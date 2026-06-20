@@ -108,6 +108,7 @@ export default function SpecPickerTable({
   const unitOptions = unitsProp?.length ? unitsProp : ["шт.", "м", "м²", "м³", "кг", "л"];
   const groupTitle = (id) => stellageGroups.find((g) => g.id === id)?.label || groupLabel(id);
   const [picker, setPicker] = useState(false);
+  const [pickedIds, setPickedIds] = useState(() => new Set());
   const [newOpen, setNewOpen] = useState(false);
   const [newForm, setNewForm] = useState(emptyNew);
   const [q, setQ] = useState("");
@@ -116,16 +117,36 @@ export default function SpecPickerTable({
   const [savingId, setSavingId] = useState(null);
   const [savingNew, setSavingNew] = useState(false);
 
+  /** Все активные материалы базы (без привязки к модулю/разделу) */
   const catalog = useMemo(() => {
     const ql = q.trim().toLowerCase();
-    return materials.filter(
-      (m) =>
-        m.status === "active" &&
-        (!catalogModule || m.module === catalogModule) &&
-        (!farmSectionId || m.farmSectionId === farmSectionId) &&
-        (!ql || m.name.toLowerCase().includes(ql))
-    );
-  }, [materials, catalogModule, farmSectionId, q]);
+    return materials.filter((m) => {
+      if (m.status !== "active") return false;
+      if (!ql) return true;
+      const hay = `${m.name} ${m.module || ""} ${m.category || ""} ${m.supplier || ""}`.toLowerCase();
+      return hay.includes(ql);
+    });
+  }, [materials, q]);
+
+  const existingMaterialIds = useMemo(
+    () => new Set(lines.map((ln) => ln.materialId).filter(Boolean)),
+    [lines]
+  );
+
+  const catalogGrouped = useMemo(() => {
+    const map = new Map();
+    for (const m of catalog) {
+      const mod = m.module || "Без модуля";
+      if (!map.has(mod)) map.set(mod, []);
+      map.get(mod).push(m);
+    }
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], "ru"));
+  }, [catalog]);
+
+  const pickableCatalog = useMemo(
+    () => catalog.filter((m) => !existingMaterialIds.has(m.id)),
+    [catalog, existingMaterialIds]
+  );
 
   const visibleLines = useMemo(() => {
     const sq = search.trim().toLowerCase();
@@ -170,11 +191,52 @@ export default function SpecPickerTable({
     onChange(patchLine(lines, ln.id, patch));
   };
 
+  const openPicker = () => {
+    setQ("");
+    setPickedIds(new Set());
+    setPicker(true);
+  };
+
+  const togglePick = (id) => {
+    if (existingMaterialIds.has(id)) return;
+    setPickedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllPickable = () => {
+    setPickedIds(new Set(pickableCatalog.map((m) => m.id)));
+  };
+
+  const clearPicked = () => setPickedIds(new Set());
+
+  const addSelectedFromCatalog = () => {
+    if (!pickedIds.size) return;
+    const toAdd = materials.filter((m) => pickedIds.has(m.id) && !existingMaterialIds.has(m.id));
+    if (!toAdd.length) return;
+    onChange([
+      ...lines,
+      ...toAdd.map((m) =>
+        lineFromMaterial(m, {
+          included: true,
+          ...(showQty ? { qty: Number(m.defaultQty) || 1, defaultQty: Number(m.defaultQty) || 1 } : {}),
+        })
+      ),
+    ]);
+    setPicker(false);
+    setPickedIds(new Set());
+    setQ("");
+  };
+
   const addFromCatalog = (mat) => {
     if (lines.some((ln) => ln.materialId === mat.id)) return;
     onChange([...lines, lineFromMaterial(mat, { included: true })]);
     setPicker(false);
     setQ("");
+    setPickedIds(new Set());
   };
 
   const saveLineToBase = async (ln) => {
@@ -250,8 +312,8 @@ export default function SpecPickerTable({
           <input type="checkbox" checked={onlyOn} onChange={(e) => setOnlyOn(e.target.checked)} />
           Только отмеченные
         </label>
-        <button type="button" className="btn btn-sm" onClick={() => setPicker(true)}>
-          ＋ {catalogLabel}
+        <button type="button" className="btn btn-sm" onClick={openPicker}>
+          ＋ материал
         </button>
         <button type="button" className="btn btn-primary btn-sm" onClick={() => setNewOpen(true)}>
           ＋ новая позиция в базу
@@ -560,27 +622,121 @@ export default function SpecPickerTable({
       )}
 
       {picker && (
-        <Modal title={`Добавить ${catalogLabel}`} onClose={() => setPicker(false)}>
-          <input placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: "100%", marginBottom: 12 }} />
-          <div style={{ maxHeight: 320, overflowY: "auto" }}>
-            {catalog.slice(0, 80).map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                className="panel"
-                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: 10, marginBottom: 6, cursor: "pointer" }}
-                onClick={() => addFromCatalog(m)}
-              >
-                {(m.imageUrl || m.photoUrl) && (
-                  <img src={photoSrc(m.imageUrl || m.photoUrl)} alt="" className="thumb-img" />
+        <Modal
+          title="Добавить материалы из базы"
+          onClose={() => setPicker(false)}
+          footer={
+            <>
+              <span className="muted" style={{ fontSize: 12, marginRight: "auto" }}>
+                Выбрано: <span className="num">{pickedIds.size}</span>
+                {pickableCatalog.length > 0 && (
+                  <> · доступно {pickableCatalog.length}</>
                 )}
-                <span style={{ flex: 1, fontSize: 13 }}>{m.name}</span>
-                <span className="muted num" style={{ fontSize: 12 }}>
-                  {m.unit}
-                </span>
+              </span>
+              <button type="button" className="btn" onClick={() => setPicker(false)}>
+                Отмена
               </button>
-            ))}
-            {catalog.length === 0 && <p className="muted">Ничего не найдено</p>}
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!pickedIds.size}
+                onClick={addSelectedFromCatalog}
+              >
+                Добавить выбранные{pickedIds.size ? ` (${pickedIds.size})` : ""}
+              </button>
+            </>
+          }
+        >
+          <p className="muted" style={{ fontSize: 12, margin: "0 0 10px" }}>
+            Вся база материалов ({materials.filter((m) => m.status === "active").length} поз.). Отметьте галочками —
+            добавятся в текущий список.
+          </p>
+          <div className="row wrap" style={{ gap: 8, marginBottom: 10 }}>
+            <input
+              placeholder="Поиск: название, модуль, категория, поставщик…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              style={{ flex: "1 1 200px", minWidth: 180 }}
+              autoFocus
+            />
+            <button type="button" className="btn btn-sm" onClick={selectAllPickable} disabled={!pickableCatalog.length}>
+              Все видимые
+            </button>
+            <button type="button" className="btn btn-sm" onClick={clearPicked} disabled={!pickedIds.size}>
+              Снять выбор
+            </button>
+          </div>
+          <div className="material-picker-list">
+            {catalogGrouped.length === 0 ? (
+              <p className="muted">Ничего не найдено</p>
+            ) : (
+              catalogGrouped.map(([modName, mats]) => (
+                <div key={modName} className="material-picker-group">
+                  <div className="material-picker-group__title">{modName}</div>
+                  <table className="spec material-picker-table">
+                    <tbody>
+                      {mats.map((m) => {
+                        const added = existingMaterialIds.has(m.id);
+                        const src = photoSrc(m.imageUrl || m.photoUrl);
+                        return (
+                          <tr
+                            key={m.id}
+                            className={
+                              (added ? "material-picker-row--added " : "") +
+                              (pickedIds.has(m.id) ? "material-picker-row--picked" : "")
+                            }
+                          >
+                            <td style={{ width: 36 }}>
+                              <input
+                                type="checkbox"
+                                checked={added || pickedIds.has(m.id)}
+                                disabled={added}
+                                onChange={() => togglePick(m.id)}
+                              />
+                            </td>
+                            <td style={{ width: 52 }}>
+                              {src ? (
+                                <img src={src} alt="" className="thumb-img" style={{ width: 40, height: 40 }} />
+                              ) : (
+                                <div className="thumb" style={{ width: 40, height: 40, fontSize: 16 }}>
+                                  {(m.name || "?").charAt(0)}
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <strong style={{ fontSize: 13 }}>{m.name}</strong>
+                              <div className="muted" style={{ fontSize: 11 }}>
+                                {m.category || "—"}
+                                {m.supplier ? ` · ${m.supplier}` : ""}
+                              </div>
+                            </td>
+                            <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                              {m.unit}
+                              {m.basePrice ? ` · ${m.basePrice} ₽` : ""}
+                            </td>
+                            <td style={{ width: 88 }}>
+                              {added ? (
+                                <span className="chip chip--neutral" style={{ fontSize: 10 }}>
+                                  в списке
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => addFromCatalog(m)}
+                                >
+                                  ＋ один
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ))
+            )}
           </div>
         </Modal>
       )}
