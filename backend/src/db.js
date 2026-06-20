@@ -282,6 +282,7 @@ export function rowToMaterial(row) {
     orderStep: row.order_step || 1,
     defaultItemRole: row.default_item_role || "purchase",
     comment: row.client_note || row.tech_note,
+    updatedAt: row.updated_at || "",
   };
 }
 

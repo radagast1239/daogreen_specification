@@ -13,6 +13,35 @@ import { photoSrc, api } from "../lib/api.js";
 import { linePhotoSrc, resolveLinePhoto } from "../lib/photoHelpers.js";
 import { Modal } from "./ui.jsx";
 
+function materialUpdatedTs(m) {
+  if (!m?.updatedAt) return 0;
+  const t = new Date(m.updatedAt).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+function groupMaterialsByCategory(items, categoryOrder = CATEGORIES) {
+  const map = new Map();
+  for (const m of items) {
+    const cat = m.category || "Прочее";
+    if (!map.has(cat)) map.set(cat, []);
+    map.get(cat).push(m);
+  }
+  for (const arr of map.values()) {
+    arr.sort((a, b) => materialUpdatedTs(b) - materialUpdatedTs(a));
+  }
+  return [...map.entries()].sort((a, b) => {
+    const maxA = Math.max(0, ...a[1].map(materialUpdatedTs));
+    const maxB = Math.max(0, ...b[1].map(materialUpdatedTs));
+    if (maxB !== maxA) return maxB - maxA;
+    const ia = categoryOrder.indexOf(a[0]);
+    const ib = categoryOrder.indexOf(b[0]);
+    const oa = ia >= 0 ? ia : 999;
+    const ob = ib >= 0 ? ib : 999;
+    if (oa !== ob) return oa - ob;
+    return a[0].localeCompare(b[0], "ru");
+  });
+}
+
 function patchLine(lines, id, patch) {
   return lines.map((ln) => (ln.id === id ? { ...ln, ...patch } : ln));
 }
@@ -133,15 +162,10 @@ export default function SpecPickerTable({
     [lines]
   );
 
-  const catalogGrouped = useMemo(() => {
-    const map = new Map();
-    for (const m of catalog) {
-      const mod = m.module || "Без модуля";
-      if (!map.has(mod)) map.set(mod, []);
-      map.get(mod).push(m);
-    }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], "ru"));
-  }, [catalog]);
+  const catalogGrouped = useMemo(
+    () => groupMaterialsByCategory(catalog, categories),
+    [catalog, categories]
+  );
 
   const pickableCatalog = useMemo(
     () => catalog.filter((m) => !existingMaterialIds.has(m.id)),
@@ -648,8 +672,8 @@ export default function SpecPickerTable({
           }
         >
           <p className="muted" style={{ fontSize: 12, margin: "0 0 10px" }}>
-            Вся база материалов ({materials.filter((m) => m.status === "active").length} поз.). Отметьте галочками —
-            добавятся в текущий список.
+            Вся база ({materials.filter((m) => m.status === "active").length} поз.) — группы по категории
+            (сантехника, крепёж, электрика…), внутри группы свежие изменения сверху.
           </p>
           <div className="row wrap" style={{ gap: 8, marginBottom: 10 }}>
             <input
@@ -670,9 +694,14 @@ export default function SpecPickerTable({
             {catalogGrouped.length === 0 ? (
               <p className="muted">Ничего не найдено</p>
             ) : (
-              catalogGrouped.map(([modName, mats]) => (
-                <div key={modName} className="material-picker-group">
-                  <div className="material-picker-group__title">{modName}</div>
+              catalogGrouped.map(([catName, mats]) => (
+                <div key={catName} className="material-picker-group">
+                  <div className="material-picker-group__title">
+                    {catName}
+                    <span className="muted num" style={{ fontWeight: 400, marginLeft: 8 }}>
+                      {mats.length}
+                    </span>
+                  </div>
                   <table className="spec material-picker-table">
                     <tbody>
                       {mats.map((m) => {
@@ -706,7 +735,7 @@ export default function SpecPickerTable({
                             <td>
                               <strong style={{ fontSize: 13 }}>{m.name}</strong>
                               <div className="muted" style={{ fontSize: 11 }}>
-                                {m.category || "—"}
+                                {m.module || "—"}
                                 {m.supplier ? ` · ${m.supplier}` : ""}
                               </div>
                             </td>
