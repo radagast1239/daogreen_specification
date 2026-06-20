@@ -303,8 +303,10 @@ export default function ClientProjectPage() {
               items={filterSupplier(installItems)}
               currency={project.currency}
               patch={patch}
-              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} />}
-              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
+              purchaseStatuses={purchaseStatuses}
+              quickStatuses={quickStatuses}
+              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
+              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
             />
           )}
           {activeTab === "categories" && (
@@ -312,11 +314,13 @@ export default function ClientProjectPage() {
               items={filterSupplier(purchaseItems)}
               currency={project.currency}
               patch={patch}
+              purchaseStatuses={purchaseStatuses}
+              quickStatuses={quickStatuses}
               render={(todo) => (
-                <ItemsByGroup groups={groupBy(todo, "category")} currency={project.currency} patch={patch} />
+                <ItemsByGroup groups={groupBy(todo, "category")} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />
               )}
               renderBought={(bought) => (
-                <ItemsByGroup groups={groupBy(bought, "category")} currency={project.currency} patch={patch} bought />
+                <ItemsByGroup groups={groupBy(bought, "category")} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />
               )}
             />
           )}
@@ -325,11 +329,13 @@ export default function ClientProjectPage() {
               items={filterSupplier(purchaseItems)}
               currency={project.currency}
               patch={patch}
+              purchaseStatuses={purchaseStatuses}
+              quickStatuses={quickStatuses}
               render={(todo) => (
-                <ItemsByGroup groups={groupBy(todo, "module")} currency={project.currency} patch={patch} />
+                <ItemsByGroup groups={groupBy(todo, "module")} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />
               )}
               renderBought={(bought) => (
-                <ItemsByGroup groups={groupBy(bought, "module")} currency={project.currency} patch={patch} bought />
+                <ItemsByGroup groups={groupBy(bought, "module")} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />
               )}
             />
           )}
@@ -338,11 +344,13 @@ export default function ClientProjectPage() {
               items={filterSupplier(purchaseItems)}
               currency={project.currency}
               patch={patch}
+              purchaseStatuses={purchaseStatuses}
+              quickStatuses={quickStatuses}
               render={(todo) => (
                 <MergedClientTab project={project} items={todo} onExport={() => exportRows(visibleItems, "общий")} />
               )}
               renderBought={(bought) => (
-                <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />
+                <ItemsFlat items={bought} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />
               )}
             />
           )}
@@ -351,8 +359,10 @@ export default function ClientProjectPage() {
               items={filterSupplier(itemsByResponsible(visibleItems, "plumber"))}
               currency={project.currency}
               patch={patch}
-              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} />}
-              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
+              purchaseStatuses={purchaseStatuses}
+              quickStatuses={quickStatuses}
+              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
+              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
             />
           )}
           {activeTab === "electric" && (
@@ -360,8 +370,10 @@ export default function ClientProjectPage() {
               items={filterSupplier(itemsByResponsible(visibleItems, "electrician"))}
               currency={project.currency}
               patch={patch}
-              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} />}
-              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
+              purchaseStatuses={purchaseStatuses}
+              quickStatuses={quickStatuses}
+              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
+              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
             />
           )}
           {activeTab === "installer" && (
@@ -369,8 +381,10 @@ export default function ClientProjectPage() {
               items={filterSupplier(itemsByResponsible(visibleItems, "installer"))}
               currency={project.currency}
               patch={patch}
-              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} />}
-              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
+              purchaseStatuses={purchaseStatuses}
+              quickStatuses={quickStatuses}
+              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
+              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
             />
           )}
           {activeTab === "consumables" && (
@@ -378,8 +392,10 @@ export default function ClientProjectPage() {
               items={filterSupplier(itemsByResponsible(visibleItems, "consumables"))}
               currency={project.currency}
               patch={patch}
-              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} />}
-              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
+              purchaseStatuses={purchaseStatuses}
+              quickStatuses={quickStatuses}
+              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
+              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
             />
           )}
         </>
@@ -555,7 +571,7 @@ function OverviewTab({ project, totals, items, supplierFilter, qrUrl, branding, 
   );
 }
 
-function ItemsByGroup({ groups, currency, patch, bought = false }) {
+function ItemsByGroup({ groups, currency, patch, bought = false, purchaseStatuses, quickStatuses }) {
   return (
     <>
       {groups.map(([title, items]) => {
@@ -570,7 +586,15 @@ function ItemsByGroup({ groups, currency, patch, bought = false }) {
               </span>
             </div>
             {items.map((it) => (
-              <ItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} />
+              <ItemCard
+                key={it.id}
+                it={it}
+                currency={currency}
+                patch={patch}
+                bought={bought}
+                purchaseStatuses={purchaseStatuses}
+                quickStatuses={quickStatuses}
+              />
             ))}
           </section>
         );
@@ -579,9 +603,19 @@ function ItemsByGroup({ groups, currency, patch, bought = false }) {
   );
 }
 
-function ItemsFlat({ items, currency, patch, bought = false }) {
+function ItemsFlat({ items, currency, patch, bought = false, purchaseStatuses, quickStatuses }) {
   if (!items.length) return null;
-  return items.map((it) => <ItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} />);
+  return items.map((it) => (
+    <ItemCard
+      key={it.id}
+      it={it}
+      currency={currency}
+      patch={patch}
+      bought={bought}
+      purchaseStatuses={purchaseStatuses}
+      quickStatuses={quickStatuses}
+    />
+  ));
 }
 
 function MergedClientTab({ project, items, onExport }) {
@@ -660,7 +694,9 @@ function DocsTab({ documents, qrUrl, onExportAll, onExportMerged, onPdf }) {
   );
 }
 
-function ItemCard({ it, currency, patch, bought = false }) {
+function ItemCard({ it, currency, patch, bought = false, purchaseStatuses, quickStatuses }) {
+  const statuses = purchaseStatuses || PURCHASE_STATUSES;
+  const quick = quickStatuses || statuses.filter((s) => s.clientVisible !== false);
   const img = itemImageUrl(it);
   const gross = lineGross(it);
   const vat = lineVat(it);
@@ -680,7 +716,7 @@ function ItemCard({ it, currency, patch, bought = false }) {
           {bought ? (
             <span className="chip chip--ok chip-dot" style={{ fontSize: 11 }}>Куплено</span>
           ) : it.status === "need_help" ? (
-            <StatusChip status={it.status} statuses={purchaseStatuses} />
+            <StatusChip status={it.status} statuses={statuses} />
           ) : null}
         </div>
         {materialSpecLabel(it) && (
@@ -712,7 +748,7 @@ function ItemCard({ it, currency, patch, bought = false }) {
 
         {!bought ? (
           <div className="row no-print wrap" style={{ marginTop: 12, gap: 6 }}>
-            {quickStatuses.filter((s) => QUICK_STATUS_IDS.includes(s.id)).map((s) => (
+            {quick.filter((s) => QUICK_STATUS_IDS.includes(s.id)).map((s) => (
               <button
                 key={s.id}
                 type="button"
