@@ -215,6 +215,28 @@ table.spec { width: 100%; border-collapse: collapse; font-size: 13px; }
 .input-inline { width: 100%; border: none; background: transparent; font: inherit; padding: 2px 0; }
 .input-inline:focus { outline: 1px solid var(--brand); border-radius: 4px; }
 
+/* Пошаговая сборка спецификации */
+.spec-picker-wrap { border: 1px solid var(--border); }
+.spec-picker td, .spec-picker th { vertical-align: middle; }
+.spec-picker .center { text-align: center; }
+.spec-group-head { font-size: 11px; font-weight: 600; background: var(--paper); color: var(--muted); padding: 6px 10px !important; }
+.spec-row-off { opacity: .42; }
+.spec-row-off .spec-cell-input:not(:disabled) { opacity: 1; }
+.spec-cell-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.spec-cell-input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 2px rgba(46, 125, 78, .15); }
+.spec-cell-input:disabled { background: var(--paper); color: var(--muted); cursor: not-allowed; }
+.spec-cell-input--sm { max-width: 64px; }
+.spec-cell-input--num { text-align: right; font-variant-numeric: tabular-nums; }
+
 @media print {
   .sidebar, .topbar, .toolbar, .no-print, .budget-bar button, .statusbtns { display: none !important; }
   body { background: #fff; }

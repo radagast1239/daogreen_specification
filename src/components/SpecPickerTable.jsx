@@ -1,0 +1,377 @@
+import React, { useMemo, useState } from "react";
+import { groupLabel } from "../../shared/stellageComposition.js";
+import { CATEGORIES } from "../data/modules.js";
+import {
+  blankLine,
+  lineFromMaterial,
+  lineToMaterialPayload,
+  syncLineFromMaterial,
+} from "../lib/projectBuilder.js";
+import { photoSrc } from "../lib/api.js";
+import { Modal } from "./ui.jsx";
+
+function patchLine(lines, id, patch) {
+  return lines.map((ln) => (ln.id === id ? { ...ln, ...patch } : ln));
+}
+
+export function countIncluded(lines) {
+  return lines.filter((ln) => ln.included && ln.name?.trim()).length;
+}
+
+const emptyNew = () => ({
+  name: "",
+  unit: "шт.",
+  qty: 1,
+  price: 0,
+  link: "",
+  category: "Прочее",
+});
+
+export default function SpecPickerTable({
+  lines,
+  onChange,
+  materials = [],
+  catalogModule = "",
+  catalogLabel = "из базы",
+  emptyHint = "Выберите тип стеллажа — позиции появятся в таблице.",
+  onSaveMaterial,
+}) {
+  const [picker, setPicker] = useState(false);
+  const [newOpen, setNewOpen] = useState(false);
+  const [newForm, setNewForm] = useState(emptyNew);
+  const [q, setQ] = useState("");
+  const [onlyOn, setOnlyOn] = useState(false);
+  const [search, setSearch] = useState("");
+  const [savingId, setSavingId] = useState(null);
+  const [savingNew, setSavingNew] = useState(false);
+
+  const catalog = useMemo(() => {
+    const ql = q.trim().toLowerCase();
+    return materials.filter(
+      (m) =>
+        m.status === "active" &&
+        (!catalogModule || m.module === catalogModule) &&
+        (!ql || m.name.toLowerCase().includes(ql))
+    );
+  }, [materials, catalogModule, q]);
+
+  const visibleLines = useMemo(() => {
+    const sq = search.trim().toLowerCase();
+    return lines.filter((ln) => {
+      if (onlyOn && !ln.included) return false;
+      if (sq && !ln.name.toLowerCase().includes(sq)) return false;
+      return true;
+    });
+  }, [lines, onlyOn, search]);
+
+  const grouped = useMemo(() => {
+    const map = new Map();
+    for (const ln of visibleLines) {
+      const g = ln.subcategory || "other";
+      if (!map.has(g)) map.set(g, []);
+      map.get(g).push(ln);
+    }
+    return map;
+  }, [visibleLines]);
+
+  const setAll = (included) => onChange(lines.map((ln) => ({ ...ln, included })));
+
+  const toggleLine = (ln, included) => {
+    const patch = { included };
+    if (included && !ln.qty) patch.qty = 1;
+    onChange(patchLine(lines, ln.id, patch));
+  };
+
+  const addFromCatalog = (mat) => {
+    if (lines.some((ln) => ln.materialId === mat.id)) return;
+    onChange([...lines, lineFromMaterial(mat, { included: true })]);
+    setPicker(false);
+    setQ("");
+  };
+
+  const saveLineToBase = async (ln) => {
+    if (!onSaveMaterial || !catalogModule || !ln.name?.trim()) return;
+    setSavingId(ln.id);
+    try {
+      const mat = await onSaveMaterial(lineToMaterialPayload(ln, catalogModule));
+      onChange(patchLine(lines, ln.id, syncLineFromMaterial(ln, mat)));
+    } catch (e) {
+      alert(e.message || "Не удалось сохранить в базу");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const createNewInBase = async () => {
+    if (!onSaveMaterial || !catalogModule) {
+      onChange([...lines, blankLine({ ...newForm, included: true })]);
+      setNewOpen(false);
+      setNewForm(emptyNew());
+      return;
+    }
+    if (!newForm.name.trim()) {
+      alert("Укажите название позиции.");
+      return;
+    }
+    setSavingNew(true);
+    try {
+      const mat = await onSaveMaterial(
+        lineToMaterialPayload(
+          { ...newForm, category: newForm.category },
+          catalogModule
+        )
+      );
+      onChange([...lines, lineFromMaterial(mat, { included: true, qty: newForm.qty, price: newForm.price })]);
+      setNewOpen(false);
+      setNewForm(emptyNew());
+    } catch (e) {
+      alert(e.message || "Не удалось сохранить в базу");
+    } finally {
+      setSavingNew(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="toolbar" style={{ marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+        <input
+          placeholder="Поиск по позициям…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ minWidth: 180, flex: "1 1 160px" }}
+        />
+        <button type="button" className="btn btn-sm" onClick={() => setAll(true)}>
+          Все ✓
+        </button>
+        <button type="button" className="btn btn-sm" onClick={() => setAll(false)}>
+          Снять все
+        </button>
+        <label className="row" style={{ fontSize: 13, gap: 6, cursor: "pointer" }}>
+          <input type="checkbox" checked={onlyOn} onChange={(e) => setOnlyOn(e.target.checked)} />
+          Только отмеченные
+        </label>
+        <button type="button" className="btn btn-sm" onClick={() => setPicker(true)}>
+          ＋ {catalogLabel}
+        </button>
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => setNewOpen(true)}>
+          ＋ новая позиция в базу
+        </button>
+        <span className="muted" style={{ fontSize: 12 }}>
+          {countIncluded(lines)} / {lines.length} в спецификации
+        </span>
+      </div>
+
+      {lines.length === 0 ? (
+        <p className="muted" style={{ fontSize: 13, padding: "12px 0" }}>
+          {emptyHint}
+        </p>
+      ) : (
+        <div className="card spec-picker-wrap" style={{ overflowX: "auto", padding: 0 }}>
+          <table className="spec spec-picker">
+            <thead>
+              <tr>
+                <th style={{ width: 40 }} title="Включить в спецификацию">✓</th>
+                <th style={{ minWidth: 220 }}>Наименование</th>
+                <th style={{ width: 72 }}>Ед.</th>
+                <th className="right" style={{ width: 96 }}>Кол-во</th>
+                <th className="right" style={{ width: 110 }}>Цена, ₽</th>
+                <th style={{ minWidth: 140 }}>Ссылка</th>
+                <th style={{ width: 72 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {[...grouped.entries()].map(([g, grpLines]) => (
+                <React.Fragment key={g}>
+                  {g !== "other" && (
+                    <tr>
+                      <td colSpan={7} className="spec-group-head">
+                        {groupLabel(g)}
+                      </td>
+                    </tr>
+                  )}
+                  {grpLines.map((ln) => (
+                    <tr key={ln.id} className={ln.included ? "" : "spec-row-off"}>
+                      <td className="center">
+                        <input
+                          type="checkbox"
+                          checked={!!ln.included}
+                          onChange={(e) => toggleLine(ln, e.target.checked)}
+                          title="Включить позицию"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="spec-cell-input"
+                          value={ln.name}
+                          placeholder="наименование"
+                          onChange={(e) => onChange(patchLine(lines, ln.id, { name: e.target.value }))}
+                        />
+                        {!ln.materialId && ln.name?.trim() && (
+                          <span className="muted" style={{ fontSize: 10, display: "block", marginTop: 2 }}>
+                            не в базе
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <input
+                          className="spec-cell-input spec-cell-input--sm"
+                          value={ln.unit}
+                          onChange={(e) => onChange(patchLine(lines, ln.id, { unit: e.target.value }))}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="spec-cell-input spec-cell-input--num"
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={ln.qty}
+                          disabled={!ln.included}
+                          onChange={(e) => onChange(patchLine(lines, ln.id, { qty: Number(e.target.value) || 0 }))}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="spec-cell-input spec-cell-input--num"
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={ln.price}
+                          disabled={!ln.included}
+                          onChange={(e) => onChange(patchLine(lines, ln.id, { price: Number(e.target.value) || 0 }))}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="spec-cell-input"
+                          value={ln.link || ""}
+                          placeholder="ссылка"
+                          disabled={!ln.included}
+                          onChange={(e) => onChange(patchLine(lines, ln.id, { link: e.target.value }))}
+                        />
+                      </td>
+                      <td className="row" style={{ gap: 2, justifyContent: "flex-end" }}>
+                        {!ln.materialId && onSaveMaterial && ln.name?.trim() && (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            title="Сохранить в базу материалов"
+                            disabled={savingId === ln.id}
+                            onClick={() => saveLineToBase(ln)}
+                          >
+                            {savingId === ln.id ? "…" : "💾"}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          title="Удалить строку"
+                          onClick={() => onChange(lines.filter((x) => x.id !== ln.id))}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {newOpen && (
+        <Modal
+          title="Новая позиция — сохранится в базу"
+          onClose={() => !savingNew && setNewOpen(false)}
+          footer={
+            <>
+              <button type="button" className="btn" disabled={savingNew} onClick={() => setNewOpen(false)}>
+                Отмена
+              </button>
+              <button type="button" className="btn btn-primary" disabled={savingNew} onClick={createNewInBase}>
+                {savingNew ? "Сохранение…" : "Сохранить и добавить"}
+              </button>
+            </>
+          }
+        >
+          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+            Позиция попадёт в базу материалов ({catalogModule || "модуль"}) и сразу в эту спецификацию.
+          </p>
+          <div className="form-grid">
+            <label className="full">
+              Наименование *
+              <input
+                value={newForm.name}
+                onChange={(e) => setNewForm((f) => ({ ...f, name: e.target.value }))}
+                autoFocus
+              />
+            </label>
+            <label>
+              Ед.
+              <input value={newForm.unit} onChange={(e) => setNewForm((f) => ({ ...f, unit: e.target.value }))} />
+            </label>
+            <label>
+              Кол-во по умолчанию
+              <input
+                type="number"
+                min={0}
+                value={newForm.qty}
+                onChange={(e) => setNewForm((f) => ({ ...f, qty: Number(e.target.value) || 0 }))}
+              />
+            </label>
+            <label>
+              Цена, ₽
+              <input
+                type="number"
+                min={0}
+                value={newForm.price}
+                onChange={(e) => setNewForm((f) => ({ ...f, price: Number(e.target.value) || 0 }))}
+              />
+            </label>
+            <label>
+              Категория
+              <select value={newForm.category} onChange={(e) => setNewForm((f) => ({ ...f, category: e.target.value }))}>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="full">
+              Ссылка
+              <input value={newForm.link} onChange={(e) => setNewForm((f) => ({ ...f, link: e.target.value }))} />
+            </label>
+          </div>
+        </Modal>
+      )}
+
+      {picker && (
+        <Modal title={`Добавить ${catalogLabel}`} onClose={() => setPicker(false)}>
+          <input placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: "100%", marginBottom: 12 }} />
+          <div style={{ maxHeight: 320, overflowY: "auto" }}>
+            {catalog.slice(0, 80).map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className="panel"
+                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: 10, marginBottom: 6, cursor: "pointer" }}
+                onClick={() => addFromCatalog(m)}
+              >
+                {(m.imageUrl || m.photoUrl) && (
+                  <img src={photoSrc(m.imageUrl || m.photoUrl)} alt="" style={{ width: 28, height: 28, borderRadius: 4, objectFit: "cover" }} />
+                )}
+                <span style={{ flex: 1, fontSize: 13 }}>{m.name}</span>
+                <span className="muted num" style={{ fontSize: 12 }}>
+                  {m.defaultQty} {m.unit}
+                </span>
+              </button>
+            ))}
+            {catalog.length === 0 && <p className="muted">Ничего не найдено</p>}
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}

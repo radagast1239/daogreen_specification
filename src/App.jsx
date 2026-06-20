@@ -4,6 +4,7 @@ import Layout from "./components/Layout.jsx";
 import AdminGuard from "./components/AdminGuard.jsx";
 import ProjectsPage from "./pages/admin/ProjectsPage.jsx";
 import NewProjectPage from "./pages/admin/NewProjectPage.jsx";
+import ProjectBuilderPage from "./pages/admin/ProjectBuilderPage.jsx";
 import SpecEditorPage from "./pages/admin/SpecEditorPage.jsx";
 import MaterialsPage from "./pages/admin/MaterialsPage.jsx";
 import ImportPage from "./pages/admin/ImportPage.jsx";
@@ -39,7 +40,8 @@ export default function App() {
           <Route path="/import" element={<ImportPage />} />
           <Route path="/archive" element={<ArchivePage />} />
           <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/new" element={<NewProjectPage />} />
+          <Route path="/new" element={<ProjectBuilderPage />} />
+          <Route path="/new/template" element={<NewProjectPage />} />
           <Route path="/project/:id" element={<SpecEditorPage />} />
         </Route>
       </Route>
