@@ -20,34 +20,38 @@ import ActivityFeed from "../../components/ActivityFeed.jsx";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import { setClientScope } from "../../components/ClientGuard.jsx";
 import { generateProjectPdf } from "../../lib/pdfExport.js";
+import { clientTabDefs, heroEyebrow } from "../../lib/clientBrandConfig.js";
 import QRCode from "qrcode";
 import { downloadCSV, printPDF } from "../../lib/export.js";
 
-const TABS = [
-  ["overview", "Обзор"],
-  ["cooling", "Охлаждение"],
-  ["categories", "По категориям"],
-  ["modules", "По стеллажам"],
-  ["merged", "Общий список"],
-  ["install", "Монтаж"],
-  ["plumber", "Сантехник"],
-  ["electric", "Электрик"],
-  ["installer", "Монтажник"],
-  ["consumables", "Расходники"],
-  ["docs", "Документы"],
+const QUICK_STATUS_IDS = [
+  "not_bought", "searching", "ordered", "bought", "delivered", "have", "need_help", "not_fit", "replacement_check",
 ];
 
-const QUICK_STATUSES = PURCHASE_STATUSES.filter((s) =>
-  ["not_bought", "searching", "ordered", "bought", "delivered", "have", "need_help", "not_fit", "replacement_check"].includes(
-    s.id
-  )
-);
+function clientPageStyle(branding) {
+  const brand = branding.brandColor || "#116355";
+  const accent = branding.brandAccentColor || "#7fc9a8";
+  const bg = branding.brandBgColor || "#f0f7f4";
+  return {
+    "--client-brand": brand,
+    "--client-accent": accent,
+    "--client-bg": bg,
+    background: `radial-gradient(ellipse 100% 60% at 50% -10%, ${accent}2e, transparent 55%), linear-gradient(180deg, ${bg} 0%, ${bg}dd 100%)`,
+  };
+}
+
+function heroGradient(branding) {
+  const brand = branding.brandColor || "#116355";
+  return `linear-gradient(135deg, ${brand} 0%, ${brand}cc 50%, ${brand}99 100%)`;
+}
 
 export default function ClientProjectPage() {
   const { token } = useParams();
   const { actions } = useStore();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("overview");
+  const purchaseStatuses = data?.purchaseStatuses || PURCHASE_STATUSES;
+  const quickStatuses = purchaseStatuses.filter((s) => s.clientVisible !== false);
   const [supplierFilter, setSupplierFilter] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
@@ -116,9 +120,7 @@ export default function ClientProjectPage() {
     ? visibleItems.filter((i) => i.supplier === supplierFilter).length
     : visibleItems.length;
 
-  const brandStyle = {
-    "--client-brand": branding.brandColor || "#116355",
-  };
+  const brandStyle = clientPageStyle(branding);
 
   const filterSupplier = (list) =>
     supplierFilter ? list.filter((i) => i.supplier === supplierFilter) : list;
@@ -127,7 +129,9 @@ export default function ClientProjectPage() {
   const purchaseItems = visibleItems.filter((i) => i.itemRole !== "installation");
   const hasCooling = !!(project.manualParams?.coolingFarm && typeof project.manualParams.coolingFarm === "object");
   const hasPurchase = visibleItems.length > 0;
-  const clientTabs = TABS.filter(([k]) => k !== "cooling" || hasCooling);
+  const clientTabs = clientTabDefs(branding).filter(([k]) => k !== "cooling" || hasCooling);
+  const trustLines = (branding.clientTrustLines || []).filter(Boolean);
+  const activeTab = clientTabs.some(([k]) => k === tab) ? tab : clientTabs[0]?.[0] || "overview";
 
   const patchCoolingFactor = async (safetyFactor) => {
     const res = await actions.clientPatchCooling(token, safetyFactor);
@@ -156,11 +160,19 @@ export default function ClientProjectPage() {
         НДС: i.vatRate || 0,
         Сумма: Math.round(lineGross(i)),
         Ссылка: i.link,
-        Статус: PURCHASE_STATUSES.find((s) => s.id === i.status)?.label,
+        Статус: purchaseStatuses.find((s) => s.id === i.status)?.label,
       }))
     );
 
   const delta = versionInfo?.summary?.delta;
+  const exportPdf = () =>
+    generateProjectPdf({
+      project,
+      items: visibleItems,
+      branding,
+      purchaseStatuses,
+      pageUrl: typeof window !== "undefined" ? window.location.href : "",
+    });
 
   return (
     <div className="client-page" style={brandStyle}>
@@ -172,18 +184,21 @@ export default function ClientProjectPage() {
         </p>
       </div>
 
-      <header className="client-hero no-print">
-        <div className="client-hero__eyebrow">{branding.companyName || "Daogreen"} · вертикальные фермы</div>
+      <header className="client-hero no-print" style={{ background: heroGradient(branding) }}>
+        <div className="client-hero__eyebrow">{heroEyebrow(branding)}</div>
         <h1 className="client-hero__title">{project.name}</h1>
         <p className="client-hero__sub">
           {project.client}
           {project.city ? ` · ${project.city}` : ""}
           {project.version > 1 ? ` · версия ${project.version}` : ""}
         </p>
-        <div className="client-trust">
-          <span>Фото, цены и статусы закупки</span>
-          <span>Отметки «куплено» сохраняются автоматически</span>
-        </div>
+        {trustLines.length > 0 && (
+          <div className="client-trust">
+            {trustLines.map((line) => (
+              <span key={line}>{line}</span>
+            ))}
+          </div>
+        )}
       </header>
 
       <BudgetBar
@@ -193,7 +208,7 @@ export default function ClientProjectPage() {
         versionInfo={versionInfo}
         delta={delta}
         onExport={() => exportRows(visibleItems, "закупка")}
-        onPdf={() => generateProjectPdf({ project, items: visibleItems, branding })}
+        onPdf={exportPdf}
       />
 
       <div className="client-wrap">
@@ -207,13 +222,13 @@ export default function ClientProjectPage() {
       )}
       <div className="client-tabs no-print">
         {clientTabs.map(([k, label]) => (
-          <button key={k} className={"btn btn-sm" + (tab === k ? " btn-primary" : "")} onClick={() => setTab(k)}>
+          <button key={k} className={"btn btn-sm" + (activeTab === k ? " btn-primary" : "")} onClick={() => setTab(k)}>
             {label}
           </button>
         ))}
       </div>
 
-      {tab !== "docs" && tab !== "cooling" && hasPurchase && (
+      {activeTab !== "docs" && activeTab !== "cooling" && hasPurchase && (
         <div className="client-supplier-bar no-print">
           <strong style={{ fontSize: 13 }}>Поставщик:</strong>
           <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} style={{ width: "auto" }}>
@@ -235,7 +250,7 @@ export default function ClientProjectPage() {
         </div>
       )}
 
-      {tab === "cooling" && hasCooling && (
+      {activeTab === "cooling" && hasCooling && (
         <CoolingFarmTab
           key={`cool-${project.manualParams?.coolingFarm?.safetyFactor ?? "d"}`}
           variant="client"
@@ -244,7 +259,7 @@ export default function ClientProjectPage() {
         />
       )}
 
-      {tab === "docs" && (
+      {activeTab === "docs" && (
         <DocsTab
           project={project}
           documents={documents}
@@ -264,15 +279,15 @@ export default function ClientProjectPage() {
               }))
             );
           }}
-          onPdf={() => generateProjectPdf({ project, items: visibleItems, branding })}
+          onPdf={exportPdf}
         />
       )}
 
-      {!hasPurchase && tab !== "cooling" && tab !== "docs" ? (
+      {!hasPurchase && activeTab !== "cooling" && activeTab !== "docs" ? (
         <Empty title="Спецификация готовится" hint="Позиции появятся после утверждения. Расчёт охлаждения — во вкладке «Охлаждение»." />
-      ) : tab !== "cooling" && tab !== "docs" ? (
+      ) : activeTab !== "cooling" && activeTab !== "docs" ? (
         <>
-          {tab === "overview" && (
+          {activeTab === "overview" && (
             <OverviewTab
               project={project}
               totals={totals}
@@ -283,7 +298,7 @@ export default function ClientProjectPage() {
               activity={activity}
             />
           )}
-          {tab === "install" && (
+          {activeTab === "install" && (
             <PurchaseSplitView
               items={filterSupplier(installItems)}
               currency={project.currency}
@@ -292,7 +307,7 @@ export default function ClientProjectPage() {
               renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
             />
           )}
-          {tab === "categories" && (
+          {activeTab === "categories" && (
             <PurchaseSplitView
               items={filterSupplier(purchaseItems)}
               currency={project.currency}
@@ -305,7 +320,7 @@ export default function ClientProjectPage() {
               )}
             />
           )}
-          {tab === "modules" && (
+          {activeTab === "modules" && (
             <PurchaseSplitView
               items={filterSupplier(purchaseItems)}
               currency={project.currency}
@@ -318,7 +333,7 @@ export default function ClientProjectPage() {
               )}
             />
           )}
-          {tab === "merged" && (
+          {activeTab === "merged" && (
             <PurchaseSplitView
               items={filterSupplier(purchaseItems)}
               currency={project.currency}
@@ -331,7 +346,7 @@ export default function ClientProjectPage() {
               )}
             />
           )}
-          {tab === "plumber" && (
+          {activeTab === "plumber" && (
             <PurchaseSplitView
               items={filterSupplier(itemsByResponsible(visibleItems, "plumber"))}
               currency={project.currency}
@@ -340,7 +355,7 @@ export default function ClientProjectPage() {
               renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
             />
           )}
-          {tab === "electric" && (
+          {activeTab === "electric" && (
             <PurchaseSplitView
               items={filterSupplier(itemsByResponsible(visibleItems, "electrician"))}
               currency={project.currency}
@@ -349,7 +364,7 @@ export default function ClientProjectPage() {
               renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
             />
           )}
-          {tab === "installer" && (
+          {activeTab === "installer" && (
             <PurchaseSplitView
               items={filterSupplier(itemsByResponsible(visibleItems, "installer"))}
               currency={project.currency}
@@ -358,7 +373,7 @@ export default function ClientProjectPage() {
               renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
             />
           )}
-          {tab === "consumables" && (
+          {activeTab === "consumables" && (
             <PurchaseSplitView
               items={filterSupplier(itemsByResponsible(visibleItems, "consumables"))}
               currency={project.currency}
@@ -665,7 +680,7 @@ function ItemCard({ it, currency, patch, bought = false }) {
           {bought ? (
             <span className="chip chip--ok chip-dot" style={{ fontSize: 11 }}>Куплено</span>
           ) : it.status === "need_help" ? (
-            <StatusChip status={it.status} />
+            <StatusChip status={it.status} statuses={purchaseStatuses} />
           ) : null}
         </div>
         {materialSpecLabel(it) && (
@@ -697,7 +712,7 @@ function ItemCard({ it, currency, patch, bought = false }) {
 
         {!bought ? (
           <div className="row no-print wrap" style={{ marginTop: 12, gap: 6 }}>
-            {QUICK_STATUSES.map((s) => (
+            {quickStatuses.filter((s) => QUICK_STATUS_IDS.includes(s.id)).map((s) => (
               <button
                 key={s.id}
                 type="button"

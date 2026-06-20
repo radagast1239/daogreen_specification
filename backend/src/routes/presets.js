@@ -15,6 +15,7 @@ function rowToPreset(row) {
     sectionId: row.section_id || "",
     sortOrder: row.sort_order,
     items: JSON.parse(row.items_json || "[]"),
+    params: JSON.parse(row.params_json || "{}"),
     note: row.note || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -27,15 +28,15 @@ const LIST = db.prepare(
 const GET = db.prepare("SELECT * FROM spec_presets WHERE id = ?");
 const INSERT = db.prepare(`
   INSERT INTO spec_presets (
-    id, name, preset_type, module_id, module_name, section_id, sort_order, items_json, note, updated_at
+    id, name, preset_type, module_id, module_name, section_id, sort_order, items_json, params_json, note, updated_at
   ) VALUES (
-    @id, @name, @preset_type, @module_id, @module_name, @section_id, @sort_order, @items_json, @note, datetime('now')
+    @id, @name, @preset_type, @module_id, @module_name, @section_id, @sort_order, @items_json, @params_json, @note, datetime('now')
   )
 `);
 const UPDATE = db.prepare(`
   UPDATE spec_presets SET
     name=@name, module_id=@module_id, module_name=@module_name, section_id=@section_id,
-    sort_order=@sort_order, items_json=@items_json, note=@note, updated_at=datetime('now')
+    sort_order=@sort_order, items_json=@items_json, params_json=@params_json, note=@note, updated_at=datetime('now')
   WHERE id=@id
 `);
 const DELETE = db.prepare("DELETE FROM spec_presets WHERE id = ?");
@@ -50,6 +51,7 @@ function toParams(p, id) {
     section_id: p.sectionId || "",
     sort_order: Number(p.sortOrder) || 0,
     items_json: JSON.stringify(p.items || []),
+    params_json: JSON.stringify(p.params || {}),
     note: p.note || "",
   };
 }

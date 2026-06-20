@@ -158,7 +158,7 @@ export function lineToProjectItem(line, section, sortOrder) {
     coolingBtu: Number(line.coolingBtu) || 0,
     exhaustM3: Number(line.exhaustM3) || 0,
     roomId: line.roomId || "",
-    responsible: defaultResponsible(line.category, line),
+    responsible: line.responsible || defaultResponsible(line.category, line),
     visible: on && qty > 0,
     approved: on && qty > 0,
     enabled: on,
@@ -191,6 +191,7 @@ export function buildProjectFromBuilder({ form, stellages, farmSections, general
       moduleName: st.moduleName,
       tech: st.tech || "",
       presetId: st.presetId || null,
+      params: st.params || {},
       groups: activeLines(st.items).map((ln) => ({
         name: ln.name,
         qty: ln.qty,
@@ -208,9 +209,13 @@ export function buildProjectFromBuilder({ form, stellages, farmSections, general
   if (farmSections?.length) {
     for (const sec of farmSections) {
       const sectionName = sec.sectionName || sec.name;
+      const defaultResp = sec.defaultResponsible || "";
       for (const line of activeLines(sec.items)) {
         if ((Number(line.qty) || 0) <= 0) continue;
-        pushLine(line, sectionName);
+        pushLine(
+          { ...line, responsible: line.responsible || defaultResp || undefined },
+          sectionName
+        );
       }
     }
   } else if (generalLines?.length) {

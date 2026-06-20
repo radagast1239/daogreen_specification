@@ -20,7 +20,7 @@ const ITEM_TYPES = [
   ["delivery", "Доставка"],
 ];
 
-const TAG_PRESETS = ["охлаждение", "электрика", "гидропоника", "вентиляция", "освещение", "монтаж"];
+const TAG_PRESETS = []; // unused — see tagPresets prop
 
 const blank = {
   name: "",
@@ -54,6 +54,8 @@ const blank = {
 
 export default function MaterialsPage() {
   const { state, actions } = useStore();
+  const ref = state.reference;
+  const tagPresets = ref.tags;
   const { confirm } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = ["import", "duplicates"].includes(searchParams.get("tab")) ? searchParams.get("tab") : "base";
@@ -294,7 +296,11 @@ export default function MaterialsPage() {
             </div>
             <div className="field">
               <label>Единица</label>
-              <input value={editing.unit} onChange={(e) => setEditing({ ...editing, unit: e.target.value })} />
+              <select value={editing.unit} onChange={(e) => setEditing({ ...editing, unit: e.target.value })}>
+                {ref.units.map((u) => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
             </div>
             <div className="field">
               <label>Категория</label>
@@ -417,7 +423,7 @@ export default function MaterialsPage() {
             <label>Пояснение клиенту</label>
             <textarea rows={2} value={editing.clientNote} onChange={(e) => setEditing({ ...editing, clientNote: e.target.value })} />
           </div>
-          <TagsEditor editing={editing} setEditing={setEditing} />
+          <TagsEditor editing={editing} setEditing={setEditing} tagPresets={tagPresets} />
           <div className="form-grid">
             <div className="field">
               <label>Мин. заказ</label>
@@ -460,7 +466,7 @@ export default function MaterialsPage() {
   );
 }
 
-function TagsEditor({ editing, setEditing }) {
+function TagsEditor({ editing, setEditing, tagPresets = [] }) {
   const [tagDraft, setTagDraft] = useState("");
   const tags = Array.isArray(editing.tags) ? editing.tags : [];
 
@@ -490,7 +496,7 @@ function TagsEditor({ editing, setEditing }) {
         ))}
       </div>
       <div className="row wrap" style={{ gap: 6, marginBottom: 8 }}>
-        {TAG_PRESETS.filter((p) => !tags.includes(p)).map((p) => (
+        {tagPresets.filter((p) => !tags.includes(p)).map((p) => (
           <button key={p} type="button" className="btn btn-sm btn-ghost" onClick={() => addTag(p)}>
             + {p}
           </button>

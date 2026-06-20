@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState } from "react";
+import { buildReferenceData } from "../lib/referenceData.js";
 import { buildItemsFromModules } from "../lib/apiHelpers.js";
 import { api as apiClient } from "../lib/api.js";
 
@@ -40,6 +41,8 @@ const initial = {
   modules: [],
   projects: [],
   dashboard: null,
+  settings: {},
+  reference: buildReferenceData({}),
 };
 
 export function StoreProvider({ children }) {
@@ -50,15 +53,17 @@ export function StoreProvider({ children }) {
     dispatch({ type: "SET_LOADING", loading: true });
     dispatch({ type: "SET_ERROR", error: null });
     try {
-      const [materials, modules, projects, dashboard] = await Promise.all([
+      const [materials, modules, projects, dashboard, settings] = await Promise.all([
         apiClient.getMaterials(),
         apiClient.getModules(),
         apiClient.getProjects(),
         apiClient.getDashboard(),
+        apiClient.getSettings(),
       ]);
+      const reference = buildReferenceData(settings);
       dispatch({
         type: "HYDRATE",
-        payload: { materials, modules, projects, dashboard, loading: false },
+        payload: { materials, modules, projects, dashboard, settings, reference, loading: false },
       });
     } catch (e) {
       dispatch({ type: "SET_ERROR", error: e.message });
@@ -204,6 +209,10 @@ export function useStore() {
   const ctx = useContext(StoreContext);
   if (!ctx) throw new Error("useStore must be used inside StoreProvider");
   return ctx;
+}
+
+export function useReference() {
+  return useStore().state.reference;
 }
 
 // legacy dispatch shim for gradual migration

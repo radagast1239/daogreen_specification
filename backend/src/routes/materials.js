@@ -130,17 +130,148 @@ export function listModules() {
   return db.prepare("SELECT * FROM modules WHERE active = 1 ORDER BY sort_order, name").all().map(rowToModule);
 }
 
-export function upsertModule(mod) {
+export function listModulesAdmin({ includeArchived = true } = {}) {
+  const sql = includeArchived
+    ? "SELECT * FROM modules ORDER BY active DESC, sort_order, name"
+    : "SELECT * FROM modules WHERE active = 1 ORDER BY sort_order, name";
+  return db.prepare(sql).all().map(rowToModule);
+}
+
+export function getModule(id) {
+  return rowToModule(db.prepare("SELECT * FROM modules WHERE id = ?").get(id));
+}
+
+const MODULE_TYPES = new Set(["stellage", "general", "assembly", "consumables", "farm_section"]);
+
+function nextModuleSortOrder() {
+  const row = db.prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM modules").get();
+  return row?.n || 0;
+}
+
+/** Seed: только добавляет новые модули, не перезаписывает пользовательские правки */
+export function ensureModuleSeed(mod) {
   db.prepare(`
-    INSERT INTO modules (id, name, type, tech, section, active, sort_order)
-    VALUES (@id, @name, @type, @tech, @section, 1, @sort_order)
-    ON CONFLICT(id) DO UPDATE SET name=@name, type=@type, tech=@tech, section=@section, sort_order=@sort_order
+    INSERT INTO modules (id, name, type, tech, section, icon, color, farm_section_id, active, sort_order)
+    VALUES (@id, @name, @type, @tech, @section, @icon, @color, @farm_section_id, 1, @sort_order)
+    ON CONFLICT(id) DO NOTHING
   `).run({
     id: mod.id,
     name: mod.name,
     type: mod.type,
     tech: mod.tech || "",
     section: mod.section || mod.name,
-    sort_order: mod.sortOrder || 0,
+    icon: mod.icon || "",
+    color: mod.color || "#116355",
+    farm_section_id: mod.farmSectionId || "",
+    sort_order: mod.sortOrder ?? 0,
   });
+}
+
+export function upsertModule(mod) {
+  ensureModuleSeed(mod);
+}
+
+export function createModule(data) {
+  const type = MODULE_TYPES.has(data.type) ? data.type : "general";
+  const id = data.id || uid("mod");
+  const name = String(data.name || "").trim();
+  if (!name) throw new Error("Укажите название модуля");
+  const existing = db.prepare("SELECT id FROM modules WHERE name = ? AND active = 1").get(name);
+  if (existing) throw new Error("Модуль с таким названием уже есть");
+
+  db.prepare(`
+    INSERT INTO modules (id, name, type, tech, section, icon, color, farm_section_id, active, sort_order)
+    VALUES (@id, @name, @type, @tech, @section, @icon, @color, @farm_section_id, 1, @sort_order)
+  `).run({
+    id,
+    name,
+    type,
+    tech: data.tech || "",
+    section: data.section || name,
+    icon: data.icon || "",
+    color: data.color || "#116355",
+    farm_section_id: data.farmSectionId || "",
+    sort_order: data.sortOrder ?? nextModuleSortOrder(),
+  });
+  return getModule(id);
+}
+
+export function updateModule(id, patch) {
+  const cur = getModule(id);
+  if (!cur) return null;
+
+  const name = patch.name != null ? String(patch.name).trim() : cur.name;
+  if (!name) throw new Error("Название не может быть пустым");
+
+  if (patch.name != null && name !== cur.name) {
+    const dup = db.prepare("SELECT id FROM modules WHERE name = ? AND id != ? AND active = 1").get(name, id);
+    if (dup) throw new Error("Модуль с таким названием уже есть");
+    db.prepare("UPDATE materials SET module = @newName WHERE module = @oldName").run({
+      newName: name,
+      oldName: cur.name,
+    });
+  }
+
+  const type = patch.type != null ? (MODULE_TYPES.has(patch.type) ? patch.type : cur.type) : cur.type;
+
+  db.prepare(`
+    UPDATE modules SET
+      name=@name, type=@type, tech=@tech, section=@section,
+      icon=@icon, color=@color, farm_section_id=@farm_section_id,
+      sort_order=@sort_order
+    WHERE id=@id
+  `).run({
+    id,
+    name,
+    type,
+    tech: patch.tech != null ? patch.tech : cur.tech,
+    section: patch.section != null ? patch.section : cur.section,
+    icon: patch.icon != null ? patch.icon : cur.icon,
+    color: patch.color != null ? patch.color : cur.color,
+    farm_section_id: patch.farmSectionId != null ? patch.farmSectionId : cur.farmSectionId,
+    sort_order: patch.sortOrder != null ? patch.sortOrder : cur.sortOrder,
+  });
+  return getModule(id);
+}
+
+export function archiveModule(id) {
+  const cur = getModule(id);
+  if (!cur) return null;
+  db.prepare("UPDATE modules SET active = 0 WHERE id = ?").run(id);
+  return getModule(id);
+}
+
+export function restoreModule(id) {
+  const cur = getModule(id);
+  if (!cur) return null;
+  db.prepare("UPDATE modules SET active = 1 WHERE id = ?").run(id);
+  return getModule(id);
+}
+
+export function duplicateModule(id) {
+  const src = getModule(id);
+  if (!src) return null;
+
+  let copyName = `${src.name} (копия)`;
+  let n = 2;
+  while (db.prepare("SELECT id FROM modules WHERE name = ?").get(copyName)) {
+    copyName = `${src.name} (копия ${n++})`;
+  }
+
+  const newMod = createModule({
+    name: copyName,
+    type: src.type,
+    tech: src.tech,
+    section: src.section,
+    icon: src.icon,
+    color: src.color,
+    farmSectionId: src.farmSectionId,
+  });
+
+  const mats = listMaterials({ module: src.name });
+  for (const m of mats) {
+    createMaterial({ ...m, id: undefined, module: copyName });
+  }
+
+  return { module: newMod, materialCount: mats.length };
 }

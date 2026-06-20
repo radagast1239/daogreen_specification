@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { groupLabel } from "../../shared/stellageComposition.js";
+import { groupLabel, STELLAGE_GROUPS } from "../../shared/stellageComposition.js";
 import { CATEGORIES } from "../data/modules.js";
 import { isExhaustFanName, isSplitSystemName } from "../lib/materialSpecs.js";
 import { roomLabel } from "../lib/roomHelpers.js";
@@ -97,10 +97,16 @@ export default function SpecPickerTable({
   categories: categoriesProp,
   suppliers = [],
   showQty = false,
+  qtyLabel = "Кол-во",
+  showCompositionGroups = false,
+  stellageGroups = STELLAGE_GROUPS,
+  units: unitsProp,
   rooms = [],
   showRoom = false,
 }) {
   const categories = categoriesProp?.length ? categoriesProp : CATEGORIES;
+  const unitOptions = unitsProp?.length ? unitsProp : ["шт.", "м", "м²", "м³", "кг", "л"];
+  const groupTitle = (id) => stellageGroups.find((g) => g.id === id)?.label || groupLabel(id);
   const [picker, setPicker] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [newForm, setNewForm] = useState(emptyNew);
@@ -137,8 +143,17 @@ export default function SpecPickerTable({
       if (!map.has(g)) map.set(g, []);
       map.get(g).push(ln);
     }
-    return map;
-  }, [visibleLines]);
+    if (!showCompositionGroups) return map;
+    const ordered = new Map();
+    for (const sg of stellageGroups) {
+      if (map.has(sg.id)) ordered.set(sg.id, map.get(sg.id));
+    }
+    if (map.has("other")) ordered.set("other", map.get("other"));
+    for (const [g, arr] of map) {
+      if (!ordered.has(g)) ordered.set(g, arr);
+    }
+    return ordered;
+  }, [visibleLines, showCompositionGroups, stellageGroups]);
 
   const setAll = (included) => onChange(lines.map((ln) => ({ ...ln, included })));
 
@@ -214,7 +229,7 @@ export default function SpecPickerTable({
     }
   };
 
-  const colSpan = (showQty ? 10 : 9) + (showRoom ? 1 : 0);
+  const colSpan = (showQty ? 10 : 9) + (showRoom ? 1 : 0) + (showCompositionGroups ? 1 : 0);
 
   return (
     <>
@@ -261,8 +276,9 @@ export default function SpecPickerTable({
                 <th style={{ width: 120 }}>Категория</th>
                 <th style={{ width: 110 }}>Поставщик</th>
                 <th style={{ width: 72 }}>Ед.</th>
+                {showCompositionGroups && <th style={{ width: 130 }}>Группа</th>}
                 {showRoom && <th style={{ width: 130 }}>Комната</th>}
-                {showQty && <th className="right" style={{ width: 96 }}>Кол-во</th>}
+                {showQty && <th className="right" style={{ width: 96 }}>{qtyLabel}</th>}
                 <th className="right" style={{ width: 110 }}>Цена, ₽</th>
                 <th style={{ minWidth: 120 }}>Ссылка</th>
                 <th style={{ width: 72 }} />
@@ -274,7 +290,7 @@ export default function SpecPickerTable({
                   {g !== "other" && (
                     <tr>
                       <td colSpan={colSpan} className="spec-group-head">
-                        {groupLabel(g)}
+                        {groupTitle(g)}
                       </td>
                     </tr>
                   )}
@@ -361,12 +377,42 @@ export default function SpecPickerTable({
                         </select>
                       </td>
                       <td>
-                        <input
-                          className="spec-cell-input spec-cell-input--sm"
-                          value={ln.unit}
-                          onChange={(e) => onChange(patchLine(lines, ln.id, { unit: e.target.value }))}
-                        />
+                        {unitOptions.length > 1 ? (
+                          <select
+                            className="spec-cell-input spec-cell-input--sm"
+                            value={ln.unit}
+                            disabled={!ln.included}
+                            onChange={(e) => onChange(patchLine(lines, ln.id, { unit: e.target.value }))}
+                          >
+                            {unitOptions.map((u) => (
+                              <option key={u} value={u}>{u}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            className="spec-cell-input spec-cell-input--sm"
+                            value={ln.unit}
+                            onChange={(e) => onChange(patchLine(lines, ln.id, { unit: e.target.value }))}
+                          />
+                        )}
                       </td>
+                      {showCompositionGroups && (
+                        <td>
+                          <select
+                            className="spec-cell-input"
+                            value={ln.subcategory || ""}
+                            disabled={!ln.included}
+                            onChange={(e) =>
+                              onChange(patchLine(lines, ln.id, { subcategory: e.target.value }))
+                            }
+                          >
+                            <option value="">—</option>
+                            {stellageGroups.map((g) => (
+                              <option key={g.id} value={g.id}>{g.label}</option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
                       {showRoom && (
                         <td>
                           <select

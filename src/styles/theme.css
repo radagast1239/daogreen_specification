@@ -387,6 +387,17 @@ body.nav-open { overflow: hidden; }
   .section-tabs button { max-width: 100%; flex: 1 1 100%; }
 }
 .preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.preset-grid--sortable .preset-card { position: relative; padding-top: 28px; }
+.preset-card--drag { opacity: 0.45; outline: 2px dashed var(--brand); }
+.preset-drag-handle {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
+}
 .preset-card {
   padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm);
   background: var(--paper); cursor: pointer; text-align: left; transition: border-color .12s, box-shadow .12s;
@@ -710,6 +721,96 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 .client-supplier-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 14px; margin: 12px 0; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); }
 .client-supplier-bar select { min-width: 200px; }
 .client-brand-footer { margin-top: 32px; padding: 16px; text-align: center; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); }
+
+/* Floor plan (схема помещения) */
+.floor-plan-field__preview {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  cursor: zoom-in;
+  overflow: hidden;
+}
+.floor-plan-field__preview img {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+}
+.floor-plan-pin {
+  position: fixed;
+  right: 20px;
+  bottom: 24px;
+  z-index: 45;
+  width: 72px;
+  padding: 6px;
+  border: 2px solid var(--brand);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--shadow-lg);
+  cursor: zoom-in;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.floor-plan-pin:hover { border-color: var(--brand-dark, #0a4a3d); transform: scale(1.03); }
+.floor-plan-pin__img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #f4f4f4;
+}
+.floor-plan-pin__label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--brand);
+  letter-spacing: 0.02em;
+}
+.floor-plan-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(6, 20, 16, 0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.floor-plan-fullscreen__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(96vw, 1200px);
+  color: #fff;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+.floor-plan-fullscreen__body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 0;
+}
+.floor-plan-fullscreen__img {
+  max-width: min(96vw, 1400px);
+  max-height: calc(100vh - 100px);
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+}
+.floor-plan-fullscreen__hint {
+  font-size: 12px;
+  margin: 10px 0 0;
+  color: #9ecdb8;
+}
 
 /* Project filters */
 .project-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; align-items: center; }

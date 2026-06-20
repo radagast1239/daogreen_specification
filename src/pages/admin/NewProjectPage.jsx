@@ -3,9 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { buildItemsFromModules } from "../../lib/apiHelpers.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
-import { FARM_TYPES } from "../../data/modules.js";
+import { defaultStellageGroupIds } from "../../lib/referenceData.js";
 import { selectionToApi } from "../../../shared/stellageComposition.js";
-import StellageModulePicker, { defaultStellageGroups } from "../../components/StellageModulePicker.jsx";
+import StellageModulePicker from "../../components/StellageModulePicker.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
 
 const blankZone = () => ({
@@ -23,6 +23,7 @@ const blankZone = () => ({
 
 export default function NewProjectPage() {
   const { state, actions } = useStore();
+  const ref = state.reference;
   const nav = useNavigate();
 
   const [form, setForm] = useState({
@@ -49,7 +50,7 @@ export default function NewProjectPage() {
       const next = { ...s };
       if (next[mod.id] != null) delete next[mod.id];
       else if (mod.type === "stellage") {
-        next[mod.id] = { count: 1, groups: defaultStellageGroups(), excludedMaterialIds: [] };
+        next[mod.id] = { count: 1, groups: defaultStellageGroupIds(ref.stellageGroups), excludedMaterialIds: [] };
       } else {
         next[mod.id] = 1;
       }
@@ -111,7 +112,7 @@ export default function NewProjectPage() {
             <div className="field">
               <label>Тип фермы</label>
               <select value={form.type} onChange={(e) => set("type", e.target.value)}>
-                {FARM_TYPES.map((t) => (
+                {ref.farmTypes.map((t) => (
                   <option key={t}>{t}</option>
                 ))}
               </select>
@@ -264,6 +265,7 @@ export default function NewProjectPage() {
                     <StellageModulePicker
                       mod={mod}
                       materials={state.materials}
+                      stellageGroups={ref.stellageGroups}
                       value={selected[mod.id]}
                       onChange={(v) => setModuleSel(mod.id, v)}
                     />

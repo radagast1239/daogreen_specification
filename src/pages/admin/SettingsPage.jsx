@@ -54,7 +54,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Настройки" sub="Контакты, категории материалов для пресетов и смет" />
+      <PageHeader title="Настройки" sub="Ключи, срок ссылки, категории. Бренд клиента — в «Модули / разделы → Клиент и бренд»." />
       <div className="content" style={{ maxWidth: 560 }}>
         <div className="card" style={{ padding: 22, marginBottom: 20 }}>
           <h3 style={{ marginTop: 0 }}>Компания</h3>
@@ -64,7 +64,6 @@ export default function SettingsPage() {
             ["contactEmail", "Email"],
             ["contactTelegram", "Telegram"],
             ["clientLinkTtlDays", "Срок ссылки, дней"],
-            ["logoUrl", "URL логотипа (PDF)"],
           ].map(([k, label]) => (
             <div className="field" key={k}>
               <label>{label}</label>

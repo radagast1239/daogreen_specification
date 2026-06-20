@@ -1,5 +1,6 @@
 import { uid } from "../store/helpers.js";
 import { emptyFarmSectionsState as buildFarmSectionsState } from "./farmSectionsConfig.js";
+import { normalizeStellageParams } from "./stellagePresetParams.js";
 
 export function cloneBuilderLines(items) {
   return (items || []).map((ln) => ({ ...ln, id: uid("ln") }));
@@ -12,6 +13,7 @@ export function presetPayloadFromDraft(draft, name) {
     moduleId: draft.moduleId,
     moduleName: draft.moduleName,
     sectionId: "",
+    params: normalizeStellageParams(draft.params),
     items: (draft.items || [])
       .filter((ln) => ln.included && ln.name?.trim())
       .map(({ id, qty, ...rest }) => rest),
@@ -20,11 +22,13 @@ export function presetPayloadFromDraft(draft, name) {
 }
 
 export function draftFromStellagePreset(preset, instanceName, index) {
+  const params = normalizeStellageParams(preset.params);
   return {
     id: uid("st"),
     presetId: preset.id,
     name: instanceName || preset.name || `Стеллаж ${index}`,
-    count: 1,
+    count: params.defaultCount,
+    params,
     moduleId: preset.moduleId,
     moduleName: preset.moduleName,
     tech: preset.note || "",

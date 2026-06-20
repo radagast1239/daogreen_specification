@@ -1,5 +1,5 @@
 import { db } from "./db.js";
-import { bulkUpsertMaterials, upsertModule } from "./routes/materials.js";
+import { bulkUpsertMaterials, upsertModule, ensureModuleSeed } from "./routes/materials.js";
 import { seedMaterials } from "../../src/data/seedMaterials.js";
 import { seedModules } from "../../src/data/modules.js";
 import { FARM_SECTIONS } from "../../src/data/farmSections.js";
@@ -41,10 +41,10 @@ export const FULL_MODULES = [
 export function ensureModules() {
   let order = 0;
   for (const mod of FULL_MODULES) {
-    upsertModule({ ...mod, section: mod.section || mod.name, sortOrder: order++ });
+    ensureModuleSeed({ ...mod, section: mod.section || mod.name, sortOrder: order++ });
   }
   for (const sec of FARM_SECTIONS) {
-    upsertModule({
+    ensureModuleSeed({
       id: sec.id,
       name: sec.module,
       type: "farm_section",

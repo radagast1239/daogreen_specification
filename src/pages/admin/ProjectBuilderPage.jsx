@@ -4,11 +4,12 @@ import { useStore } from "../../store/StoreContext.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
 import { useToast } from "../../components/Toast.jsx";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
-import { FARM_TYPES } from "../../data/modules.js";
 import { resolveCategories } from "../../lib/categories.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
 import { api } from "../../lib/api.js";
 import {
+  filterSectionsForFarmType,
+  GROUP_LABEL,
   parseFarmSectionCatalogs,
   projectLinesFromCatalog,
   resolveFarmSections,
@@ -24,9 +25,12 @@ import {
   emptyFarmSectionsState,
   presetPayloadFromDraft,
 } from "../../lib/presetHelpers.js";
+import { formatStellageParamsSummary } from "../../lib/stellagePresetParams.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
+import FloorPlanField from "../../components/FloorPlanField.jsx";
+import FloorPlanPin from "../../components/FloorPlanPin.jsx";
 import { COOLING_FARM_DEFAULTS, computeCoolingFarm } from "../../lib/coolingFarmCalc.js";
 import { defaultRooms } from "../../lib/roomHelpers.js";
 
@@ -40,6 +44,7 @@ const STEPS = [
 
 export default function ProjectBuilderPage() {
   const { state, actions } = useStore();
+  const ref = state.reference;
   const { confirm, success, error } = useToast();
   const nav = useNavigate();
 
@@ -73,12 +78,22 @@ export default function ProjectBuilderPage() {
   const [rooms, setRooms] = useState(defaultRooms);
 
   const sections = useMemo(
-    () => resolveFarmSections(farmSettings || {}),
-    [farmSettings]
+    () => filterSectionsForFarmType(resolveFarmSections(farmSettings || {}), form.type),
+    [farmSettings, form.type]
   );
   const stellageMods = state.modules.filter((m) => m.type === "stellage");
-  const stellagePresets = presets.filter((p) => p.presetType === "stellage");
+  const stellagePresets = useMemo(
+    () =>
+      [...presets.filter((p) => p.presetType === "stellage")].sort(
+        (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)
+      ),
+    [presets]
+  );
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const setManual = (k, v) =>
+    setForm((f) => ({ ...f, manualParams: { ...(f.manualParams || {}), [k]: v } }));
+  const floorPlanUrl = form.manualParams?.floorPlanUrl || "";
+  const showFloorPlanPin = step !== "stellages" && !!floorPlanUrl;
 
   useEffect(() => {
     Promise.all([api.getPresets(), api.getSettings(), api.getSuppliers()]).then(([p, s, sup]) => {
@@ -103,6 +118,10 @@ export default function ProjectBuilderPage() {
       setFarmLoaded(true);
     }
   }, [step, farmLoaded, sections, farmCatalogs, state.materials]);
+
+  useEffect(() => {
+    setFarmLoaded(false);
+  }, [form.type]);
 
   const changeDraftModule = async (moduleId) => {
     const mod = state.modules.find((m) => m.id === moduleId);
@@ -178,10 +197,11 @@ export default function ProjectBuilderPage() {
   const resetFarmSection = async () => {
     if (!activeFarmSection) return;
     const cur = farmSectionLines[activeFarmSection] || [];
+    const sec = sections.find((s) => s.id === activeFarmSection);
     if (cur.some((ln) => ln.included) && !(await confirm({ title: "Сбросить раздел?" }))) return;
     setFarmSectionLines((s) => ({
       ...s,
-      [activeFarmSection]: projectLinesFromCatalog(farmCatalogs, activeFarmSection, state.materials),
+      [activeFarmSection]: projectLinesFromCatalog(farmCatalogs, activeFarmSection, state.materials, sec),
     }));
   };
 
@@ -220,6 +240,7 @@ export default function ProjectBuilderPage() {
       const farmSections = sections.map((sec) => ({
         sectionId: sec.id,
         sectionName: sec.name,
+        defaultResponsible: sec.defaultResponsible || "",
         items: farmSectionLines[sec.id] || [],
       }));
       const payload = buildProjectFromBuilder({
@@ -287,7 +308,7 @@ export default function ProjectBuilderPage() {
             <label>
               Тип фермы
               <select value={form.type} onChange={(e) => set("type", e.target.value)}>
-                {FARM_TYPES.map((t) => (
+                {ref.farmTypes.map((t) => (
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>
@@ -307,6 +328,8 @@ export default function ProjectBuilderPage() {
           </div>
 
           <RoomsEditor rooms={rooms} onChange={setRooms} />
+
+          <FloorPlanField value={floorPlanUrl} onChange={(url) => setManual("floorPlanUrl", url)} />
 
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button type="button" className="btn btn-primary" disabled={!form.name.trim()} onClick={() => setStep("stellages")}>
@@ -356,7 +379,11 @@ export default function ProjectBuilderPage() {
                 {stellagePresets.map((p) => (
                   <button key={p.id} type="button" className="preset-card" onClick={() => applyStellagePreset(p)}>
                     <strong>{p.name}</strong>
-                    <span className="muted">{p.moduleName} · {p.items.filter((i) => i.included).length} поз.</span>
+                    <span className="muted">{p.moduleName}</span>
+                    <span className="muted" style={{ fontSize: 11 }}>
+                      {p.items.filter((i) => i.included).length} поз.
+                      {formatStellageParamsSummary(p.params) ? ` · ${formatStellageParamsSummary(p.params)}` : ""}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -392,6 +419,11 @@ export default function ProjectBuilderPage() {
                 />
               </label>
             </div>
+            {draft.params && formatStellageParamsSummary(draft.params) && (
+              <p className="muted" style={{ fontSize: 12, margin: "10px 0 0" }}>
+                Параметры пресета: {formatStellageParamsSummary(draft.params)}
+              </p>
+            )}
             <div className="toolbar" style={{ marginTop: 10 }}>
               <button type="button" className="btn btn-sm" onClick={saveDraftAsPreset}>
                 💾 Сохранить как пресет
@@ -416,6 +448,8 @@ export default function ProjectBuilderPage() {
             catalogLabel="позицию"
             onSaveMaterial={saveMaterial}
             showQty
+            showCompositionGroups
+            stellageGroups={ref.stellageGroups}
             categories={categories}
             suppliers={suppliers}
           />
@@ -429,6 +463,18 @@ export default function ProjectBuilderPage() {
               Ферма целиком →
             </button>
           </div>
+        </div>
+      )}
+
+      {step === "general" && !sections.length && (
+        <div className="card" style={{ padding: 20 }}>
+          <p className="muted" style={{ margin: 0 }}>
+            Для типа фермы «{form.type}» нет доступных разделов — проверьте настройки в «Модули / разделы → Разделы фермы»
+            (галочки «Скрыть для типов фермы»).
+          </p>
+          <button type="button" className="btn btn-sm" style={{ marginTop: 12 }} onClick={() => setStep("basics")}>
+            ← Изменить тип фермы
+          </button>
         </div>
       )}
 
@@ -452,11 +498,25 @@ export default function ProjectBuilderPage() {
                   key={sec.id}
                   type="button"
                   className={sec.id === activeFarmSection ? "active" : ""}
-                  title={sec.name}
+                  title={`${GROUP_LABEL[sec.group] || ""} · ${sec.name}`}
+                  style={
+                    sec.id === activeFarmSection
+                      ? {
+                          borderColor: sec.color,
+                          color: sec.color,
+                          background: `${sec.color}14`,
+                        }
+                      : { borderColor: `${sec.color}33` }
+                  }
                   onClick={() => setActiveFarmSection(sec.id)}
                 >
-                  <span className="sec-tab-name">{sec.name}</span>
+                  <span className="sec-tab-name">
+                    {sec.icon ? `${sec.icon} ` : ""}
+                    {sec.name}
+                  </span>
                   <span className="muted" style={{ display: "block", fontWeight: 400, fontSize: 10.5, marginTop: 2 }}>
+                    {GROUP_LABEL[sec.group] || "Раздел"}
+                    {" · "}
                     {(farmSectionLines[sec.id] || []).length} поз.
                     {countIncluded(farmSectionLines[sec.id] || []) > 0 &&
                       ` · ${countIncluded(farmSectionLines[sec.id] || [])} отм.`}
@@ -565,6 +625,8 @@ export default function ProjectBuilderPage() {
           </div>
         </div>
       )}
+
+      {showFloorPlanPin && <FloorPlanPin url={floorPlanUrl} title="Схема помещения" />}
     </>
   );
 }

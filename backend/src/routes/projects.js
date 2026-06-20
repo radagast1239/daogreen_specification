@@ -22,6 +22,8 @@ import {
   sanitizeItemForClient,
   sanitizeProjectForClient,
 } from "../services/activityLog.js";
+import { clientPurchaseStatuses } from "../services/referenceData.js";
+import { loadClientBrand } from "../services/clientBrand.js";
 
 const router = Router();
 
@@ -461,18 +463,7 @@ api.post("/:id/restore", (req, res) => {
 export default api;
 
 function loadBrandingSettings() {
-  const keys = ["companyName", "contactPhone", "contactEmail", "contactTelegram", "brandColor"];
-  const rows = db
-    .prepare(`SELECT key, value FROM settings WHERE key IN (${keys.map(() => "?").join(",")})`)
-    .all(...keys);
-  const branding = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-  return {
-    companyName: branding.companyName || "Daogreen",
-    contactPhone: branding.contactPhone || "",
-    contactEmail: branding.contactEmail || "",
-    contactTelegram: branding.contactTelegram || "",
-    brandColor: branding.brandColor || "#116355",
-  };
+  return loadClientBrand(db);
 }
 
 function serveClientProject(req, res) {
@@ -490,6 +481,7 @@ function serveClientProject(req, res) {
     project: sanitizeProjectForClient(p),
     versionInfo: versions[0] || null,
     branding: loadBrandingSettings(),
+    purchaseStatuses: clientPurchaseStatuses(),
     documents,
     activity,
   });

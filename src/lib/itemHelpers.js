@@ -1,14 +1,7 @@
 import { DONE_STATUSES, SPECIALIST_MAP } from "../data/modules.js";
+import { DEFAULT_RESPONSIBLE_ROLES } from "./referenceData.js";
 
-export const RESPONSIBLE_OPTIONS = [
-  { id: "plumber", label: "Сантехник" },
-  { id: "electrician", label: "Электрик" },
-  { id: "installer", label: "Монтажник" },
-  { id: "client", label: "Клиент" },
-  { id: "purchaser", label: "Закупщик" },
-  { id: "consumables", label: "Расходники" },
-  { id: "general", label: "Общий" },
-];
+export const RESPONSIBLE_OPTIONS = DEFAULT_RESPONSIBLE_ROLES;
 
 const CATEGORY_TO_RESPONSIBLE = {
   "Полив и сантехника": "plumber",
@@ -83,6 +76,7 @@ export const DEFAULT_MANUAL_PARAMS = {
   drainPumps: "",
   layoutNotes: "",
   notes: "",
+  floorPlanUrl: "",
 };
 
 export function clientVisibleItems(project) {
@@ -93,8 +87,8 @@ export function itemsByResponsible(items, responsibleId) {
   return items.filter((it) => resolveResponsible(it) === responsibleId);
 }
 
-export function itemsForSpecialist(items, specialistName) {
-  const id = RESPONSIBLE_OPTIONS.find((o) => o.label === specialistName)?.id;
+export function itemsForSpecialist(items, specialistName, roles = RESPONSIBLE_OPTIONS) {
+  const id = roles.find((o) => o.label === specialistName)?.id;
   if (id) return itemsByResponsible(items, id);
   return items.filter((it) => (SPECIALIST_MAP[it.category] || "Клиент") === specialistName);
 }

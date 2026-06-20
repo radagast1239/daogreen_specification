@@ -23,6 +23,8 @@ import { api } from "../../lib/api.js";
 import { downloadCSV } from "../../lib/export.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
+import FloorPlanField from "../../components/FloorPlanField.jsx";
+import FloorPlanPin from "../../components/FloorPlanPin.jsx";
 import { defaultRooms, isFarmGeneralItem, roomLabel } from "../../lib/roomHelpers.js";
 import RoomCoolingSummary from "../../components/RoomCoolingSummary.jsx";
 import ActivityFeed from "../../components/ActivityFeed.jsx";
@@ -91,6 +93,14 @@ export default function SpecEditorPage() {
     });
 
   const saveRooms = (rooms) => actions.projectUpdate(project.id, { rooms });
+
+  const saveManualParam = (key, value) => {
+    const mp = project.manualParams && typeof project.manualParams === "object" ? project.manualParams : {};
+    return actions.projectUpdate(project.id, { manualParams: { ...mp, [key]: value } });
+  };
+
+  const floorPlanUrl = project.manualParams?.floorPlanUrl || "";
+  const showFloorPlanPin = !!floorPlanUrl && (tab === "spec" || tab === "calc");
 
   const approveAll = async () => {
     await actions.approveAll(project.id);
@@ -249,7 +259,14 @@ export default function SpecEditorPage() {
         {tab === "spec" && (
           <>
             <RoomCoolingSummary project={project} />
-            <SpecTab project={project} patchItem={patchItem} actions={actions} saveRooms={saveRooms} />
+            <SpecTab
+              project={project}
+              patchItem={patchItem}
+              actions={actions}
+              saveRooms={saveRooms}
+              floorPlanUrl={floorPlanUrl}
+              onFloorPlanChange={(url) => saveManualParam("floorPlanUrl", url)}
+            />
           </>
         )}
         {tab === "merged" && <MergedTab project={project} />}
@@ -274,6 +291,8 @@ export default function SpecEditorPage() {
           />
         )}
       </div>
+
+      {showFloorPlanPin && <FloorPlanPin url={floorPlanUrl} title="Схема помещения" />}
     </>
   );
 }
@@ -352,7 +371,7 @@ function ProjectDocuments({ projectId }) {
 }
 
 /* ---------------- Спецификация ---------------- */
-function SpecTab({ project, patchItem, actions, saveRooms }) {
+function SpecTab({ project, patchItem, actions, saveRooms, floorPlanUrl, onFloorPlanChange }) {
   const { confirm } = useToast();
   const groups = useMemo(() => groupBy(project.items, "module"), [project.items]);
   const rooms = project.rooms?.length ? project.rooms : defaultRooms();
@@ -383,11 +402,14 @@ function SpecTab({ project, patchItem, actions, saveRooms }) {
 
   return (
     <div style={{ marginTop: 16 }}>
-      {hasFarmItems && (
-        <Collapsible title="Комнаты фермы" defaultOpen>
-          <RoomsEditor rooms={rooms} onChange={(next) => saveRooms(next)} />
-        </Collapsible>
-      )}
+      <Collapsible title="Схема и комнаты" defaultOpen={hasFarmItems || !!floorPlanUrl}>
+        <FloorPlanField value={floorPlanUrl || ""} onChange={onFloorPlanChange} />
+        {hasFarmItems && (
+          <div style={{ marginTop: 12 }}>
+            <RoomsEditor rooms={rooms} onChange={(next) => saveRooms(next)} compact />
+          </div>
+        )}
+      </Collapsible>
       {groups.map(([module, items]) => {
         const modSum = items.reduce((s, i) => s + lineGross(i), 0);
         return (

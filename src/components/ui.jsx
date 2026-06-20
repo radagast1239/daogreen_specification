@@ -7,8 +7,9 @@ export function Chip({ kind = "neutral", children, dot = true }) {
   return <span className={`chip chip--${kind} ${dot ? "chip-dot" : ""}`}>{children}</span>;
 }
 
-export function StatusChip({ status }) {
-  const s = PURCHASE_STATUSES.find((x) => x.id === status) || PURCHASE_STATUSES[0];
+export function StatusChip({ status, statuses }) {
+  const list = statuses?.length ? statuses : PURCHASE_STATUSES;
+  const s = list.find((x) => x.id === status) || list[0];
   return <Chip kind={s.chip}>{s.label}</Chip>;
 }
 

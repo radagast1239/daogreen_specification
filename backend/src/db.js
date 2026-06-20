@@ -186,6 +186,10 @@ function migrateDb() {
   addCol("projects", "installation_done_at", "TEXT DEFAULT ''");
   addCol("client_profiles", "purchase_started_at", "TEXT DEFAULT ''");
   addCol("client_profiles", "installation_done_at", "TEXT DEFAULT ''");
+  addCol("modules", "icon", "TEXT DEFAULT ''");
+  addCol("modules", "color", "TEXT DEFAULT '#116355'");
+  addCol("modules", "farm_section_id", "TEXT DEFAULT ''");
+  addCol("spec_presets", "params_json", "TEXT NOT NULL DEFAULT '{}'");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS material_price_history (
@@ -289,6 +293,9 @@ export function rowToModule(row) {
     type: row.type,
     tech: row.tech,
     section: row.section,
+    icon: row.icon || "",
+    color: row.color || "#116355",
+    farmSectionId: row.farm_section_id || "",
     active: !!row.active,
     sortOrder: row.sort_order,
   };

@@ -5,11 +5,12 @@ import multer from "multer";
 import { nanoid } from "nanoid";
 import { fileURLToPath } from "url";
 import { db, getDbPath } from "../db.js";
-import { listMaterials, listModules } from "./materials.js";
+import { listMaterials, listModulesAdmin, createModule, updateModule, archiveModule, restoreModule, duplicateModule } from "./materials.js";
 import { loadProject, loadProjectItems, rowToProject } from "../db.js";
 import { projectTotals } from "../services/buildItems.js";
 import { getAnalytics } from "../services/analytics.js";
 import { listAdminUsers, upsertAdminUser, deactivateAdminUser } from "../auth.js";
+import { brandSettingsResponse } from "../services/clientBrand.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, "../uploads");
@@ -109,7 +110,7 @@ router.get("/suppliers", (_req, res) => {
 });
 
 router.get("/modules", (_req, res) => {
-  const modules = listModules();
+  const modules = listModulesAdmin();
   const mats = listMaterials();
   res.json(
     modules.map((m) => ({
@@ -117,6 +118,49 @@ router.get("/modules", (_req, res) => {
       materialCount: mats.filter((x) => x.module === m.name).length,
     }))
   );
+});
+
+router.post("/modules", (req, res) => {
+  try {
+    const mod = createModule(req.body);
+    const mats = listMaterials();
+    res.status(201).json({ ...mod, materialCount: 0 });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.patch("/modules/:id", (req, res) => {
+  try {
+    const mod = updateModule(req.params.id, req.body);
+    if (!mod) return res.status(404).json({ error: "Not found" });
+    const mats = listMaterials();
+    res.json({ ...mod, materialCount: mats.filter((x) => x.module === mod.name).length });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.post("/modules/:id/archive", (req, res) => {
+  const mod = archiveModule(req.params.id);
+  if (!mod) return res.status(404).json({ error: "Not found" });
+  res.json(mod);
+});
+
+router.post("/modules/:id/restore", (req, res) => {
+  const mod = restoreModule(req.params.id);
+  if (!mod) return res.status(404).json({ error: "Not found" });
+  res.json(mod);
+});
+
+router.post("/modules/:id/duplicate", (req, res) => {
+  try {
+    const result = duplicateModule(req.params.id);
+    if (!result) return res.status(404).json({ error: "Not found" });
+    res.status(201).json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 router.get("/archive", (_req, res) => {
@@ -137,9 +181,17 @@ router.get("/settings", (_req, res) => {
     farmSectionNames: obj.farmSectionNames || "",
     farmSections: obj.farmSections || "",
     farmSectionCatalogs: obj.farmSectionCatalogs || "",
+    farmSectionVersions: obj.farmSectionVersions || "",
     materialCategories: obj.materialCategories || "",
+    refTags: obj.refTags || "",
+    refUnits: obj.refUnits || "",
+    refPurchaseStatuses: obj.refPurchaseStatuses || "",
+    refResponsibleRoles: obj.refResponsibleRoles || "",
+    refFarmTypes: obj.refFarmTypes || "",
+    refStellageGroups: obj.refStellageGroups || "",
     clientLinkTtlDays: obj.clientLinkTtlDays || "0",
     logoUrl: obj.logoUrl || "",
+    ...brandSettingsResponse(obj),
   });
 });
 
@@ -210,9 +262,17 @@ router.patch("/settings", (req, res) => {
     farmSectionNames: obj.farmSectionNames || "",
     farmSections: obj.farmSections || "",
     farmSectionCatalogs: obj.farmSectionCatalogs || "",
+    farmSectionVersions: obj.farmSectionVersions || "",
     materialCategories: obj.materialCategories || "",
+    refTags: obj.refTags || "",
+    refUnits: obj.refUnits || "",
+    refPurchaseStatuses: obj.refPurchaseStatuses || "",
+    refResponsibleRoles: obj.refResponsibleRoles || "",
+    refFarmTypes: obj.refFarmTypes || "",
+    refStellageGroups: obj.refStellageGroups || "",
     clientLinkTtlDays: obj.clientLinkTtlDays || "0",
     logoUrl: obj.logoUrl || "",
+    ...brandSettingsResponse(obj),
   });
 });
 

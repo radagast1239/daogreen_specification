@@ -9,9 +9,13 @@ import {
   normalizeModuleSelection,
 } from "../../shared/stellageComposition.js";
 
-export default function StellageModulePicker({ mod, materials, value, onChange }) {
+export default function StellageModulePicker({ mod, materials, value, onChange, stellageGroups = STELLAGE_GROUPS }) {
   const sel = normalizeModuleSelection(value);
-  const moduleGroups = useMemo(() => groupsForModule(materials, mod.name), [materials, mod.name]);
+  const labelFor = (id) => stellageGroups.find((g) => g.id === id)?.label || groupLabel(id);
+  const moduleGroups = useMemo(
+    () => groupsForModule(materials, mod.name).map((g) => ({ ...g, label: labelFor(g.id) })),
+    [materials, mod.name, stellageGroups]
+  );
   const byGroup = useMemo(() => materialsByGroup(materials, mod.name), [materials, mod.name]);
 
   const set = (patch) => onChange({ ...sel, ...patch });
@@ -102,7 +106,7 @@ export default function StellageModulePicker({ mod, materials, value, onChange }
           Детальный выбор позиций
         </summary>
         <div style={{ marginTop: 8, maxHeight: 280, overflowY: "auto" }}>
-          {STELLAGE_GROUPS.filter((g) => moduleGroups.some((mg) => mg.id === g.id)).map((g) => {
+          {moduleGroups.map((g) => {
             const mats = byGroup.get(g.id) || [];
             if (!mats.length) return null;
             return (
