@@ -1,5 +1,5 @@
 import { uid } from "../store/helpers.js";
-import { catalogLinesForModule } from "./projectBuilder.js";
+import { catalogLinesForFarmSection } from "./projectBuilder.js";
 
 export function cloneBuilderLines(items) {
   return (items || []).map((ln) => ({ ...ln, id: uid("ln") }));
@@ -43,7 +43,7 @@ export function draftFromStellagePreset(preset, instanceName, index) {
 export function emptyFarmSectionsState(materials, sections) {
   const map = {};
   for (const sec of sections) {
-    map[sec.id] = catalogLinesForModule(materials, sec.module);
+    map[sec.id] = catalogLinesForFarmSection(materials, sec.id);
   }
   return map;
 }

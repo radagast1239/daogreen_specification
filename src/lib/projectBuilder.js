@@ -26,13 +26,14 @@ export function blankLine(overrides = {}) {
   };
 }
 
-export function lineToMaterialPayload(line, moduleName) {
+export function lineToMaterialPayload(line, moduleName, farmSectionId = "") {
   return {
     name: line.name.trim(),
     unit: line.unit || "шт.",
     module: moduleName,
     category: line.category || "Прочее",
     subcategory: line.subcategory || "",
+    farmSectionId: farmSectionId || line.farmSectionId || "",
     defaultQty: 0,
     basePrice: Number(line.price) || 0,
     link: line.link || "",
@@ -61,6 +62,18 @@ export function syncLineFromMaterial(line, mat) {
     price: Number(mat.basePrice) || line.price,
     vatRate: Number(mat.vatRate) || 0,
   };
+}
+
+/** Строки каталога для раздела «Ферма целиком» */
+export function catalogLinesForFarmSection(materials, sectionId) {
+  return materials
+    .filter(
+      (m) =>
+        m.module === "Общая закупка на ферму" &&
+        m.farmSectionId === sectionId &&
+        m.status === "active"
+    )
+    .map((m) => lineFromMaterial(m, { included: false }));
 }
 
 /** Строки каталога для сборки — все видны, по умолчанию не отмечены */

@@ -35,6 +35,7 @@ export default function ProjectBuilderPage() {
   const [saving, setSaving] = useState(false);
   const [presets, setPresets] = useState([]);
   const [sectionOrder, setSectionOrder] = useState("");
+  const [sectionNames, setSectionNames] = useState("");
 
   const [form, setForm] = useState({
     name: "",
@@ -56,7 +57,7 @@ export default function ProjectBuilderPage() {
   const [activeFarmSection, setActiveFarmSection] = useState(null);
   const [farmLoaded, setFarmLoaded] = useState(false);
 
-  const sections = useMemo(() => orderedFarmSections(sectionOrder), [sectionOrder]);
+  const sections = useMemo(() => orderedFarmSections(sectionOrder, sectionNames), [sectionOrder, sectionNames]);
   const stellageMods = state.modules.filter((m) => m.type === "stellage");
   const stellagePresets = presets.filter((p) => p.presetType === "stellage");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -65,6 +66,7 @@ export default function ProjectBuilderPage() {
     Promise.all([api.getPresets(), api.getSettings()]).then(([p, s]) => {
       setPresets(p);
       setSectionOrder(s.farmSectionOrder || "");
+      setSectionNames(s.farmSectionNames || "");
     });
   }, []);
 
@@ -360,7 +362,9 @@ export default function ProjectBuilderPage() {
                 >
                   {sec.name}
                   <span className="muted" style={{ display: "block", fontWeight: 400, fontSize: 11, marginTop: 2 }}>
-                    {countIncluded(farmSectionLines[sec.id] || [])} поз.
+                    {(farmSectionLines[sec.id] || []).length} поз.
+                    {countIncluded(farmSectionLines[sec.id] || []) > 0 &&
+                      ` · ${countIncluded(farmSectionLines[sec.id] || [])} отм.`}
                   </span>
                 </button>
               ))}
@@ -389,7 +393,8 @@ export default function ProjectBuilderPage() {
                 lines={farmSectionLines[activeFarmSection] || []}
                 onChange={(lines) => setFarmSectionLines((s) => ({ ...s, [activeFarmSection]: lines }))}
                 materials={state.materials}
-                catalogModule={activeSection.module}
+                catalogModule="Общая закупка на ферму"
+                farmSectionId={activeSection.id}
                 catalogLabel="позицию"
                 onSaveMaterial={saveMaterial}
               />

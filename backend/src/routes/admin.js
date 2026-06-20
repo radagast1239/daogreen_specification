@@ -58,6 +58,7 @@ router.get("/settings", (_req, res) => {
     contactTelegram: obj.contactTelegram || "",
     brandColor: obj.brandColor || "#116355",
     farmSectionOrder: obj.farmSectionOrder || "",
+    farmSectionNames: obj.farmSectionNames || "",
   });
 });
 
@@ -66,7 +67,7 @@ router.patch("/settings", (req, res) => {
     "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
   );
   for (const [key, value] of Object.entries(req.body)) {
-    upsert.run(key, String(value ?? ""));
+    upsert.run(key, typeof value === "string" ? value : JSON.stringify(value ?? ""));
   }
   const rows = db.prepare("SELECT key, value FROM settings").all();
   const obj = Object.fromEntries(rows.map((r) => [r.key, r.value]));
@@ -77,6 +78,7 @@ router.patch("/settings", (req, res) => {
     contactTelegram: obj.contactTelegram || "",
     brandColor: obj.brandColor || "#116355",
     farmSectionOrder: obj.farmSectionOrder || "",
+    farmSectionNames: obj.farmSectionNames || "",
   });
 });
 

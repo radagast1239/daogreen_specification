@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
-import { orderedFarmSections, moveSectionOrder } from "../../lib/farmSectionOrder.js";
+import { orderedFarmSections, moveSectionOrder, patchFarmSectionName } from "../../lib/farmSectionOrder.js";
 import {
+  catalogLinesForFarmSection,
   catalogLinesForModule,
 } from "../../lib/projectBuilder.js";
 import {
@@ -24,11 +25,12 @@ export default function ModulesPage() {
   const [presets, setPresets] = useState([]);
   const [mods, setMods] = useState([]);
   const [sectionOrder, setSectionOrder] = useState("");
+  const [sectionNames, setSectionNames] = useState("");
   const [editing, setEditing] = useState(null);
   const [editLines, setEditLines] = useState([]);
   const [saving, setSaving] = useState(false);
 
-  const sections = useMemo(() => orderedFarmSections(sectionOrder), [sectionOrder]);
+  const sections = useMemo(() => orderedFarmSections(sectionOrder, sectionNames), [sectionOrder, sectionNames]);
   const stellageMods = state.modules.filter((m) => m.type === "stellage");
 
   const reload = useCallback(async () => {
@@ -36,6 +38,7 @@ export default function ModulesPage() {
     setPresets(p);
     setMods(m);
     setSectionOrder(s.farmSectionOrder || "");
+    setSectionNames(s.farmSectionNames || "");
   }, []);
 
   useEffect(() => {
@@ -71,10 +74,10 @@ export default function ModulesPage() {
       name: "",
       presetType: "farm_section",
       moduleId: "",
-      moduleName: section.module,
+      moduleName: "Общая закупка на ферму",
       sectionId: section.id,
     });
-    setEditLines(catalogLinesForModule(state.materials, section.module));
+    setEditLines(catalogLinesForFarmSection(state.materials, section.id));
   };
 
   const openPreset = (p) => {
@@ -122,6 +125,17 @@ export default function ModulesPage() {
     setSectionOrder(next);
     await api.saveSettings({ farmSectionOrder: next });
   };
+
+  const saveSectionName = async (sectionId, name) => {
+    const next = patchFarmSectionName(sectionNames, sectionId, name);
+    setSectionNames(next);
+    await api.saveSettings({ farmSectionNames: next });
+  };
+
+  const sectionMaterialCount = (sectionId) =>
+    state.materials.filter(
+      (m) => m.module === "Общая закупка на ферму" && m.farmSectionId === sectionId && m.status === "active"
+    ).length;
 
   return (
     <>
@@ -185,7 +199,12 @@ export default function ModulesPage() {
             return (
               <div key={sec.id} className="card" style={{ padding: 14, marginBottom: 12 }}>
                 <div className="between" style={{ marginBottom: 10 }}>
-                  <strong style={{ fontSize: 14 }}>{sec.name}</strong>
+                  <div>
+                    <strong style={{ fontSize: 14 }}>{sec.name}</strong>
+                    <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
+                      {sectionMaterialCount(sec.id)} поз. в базе
+                    </span>
+                  </div>
                   <button type="button" className="btn btn-sm" onClick={() => startNewFarmPreset(sec)}>
                     ＋ Пресет
                   </button>
@@ -219,15 +238,34 @@ export default function ModulesPage() {
       {tab === "order" && (
         <div className="content">
           <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-            Порядок разделов на шаге «Ферма целиком» при создании проекта.
+            Названия и порядок разделов на шаге «Ферма целиком». Позиции берутся из модуля «Общая закупка на ферму».
           </p>
-          <div className="card" style={{ padding: 0, overflow: "hidden", maxWidth: 560 }}>
+          <div className="card" style={{ padding: 0, overflow: "hidden", maxWidth: 720 }}>
             <table className="spec">
+              <thead>
+                <tr>
+                  <th style={{ width: 40 }}>#</th>
+                  <th>Название раздела</th>
+                  <th className="right" style={{ width: 80 }}>В базе</th>
+                  <th className="right" style={{ width: 100 }} />
+                </tr>
+              </thead>
               <tbody>
                 {sections.map((sec, i) => (
                   <tr key={sec.id}>
-                    <td style={{ width: 40 }} className="muted num">{i + 1}</td>
-                    <td>{sec.name}</td>
+                    <td className="muted num">{i + 1}</td>
+                    <td>
+                      <input
+                        className="spec-cell-input"
+                        value={sec.name}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setSectionNames(patchFarmSectionName(sectionNames, sec.id, v));
+                        }}
+                        onBlur={(e) => saveSectionName(sec.id, e.target.value)}
+                      />
+                    </td>
+                    <td className="right num muted">{sectionMaterialCount(sec.id)}</td>
                     <td className="right" style={{ width: 100 }}>
                       <button type="button" className="btn btn-ghost btn-sm" disabled={i === 0} onClick={() => moveSection(sec.id, "up")}>
                         ↑
@@ -307,7 +345,8 @@ export default function ModulesPage() {
             lines={editLines}
             onChange={setEditLines}
             materials={state.materials}
-            catalogModule={editing.moduleName}
+            catalogModule={editing.presetType === "farm_section" ? "Общая закупка на ферму" : editing.moduleName}
+            farmSectionId={editing.presetType === "farm_section" ? editing.sectionId : ""}
             catalogLabel="позицию"
             onSaveMaterial={saveMaterial}
           />

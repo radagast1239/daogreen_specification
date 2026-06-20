@@ -185,6 +185,12 @@ function migrateDb() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  try {
+    db.exec(`ALTER TABLE materials ADD COLUMN farm_section_id TEXT DEFAULT ''`);
+  } catch {
+    /* column exists */
+  }
 }
 
 export function rowToMaterial(row) {
@@ -198,6 +204,7 @@ export function rowToMaterial(row) {
     module: row.module,
     category: row.category,
     subcategory: row.subcategory,
+    farmSectionId: row.farm_section_id || "",
     itemType: row.item_type,
     supplier: row.supplier,
     link: row.link,

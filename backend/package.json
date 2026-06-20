@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "photos:import": "node scripts/importPhotos.js",
     "photos:excel": "node scripts/importExcelPhotosBatch.mjs",
+    "farm:sync": "node scripts/syncFarmSections.mjs",
     "seed": "node src/seed.js"
   },
   "dependencies": {

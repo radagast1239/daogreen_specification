@@ -10,6 +10,7 @@ import {
 import path from "path";
 import { fileURLToPath } from "url";
 import { importPhotosFromDir } from "./services/photoImport.js";
+import { syncFarmSectionsFromExcel } from "./services/syncFarmSections.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, "../uploads");
@@ -69,7 +70,15 @@ export function ensureCompositionSubcategories() {
   if (n) console.log(`Composition groups: updated ${n} materials`);
 }
 
-/** Импорт фото из materials-photos/ по имени m001.jpg */
+/** Проставляет farm_section_id из Excel «закуп на всю ферму» */
+export function ensureFarmSectionIds() {
+  const result = syncFarmSectionsFromExcel(db);
+  if (result.updated > 0) {
+    console.log(`Farm sections: updated ${result.updated} materials (${result.excel})`);
+  }
+  return result;
+}
+
 export function ensureMaterialPhotos() {
   const result = importPhotosFromDir(photosSourceDir, uploadDir);
   if (result.error) return result;
@@ -85,6 +94,7 @@ export function runSeedIfEmpty() {
   if (count > 0) {
     ensureCompositionSubcategories();
     ensureMaterialPhotos();
+    ensureFarmSectionIds();
     return;
   }
 
@@ -115,6 +125,7 @@ export function runSeedIfEmpty() {
   bulkUpsertMaterials(materials, "merge");
   console.log(`Seeded ${materials.length} materials`);
   ensureMaterialPhotos();
+  ensureFarmSectionIds();
 }
 
 if (process.argv[1]?.endsWith("seed.js")) {

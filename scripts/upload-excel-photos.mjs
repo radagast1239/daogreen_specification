@@ -62,7 +62,10 @@ conn
             if (pending === 0) {
               const cmd =
                 "cd /opt/daogreen-spec && git pull --ff-only && " +
-                "/opt/node-v22.16.0-linux-x64/bin/npm run photos:excel --prefix /opt/daogreen-spec/backend";
+                "/opt/node-v22.16.0-linux-x64/bin/npm run build --prefix /opt/daogreen-spec && " +
+                "/opt/node-v22.16.0-linux-x64/bin/node /opt/daogreen-spec/backend/scripts/importExcelPhotosBatch.mjs /opt/daogreen-spec/import-sources && " +
+                "/opt/node-v22.16.0-linux-x64/bin/node /opt/daogreen-spec/backend/scripts/syncFarmSections.mjs /opt/daogreen-spec/import-sources && " +
+                "systemctl restart daogreen-spec";
               conn.exec(cmd, (execErr, stream) => {
                 if (execErr) {
                   console.error(execErr.message);

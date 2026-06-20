@@ -33,6 +33,7 @@ export default function SpecPickerTable({
   onChange,
   materials = [],
   catalogModule = "",
+  farmSectionId = "",
   catalogLabel = "из базы",
   emptyHint = "Выберите тип стеллажа — позиции появятся в таблице.",
   onSaveMaterial,
@@ -52,9 +53,10 @@ export default function SpecPickerTable({
       (m) =>
         m.status === "active" &&
         (!catalogModule || m.module === catalogModule) &&
+        (!farmSectionId || m.farmSectionId === farmSectionId) &&
         (!ql || m.name.toLowerCase().includes(ql))
     );
-  }, [materials, catalogModule, q]);
+  }, [materials, catalogModule, farmSectionId, q]);
 
   const visibleLines = useMemo(() => {
     const sq = search.trim().toLowerCase();
@@ -101,7 +103,7 @@ export default function SpecPickerTable({
     if (!onSaveMaterial || !catalogModule || !ln.name?.trim()) return;
     setSavingId(ln.id);
     try {
-      const mat = await onSaveMaterial(lineToMaterialPayload(ln, catalogModule));
+      const mat = await onSaveMaterial(lineToMaterialPayload(ln, catalogModule, farmSectionId));
       onChange(patchLine(lines, ln.id, syncLineFromMaterial(ln, mat)));
     } catch (e) {
       alert(e.message || "Не удалось сохранить в базу");
@@ -126,7 +128,8 @@ export default function SpecPickerTable({
       const mat = await onSaveMaterial(
         lineToMaterialPayload(
           { ...newForm, category: newForm.category },
-          catalogModule
+          catalogModule,
+          farmSectionId
         )
       );
       onChange([...lines, lineFromMaterial(mat, { included: true, qty: newForm.qty, price: newForm.price })]);

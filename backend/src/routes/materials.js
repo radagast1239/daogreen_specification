@@ -3,12 +3,12 @@ import { uid } from "../services/buildItems.js";
 
 const INSERT_MAT = db.prepare(`
   INSERT INTO materials (
-    id, name, unit, base_price, default_qty, module, category, subcategory, item_type,
+    id, name, unit, base_price, default_qty, module, category, subcategory, farm_section_id, item_type,
     supplier, link, link_alt, photo_url, vat_rate, vat_included,
     client_note, tech_note, internal_note, status,
     needs_approval, is_consumable, is_spare_part, client_visible_default, responsible, updated_at
   ) VALUES (
-    @id, @name, @unit, @base_price, @default_qty, @module, @category, @subcategory, @item_type,
+    @id, @name, @unit, @base_price, @default_qty, @module, @category, @subcategory, @farm_section_id, @item_type,
     @supplier, @link, @link_alt, @photo_url, @vat_rate, @vat_included,
     @client_note, @tech_note, @internal_note, @status,
     @needs_approval, @is_consumable, @is_spare_part, @client_visible_default, @responsible, datetime('now')
@@ -18,7 +18,7 @@ const INSERT_MAT = db.prepare(`
 const UPDATE_MAT = db.prepare(`
   UPDATE materials SET
     name=@name, unit=@unit, base_price=@base_price, default_qty=@default_qty,
-    module=@module, category=@category, subcategory=@subcategory, item_type=@item_type,
+    module=@module, category=@category, subcategory=@subcategory, farm_section_id=@farm_section_id, item_type=@item_type,
     supplier=@supplier, link=@link, link_alt=@link_alt, photo_url=@photo_url,
     vat_rate=@vat_rate, vat_included=@vat_included,
     client_note=@client_note, tech_note=@tech_note, internal_note=@internal_note,
@@ -39,6 +39,7 @@ function matToParams(m, id) {
     module: m.module,
     category: m.category || "Прочее",
     subcategory: m.subcategory || "",
+    farm_section_id: m.farmSectionId || "",
     item_type: m.itemType || "material",
     supplier: m.supplier || "",
     link: m.link || "",
