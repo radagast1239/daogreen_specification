@@ -6,11 +6,32 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.DATABASE_PATH || path.join(__dirname, "../data/daogreen.db");
 
-fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+let dbInstance = null;
 
-export const db = new DatabaseSync(dbPath);
-db.exec("PRAGMA journal_mode = WAL");
-db.exec("PRAGMA foreign_keys = ON");
+function connect() {
+  if (dbInstance) return dbInstance;
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  dbInstance = new DatabaseSync(dbPath);
+  dbInstance.exec("PRAGMA journal_mode = WAL");
+  dbInstance.exec("PRAGMA foreign_keys = ON");
+  return dbInstance;
+}
+
+/** Прокси: подключение к SQLite при первом обращении */
+export const db = new Proxy(
+  {},
+  {
+    get(_t, prop) {
+      const d = connect();
+      const v = d[prop];
+      return typeof v === "function" ? v.bind(d) : v;
+    },
+  }
+);
+
+export function getDbPath() {
+  return dbPath;
+}
 
 export function initDb() {
   db.exec(`
@@ -275,5 +296,3 @@ export function loadProjectByToken(token) {
   if (!row) return null;
   return rowToProject(row, loadProjectItems(row.id));
 }
-
-initDb();

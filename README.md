@@ -89,6 +89,24 @@ https://github.com/radagast1239/daogreen_specification
 
 Клиентские ссылки: `https://ваш-сервис.onrender.com/client/p/<токен>`
 
+**Render Free без доп. настроек:** проекты и правки **сбрасываются при редеплое** (спящий режим ~15 мин — сервис просыпается, но данные на диске не живут).
+
+### Бесплатно + данные сохраняются (рекомендуем)
+
+**Render (хостинг $0) + Supabase Storage (бэкап БД $0):**
+
+1. [supabase.com](https://supabase.com) → новый проект (Free)
+2. **Storage** → New bucket → имя `daogreen-db` → **Private**
+3. **Settings → API** → скопируйте `URL` и `service_role` key (секретный!)
+4. На Render → Environment:
+   - `SUPABASE_URL` = `https://xxxx.supabase.co`
+   - `SUPABASE_SERVICE_KEY` = service_role key
+5. Redeploy
+
+База автоматически загружается при старте и сохраняется в облако каждую минуту. Проекты, материалы и правки **не пропадают** при редеплое.
+
+Фото деталей: кладите в `materials-photos/` локально или загружайте через **Фото** в админке; на Render файлы в `/uploads` тоже эфемерны — для постоянных фото позже можно тот же Supabase Storage.
+
 ### Вариант 2 — фронт на github.io (как калькулятор)
 
 Фронт: **https://radagast1239.github.io/daogreen_specification/**

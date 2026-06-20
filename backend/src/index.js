@@ -3,14 +3,23 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
-import { db } from "./db.js";
+import { initRemoteDb, startDbBackupLoop } from "./dbBackup.js";
+import { initDb, db } from "./db.js";
 import { runSeedIfEmpty } from "./seed.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
 const ADMIN_KEY = process.env.ADMIN_KEY || "daogreen-admin-change-me";
 
+const dbPath = path.resolve(
+  process.env.DATABASE_PATH || path.join(__dirname, "../data/daogreen.db")
+);
+process.env.DATABASE_PATH = dbPath;
+
+await initRemoteDb(dbPath);
+initDb();
 runSeedIfEmpty();
+startDbBackupLoop(dbPath);
 
 const { default: materialsApi } = await import("./routes/materialsApi.js");
 const { default: projectsApi, clientRouter } = await import("./routes/projects.js");
@@ -38,7 +47,12 @@ function adminAuth(req, res, next) {
 app.get("/api/health", (_req, res) => {
   const mats = db.prepare("SELECT COUNT(*) as c FROM materials").get();
   const projs = db.prepare("SELECT COUNT(*) as c FROM projects").get();
-  res.json({ ok: true, materials: mats.c, projects: projs.c });
+  res.json({
+    ok: true,
+    materials: mats.c,
+    projects: projs.c,
+    dbBackup: !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY),
+  });
 });
 
 app.use("/api/materials", adminAuth, materialsApi);

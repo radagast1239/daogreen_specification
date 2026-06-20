@@ -107,6 +107,8 @@ export function runSeedIfEmpty() {
 }
 
 if (process.argv[1]?.endsWith("seed.js")) {
+  const { initDb } = await import("./db.js");
+  initDb();
   db.prepare("DELETE FROM project_items").run();
   db.prepare("DELETE FROM spec_versions").run();
   db.prepare("DELETE FROM projects").run();
