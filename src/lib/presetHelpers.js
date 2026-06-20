@@ -13,7 +13,7 @@ export function presetPayloadFromDraft(draft, name) {
     moduleId: draft.moduleId,
     moduleName: draft.moduleName,
     sectionId: "",
-    params: normalizeStellageParams(draft.params),
+    params: normalizeStellageParams({ ...(draft.params || {}), photoUrl: draft.photoUrl || draft.params?.photoUrl }),
     items: (draft.items || [])
       .filter((ln) => ln.included && ln.name?.trim())
       .map(({ id, qty, ...rest }) => rest),
@@ -29,6 +29,7 @@ export function draftFromStellagePreset(preset, instanceName, index) {
     name: instanceName || preset.name || `Стеллаж ${index}`,
     count: params.defaultCount,
     params,
+    photoUrl: params.photoUrl || "",
     moduleId: preset.moduleId,
     moduleName: preset.moduleName,
     tech: preset.note || "",

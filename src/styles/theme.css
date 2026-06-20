@@ -415,6 +415,44 @@ body.nav-open { overflow: hidden; }
 .preset-card.selected { border-color: var(--brand); background: var(--brand-tint); }
 .preset-card strong { display: block; font-size: 13px; margin-bottom: 4px; }
 .preset-card .muted { font-size: 11px; }
+.preset-card--photo { padding-top: 10px; }
+.preset-card--photo .stellage-photo-thumb { width: 100%; height: 88px; object-fit: cover; border-radius: var(--radius-sm); margin-bottom: 8px; }
+
+.stellage-photo-thumb {
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  display: block;
+}
+.stellage-photo-thumb--empty {
+  background: var(--surface);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  border: 1px dashed var(--line);
+}
+.stellage-photo-field__preview {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  margin-top: 10px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: zoom-in;
+  background: var(--surface);
+}
+.stellage-photo-field__preview img { width: 100%; max-height: 220px; object-fit: contain; display: block; }
+.stellage-photo-field--compact { display: flex; align-items: center; gap: 8px; }
+.stellage-photo-field__thumb { width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--line); }
+.stellage-photo-field__empty {
+  width: 56px; height: 56px; border-radius: var(--radius-sm); border: 1px dashed var(--line);
+  display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 20px;
+}
+.stellage-list-row { align-items: center; }
 .form-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px;
 }

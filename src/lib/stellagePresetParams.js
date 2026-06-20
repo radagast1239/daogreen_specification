@@ -10,12 +10,14 @@ export const DEFAULT_STELLAGE_PARAMS = {
   crop: "",
   zone: "",
   comment: "",
+  photoUrl: "",
 };
 
 export function normalizeStellageParams(raw = {}) {
   return {
     ...DEFAULT_STELLAGE_PARAMS,
     ...raw,
+    photoUrl: raw.photoUrl || "",
     defaultCount: Math.max(1, Number(raw.defaultCount) || 1),
   };
 }

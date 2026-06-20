@@ -2,7 +2,7 @@ import { uid } from "../store/helpers.js";
 import { defaultResponsible } from "./itemHelpers.js";
 import { hydrateLinePhoto } from "./photoHelpers.js";
 import { groupLabel, materialCompositionGroup } from "../../shared/stellageComposition.js";
-import { projectStellageLinesFromCatalog } from "./stellageCatalogConfig.js";
+import { projectStellageLinesFromCatalog, stellageModulePhoto } from "./stellageCatalogConfig.js";
 
 export function blankLine(overrides = {}) {
   return {
@@ -192,6 +192,7 @@ export function buildProjectFromBuilder({ form, stellages, farmSections, general
       moduleName: st.moduleName,
       tech: st.tech || "",
       presetId: st.presetId || null,
+      photoUrl: st.photoUrl || st.params?.photoUrl || "",
       params: st.params || {},
       groups: activeLines(st.items).map((ln) => ({
         name: ln.name,
@@ -241,7 +242,7 @@ export function buildProjectFromBuilder({ form, stellages, farmSections, general
   };
 }
 
-export function newStellageDraft(modules, materials, index, stellageCatalogs = {}) {
+export function newStellageDraft(modules, materials, index, stellageCatalogs = {}, stellageModuleMeta = {}) {
   const stellageMods = modules.filter((m) => m.type === "stellage");
   const mod = stellageMods[0] || modules[0];
   return {
@@ -251,6 +252,7 @@ export function newStellageDraft(modules, materials, index, stellageCatalogs = {
     tech: mod?.tech || "",
     name: `Стеллаж ${index}`,
     count: 1,
+    photoUrl: mod?.id ? stellageModulePhoto(stellageModuleMeta, mod.id) : "",
     items: mod?.id
       ? projectStellageLinesFromCatalog(stellageCatalogs, mod.id, materials, mod.name)
       : [],

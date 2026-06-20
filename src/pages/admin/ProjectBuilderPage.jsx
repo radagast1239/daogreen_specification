@@ -20,7 +20,8 @@ import {
   catalogLinesForModule,
   newStellageDraft,
 } from "../../lib/projectBuilder.js";
-import { parseStellageModuleCatalogs, projectStellageLinesFromCatalog } from "../../lib/stellageCatalogConfig.js";
+import { parseStellageModuleCatalogs, parseStellageModuleMeta, projectStellageLinesFromCatalog, stellageModulePhoto } from "../../lib/stellageCatalogConfig.js";
+import StellagePhotoField, { StellagePhotoThumb } from "../../components/StellagePhotoField.jsx";
 import {
   draftFromStellagePreset,
   emptyFarmSectionsState,
@@ -54,6 +55,7 @@ export default function ProjectBuilderPage() {
   const [presets, setPresets] = useState([]);
   const [farmCatalogs, setFarmCatalogs] = useState({});
   const [stellageCatalogs, setStellageCatalogs] = useState({});
+  const [stellageModuleMeta, setStellageModuleMeta] = useState({});
   const [farmSettings, setFarmSettings] = useState(null);
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -103,6 +105,7 @@ export default function ProjectBuilderPage() {
       setFarmSettings(s);
       setFarmCatalogs(parseFarmSectionCatalogs(s.farmSectionCatalogs));
       setStellageCatalogs(parseStellageModuleCatalogs(s.stellageModuleCatalogs));
+      setStellageModuleMeta(parseStellageModuleMeta(s.stellageModuleMeta));
       setCategories(resolveCategories(s));
       setSuppliers(sup);
     });
@@ -110,9 +113,9 @@ export default function ProjectBuilderPage() {
 
   useEffect(() => {
     if (step === "stellages" && !draft) {
-      setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 1, stellageCatalogs));
+      setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 1, stellageCatalogs, stellageModuleMeta));
     }
-  }, [step, draft, state.modules, state.materials, stellages.length, stellageCatalogs]);
+  }, [step, draft, state.modules, state.materials, stellages.length, stellageCatalogs, stellageModuleMeta]);
 
   useEffect(() => {
     if (step === "general" && !farmLoaded && sections.length) {
@@ -136,6 +139,7 @@ export default function ProjectBuilderPage() {
         moduleName: mod.name,
         tech: mod.tech || "",
         presetId: null,
+        photoUrl: stellageModulePhoto(stellageModuleMeta, mod.id),
         items: projectStellageLinesFromCatalog(stellageCatalogs, mod.id, state.materials, mod.name),
       }));
     if (draft?.items?.some((ln) => ln.included)) {
@@ -175,7 +179,7 @@ export default function ProjectBuilderPage() {
       return;
     }
     setStellages((list) => [...list, { ...draft, items: draft.items.map((ln) => ({ ...ln })) }]);
-    setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 2, stellageCatalogs));
+    setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 2, stellageCatalogs, stellageModuleMeta));
   };
 
   const editStellage = async (id) => {
@@ -356,8 +360,9 @@ export default function ProjectBuilderPage() {
             <div className="card" style={{ marginBottom: 14, padding: 12 }}>
               <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>В проекте ({stellages.length})</div>
               {stellages.map((st) => (
-                <div key={st.id} className="row between" style={{ marginBottom: 6 }}>
-                  <span>
+                <div key={st.id} className="row between stellage-list-row" style={{ marginBottom: 8, gap: 10 }}>
+                  <StellagePhotoThumb url={st.photoUrl || st.params?.photoUrl} size={48} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
                     <strong>{st.name}</strong>
                     {(Number(st.count) || 1) > 1 && (
                       <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>× {st.count} шт.</span>
@@ -381,7 +386,8 @@ export default function ProjectBuilderPage() {
               <div className="eyebrow" style={{ marginBottom: 8 }}>Готовые конфигурации</div>
               <div className="preset-grid">
                 {stellagePresets.map((p) => (
-                  <button key={p.id} type="button" className="preset-card" onClick={() => applyStellagePreset(p)}>
+                  <button key={p.id} type="button" className="preset-card preset-card--photo" onClick={() => applyStellagePreset(p)}>
+                    <StellagePhotoThumb url={p.params?.photoUrl} size={80} />
                     <strong>{p.name}</strong>
                     <span className="muted">{p.moduleName}</span>
                     <span className="muted" style={{ fontSize: 11 }}>
@@ -423,6 +429,11 @@ export default function ProjectBuilderPage() {
                 />
               </label>
             </div>
+            <StellagePhotoField
+              value={draft.photoUrl || draft.params?.photoUrl || ""}
+              onChange={(url) => setDraft((d) => ({ ...d, photoUrl: url, params: { ...(d.params || {}), photoUrl: url } }))}
+              compact={false}
+            />
             {draft.params && formatStellageParamsSummary(draft.params) && (
               <p className="muted" style={{ fontSize: 12, margin: "10px 0 0" }}>
                 Параметры пресета: {formatStellageParamsSummary(draft.params)}

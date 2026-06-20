@@ -31,9 +31,13 @@ import DirectoriesTab from "./DirectoriesTab.jsx";
 import ClientBrandTab from "./ClientBrandTab.jsx";
 import PublishRulesTab from "./PublishRulesTab.jsx";
 import StellageGroupsEditor from "../../components/StellageGroupsEditor.jsx";
+import StellagePhotoField, { StellagePhotoThumb } from "../../components/StellagePhotoField.jsx";
 import { referenceToSettings, buildReferenceData } from "../../lib/referenceData.js";
 import {
   parseStellageModuleCatalogs,
+  parseStellageModuleMeta,
+  patchStellageModulePhoto,
+  stellageModulePhoto,
   stellageCatalogCount,
   stellageCatalogEditorLines,
   stripStellageCatalogLines,
@@ -113,7 +117,9 @@ export default function ModulesPage() {
   const [dragPresetId, setDragPresetId] = useState(null);
   const [appSettings, setAppSettings] = useState({});
   const [stellageCatalogs, setStellageCatalogs] = useState({});
+  const [stellageModuleMeta, setStellageModuleMeta] = useState({});
   const [editingStellageMod, setEditingStellageMod] = useState(null);
+  const [editingStellagePhoto, setEditingStellagePhoto] = useState("");
   const [stellageGroupsDraft, setStellageGroupsDraft] = useState([]);
 
   const stellageMods = state.modules.filter((m) => m.type === "stellage");
@@ -148,6 +154,7 @@ export default function ModulesPage() {
     setFarmCatalogs(parseFarmSectionCatalogs(s.farmSectionCatalogs));
     setFarmSectionVersions(parseFarmSectionVersions(s.farmSectionVersions));
     setStellageCatalogs(parseStellageModuleCatalogs(s.stellageModuleCatalogs));
+    setStellageModuleMeta(parseStellageModuleMeta(s.stellageModuleMeta));
     setAppSettings(s);
     setStellageGroupsDraft(buildReferenceData(s).stellageGroups);
   }, []);
@@ -184,6 +191,7 @@ export default function ModulesPage() {
     setEditingMod(null);
     setEditingStellageMod(mod);
     setStellageGroupsDraft(ref.stellageGroups);
+    setEditingStellagePhoto(stellageModulePhoto(stellageModuleMeta, mod.id));
     setEditLines(stellageCatalogEditorLines(stellageCatalogs, mod.id, state.materials, mod.name));
   };
 
@@ -201,11 +209,14 @@ export default function ModulesPage() {
         ...stellageCatalogs,
         [editingStellageMod.id]: stripStellageCatalogLines(editLines),
       };
+      const meta = patchStellageModulePhoto(stellageModuleMeta, editingStellageMod.id, editingStellagePhoto);
       await api.saveSettings({
         stellageModuleCatalogs: JSON.stringify(catalogs),
+        stellageModuleMeta: JSON.stringify(meta),
         ...referenceToSettings({ ...ref, stellageGroups: stellageGroupsDraft }),
       });
       setStellageCatalogs(catalogs);
+      setStellageModuleMeta(meta);
       setEditingStellageMod(null);
       await reload();
       await actions.refresh();
@@ -573,6 +584,7 @@ export default function ModulesPage() {
                     onDrop={() => reorderStellagePresets(p.id)}
                   >
                     <span className="preset-drag-handle" title="Перетащить">⠿</span>
+                    <StellagePhotoThumb url={p.params?.photoUrl} size={72} />
                     <strong>{p.name}</strong>
                     <span className="muted">{p.moduleName}</span>
                     <span className="muted" style={{ fontSize: 11 }}>
@@ -617,6 +629,7 @@ export default function ModulesPage() {
               <table className="spec">
                 <thead>
                   <tr>
+                    <th style={{ width: 64 }}>Фото</th>
                     <th>Тип стеллажа</th>
                     <th>Технология</th>
                     <th className="right" style={{ width: 90 }}>В шаблоне</th>
@@ -626,6 +639,9 @@ export default function ModulesPage() {
                 <tbody>
                   {stellageMods.map((mod) => (
                     <tr key={mod.id}>
+                      <td>
+                        <StellagePhotoThumb url={stellageModulePhoto(stellageModuleMeta, mod.id)} />
+                      </td>
                       <td>
                         <ModuleBadge mod={mod} />
                       </td>
@@ -1119,6 +1135,11 @@ export default function ModulesPage() {
               Эти позиции подставляются при создании проекта и в новых пресетах. Группа состава — колонка «Группа» в
               таблице ниже.
             </p>
+            <StellagePhotoField
+              value={editingStellagePhoto}
+              onChange={setEditingStellagePhoto}
+              hint="Фото этого типа стеллажа — подставляется в новый проект."
+            />
             <StellageGroupsEditor
               groups={stellageGroupsDraft}
               onChange={setStellageGroupsDraft}
@@ -1276,6 +1297,11 @@ export default function ModulesPage() {
                 />
               </label>
             </div>
+            <StellagePhotoField
+              value={editing.params?.photoUrl || ""}
+              onChange={(url) => setPresetParam("photoUrl", url)}
+              hint="Показывается на карточке пресета и при выборе в мастере проекта."
+            />
           </div>
 
           <SpecPickerTable

@@ -7,6 +7,22 @@ export function parseStellageModuleCatalogs(raw) {
   return parseJson(raw, {});
 }
 
+export function parseStellageModuleMeta(raw) {
+  return parseJson(raw, {});
+}
+
+export function stellageModulePhoto(meta, moduleId) {
+  if (!moduleId || !meta?.[moduleId]) return "";
+  return meta[moduleId].photoUrl || "";
+}
+
+export function patchStellageModulePhoto(meta, moduleId, photoUrl) {
+  return {
+    ...(meta || {}),
+    [moduleId]: { ...(meta?.[moduleId] || {}), photoUrl: photoUrl || "" },
+  };
+}
+
 function lineQtyFromCatalog(ln) {
   return Number(ln.defaultQty ?? ln.qty) || 0;
 }
