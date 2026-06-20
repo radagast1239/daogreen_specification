@@ -1,11 +1,11 @@
-export function clientLinkMessage({ projectName, clientName, url, companyName = "Daogreen" }) {
-  const greeting = clientName?.trim() ? `Здравствуйте, ${clientName.trim()}!` : "Здравствуйте!";
-  return `${greeting}
+import { clientLinkFromTemplate, DEFAULT_CLIENT_LINK_TEMPLATE } from "./publishRulesConfig.js";
 
-Список закупки по проекту «${projectName}»:
-${url}
-
-Откройте ссылку в браузере — там фото, цены и отметки «куплено».
-
-${companyName}`;
+/** @deprecated use clientLinkFromTemplate with settings template */
+export function clientLinkMessage({ projectName, clientName, url, companyName = "Daogreen", template }) {
+  return clientLinkFromTemplate(template || DEFAULT_CLIENT_LINK_TEMPLATE, {
+    projectName,
+    clientName,
+    url,
+    companyName,
+  });
 }

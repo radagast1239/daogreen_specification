@@ -72,15 +72,3 @@ export function getAnalytics() {
     purchaseToInstallDays: timelines.sort((a, b) => b.days - a.days),
   };
 }
-
-export function validateProjectForPublish(projectId) {
-  const items = loadProjectItems(projectId);
-  const visible = items.filter((i) => i.visible && i.enabled !== false);
-  const problems = [];
-  for (const it of visible) {
-    if (!it.price) problems.push({ itemId: it.id, name: it.name, issue: "no_price" });
-    if (!it.photoUrl && !it.imageUrl) problems.push({ itemId: it.id, name: it.name, issue: "no_photo" });
-    if (!it.link) problems.push({ itemId: it.id, name: it.name, issue: "no_link" });
-  }
-  return { ok: problems.length === 0, problems };
-}

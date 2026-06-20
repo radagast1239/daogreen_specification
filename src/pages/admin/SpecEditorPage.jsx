@@ -28,6 +28,8 @@ import FloorPlanPin from "../../components/FloorPlanPin.jsx";
 import { defaultRooms, isFarmGeneralItem, roomLabel } from "../../lib/roomHelpers.js";
 import RoomCoolingSummary from "../../components/RoomCoolingSummary.jsx";
 import ActivityFeed from "../../components/ActivityFeed.jsx";
+import PublishChecklist, { PublishGateModal } from "../../components/PublishChecklist.jsx";
+import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
 
 const TAB_LABELS = {
   spec: "Спецификация",
@@ -46,11 +48,32 @@ export default function SpecEditorPage() {
   const [linkOpen, setLinkOpen] = useState(false);
   const [loading, setLoading] = useState(!project);
   const [companyName, setCompanyName] = useState("Daogreen");
+  const [linkTemplate, setLinkTemplate] = useState("");
   const [activity, setActivity] = useState([]);
+  const [publishCheck, setPublishCheck] = useState(null);
+  const [publishCheckLoading, setPublishCheckLoading] = useState(false);
+  const [gateModal, setGateModal] = useState(null);
 
   useEffect(() => {
-    api.getSettings().then((s) => setCompanyName(s.companyName || "Daogreen")).catch(() => {});
+    api.getSettings().then((s) => {
+      setCompanyName(s.companyName || "Daogreen");
+      setLinkTemplate(parsePublishRulesSettings(s).clientLinkTemplate);
+    }).catch(() => {});
   }, []);
+
+  const refreshPublishCheck = () => {
+    if (!id) return Promise.resolve();
+    setPublishCheckLoading(true);
+    return api
+      .publishCheck(id)
+      .then(setPublishCheck)
+      .catch(() => setPublishCheck(null))
+      .finally(() => setPublishCheckLoading(false));
+  };
+
+  useEffect(() => {
+    refreshPublishCheck();
+  }, [id, project?.updatedAt]);
 
   useEffect(() => {
     if (!id) return;
@@ -102,25 +125,46 @@ export default function SpecEditorPage() {
   const floorPlanUrl = project.manualParams?.floorPlanUrl || "";
   const showFloorPlanPin = !!floorPlanUrl && (tab === "spec" || tab === "calc");
 
-  const approveAll = async () => {
-    await actions.approveAll(project.id);
-    const v = await actions.createVersion(project.id);
-    setVersionMsg(`Версия ${v.versionNumber} сохранена`);
-  };
-
-  const publishVersion = async () => {
+  const doPublishVersion = async (force = false) => {
     try {
-      const v = await actions.createVersion(project.id);
+      const v = await actions.createVersion(project.id, force ? { force: true } : {});
       setVersionMsg(`Опубликована версия ${v.versionNumber}: Δ ${v.summary.delta} ₽`);
-      success("Версия опубликована");
+      success(force ? "Версия опубликована (принудительно)" : "Версия опубликована");
+      await refreshPublishCheck();
     } catch (e) {
       if (e.problems?.length) {
-        error(`Не хватает данных: ${e.problems.length} позиций (фото/цена/ссылка)`);
+        error(`Не хватает данных: ${e.problems.length} замечаний`);
+        setPublishCheck((prev) => ({ ...prev, ok: false, problems: e.problems }));
       } else {
         error(e.message);
       }
     }
   };
+
+  const requestPublishVersion = () => {
+    if (publishCheck?.ok) doPublishVersion(false);
+    else setGateModal({ action: "version" });
+  };
+
+  const requestClientLink = () => {
+    if (!url) return;
+    if (publishCheck?.ok) setLinkOpen(true);
+    else setGateModal({ action: "link" });
+  };
+
+  const approveAll = async () => {
+    await actions.approveAll(project.id);
+    await refreshPublishCheck();
+    try {
+      const v = await actions.createVersion(project.id);
+      setVersionMsg(`Версия ${v.versionNumber} сохранена`);
+    } catch (e) {
+      if (e.problems?.length) error(`Утверждено всё, но версия не создана: ${e.problems.length} замечаний`);
+      else error(e.message);
+    }
+  };
+
+  const publishVersion = requestPublishVersion;
 
   const exportSpec = () => {
     const rows = project.items.map((it) => ({
@@ -174,7 +218,21 @@ export default function SpecEditorPage() {
           projectName={project.name}
           clientName={project.client}
           companyName={companyName}
+          linkTemplate={linkTemplate}
           onClose={() => setLinkOpen(false)}
+        />
+      )}
+      {gateModal && publishCheck && (
+        <PublishGateModal
+          title={gateModal.action === "link" ? "Ссылка клиенту — проверка" : "Утверждение версии — проверка"}
+          check={publishCheck}
+          onClose={() => setGateModal(null)}
+          proceedLabel={gateModal.action === "link" ? "Всё равно открыть ссылку" : "Всё равно утвердить"}
+          onProceed={async () => {
+            setGateModal(null);
+            if (gateModal.action === "link") setLinkOpen(true);
+            else await doPublishVersion(true);
+          }}
         />
       )}
       <PageHeader
@@ -189,7 +247,7 @@ export default function SpecEditorPage() {
             <button className="btn" onClick={exportSpec}>Excel ↓</button>
             <button className="btn" onClick={publishVersion}>Утвердить версию</button>
             <button className="btn" onClick={approveAll}>Утвердить всё</button>
-            <button className="btn" disabled={!url} onClick={() => setLinkOpen(true)}>Ссылка клиенту</button>
+            <button className="btn" disabled={!url} onClick={requestClientLink}>Ссылка клиенту</button>
             <button className="btn btn-ghost" onClick={regenerateLink}>↻ Новая ссылка</button>
           </>
         }
@@ -230,6 +288,14 @@ export default function SpecEditorPage() {
           {stats.noPrice > 0 && <span className="chip chip--amber chip-dot">без цены: {stats.noPrice}</span>}
           {stats.noLink > 0 && <span className="chip chip--neutral chip-dot">без ссылки: {stats.noLink}</span>}
         </div>
+        </Collapsible>
+
+        <Collapsible
+          title="Готовность к отправке клиенту"
+          subtitle={publishCheck?.ok ? "Всё в порядке" : publishCheck ? `${publishCheck.counts?.issueCount || 0} замечаний` : "Проверка…"}
+          defaultOpen={!publishCheck?.ok}
+        >
+          <PublishChecklist check={publishCheck} loading={publishCheckLoading} onRefresh={refreshPublishCheck} />
         </Collapsible>
 
         {/* Tabs */}

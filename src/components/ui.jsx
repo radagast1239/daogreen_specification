@@ -46,11 +46,18 @@ export function Modal({ title, onClose, children, footer }) {
   );
 }
 
-export function ClientLinkModal({ url, projectName = "проект", clientName = "", companyName = "Daogreen", onClose }) {
+export function ClientLinkModal({
+  url,
+  projectName = "проект",
+  clientName = "",
+  companyName = "Daogreen",
+  linkTemplate,
+  onClose,
+}) {
   const [msg, setMsg] = useState("");
   const messengerText = useMemo(
-    () => clientLinkMessage({ projectName, clientName, url, companyName }),
-    [projectName, clientName, url, companyName]
+    () => clientLinkMessage({ projectName, clientName, url, companyName, template: linkTemplate }),
+    [projectName, clientName, url, companyName, linkTemplate]
   );
 
   const copy = async (text, label) => {

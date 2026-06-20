@@ -9,6 +9,7 @@ import { Progress, Empty, ClientLinkModal } from "../../components/ui.jsx";
 import { useToast } from "../../components/Toast.jsx";
 import { CLIENT_STATUSES, clientStatusMeta } from "../../data/clientStatuses.js";
 import { getPinnedIds, isPinned, sortWithPinned, togglePinned } from "../../lib/pinnedProjects.js";
+import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
 
 function clientKey(name) {
   return (name || "Без имени").trim().toLowerCase().replace(/\s+/g, " ");
@@ -24,6 +25,7 @@ export default function ProjectsPage() {
   const [pinned, setPinned] = useState(getPinnedIds);
   const [clientMap, setClientMap] = useState({});
   const [companyName, setCompanyName] = useState("Daogreen");
+  const [linkTemplate, setLinkTemplate] = useState("");
 
   const [q, setQ] = useState("");
   const [clientF, setClientF] = useState("");
@@ -37,7 +39,10 @@ export default function ProjectsPage() {
       for (const c of list) map[c.key] = c;
       setClientMap(map);
     });
-    api.getSettings().then((s) => setCompanyName(s.companyName || "Daogreen")).catch(() => {});
+    api.getSettings().then((s) => {
+      setCompanyName(s.companyName || "Daogreen");
+      setLinkTemplate(parsePublishRulesSettings(s).clientLinkTemplate);
+    }).catch(() => {});
   }, []);
 
   const problemIds = useMemo(
@@ -116,6 +121,7 @@ export default function ProjectsPage() {
           projectName={linkModal.projectName}
           clientName={linkModal.clientName}
           companyName={companyName}
+          linkTemplate={linkTemplate}
           onClose={() => setLinkModal(null)}
         />
       )}

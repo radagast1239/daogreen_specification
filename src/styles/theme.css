@@ -839,6 +839,41 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   color: #9ecdb8;
 }
 
+/* Publish rules & checklist */
+.publish-rules-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; }
+.publish-rule-row { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; cursor: pointer; }
+.publish-checklist {
+  padding: 14px 16px; border-radius: var(--radius);
+  background: var(--paper); border: 1px solid var(--line);
+}
+.publish-checklist--compact { padding: 10px 12px; }
+.publish-checklist__group { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.publish-checklist__group-title { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+.publish-checklist__bad { color: var(--danger); margin-right: 4px; }
+.publish-checklist__items { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.55; }
+
+/* Excel import UI */
+.import-mode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.import-mode-card {
+  display: flex; flex-direction: column; gap: 6px; text-align: left;
+  padding: 14px 16px; border: 2px solid var(--line); border-radius: var(--radius);
+  background: var(--paper); cursor: pointer; font: inherit;
+}
+.import-mode-card:hover { border-color: var(--brand); }
+.import-mode-card--active { border-color: var(--brand); background: var(--brand-tint, #eef6f3); }
+.import-steps { display: flex; flex-direction: column; gap: 16px; }
+.import-step { display: flex; gap: 12px; align-items: flex-start; }
+.import-step__n {
+  flex: 0 0 28px; height: 28px; border-radius: 50%; background: var(--brand); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700;
+}
+.import-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 8px; }
+.import-stat { padding: 12px; border-radius: var(--radius-sm); background: var(--bg, #f6f9f8); border: 1px solid var(--line); text-align: center; }
+.import-stat--ok { border-color: #9ecdb8; background: #eef8f3; }
+.import-stat--warn { border-color: #e8c547; background: #fffbeb; }
+.import-stat__v { font-size: 22px; font-weight: 800; line-height: 1.1; }
+.import-stat__k { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
 /* Project filters */
 .project-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; align-items: center; }
 .project-filters input, .project-filters select { font-size: 13px; }

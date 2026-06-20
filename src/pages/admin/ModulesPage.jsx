@@ -30,6 +30,7 @@ import {
 import { useStore } from "../../store/StoreContext.jsx";
 import DirectoriesTab from "./DirectoriesTab.jsx";
 import ClientBrandTab from "./ClientBrandTab.jsx";
+import PublishRulesTab from "./PublishRulesTab.jsx";
 
 const TABS = [
   { id: "stellage", label: "Пресеты стеллажей" },
@@ -37,6 +38,7 @@ const TABS = [
   { id: "catalog", label: "Модули базы" },
   { id: "directories", label: "Справочники" },
   { id: "brand", label: "Клиент и бренд" },
+  { id: "publish", label: "Правила публикации" },
 ];
 
 const MODULE_TYPES = [
@@ -479,6 +481,15 @@ export default function ModulesPage() {
           onSaved={async () => {
             await reload();
             await actions.refresh();
+          }}
+        />
+      )}
+
+      {tab === "publish" && !editing && !editingSection && !editingMod && (
+        <PublishRulesTab
+          settings={appSettings}
+          onSaved={async () => {
+            await reload();
           }}
         />
       )}

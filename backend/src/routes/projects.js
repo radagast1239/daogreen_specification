@@ -14,7 +14,7 @@ import {
   projectTotals,
 } from "../services/buildItems.js";
 import { listMaterials, listModules } from "./materials.js";
-import { validateProjectForPublish } from "../services/analytics.js";
+import { validateProjectForPublish } from "../services/publishRules.js";
 import {
   listActivity,
   logItemPatch,

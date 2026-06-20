@@ -11,6 +11,7 @@ import { projectTotals } from "../services/buildItems.js";
 import { getAnalytics } from "../services/analytics.js";
 import { listAdminUsers, upsertAdminUser, deactivateAdminUser } from "../auth.js";
 import { brandSettingsResponse } from "../services/clientBrand.js";
+import { publishRulesSettingsPayload } from "../services/publishRules.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, "../uploads");
@@ -192,6 +193,7 @@ router.get("/settings", (_req, res) => {
     clientLinkTtlDays: obj.clientLinkTtlDays || "0",
     logoUrl: obj.logoUrl || "",
     ...brandSettingsResponse(obj),
+    ...publishRulesSettingsPayload(obj),
   });
 });
 
@@ -273,6 +275,7 @@ router.patch("/settings", (req, res) => {
     clientLinkTtlDays: obj.clientLinkTtlDays || "0",
     logoUrl: obj.logoUrl || "",
     ...brandSettingsResponse(obj),
+    ...publishRulesSettingsPayload(obj),
   });
 });
 
