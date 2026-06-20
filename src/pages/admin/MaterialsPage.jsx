@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useStore } from "../../store/StoreContext.jsx";
 import { CATEGORIES } from "../../data/modules.js";
-import { money } from "../../store/helpers.js";
+import { api, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { Modal, Empty } from "../../components/ui.jsx";
 import { downloadCSV } from "../../lib/export.js";
@@ -250,10 +250,30 @@ export default function MaterialsPage() {
             <input
               value={editing.imageUrl || editing.photoUrl || ""}
               onChange={(e) => setEditing({ ...editing, imageUrl: e.target.value, photoUrl: e.target.value })}
-              placeholder="https://..."
+              placeholder="https://... или загрузите файл"
             />
+            <div className="row" style={{ marginTop: 8, gap: 8 }}>
+              <label className="btn btn-sm">
+                Загрузить файл
+                <input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const { url } = await api.uploadPhoto(file);
+                    setEditing((ed) => ({ ...ed, imageUrl: url, photoUrl: url }));
+                  }}
+                />
+              </label>
+            </div>
             {(editing.imageUrl || editing.photoUrl) && (
-              <img src={editing.imageUrl || editing.photoUrl} alt="" style={{ maxHeight: 80, marginTop: 8, borderRadius: 8 }} />
+              <img
+                src={photoSrc(editing.imageUrl || editing.photoUrl)}
+                alt=""
+                style={{ maxHeight: 80, marginTop: 8, borderRadius: 8 }}
+              />
             )}
           </div>
           <div className="field">

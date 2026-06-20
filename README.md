@@ -77,7 +77,32 @@ http://localhost:5173/client/<32-символьный-токен>
 
 https://github.com/radagast1239/daogreen_specification
 
-### Деплой на Render (бесплатно)
+### Вариант 1 — одна ссылка (рекомендуется, как «просто открыл и работает»)
+
+Старый [калькулятор](https://radagast1239.github.io/daogreen-calculator/) — это чистый HTML без сервера, поэтому хватало GitHub Pages.
+
+**Daogreen Spec** хранит проекты в базе на сервере — нужен backend. Проще всего поднять всё одним сервисом на Render:
+
+1. [Deploy to Render](https://render.com/deploy?repo=https://github.com/radagast1239/daogreen_specification)
+2. После деплоя откройте URL вида `https://daogreen-spec.onrender.com`
+3. `/login` → ключ `ADMIN_KEY` из настроек Render
+
+Клиентские ссылки: `https://ваш-сервис.onrender.com/client/p/<токен>`
+
+### Вариант 2 — фронт на github.io (как калькулятор)
+
+Фронт: **https://radagast1239.github.io/daogreen_specification/**
+
+Нужны два шага (API отдельно от Pages):
+
+1. **Render** — backend по инструкции выше (только API, тот же репозиторий)
+2. **GitHub** → Settings → Pages → Source: **GitHub Actions**
+3. **GitHub** → Settings → Secrets → `VITE_API_URL` = `https://ваш-сервис.onrender.com` (без слэша в конце)
+4. На Render в `CORS_ORIGIN` добавьте: `https://radagast1239.github.io`
+
+После push в `main` сайт обновится автоматически (workflow `.github/workflows/deploy-pages.yml`).
+
+### Деплой на Render (детали)
 
 1. Открой [Deploy to Render](https://render.com/deploy?repo=https://github.com/radagast1239/daogreen_specification)
 2. Подключи GitHub и создай Blueprint из `render.yaml`

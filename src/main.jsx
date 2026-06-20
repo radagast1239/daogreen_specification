@@ -5,9 +5,11 @@ import { StoreProvider } from "./store/StoreContext.jsx";
 import App from "./App.jsx";
 import "./styles/theme.css";
 
+const routerBase = import.meta.env.BASE_URL.replace(/\/$/, "") || undefined;
+
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={routerBase}>
       <StoreProvider>
         <App />
       </StoreProvider>

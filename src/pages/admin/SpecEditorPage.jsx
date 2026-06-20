@@ -11,7 +11,7 @@ import {
 } from "../../store/helpers.js";
 import { SPECIALIST_MAP } from "../../data/modules.js";
 import { VAT_RATES, lineGross, DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
-import { clientLink } from "../../lib/api.js";
+import { clientLink, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { Progress, Stat, Empty } from "../../components/ui.jsx";
 import { downloadCSV } from "../../lib/export.js";
@@ -196,6 +196,7 @@ function SpecTab({ project, patchItem, actions }) {
             <table className="spec">
               <thead>
                 <tr>
+                  <th style={{ width: 48 }}>Фото</th>
                   <th>Наименование</th>
                   <th>Ед</th>
                   <th className="right">Кол-во</th>
@@ -213,6 +214,20 @@ function SpecTab({ project, patchItem, actions }) {
               <tbody>
                 {items.map((it) => (
                   <tr key={it.id} className={!it.visible || !it.enabled ? "row-hidden" : ""}>
+                    <td>
+                      {photoSrc(it.imageUrl || it.photoUrl) ? (
+                        <img
+                          src={photoSrc(it.imageUrl || it.photoUrl)}
+                          alt=""
+                          className="thumb-img"
+                          style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 6 }}
+                        />
+                      ) : (
+                        <div className="thumb" style={{ width: 36, height: 36, fontSize: 14 }}>
+                          {(it.name || "?").trim().charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ minWidth: 240 }}>
                       <input
                         className="input-inline"

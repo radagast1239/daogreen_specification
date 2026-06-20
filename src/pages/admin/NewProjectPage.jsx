@@ -4,6 +4,8 @@ import { useStore } from "../../store/StoreContext.jsx";
 import { buildItemsFromModules } from "../../lib/apiHelpers.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
 import { FARM_TYPES } from "../../data/modules.js";
+import { selectionToApi } from "../../../shared/stellageComposition.js";
+import StellageModulePicker, { defaultStellageGroups } from "../../components/StellageModulePicker.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
 
 const blankZone = () => ({
@@ -46,9 +48,17 @@ export default function NewProjectPage() {
     setSelected((s) => {
       const next = { ...s };
       if (next[mod.id] != null) delete next[mod.id];
-      else next[mod.id] = mod.type === "stellage" ? 1 : 1;
+      else if (mod.type === "stellage") {
+        next[mod.id] = { count: 1, groups: defaultStellageGroups(), excludedMaterialIds: [] };
+      } else {
+        next[mod.id] = 1;
+      }
       return next;
     });
+  };
+
+  const setModuleSel = (modId, value) => {
+    setSelected((s) => ({ ...s, [modId]: value }));
   };
 
   const matCount = (modName) => state.materials.filter((m) => m.module === modName).length;
@@ -56,7 +66,7 @@ export default function NewProjectPage() {
   const create = async () => {
     setSaving(true);
     try {
-      const sel = Object.entries(selected).map(([moduleId, count]) => ({ moduleId, count }));
+      const sel = Object.entries(selected).map(([moduleId, v]) => selectionToApi(moduleId, v));
       const items = buildItemsFromModules(state.materials, state.modules, sel);
       const project = await actions.projectCreate({
         ...form,
@@ -220,8 +230,11 @@ export default function NewProjectPage() {
         <div className="card" style={{ padding: 22, marginTop: 16 }}>
           <div className="section-head" style={{ marginTop: 0 }}>
             <div className="spine" />
-            <h3>Модули</h3>
+            <h3>Модули и состав стеллажей</h3>
           </div>
+          <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+            Для стеллажей отметьте блоки состава (каркас, полив, свет…) и при необходимости снимите отдельные детали.
+          </p>
           <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
             {state.modules.map((mod) => {
               const on = selected[mod.id] != null;
@@ -248,19 +261,16 @@ export default function NewProjectPage() {
                     <input type="checkbox" readOnly checked={on} style={{ width: 18, height: 18 }} />
                   </div>
                   {on && mod.type === "stellage" && (
-                    <div className="row" style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
-                      <span className="muted" style={{ fontSize: 12 }}>
-                        Кол-во стеллажей
-                      </span>
-                      <input
-                        type="number"
-                        min={1}
-                        value={selected[mod.id]}
-                        onChange={(e) =>
-                          setSelected((s) => ({ ...s, [mod.id]: Math.max(1, Number(e.target.value) || 1) }))
-                        }
-                        style={{ width: 80 }}
-                      />
+                    <StellageModulePicker
+                      mod={mod}
+                      materials={state.materials}
+                      value={selected[mod.id]}
+                      onChange={(v) => setModuleSel(mod.id, v)}
+                    />
+                  )}
+                  {on && mod.type !== "stellage" && (
+                    <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                      Модуль целиком · {count} позиц.
                     </div>
                   )}
                 </div>

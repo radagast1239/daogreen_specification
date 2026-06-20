@@ -64,6 +64,19 @@ export const api = {
     if (!res.ok) throw new Error(data.error || "Upload failed");
     return data;
   },
+  bulkPhotos: async (files) => {
+    const fd = new FormData();
+    for (const f of files) fd.append("files", f);
+    const res = await fetch(`${API}/api/materials/bulk-photos`, {
+      method: "POST",
+      headers: { "X-Admin-Key": getAdminKey() },
+      body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Upload failed");
+    return data;
+  },
+  importPhotosFolder: () => request("/api/materials/import-photos-folder", { method: "POST" }),
 
   getProjects: () => request("/api/projects"),
   getDashboard: () => request("/api/projects/dashboard/summary"),

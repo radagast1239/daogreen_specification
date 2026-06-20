@@ -5,6 +5,7 @@ const NAV = [
   { to: "/", label: "Проекты", ic: "▣", end: true },
   { to: "/clients", label: "Клиенты", ic: "◎" },
   { to: "/materials", label: "Материалы", ic: "▤" },
+  { to: "/photos", label: "Фото", ic: "◉" },
   { to: "/modules", label: "Модули", ic: "▦" },
   { to: "/suppliers", label: "Поставщики", ic: "◇" },
   { to: "/import", label: "Импорт", ic: "↓" },

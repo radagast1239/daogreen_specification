@@ -15,6 +15,7 @@ import {
   upsertModule,
 } from "./materials.js";
 import { parseExcelBuffer } from "../services/excelImport.js";
+import { bulkMatchUploads, importPhotosFromDir } from "../services/photoImport.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, "../../uploads");
@@ -80,6 +81,19 @@ router.post("/upload-photo", upload.single("file"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file" });
   const url = `/uploads/${req.file.filename}`;
   res.json({ url, filename: req.file.filename });
+});
+
+router.post("/bulk-photos", memUpload.array("files", 500), (req, res) => {
+  if (!req.files?.length) return res.status(400).json({ error: "No files" });
+  const result = bulkMatchUploads(req.files, uploadDir);
+  res.json(result);
+});
+
+router.post("/import-photos-folder", (_req, res) => {
+  const sourceDir = path.join(__dirname, "../../../materials-photos");
+  const result = importPhotosFromDir(sourceDir, uploadDir);
+  if (result.error) return res.status(400).json(result);
+  res.json(result);
 });
 
 router.post("/modules", (req, res) => {

@@ -12,7 +12,7 @@ import ModulesPage from "./pages/admin/ModulesPage.jsx";
 import SuppliersPage from "./pages/admin/SuppliersPage.jsx";
 import ArchivePage from "./pages/admin/ArchivePage.jsx";
 import SettingsPage from "./pages/admin/SettingsPage.jsx";
-import LoginPage from "./pages/admin/LoginPage.jsx";
+import PhotosPage from "./pages/admin/PhotosPage.jsx";
 import ClientProjectPage from "./pages/client/ClientProjectPage.jsx";
 
 function ClientLegacyRedirect() {
@@ -33,6 +33,7 @@ export default function App() {
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/modules" element={<ModulesPage />} />
           <Route path="/materials" element={<MaterialsPage />} />
+          <Route path="/photos" element={<PhotosPage />} />
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/import" element={<ImportPage />} />
           <Route path="/archive" element={<ArchivePage />} />

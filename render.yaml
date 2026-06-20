@@ -12,6 +12,8 @@ services:
         generateValue: true
       - key: DATABASE_PATH
         value: /opt/render/project/src/backend/data/daogreen.db
+      - key: CORS_ORIGIN
+        value: https://radagast1239.github.io,http://localhost:5173
     disk:
       name: daogreen-data
       mountPath: /opt/render/project/src/backend/data
