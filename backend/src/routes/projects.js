@@ -129,6 +129,18 @@ function projectInsertRow(p) {
   return insert;
 }
 
+function projectUpdateRow(p) {
+  const r = projectRow(p);
+  const { client_token, ...update } = r;
+  return update;
+}
+
+function updateItemParams(it, projectId) {
+  const p = itemToParams(it, projectId);
+  const { material_id, sort_order, ...update } = p;
+  return update;
+}
+
 export function listProjects() {
   const rows = db.prepare("SELECT * FROM projects WHERE status != 'archived' ORDER BY created_at DESC").all();
   return rows.map((r) => {
@@ -161,7 +173,7 @@ export function updateProject(id, patch) {
   const cur = loadProject(id);
   if (!cur) return null;
   const merged = { ...cur, ...patch, id };
-  const row = projectRow(merged);
+  const row = projectUpdateRow(merged);
   UPDATE_PROJECT.run(row);
   if (patch.items) saveItems(id, patch.items);
   return loadProject(id);
@@ -241,7 +253,7 @@ export function patchItem(projectId, itemId, patch) {
   const item = items.find((i) => i.id === itemId);
   if (!item) return null;
   if (patch.qty !== undefined && patch.qty === 0) item.enabled = false;
-  UPDATE_ITEM.run(itemToParams(item, projectId));
+  UPDATE_ITEM.run(updateItemParams(item, projectId));
   return item;
 }
 

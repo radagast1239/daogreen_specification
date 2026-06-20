@@ -13,6 +13,7 @@ import SuppliersPage from "./pages/admin/SuppliersPage.jsx";
 import ArchivePage from "./pages/admin/ArchivePage.jsx";
 import SettingsPage from "./pages/admin/SettingsPage.jsx";
 import PhotosPage from "./pages/admin/PhotosPage.jsx";
+import LoginPage from "./pages/admin/LoginPage.jsx";
 import ClientProjectPage from "./pages/client/ClientProjectPage.jsx";
 
 function ClientLegacyRedirect() {
