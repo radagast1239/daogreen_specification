@@ -37,6 +37,7 @@ import {
   parseStellageModuleCatalogs,
   parseStellageModuleMeta,
   patchStellageModulePhoto,
+  resolveStellagePhoto,
   stellageModulePhoto,
   stellageCatalogCount,
   stellageCatalogEditorLines,
@@ -180,7 +181,10 @@ export default function ModulesPage() {
       moduleName: mod?.name || "",
       sectionId: "",
       note: mod?.tech || "",
-      params: { ...DEFAULT_STELLAGE_PARAMS },
+      params: {
+        ...DEFAULT_STELLAGE_PARAMS,
+        photoUrl: mod?.id ? stellageModulePhoto(stellageModuleMeta, mod.id) : "",
+      },
     });
     setEditLines(mod?.name ? stellageCatalogEditorLines(stellageCatalogs, mod?.id, state.materials, mod.name) : []);
   };
@@ -584,7 +588,10 @@ export default function ModulesPage() {
                     onDrop={() => reorderStellagePresets(p.id)}
                   >
                     <span className="preset-drag-handle" title="Перетащить">⠿</span>
-                    <StellagePhotoThumb url={p.params?.photoUrl} size={72} />
+                    <StellagePhotoThumb
+                      url={resolveStellagePhoto(stellageModuleMeta, p.moduleId, p.params?.photoUrl)}
+                      size={72}
+                    />
                     <strong>{p.name}</strong>
                     <span className="muted">{p.moduleName}</span>
                     <span className="muted" style={{ fontSize: 11 }}>
@@ -1138,7 +1145,7 @@ export default function ModulesPage() {
             <StellagePhotoField
               value={editingStellagePhoto}
               onChange={setEditingStellagePhoto}
-              hint="Фото этого типа стеллажа — подставляется в новый проект."
+              hint="Фото по умолчанию для этого типа стеллажа — подставляется в новый проект и в пресеты без своего фото."
             />
             <StellageGroupsEditor
               groups={stellageGroupsDraft}
@@ -1192,7 +1199,16 @@ export default function ModulesPage() {
                   onChange={(e) => {
                     const mod = stellageMods.find((m) => m.id === e.target.value);
                     if (!mod) return;
-                    setEditing({ ...editing, moduleId: mod.id, moduleName: mod.name, note: mod.tech || "" });
+                    setEditing({
+                      ...editing,
+                      moduleId: mod.id,
+                      moduleName: mod.name,
+                      note: mod.tech || "",
+                      params: {
+                        ...editing.params,
+                        photoUrl: stellageModulePhoto(stellageModuleMeta, mod.id),
+                      },
+                    });
                     setEditLines(stellageCatalogEditorLines(stellageCatalogs, mod.id, state.materials, mod.name));
                   }}
                 >
@@ -1298,9 +1314,9 @@ export default function ModulesPage() {
               </label>
             </div>
             <StellagePhotoField
-              value={editing.params?.photoUrl || ""}
+              value={resolveStellagePhoto(stellageModuleMeta, editing.moduleId, editing.params?.photoUrl)}
               onChange={(url) => setPresetParam("photoUrl", url)}
-              hint="Показывается на карточке пресета и при выборе в мастере проекта."
+              hint="Своё фото пресета. Если пусто — берётся из «Состав стеллажей» для выбранного типа."
             />
           </div>
 

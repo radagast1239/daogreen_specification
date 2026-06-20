@@ -2,7 +2,7 @@ import { uid } from "../store/helpers.js";
 import { defaultResponsible } from "./itemHelpers.js";
 import { hydrateLinePhoto } from "./photoHelpers.js";
 import { groupLabel, materialCompositionGroup } from "../../shared/stellageComposition.js";
-import { projectStellageLinesFromCatalog, stellageModulePhoto } from "./stellageCatalogConfig.js";
+import { projectStellageLinesFromCatalog, stellageModulePhoto, resolveStellagePhoto } from "./stellageCatalogConfig.js";
 
 export function blankLine(overrides = {}) {
   return {
@@ -171,7 +171,15 @@ export function lineToProjectItem(line, section, sortOrder) {
   };
 }
 
-export function buildProjectFromBuilder({ form, stellages, farmSections, generalLines, materials = [], rooms = [] }) {
+export function buildProjectFromBuilder({
+  form,
+  stellages,
+  farmSections,
+  generalLines,
+  materials = [],
+  rooms = [],
+  stellageModuleMeta = {},
+}) {
   const items = [];
   const stellageConfigs = [];
   let order = 0;
@@ -192,7 +200,7 @@ export function buildProjectFromBuilder({ form, stellages, farmSections, general
       moduleName: st.moduleName,
       tech: st.tech || "",
       presetId: st.presetId || null,
-      photoUrl: st.photoUrl || st.params?.photoUrl || "",
+      photoUrl: resolveStellagePhoto(stellageModuleMeta, st.moduleId, st.photoUrl || st.params?.photoUrl),
       params: st.params || {},
       groups: activeLines(st.items).map((ln) => ({
         name: ln.name,

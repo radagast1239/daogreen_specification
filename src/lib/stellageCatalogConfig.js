@@ -16,6 +16,12 @@ export function stellageModulePhoto(meta, moduleId) {
   return meta[moduleId].photoUrl || "";
 }
 
+/** Явное фото пресета/черновика; иначе — фото типа стеллажа из «Состав стеллажей». */
+export function resolveStellagePhoto(meta, moduleId, override = "") {
+  if (override) return override;
+  return stellageModulePhoto(meta, moduleId);
+}
+
 export function patchStellageModulePhoto(meta, moduleId, photoUrl) {
   return {
     ...(meta || {}),
