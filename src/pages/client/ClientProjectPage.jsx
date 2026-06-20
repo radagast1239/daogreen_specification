@@ -163,7 +163,29 @@ export default function ClientProjectPage() {
   const delta = versionInfo?.summary?.delta;
 
   return (
-    <div className="client-wrap" style={brandStyle}>
+    <div className="client-page" style={brandStyle}>
+      <div className="print-header">
+        <h1>{project.name}</h1>
+        <p>
+          {branding.companyName || "Daogreen"} · {project.client}
+          {project.city ? ` · ${project.city}` : ""} · спецификация закупки
+        </p>
+      </div>
+
+      <header className="client-hero no-print">
+        <div className="client-hero__eyebrow">{branding.companyName || "Daogreen"} · вертикальные фермы</div>
+        <h1 className="client-hero__title">{project.name}</h1>
+        <p className="client-hero__sub">
+          {project.client}
+          {project.city ? ` · ${project.city}` : ""}
+          {project.version > 1 ? ` · версия ${project.version}` : ""}
+        </p>
+        <div className="client-trust">
+          <span>Фото, цены и статусы закупки</span>
+          <span>Отметки «куплено» сохраняются автоматически</span>
+        </div>
+      </header>
+
       <BudgetBar
         project={project}
         branding={branding}
@@ -174,6 +196,7 @@ export default function ClientProjectPage() {
         onPdf={() => generateProjectPdf({ project, items: visibleItems, branding })}
       />
 
+      <div className="client-wrap">
       <div className="client-tabs no-print">
         {clientTabs.map(([k, label]) => (
           <button key={k} className={"btn btn-sm" + (tab === k ? " btn-primary" : "")} onClick={() => setTab(k)}>
@@ -337,6 +360,7 @@ export default function ClientProjectPage() {
           )}
         </>
       ) : null}
+      </div>
 
       <ClientBrandFooter branding={branding} />
     </div>

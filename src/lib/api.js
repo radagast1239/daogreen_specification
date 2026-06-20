@@ -188,8 +188,9 @@ export function photoSrc(url) {
 }
 
 export function clientLink(token) {
-  const base =
+  const basePath = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+  const origin =
     import.meta.env.VITE_PUBLIC_URL?.replace(/\/$/, "") ||
     (typeof window !== "undefined" ? window.location.origin : "");
-  return `${base}/client/p/${encodeURIComponent(token)}`;
+  return `${origin}${basePath}/client/p/${encodeURIComponent(token)}`;
 }

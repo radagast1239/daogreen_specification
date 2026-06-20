@@ -175,6 +175,14 @@ export default function SpecEditorPage() {
       />
 
       <div className="content">
+        <div className="print-header">
+          <h1>{project.name}</h1>
+          <p>
+            {project.client || "—"}
+            {project.city ? ` · ${project.city}` : ""} · спецификация · {new Date().toLocaleDateString("ru-RU")}
+          </p>
+        </div>
+
         <ProjectDocuments projectId={project.id} />
 
         <Collapsible title="Сводка и прогресс" subtitle={`${stats.total} позиций`} defaultOpen>

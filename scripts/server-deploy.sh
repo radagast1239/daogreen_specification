@@ -24,6 +24,7 @@ fi
 
 echo "=== Install & build ==="
 export PATH="$NODE22/bin:$PATH"
+export VITE_BASE_PATH="${VITE_BASE_PATH:-/spec/}"
 npm install --include=dev
 npm run build
 npm install --prefix backend

@@ -3,14 +3,41 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="refresh" content="0;url=http://62.233.35.206:3002/hub">
   <title>Daogreen — инструменты фермы</title>
   <style>
-    body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#062920;color:#fff}
-    a{color:#7fc9a8}
+    :root { --brand:#062920; --accent:#7fc9a8; --paper:#fff; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      margin: 0; min-height: 100vh;
+      background: linear-gradient(160deg, #062920 0%, #0d6b58 55%, #083028 100%);
+      color: #fff; display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    .hub { max-width: 520px; width: 100%; }
+    .hub h1 { margin: 0 0 8px; font-size: 1.6rem; font-weight: 800; }
+    .hub p { margin: 0 0 24px; color: #9ecdb8; line-height: 1.5; font-size: 15px; }
+    .cards { display: grid; gap: 12px; }
+    a.card {
+      display: block; padding: 18px 20px; border-radius: 14px;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(127,201,168,.25);
+      color: #fff; text-decoration: none; transition: .15s;
+    }
+    a.card:hover { background: rgba(255,255,255,.14); transform: translateY(-2px); }
+    a.card strong { display: block; font-size: 16px; margin-bottom: 4px; }
+    a.card span { font-size: 13px; color: #9ecdb8; }
+    .foot { margin-top: 28px; font-size: 12px; color: #6f968a; text-align: center; }
   </style>
 </head>
 <body>
-  <p>Переход на <a href="http://62.233.35.206:3002/hub">Daogreen Hub</a>…</p>
+  <div class="hub">
+    <h1>Daogreen</h1>
+    <p>Спецификации, калькуляторы и закупка для вертикальных ферм</p>
+    <div class="cards">
+      <a class="card" href="/spec/"><strong>Спецификации</strong><span>Смета, закупка, клиентская ссылка</span></a>
+      <a class="card" href="/berry/"><strong>Калькулятор ягод</strong><span>Экономика ягодных ферм</span></a>
+      <a class="card" href="/economic/"><strong>Калькулятор салатов</strong><span>Экономика зелени и салатов</span></a>
+    </div>
+    <p class="foot">nikita-daogreen.ru · вертикальные фермы под ключ</p>
+  </div>
 </body>
 </html>

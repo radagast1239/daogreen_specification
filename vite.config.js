@@ -2,9 +2,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 const forPages = process.env.GITHUB_PAGES === "true";
+const basePath = process.env.VITE_BASE_PATH || (forPages ? "/daogreen_specification/" : "/");
 
 export default defineConfig({
-  base: forPages ? "/daogreen_specification/" : "/",
+  base: basePath,
   plugins: [react()],
   server: {
     port: 5173,
