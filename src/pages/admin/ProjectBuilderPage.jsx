@@ -413,16 +413,17 @@ export default function ProjectBuilderPage() {
           )}
 
           <div className="farm-layout">
-            <nav className="section-tabs">
+            <nav className="section-tabs" aria-label="Разделы фермы">
               {sections.map((sec) => (
                 <button
                   key={sec.id}
                   type="button"
                   className={sec.id === activeFarmSection ? "active" : ""}
+                  title={sec.name}
                   onClick={() => setActiveFarmSection(sec.id)}
                 >
-                  {sec.name}
-                  <span className="muted" style={{ display: "block", fontWeight: 400, fontSize: 11, marginTop: 2 }}>
+                  <span className="sec-tab-name">{sec.name}</span>
+                  <span className="muted" style={{ display: "block", fontWeight: 400, fontSize: 10.5, marginTop: 2 }}>
                     {(farmSectionLines[sec.id] || []).length} поз.
                     {countIncluded(farmSectionLines[sec.id] || []) > 0 &&
                       ` · ${countIncluded(farmSectionLines[sec.id] || [])} отм.`}
@@ -431,7 +432,7 @@ export default function ProjectBuilderPage() {
               ))}
             </nav>
 
-            <div>
+            <div className="farm-layout__main">
               <div className="card" style={{ padding: 14, marginBottom: 12 }}>
                 <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>{activeSection.name}</h3>
                 <p className="muted" style={{ fontSize: 12, margin: 0 }}>
