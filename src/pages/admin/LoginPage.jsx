@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { setAdminKey, getAdminKey, api } from "../lib/api.js";
+import { setAdminKey, getAdminKey, api } from "../../lib/api.js";
 
 export default function LoginPage() {
   const nav = useNavigate();

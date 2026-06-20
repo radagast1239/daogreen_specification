@@ -73,7 +73,33 @@ http://localhost:5173/client/<32-символьный-токен>
 
 ## Продакшен
 
+### Репозиторий
+
+https://github.com/radagast1239/daogreen_specification
+
+### Деплой на Render (бесплатно)
+
+1. Открой [Deploy to Render](https://render.com/deploy?repo=https://github.com/radagast1239/daogreen_specification)
+2. Подключи GitHub и создай Blueprint из `render.yaml`
+3. После деплоя скопируй `ADMIN_KEY` из переменных окружения Render
+4. Войди в приложение → `/login` → вставь ключ
+
+Один сервис отдаёт и API, и фронтенд. База SQLite хранится на диске Render (1 GB).
+
+### Локальный продакшен-сборка
+
+```bash
+npm run build:all
+cd backend
+set NODE_ENV=production   # Windows
+npm start
+```
+
+Открой http://localhost:3001
+
+### Свой сервер
+
 1. Смени `ADMIN_KEY` в `.env`
-2. `npm run build` — статика в `dist/`
-3. Раздай `dist/` через nginx, проксируй `/api` и `/uploads` на backend
+2. `npm run build:all`
+3. `NODE_ENV=production npm start` — Express раздаёт `dist/` и API
 4. Для PostgreSQL — замени слой `backend/src/db.js` (схема в SPEC.md)
