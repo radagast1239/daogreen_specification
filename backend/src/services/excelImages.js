@@ -1,6 +1,8 @@
 import fs from "fs";
 import path from "path";
 import JSZip from "jszip";
+import XLSX from "xlsx";
+import { parseExcelBuffer } from "./excelImport.js";
 
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".emf", ".wmf"]);
 
@@ -85,12 +87,57 @@ export function saveMaterialImage(materialId, buffer, ext, uploadDir) {
   return `/uploads/${destName}`;
 }
 
+const norm = (s) =>
+  String(s || "")
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/[\\/.,"'«»!?]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+function namesMatch(a, b) {
+  const na = norm(a);
+  const nb = norm(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const minLen = Math.min(na.length, nb.length);
+  if (minLen >= 10 && (na.includes(nb) || nb.includes(na))) return true;
+  return false;
+}
+
 function findImageForRow(images, sheetName, row) {
-  return images.find(
+  const candidates = images.filter(
     (img) =>
       img.sheetName === sheetName &&
       (img.row === row || img.row === row - 1 || img.row === row + 1)
   );
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => {
+    const ar = a.row === row ? 0 : Math.abs(a.row - row);
+    const br = b.row === row ? 0 : Math.abs(b.row - row);
+    if (ar !== br) return ar - br;
+    return a.col - b.col;
+  });
+  return candidates[0];
+}
+
+function findMaterialForRow(materials, row, moduleHint) {
+  const pool = moduleHint ? materials.filter((m) => m.module === moduleHint) : materials;
+
+  let mat = pool.find((m) => namesMatch(m.name, row.name));
+  if (mat) return mat;
+
+  const fuzzy = pool.filter((m) => {
+    const na = norm(m.name);
+    const nb = norm(row.name);
+    return na.length >= 8 && nb.length >= 8 && (na.includes(nb.slice(0, 18)) || nb.includes(na.slice(0, 18)));
+  });
+  if (fuzzy.length === 1) return fuzzy[0];
+
+  const global = materials.filter((m) => namesMatch(m.name, row.name));
+  if (global.length === 1) return global[0];
+
+  return null;
 }
 
 /** Привязка фото к импортируемым материалам по листу и строке */
@@ -111,29 +158,67 @@ export function attachImagesToMaterials(materials, images, uploadDir) {
   return linked;
 }
 
-const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
-
-/** Фото из Excel → существующие материалы по модулю (лист) + названию + строке */
+/** Фото из Excel → существующие материалы по модулю + названию + строке */
 export function linkImagesToExistingMaterials(parsedRows, images, materials, uploadDir, updateMaterial) {
   let linked = 0;
   const unmatched = [];
+  const linkedIds = new Set();
 
   for (const row of parsedRows) {
     const img = findImageForRow(images, row._sheet, row._row);
     if (!img) continue;
 
-    const mat =
-      materials.find((m) => m.module === row.module && norm(m.name) === norm(row.name)) ||
-      materials.find((m) => m.module === row.module && norm(m.name).includes(norm(row.name).slice(0, 20)));
-
+    const mat = findMaterialForRow(materials, row, row.module);
     if (!mat) {
-      unmatched.push({ name: row.name, sheet: row._sheet, row: row._row });
+      unmatched.push({ name: row.name, module: row.module, sheet: row._sheet, row: row._row });
       continue;
     }
+    if (linkedIds.has(mat.id)) continue;
     const url = saveMaterialImage(mat.id, img.buffer, img.ext, uploadDir);
     updateMaterial(mat.id, { imageUrl: url, photoUrl: url });
+    linkedIds.add(mat.id);
     linked++;
   }
 
   return { linked, imagesFound: images.length, unmatched };
+}
+
+/** Имя файла → модуль в базе */
+export function moduleFromExcelFilename(filename) {
+  const base = path.basename(filename).toLowerCase();
+  if (/закуп.*ферм|всю ферму/.test(base)) return "Общая закупка на ферму";
+  if (/подтоплен/.test(base)) return "Стеллаж подтопление";
+  if (/проточк/.test(base)) return "Стеллаж проточка";
+  if (/аэропоник|aeropon/.test(base)) return "Стеллаж аэропоника";
+  if (/клубник/.test(base)) return "Стеллаж клубника";
+  return null;
+}
+
+/** Один .xlsx (буфер или путь) → фото в материалы */
+export async function importPhotosFromExcelBuffer(
+  buffer,
+  filename,
+  materials,
+  uploadDir,
+  updateMaterial,
+  moduleOverride
+) {
+  const wb = XLSX.read(buffer, { type: "buffer" });
+  const moduleName = moduleOverride || moduleFromExcelFilename(filename) || "Импорт";
+  const parsed = parseExcelBuffer(buffer, moduleName);
+  const images = await extractExcelImages(buffer, wb.SheetNames);
+  const result = linkImagesToExistingMaterials(parsed.materials, images, materials, uploadDir, updateMaterial);
+  return { file: path.basename(filename), module: moduleName, ...result };
+}
+
+export async function importPhotosFromExcelFile(filePath, materials, uploadDir, updateMaterial, moduleOverride) {
+  const buffer = fs.readFileSync(filePath);
+  return importPhotosFromExcelBuffer(
+    buffer,
+    path.basename(filePath),
+    materials,
+    uploadDir,
+    updateMaterial,
+    moduleOverride
+  );
 }

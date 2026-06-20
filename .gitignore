@@ -13,3 +13,5 @@ backend/uploads/*
 materials-photos/*
 !materials-photos/README.md
 !materials-photos/.gitkeep
+import-sources/
+backend/import-sources/

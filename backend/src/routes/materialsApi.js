@@ -18,7 +18,7 @@ import { parseExcelBuffer } from "../services/excelImport.js";
 import {
   attachImagesToMaterials,
   extractExcelImages,
-  linkImagesToExistingMaterials,
+  importPhotosFromExcelBuffer,
 } from "../services/excelImages.js";
 import { bulkMatchUploads, importPhotosFromDir } from "../services/photoImport.js";
 import XLSX from "xlsx";
@@ -97,11 +97,16 @@ router.post("/import/excel", memUpload.single("file"), async (req, res) => {
 router.post("/import/excel-photos", memUpload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file" });
   try {
-    const wb = XLSX.read(req.file.buffer, { type: "buffer" });
-    const parsed = parseExcelBuffer(req.file.buffer, req.body.module || "Импорт");
-    const images = await extractExcelImages(req.file.buffer, wb.SheetNames);
+    const moduleName = req.body.module || undefined;
     const materials = listMaterials();
-    const result = linkImagesToExistingMaterials(parsed.materials, images, materials, uploadDir, updateMaterial);
+    const result = await importPhotosFromExcelBuffer(
+      req.file.buffer,
+      req.file.originalname || "import.xlsx",
+      materials,
+      uploadDir,
+      updateMaterial,
+      moduleName
+    );
     res.json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });

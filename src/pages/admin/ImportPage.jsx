@@ -2,6 +2,16 @@ import React, { useState } from "react";
 import { useStore } from "../../store/StoreContext.jsx";
 import { api } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
+import { seedModules } from "../../data/modules.js";
+
+const MODULE_PRESETS = [
+  { label: "— авто по имени файла —", value: "" },
+  { label: "Общая закупка на ферму", value: "Общая закупка на ферму" },
+  { label: "Стеллаж подтопление", value: "Стеллаж подтопление" },
+  { label: "Стеллаж проточка", value: "Стеллаж проточка" },
+  { label: "Стеллаж аэропоника", value: "Стеллаж аэропоника" },
+  ...seedModules.map((m) => ({ label: m.name, value: m.name })),
+].filter((v, i, a) => a.findIndex((x) => x.value === v.value) === i);
 
 export default function ImportPage() {
   const { actions } = useStore();
@@ -48,8 +58,14 @@ export default function ImportPage() {
             <input type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] || null)} />
           </div>
           <div className="field">
-            <label>Модуль (если пусто — имя листа)</label>
-            <input value={module} onChange={(e) => setModule(e.target.value)} placeholder="Стеллаж проточка" />
+            <label>Модуль (для фото — лучше выбрать вручную или оставить авто)</label>
+            <select value={module} onChange={(e) => setModule(e.target.value)}>
+              {MODULE_PRESETS.map((m) => (
+                <option key={m.value || "auto"} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <label className="row" style={{ fontSize: 13, marginBottom: 12, cursor: "pointer" }}>
@@ -68,8 +84,8 @@ export default function ImportPage() {
           )}
 
           <p className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
-            При полном импорте картинки из Excel (колонка с фото) автоматически привязываются к строкам по листу и номеру строки.
-            Количество из Excel в базу не попадает — только название, цена, ссылка.
+            Режим «только фото»: модуль определяется по имени файла (закуп → общая ферма, подтопление, проточка, аэропоника)
+            или выберите вручную. Картинки берутся из колонки «Фото» в Excel.
           </p>
 
           {err && <p style={{ color: "var(--danger)" }}>{err}</p>}
