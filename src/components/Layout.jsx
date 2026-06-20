@@ -1,5 +1,6 @@
 import React from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import AppModeNav from "./AppModeNav.jsx";
 
 const NAV = [
   { to: "/", label: "Проекты", ic: "▣", end: true },
@@ -15,15 +16,13 @@ const NAV = [
 
 export default function Layout() {
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="brandmark">
-          <div className="spine" />
-          <div>
-            <b>Daogreen</b>
-            <span>Spec</span>
+    <div className="app-frame">
+      <AppModeNav active="spec" />
+      <div className="shell">
+        <aside className="sidebar">
+          <div className="sidebar__head">
+            <span className="eyebrow" style={{ color: "#9ecdb8" }}>Меню</span>
           </div>
-        </div>
         {NAV.map((n) => (
           <NavLink
             key={n.to}
@@ -37,9 +36,7 @@ export default function Layout() {
         ))}
         <div className="spacer" />
         <div className="foot">
-          v1.0 production
-          <br />
-          API · #116355
+          Спецификации v1
         </div>
       </aside>
       <div className="main">
@@ -47,6 +44,7 @@ export default function Layout() {
           <Outlet />
         </div>
       </div>
+    </div>
     </div>
   );
 }

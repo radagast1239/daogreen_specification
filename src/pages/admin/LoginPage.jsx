@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { setAdminKey, getAdminKey, api } from "../../lib/api.js";
 
 export default function LoginPage() {
@@ -18,7 +18,7 @@ export default function LoginPage() {
       nav("/", { replace: true });
       window.location.reload();
     } catch {
-      setErr("Неверный ключ или API недоступен. Запусти: npm run dev:api в папке backend");
+      setErr("Неверный ключ или API недоступен.");
     } finally {
       setLoading(false);
     }
@@ -27,16 +27,17 @@ export default function LoginPage() {
   return (
     <div className="login-wrap">
       <form className="card login-card" onSubmit={submit}>
-        <div className="brandmark" style={{ marginBottom: 20 }}>
+        <Link to="/hub" className="brandmark" style={{ textDecoration: "none" }}>
           <div className="spine" />
           <div>
             <b>Daogreen</b>
-            <span>Spec</span>
+            <span style={{ color: "var(--muted)" }}>инструменты</span>
           </div>
-        </div>
-        <h2 style={{ margin: "0 0 8px" }}>Вход администратора</h2>
+        </Link>
+        <h2 style={{ margin: "0 0 8px" }}>Вход в спецификации</h2>
         <p className="muted" style={{ fontSize: 13, marginBottom: 20 }}>
-          Ключ API из <code>backend/.env</code> (ADMIN_KEY)
+          Ключ из <code>backend/.env</code> (ADMIN_KEY). Калькуляторы — без входа на{" "}
+          <Link to="/hub">главной</Link>.
         </p>
         <div className="field">
           <label>Ключ доступа</label>

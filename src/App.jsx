@@ -15,6 +15,9 @@ import ArchivePage from "./pages/admin/ArchivePage.jsx";
 import SettingsPage from "./pages/admin/SettingsPage.jsx";
 import LoginPage from "./pages/admin/LoginPage.jsx";
 import ClientProjectPage from "./pages/client/ClientProjectPage.jsx";
+import HubPage from "./pages/HubPage.jsx";
+import ToolsShell from "./components/ToolsShell.jsx";
+import ToolFramePage from "./pages/tools/ToolFramePage.jsx";
 
 function ClientLegacyRedirect() {
   const { token } = useParams();
@@ -24,6 +27,12 @@ function ClientLegacyRedirect() {
 export default function App() {
   return (
     <Routes>
+      <Route path="/hub" element={<HubPage />} />
+      <Route element={<ToolsShell />}>
+        <Route path="/tools/economic" element={<ToolFramePage tool="economic" />} />
+        <Route path="/tools/berry" element={<ToolFramePage tool="berry" />} />
+      </Route>
+
       <Route path="/login" element={<LoginPage />} />
       <Route path="/client/p/:token" element={<ClientProjectPage />} />
       <Route path="/client/:token" element={<ClientLegacyRedirect />} />
