@@ -20,6 +20,7 @@ import {
   catalogLinesForModule,
   newStellageDraft,
 } from "../../lib/projectBuilder.js";
+import { parseStellageModuleCatalogs, projectStellageLinesFromCatalog } from "../../lib/stellageCatalogConfig.js";
 import {
   draftFromStellagePreset,
   emptyFarmSectionsState,
@@ -52,6 +53,7 @@ export default function ProjectBuilderPage() {
   const [saving, setSaving] = useState(false);
   const [presets, setPresets] = useState([]);
   const [farmCatalogs, setFarmCatalogs] = useState({});
+  const [stellageCatalogs, setStellageCatalogs] = useState({});
   const [farmSettings, setFarmSettings] = useState(null);
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -100,6 +102,7 @@ export default function ProjectBuilderPage() {
       setPresets(p);
       setFarmSettings(s);
       setFarmCatalogs(parseFarmSectionCatalogs(s.farmSectionCatalogs));
+      setStellageCatalogs(parseStellageModuleCatalogs(s.stellageModuleCatalogs));
       setCategories(resolveCategories(s));
       setSuppliers(sup);
     });
@@ -107,9 +110,9 @@ export default function ProjectBuilderPage() {
 
   useEffect(() => {
     if (step === "stellages" && !draft) {
-      setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 1));
+      setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 1, stellageCatalogs));
     }
-  }, [step, draft, state.modules, state.materials, stellages.length]);
+  }, [step, draft, state.modules, state.materials, stellages.length, stellageCatalogs]);
 
   useEffect(() => {
     if (step === "general" && !farmLoaded && sections.length) {
@@ -133,7 +136,7 @@ export default function ProjectBuilderPage() {
         moduleName: mod.name,
         tech: mod.tech || "",
         presetId: null,
-        items: catalogLinesForModule(state.materials, mod.name),
+        items: projectStellageLinesFromCatalog(stellageCatalogs, mod.id, state.materials, mod.name),
       }));
     if (draft?.items?.some((ln) => ln.included)) {
       if (!(await confirm({ title: "Сменить тип?", message: "Текущие отметки будут заменены списком из базы." }))) return;
@@ -172,7 +175,7 @@ export default function ProjectBuilderPage() {
       return;
     }
     setStellages((list) => [...list, { ...draft, items: draft.items.map((ln) => ({ ...ln })) }]);
-    setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 2));
+    setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 2, stellageCatalogs));
   };
 
   const editStellage = async (id) => {

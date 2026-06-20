@@ -9,6 +9,11 @@ import "./styles/theme.css";
 
 initCompactMode();
 
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  const swUrl = `${import.meta.env.BASE_URL}sw.js`.replace(/\/{2,}/g, "/");
+  navigator.serviceWorker.register(swUrl).catch(() => {});
+}
+
 const routerBase = import.meta.env.BASE_URL.replace(/\/$/, "") || undefined;
 
 createRoot(document.getElementById("root")).render(

@@ -20,7 +20,6 @@ import {
   stripLineIds,
 } from "../../lib/farmSectionsConfig.js";
 import { resolveCategories } from "../../lib/categories.js";
-import { catalogLinesForModule } from "../../lib/projectBuilder.js";
 import { cloneBuilderLines } from "../../lib/presetHelpers.js";
 import {
   DEFAULT_STELLAGE_PARAMS,
@@ -31,9 +30,18 @@ import { useStore } from "../../store/StoreContext.jsx";
 import DirectoriesTab from "./DirectoriesTab.jsx";
 import ClientBrandTab from "./ClientBrandTab.jsx";
 import PublishRulesTab from "./PublishRulesTab.jsx";
+import StellageGroupsEditor from "../../components/StellageGroupsEditor.jsx";
+import { referenceToSettings, buildReferenceData } from "../../lib/referenceData.js";
+import {
+  parseStellageModuleCatalogs,
+  stellageCatalogCount,
+  stellageCatalogEditorLines,
+  stripStellageCatalogLines,
+} from "../../lib/stellageCatalogConfig.js";
 
 const TABS = [
   { id: "stellage", label: "Пресеты стеллажей" },
+  { id: "stellage_composition", label: "Состав стеллажей" },
   { id: "farm", label: "Разделы фермы" },
   { id: "catalog", label: "Модули базы" },
   { id: "directories", label: "Справочники" },
@@ -104,6 +112,9 @@ export default function ModulesPage() {
   const [modSaving, setModSaving] = useState(false);
   const [dragPresetId, setDragPresetId] = useState(null);
   const [appSettings, setAppSettings] = useState({});
+  const [stellageCatalogs, setStellageCatalogs] = useState({});
+  const [editingStellageMod, setEditingStellageMod] = useState(null);
+  const [stellageGroupsDraft, setStellageGroupsDraft] = useState([]);
 
   const stellageMods = state.modules.filter((m) => m.type === "stellage");
   const stellagePresets = useMemo(
@@ -136,7 +147,9 @@ export default function ModulesPage() {
     setFarmSections(resolveFarmSections(s));
     setFarmCatalogs(parseFarmSectionCatalogs(s.farmSectionCatalogs));
     setFarmSectionVersions(parseFarmSectionVersions(s.farmSectionVersions));
+    setStellageCatalogs(parseStellageModuleCatalogs(s.stellageModuleCatalogs));
     setAppSettings(s);
+    setStellageGroupsDraft(buildReferenceData(s).stellageGroups);
   }, []);
 
   useEffect(() => {
@@ -162,7 +175,45 @@ export default function ModulesPage() {
       note: mod?.tech || "",
       params: { ...DEFAULT_STELLAGE_PARAMS },
     });
-    setEditLines(mod?.name ? catalogLinesForModule(state.materials, mod.name) : []);
+    setEditLines(mod?.name ? stellageCatalogEditorLines(stellageCatalogs, mod?.id, state.materials, mod.name) : []);
+  };
+
+  const openStellageModuleEditor = (mod) => {
+    setEditing(null);
+    setEditingSection(null);
+    setEditingMod(null);
+    setEditingStellageMod(mod);
+    setStellageGroupsDraft(ref.stellageGroups);
+    setEditLines(stellageCatalogEditorLines(stellageCatalogs, mod.id, state.materials, mod.name));
+  };
+
+  const saveStellageGroups = async () => {
+    const nextRef = { ...ref, stellageGroups: stellageGroupsDraft };
+    await api.saveSettings(referenceToSettings(nextRef));
+    await actions.refresh();
+  };
+
+  const saveStellageModuleCatalog = async () => {
+    if (!editingStellageMod) return;
+    setSaving(true);
+    try {
+      const catalogs = {
+        ...stellageCatalogs,
+        [editingStellageMod.id]: stripStellageCatalogLines(editLines),
+      };
+      await api.saveSettings({
+        stellageModuleCatalogs: JSON.stringify(catalogs),
+        ...referenceToSettings({ ...ref, stellageGroups: stellageGroupsDraft }),
+      });
+      setStellageCatalogs(catalogs);
+      setEditingStellageMod(null);
+      await reload();
+      await actions.refresh();
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openStellagePreset = (p) => {
@@ -319,13 +370,14 @@ export default function ModulesPage() {
   };
 
   const sectionVersions = editingSection ? farmSectionVersions[editingSection.id] || [] : [];
-  const inEditor = !!(editing || editingSection || editingMod);
+  const inEditor = !!(editing || editingSection || editingMod || editingStellageMod);
   const tabLabel = TABS.find((t) => t.id === tab)?.label || "раздел";
 
   const exitEditor = () => {
     setEditing(null);
     setEditingSection(null);
     setEditingMod(null);
+    setEditingStellageMod(null);
   };
 
   const responsibleLabel = (id) => ref.responsibleRoles.find((r) => r.id === id)?.label || "—";
@@ -440,7 +492,7 @@ export default function ModulesPage() {
     <>
       <PageHeader
         title="Модули / разделы фермы"
-        sub="Настройте разделы «Ферма целиком»: состав материалов по умолчанию подтягивается при создании проекта."
+        sub="Разделы фермы, состав стеллажей по умолчанию, пресеты и справочники."
         back={{ to: "/", label: "Проекты" }}
       />
 
@@ -494,7 +546,7 @@ export default function ModulesPage() {
         />
       )}
 
-      {tab === "stellage" && !editing && !editingSection && !editingMod && (
+      {tab === "stellage" && !inEditor && (
         <div className="content">
           <div className="toolbar">
             <button type="button" className="btn btn-primary btn-sm" onClick={startNewStellagePreset}>
@@ -543,7 +595,57 @@ export default function ModulesPage() {
         </div>
       )}
 
-      {tab === "farm" && !editingSection && !editing && !editingMod && (
+      {tab === "stellage_composition" && !inEditor && (
+        <div className="content">
+          <StellageGroupsEditor
+            groups={stellageGroupsDraft}
+            onChange={setStellageGroupsDraft}
+          />
+          <div className="toolbar" style={{ marginBottom: 14 }}>
+            <button type="button" className="btn btn-sm" disabled={saving} onClick={saveStellageGroups}>
+              Сохранить группы
+            </button>
+          </div>
+          <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
+            Шаблон по умолчанию для каждого типа стеллажа — попадает в мастер «Новый проект» и в пресеты. Отметьте
+            позиции, укажите кол-во и группу состава.
+          </p>
+          {stellageMods.length === 0 ? (
+            <p className="muted">Нет модулей типа «Стеллаж» — создайте в «Модули базы».</p>
+          ) : (
+            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+              <table className="spec">
+                <thead>
+                  <tr>
+                    <th>Тип стеллажа</th>
+                    <th>Технология</th>
+                    <th className="right" style={{ width: 90 }}>В шаблоне</th>
+                    <th className="right" style={{ width: 140 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {stellageMods.map((mod) => (
+                    <tr key={mod.id}>
+                      <td>
+                        <ModuleBadge mod={mod} />
+                      </td>
+                      <td className="muted" style={{ fontSize: 12 }}>{mod.tech || "—"}</td>
+                      <td className="right num muted">{stellageCatalogCount(stellageCatalogs, mod.id)}</td>
+                      <td className="right">
+                        <button type="button" className="btn btn-sm" onClick={() => openStellageModuleEditor(mod)}>
+                          Настроить
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "farm" && !inEditor && (
         <div className="content">
           <div className="toolbar" style={{ marginBottom: 14 }}>
             <button type="button" className="btn btn-primary btn-sm" onClick={addFarmSection}>
@@ -1007,6 +1109,52 @@ export default function ModulesPage() {
         </div>
       )}
 
+      {editingStellageMod && (
+        <div className="content">
+          <div className="card" style={{ padding: 16, marginBottom: 12 }}>
+            <h3 style={{ marginTop: 0 }}>
+              Состав по умолчанию: <ModuleBadge mod={editingStellageMod} />
+            </h3>
+            <p className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>
+              Эти позиции подставляются при создании проекта и в новых пресетах. Группа состава — колонка «Группа» в
+              таблице ниже.
+            </p>
+            <StellageGroupsEditor
+              groups={stellageGroupsDraft}
+              onChange={setStellageGroupsDraft}
+              compact
+            />
+          </div>
+
+          <SpecPickerTable
+            lines={editLines}
+            onChange={setEditLines}
+            materials={state.materials}
+            catalogModule={editingStellageMod.name}
+            catalogLabel="позицию"
+            onSaveMaterial={saveMaterial}
+            categories={categories}
+            suppliers={suppliers}
+            showQty
+            qtyLabel="Кол-во по умолч."
+            showCompositionGroups
+            stellageGroups={stellageGroupsDraft}
+          />
+
+          <div className="toolbar" style={{ marginTop: 16 }}>
+            <button type="button" className="btn btn-primary" disabled={saving} onClick={saveStellageModuleCatalog}>
+              {saving ? "Сохранение…" : "Сохранить шаблон"}
+            </button>
+            <button type="button" className="btn" onClick={() => setEditingStellageMod(null)}>
+              Отмена
+            </button>
+            <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>
+              {countIncluded(editLines)} поз. в шаблоне
+            </span>
+          </div>
+        </div>
+      )}
+
       {editing && (
         <div className="content">
           <div className="card" style={{ padding: 16, marginBottom: 12 }}>
@@ -1024,7 +1172,7 @@ export default function ModulesPage() {
                     const mod = stellageMods.find((m) => m.id === e.target.value);
                     if (!mod) return;
                     setEditing({ ...editing, moduleId: mod.id, moduleName: mod.name, note: mod.tech || "" });
-                    setEditLines(catalogLinesForModule(state.materials, mod.name));
+                    setEditLines(stellageCatalogEditorLines(stellageCatalogs, mod.id, state.materials, mod.name));
                   }}
                 >
                   {stellageMods.map((m) => (
@@ -1140,7 +1288,7 @@ export default function ModulesPage() {
             categories={categories}
             suppliers={suppliers}
             showCompositionGroups
-            stellageGroups={ref.stellageGroups}
+            stellageGroups={stellageGroupsDraft.length ? stellageGroupsDraft : ref.stellageGroups}
           />
 
           <div className="toolbar" style={{ marginTop: 16 }}>

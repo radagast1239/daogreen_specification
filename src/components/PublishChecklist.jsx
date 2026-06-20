@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { Link } from "react-router-dom";
 import { ISSUE_LABELS } from "../lib/publishRulesConfig.js";
 
 function groupProblems(problems) {
@@ -11,7 +12,7 @@ function groupProblems(problems) {
   return [...map.values()];
 }
 
-export default function PublishChecklist({ check, loading, onRefresh, compact = false }) {
+export default function PublishChecklist({ check, loading, onRefresh, compact = false, projectId }) {
   const groups = useMemo(() => groupProblems(check?.problems), [check?.problems]);
 
   if (loading && !check) {
@@ -58,7 +59,16 @@ export default function PublishChecklist({ check, loading, onRefresh, compact = 
               <ul className="publish-checklist__items">
                 {g.items.slice(0, compact ? 5 : 20).map((p, i) => (
                   <li key={p.itemId || `g-${i}`}>
-                    {p.itemId ? (
+                    {p.itemId && projectId ? (
+                      <Link
+                        to={`/project/${projectId}?item=${encodeURIComponent(p.itemId)}#spec-item-${p.itemId}`}
+                        className="publish-checklist__link"
+                      >
+                        <strong>{p.name || "—"}</strong>
+                        {p.module && <span className="muted"> · {p.module}</span>}
+                        <span className="publish-checklist__goto"> → в таблице</span>
+                      </Link>
+                    ) : p.itemId ? (
                       <>
                         <strong>{p.name || "—"}</strong>
                         {p.module && <span className="muted"> · {p.module}</span>}
@@ -93,7 +103,7 @@ export default function PublishChecklist({ check, loading, onRefresh, compact = 
 }
 
 /** Модалка: чеклист + действие */
-export function PublishGateModal({ title, check, onClose, onProceed, proceedLabel = "Всё равно отправить" }) {
+export function PublishGateModal({ title, check, onClose, onProceed, proceedLabel = "Всё равно отправить", projectId }) {
   const canForce = check?.allowForcePublish !== false;
 
   return (
@@ -105,7 +115,7 @@ export function PublishGateModal({ title, check, onClose, onProceed, proceedLabe
             ✕
           </button>
         </div>
-        <PublishChecklist check={check} />
+        <PublishChecklist check={check} projectId={projectId} />
         <div className="row wrap" style={{ gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
           <button type="button" className="btn" onClick={onClose}>
             Закрыть

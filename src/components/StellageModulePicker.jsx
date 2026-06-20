@@ -13,10 +13,10 @@ export default function StellageModulePicker({ mod, materials, value, onChange, 
   const sel = normalizeModuleSelection(value);
   const labelFor = (id) => stellageGroups.find((g) => g.id === id)?.label || groupLabel(id);
   const moduleGroups = useMemo(
-    () => groupsForModule(materials, mod.name).map((g) => ({ ...g, label: labelFor(g.id) })),
+    () => groupsForModule(materials, mod.name, stellageGroups).map((g) => ({ ...g, label: labelFor(g.id) })),
     [materials, mod.name, stellageGroups]
   );
-  const byGroup = useMemo(() => materialsByGroup(materials, mod.name), [materials, mod.name]);
+  const byGroup = useMemo(() => materialsByGroup(materials, mod.name, stellageGroups), [materials, mod.name, stellageGroups]);
 
   const set = (patch) => onChange({ ...sel, ...patch });
 

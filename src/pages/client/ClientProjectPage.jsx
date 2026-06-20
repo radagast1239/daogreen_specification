@@ -22,7 +22,8 @@ import { setClientScope } from "../../components/ClientGuard.jsx";
 import { generateProjectPdf } from "../../lib/pdfExport.js";
 import { clientTabDefs, heroEyebrow } from "../../lib/clientBrandConfig.js";
 import QRCode from "qrcode";
-import { downloadCSV, printPDF } from "../../lib/export.js";
+import { downloadXlsx, printPDF } from "../../lib/export.js";
+import { ClientSchemesViewer } from "../../components/ClientSchemesEditor.jsx";
 
 const QUICK_STATUS_IDS = [
   "not_bought", "searching", "ordered", "bought", "delivered", "have", "need_help", "not_fit", "replacement_check",
@@ -53,6 +54,8 @@ export default function ClientProjectPage() {
   const purchaseStatuses = data?.purchaseStatuses || PURCHASE_STATUSES;
   const quickStatuses = purchaseStatuses.filter((s) => s.clientVisible !== false);
   const [supplierFilter, setSupplierFilter] = useState("");
+  const [purchaseQuery, setPurchaseQuery] = useState("");
+  const [purchaseSort, setPurchaseSort] = useState("category");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
   const [qrUrl, setQrUrl] = useState("");
@@ -125,6 +128,33 @@ export default function ClientProjectPage() {
   const filterSupplier = (list) =>
     supplierFilter ? list.filter((i) => i.supplier === supplierFilter) : list;
 
+  const filterAndSortPurchase = (list) => {
+    let out = filterSupplier(list);
+    const q = purchaseQuery.trim().toLowerCase();
+    if (q) {
+      out = out.filter(
+        (i) =>
+          (i.name || "").toLowerCase().includes(q) ||
+          (i.supplier || "").toLowerCase().includes(q)
+      );
+    }
+    const sorted = [...out];
+    sorted.sort((a, b) => {
+      if (purchaseSort === "sum") return lineGross(b) - lineGross(a);
+      if (purchaseSort === "status") {
+        const la = purchaseStatuses.find((s) => s.id === a.status)?.label || "";
+        const lb = purchaseStatuses.find((s) => s.id === b.status)?.label || "";
+        return la.localeCompare(lb, "ru");
+      }
+      if (purchaseSort === "category") {
+        const c = (a.category || "").localeCompare(b.category || "", "ru");
+        if (c !== 0) return c;
+      }
+      return (a.name || "").localeCompare(b.name || "", "ru");
+    });
+    return sorted;
+  };
+
   const installItems = visibleItems.filter((i) => i.itemRole === "installation" || i.category === "Работы и доставка");
   const purchaseItems = visibleItems.filter((i) => i.itemRole !== "installation");
   const hasCooling = !!(project.manualParams?.coolingFarm && typeof project.manualParams.coolingFarm === "object");
@@ -146,7 +176,7 @@ export default function ClientProjectPage() {
   };
 
   const exportRows = (items, name) =>
-    downloadCSV(
+    downloadXlsx(
       `${project.name}_${name}`,
       items.map((i) => ({
         Фото: absolutePhotoUrl(i.imageUrl || i.photoUrl),
@@ -212,6 +242,7 @@ export default function ClientProjectPage() {
       />
 
       <div className="client-wrap">
+      <ClientSchemesViewer manualParams={project.manualParams} />
       {!hasPurchase && (
         <div className="card" style={{ padding: 16, marginBottom: 16, borderColor: "var(--accent)" }}>
           <strong>Список закупки пока пуст</strong>
@@ -229,6 +260,21 @@ export default function ClientProjectPage() {
       </div>
 
       {activeTab !== "docs" && activeTab !== "cooling" && hasPurchase && (
+        <>
+        <div className="client-purchase-toolbar no-print">
+          <input
+            placeholder="Поиск: название или поставщик…"
+            value={purchaseQuery}
+            onChange={(e) => setPurchaseQuery(e.target.value)}
+            style={{ flex: "1 1 180px", maxWidth: 280 }}
+          />
+          <select value={purchaseSort} onChange={(e) => setPurchaseSort(e.target.value)} style={{ width: "auto" }}>
+            <option value="category">По категории</option>
+            <option value="sum">По сумме</option>
+            <option value="status">По статусу</option>
+            <option value="name">По названию</option>
+          </select>
+        </div>
         <div className="client-supplier-bar no-print">
           <strong style={{ fontSize: 13 }}>Поставщик:</strong>
           <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} style={{ width: "auto" }}>
@@ -248,6 +294,7 @@ export default function ClientProjectPage() {
             </span>
           )}
         </div>
+        </>
       )}
 
       {activeTab === "cooling" && hasCooling && (
@@ -269,7 +316,7 @@ export default function ClientProjectPage() {
           onExportAll={() => exportRows(visibleItems, "закупка")}
           onExportMerged={() => {
             const rows = mergedPurchaseList(project);
-            downloadCSV(
+            downloadXlsx(
               `${project.name}_объединённый`,
               rows.map((r) => ({
                 Наименование: r.name,
@@ -291,7 +338,7 @@ export default function ClientProjectPage() {
             <OverviewTab
               project={project}
               totals={totals}
-              items={filterSupplier(purchaseItems)}
+              items={filterAndSortPurchase(purchaseItems)}
               supplierFilter={supplierFilter}
               qrUrl={qrUrl}
               branding={branding}
@@ -300,7 +347,7 @@ export default function ClientProjectPage() {
           )}
           {activeTab === "install" && (
             <PurchaseSplitView
-              items={filterSupplier(installItems)}
+              items={filterAndSortPurchase(installItems)}
               currency={project.currency}
               patch={patch}
               purchaseStatuses={purchaseStatuses}
@@ -311,7 +358,7 @@ export default function ClientProjectPage() {
           )}
           {activeTab === "categories" && (
             <PurchaseSplitView
-              items={filterSupplier(purchaseItems)}
+              items={filterAndSortPurchase(purchaseItems)}
               currency={project.currency}
               patch={patch}
               purchaseStatuses={purchaseStatuses}
@@ -326,7 +373,7 @@ export default function ClientProjectPage() {
           )}
           {activeTab === "modules" && (
             <PurchaseSplitView
-              items={filterSupplier(purchaseItems)}
+              items={filterAndSortPurchase(purchaseItems)}
               currency={project.currency}
               patch={patch}
               purchaseStatuses={purchaseStatuses}
@@ -341,7 +388,7 @@ export default function ClientProjectPage() {
           )}
           {activeTab === "merged" && (
             <PurchaseSplitView
-              items={filterSupplier(purchaseItems)}
+              items={filterAndSortPurchase(purchaseItems)}
               currency={project.currency}
               patch={patch}
               purchaseStatuses={purchaseStatuses}
@@ -356,7 +403,7 @@ export default function ClientProjectPage() {
           )}
           {activeTab === "plumber" && (
             <PurchaseSplitView
-              items={filterSupplier(itemsByResponsible(visibleItems, "plumber"))}
+              items={filterAndSortPurchase(itemsByResponsible(visibleItems, "plumber"))}
               currency={project.currency}
               patch={patch}
               purchaseStatuses={purchaseStatuses}
@@ -367,7 +414,7 @@ export default function ClientProjectPage() {
           )}
           {activeTab === "electric" && (
             <PurchaseSplitView
-              items={filterSupplier(itemsByResponsible(visibleItems, "electrician"))}
+              items={filterAndSortPurchase(itemsByResponsible(visibleItems, "electrician"))}
               currency={project.currency}
               patch={patch}
               purchaseStatuses={purchaseStatuses}
@@ -378,7 +425,7 @@ export default function ClientProjectPage() {
           )}
           {activeTab === "installer" && (
             <PurchaseSplitView
-              items={filterSupplier(itemsByResponsible(visibleItems, "installer"))}
+              items={filterAndSortPurchase(itemsByResponsible(visibleItems, "installer"))}
               currency={project.currency}
               patch={patch}
               purchaseStatuses={purchaseStatuses}
@@ -389,7 +436,7 @@ export default function ClientProjectPage() {
           )}
           {activeTab === "consumables" && (
             <PurchaseSplitView
-              items={filterSupplier(itemsByResponsible(visibleItems, "consumables"))}
+              items={filterAndSortPurchase(itemsByResponsible(visibleItems, "consumables"))}
               currency={project.currency}
               patch={patch}
               purchaseStatuses={purchaseStatuses}

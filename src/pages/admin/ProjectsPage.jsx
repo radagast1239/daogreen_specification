@@ -10,6 +10,7 @@ import { useToast } from "../../components/Toast.jsx";
 import { CLIENT_STATUSES, clientStatusMeta } from "../../data/clientStatuses.js";
 import { getPinnedIds, isPinned, sortWithPinned, togglePinned } from "../../lib/pinnedProjects.js";
 import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
+import HomeDashboard from "../../components/HomeDashboard.jsx";
 
 function clientKey(name) {
   return (name || "Без имени").trim().toLowerCase().replace(/\s+/g, " ");
@@ -135,26 +136,7 @@ export default function ProjectsPage() {
         }
       />
       <div className="content">
-        {dash && (
-          <div className="stat-grid" style={{ marginBottom: 20 }}>
-            <div className="card stat">
-              <div className="k">Без фото</div>
-              <div className="v num">{dash.noPhoto}</div>
-            </div>
-            <div className="card stat">
-              <div className="k">Без цены</div>
-              <div className="v num">{dash.noPrice}</div>
-            </div>
-            <div className="card stat">
-              <div className="k">Без ссылки</div>
-              <div className="v num">{dash.noLink}</div>
-            </div>
-            <div className="card stat">
-              <div className="k">Проблемы</div>
-              <div className="v num">{dash.problems?.length || 0}</div>
-            </div>
-          </div>
-        )}
+        <HomeDashboard dash={dash} />
 
         <div className="project-filters no-print">
           <input placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 200 }} />
@@ -188,19 +170,6 @@ export default function ProjectsPage() {
             {filtered.length} из {projects.length}
           </span>
         </div>
-
-        {dash?.problems?.length > 0 && !problemsOnly && (
-          <div className="card" style={{ padding: 14, marginBottom: 20 }}>
-            <div className="eyebrow">Требуют внимания</div>
-            {dash.problems.slice(0, 8).map((p, i) => (
-              <div key={i} className="muted" style={{ fontSize: 13, marginTop: 6 }}>
-                <Link to={`/project/${p.projectId}`}>{p.name}</Link>
-                {" — "}
-                {p.type === "need_help" ? `нужна помощь (${p.count})` : "клиент давно не отмечал"}
-              </div>
-            ))}
-          </div>
-        )}
 
         {projects.length === 0 ? (
           <Empty title="Пока нет проектов" hint="Создай первый проект через мастер.">

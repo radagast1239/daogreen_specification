@@ -77,6 +77,10 @@ export const DEFAULT_MANUAL_PARAMS = {
   layoutNotes: "",
   notes: "",
   floorPlanUrl: "",
+  schemePipesUrl: "",
+  schemeStellagesUrl: "",
+  schemeTechnicalUrl: "",
+  schemeElectricalUrl: "",
 };
 
 export function clientVisibleItems(project) {

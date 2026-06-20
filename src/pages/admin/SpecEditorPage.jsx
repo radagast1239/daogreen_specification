@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import {
   projectTotals,
@@ -20,7 +20,7 @@ import Collapsible from "../../components/Collapsible.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
 import { useToast } from "../../components/Toast.jsx";
 import { api } from "../../lib/api.js";
-import { downloadCSV } from "../../lib/export.js";
+import { downloadXlsx } from "../../lib/export.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
 import FloorPlanField from "../../components/FloorPlanField.jsx";
@@ -29,6 +29,7 @@ import { defaultRooms, isFarmGeneralItem, roomLabel } from "../../lib/roomHelper
 import RoomCoolingSummary from "../../components/RoomCoolingSummary.jsx";
 import ActivityFeed from "../../components/ActivityFeed.jsx";
 import PublishChecklist, { PublishGateModal } from "../../components/PublishChecklist.jsx";
+import ClientSchemesEditor from "../../components/ClientSchemesEditor.jsx";
 import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
 
 const TAB_LABELS = {
@@ -40,6 +41,8 @@ const TAB_LABELS = {
 
 export default function SpecEditorPage() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  const highlightItemId = searchParams.get("item");
   const { state, actions } = useStore();
   const { confirm, success, error } = useToast();
   const project = state.projects.find((p) => p.id === id);
@@ -79,6 +82,10 @@ export default function SpecEditorPage() {
     if (!id) return;
     api.getProjectActivity(id).then(setActivity).catch(() => setActivity([]));
   }, [id, project?.updatedAt]);
+
+  useEffect(() => {
+    if (highlightItemId) setTab("spec");
+  }, [highlightItemId]);
 
   useEffect(() => {
     if (!id) return;
@@ -180,7 +187,7 @@ export default function SpecEditorPage() {
       Видно: it.visible ? "да" : "нет",
       Утверждено: it.approved ? "да" : "нет",
     }));
-    downloadCSV(`${project.name}_спецификация`, rows);
+    downloadXlsx(`${project.name}_спецификация`, rows);
   };
 
   const url = project.clientToken ? clientLink(project.clientToken) : "";
@@ -228,6 +235,7 @@ export default function SpecEditorPage() {
           check={publishCheck}
           onClose={() => setGateModal(null)}
           proceedLabel={gateModal.action === "link" ? "Всё равно открыть ссылку" : "Всё равно утвердить"}
+          projectId={project.id}
           onProceed={async () => {
             setGateModal(null);
             if (gateModal.action === "link") setLinkOpen(true);
@@ -295,7 +303,12 @@ export default function SpecEditorPage() {
           subtitle={publishCheck?.ok ? "Всё в порядке" : publishCheck ? `${publishCheck.counts?.issueCount || 0} замечаний` : "Проверка…"}
           defaultOpen={!publishCheck?.ok}
         >
-          <PublishChecklist check={publishCheck} loading={publishCheckLoading} onRefresh={refreshPublishCheck} />
+          <PublishChecklist
+            check={publishCheck}
+            loading={publishCheckLoading}
+            onRefresh={refreshPublishCheck}
+            projectId={project.id}
+          />
         </Collapsible>
 
         {/* Tabs */}
@@ -333,6 +346,9 @@ export default function SpecEditorPage() {
               saveRooms={saveRooms}
               floorPlanUrl={floorPlanUrl}
               onFloorPlanChange={(url) => saveManualParam("floorPlanUrl", url)}
+              manualParams={project.manualParams}
+              onManualParamsChange={(mp) => actions.projectUpdate(project.id, { manualParams: mp })}
+              highlightItemId={highlightItemId}
             />
           </>
         )}
@@ -438,11 +454,43 @@ function ProjectDocuments({ projectId }) {
 }
 
 /* ---------------- Спецификация ---------------- */
-function SpecTab({ project, patchItem, actions, saveRooms, floorPlanUrl, onFloorPlanChange }) {
+function SpecTab({
+  project,
+  patchItem,
+  actions,
+  saveRooms,
+  floorPlanUrl,
+  onFloorPlanChange,
+  manualParams,
+  onManualParamsChange,
+  highlightItemId,
+}) {
   const { confirm } = useToast();
   const groups = useMemo(() => groupBy(project.items, "module"), [project.items]);
   const rooms = project.rooms?.length ? project.rooms : defaultRooms();
   const hasFarmItems = project.items.some((it) => isFarmGeneralItem(project, it));
+  const [quickFilter, setQuickFilter] = useState("");
+
+  useEffect(() => {
+    if (!highlightItemId) return;
+    const t = window.setTimeout(() => {
+      const el = document.getElementById(`spec-item-${highlightItemId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("spec-row--highlight");
+        window.setTimeout(() => el.classList.remove("spec-row--highlight"), 3500);
+      }
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [highlightItemId, project.items]);
+
+  const passesFilter = (it) => {
+    if (!quickFilter) return true;
+    if (quickFilter === "no_photo") return !photoSrc(it.imageUrl || it.photoUrl);
+    if (quickFilter === "not_approved") return !it.approved;
+    if (quickFilter === "no_supplier") return !(it.supplier || "").trim();
+    return true;
+  };
 
   const addItem = (module) => {
     actions.itemAdd(project.id, {
@@ -477,13 +525,42 @@ function SpecTab({ project, patchItem, actions, saveRooms, floorPlanUrl, onFloor
           </div>
         )}
       </Collapsible>
+
+      <Collapsible title="Схемы для клиента" subtitle="трубы, стеллажи, помещения…" defaultOpen={false}>
+        <ClientSchemesEditor
+          manualParams={manualParams}
+          onChange={onManualParamsChange}
+        />
+      </Collapsible>
+
+      <div className="spec-quick-filters no-print">
+        <span className="muted" style={{ fontSize: 12 }}>Быстрый фильтр:</span>
+        {[
+          ["", "Все"],
+          ["no_photo", "Без фото"],
+          ["not_approved", "Не утверждено"],
+          ["no_supplier", "Без поставщика"],
+        ].map(([id, label]) => (
+          <button
+            key={id || "all"}
+            type="button"
+            className={`btn btn-sm${quickFilter === id ? " btn-primary" : ""}`}
+            onClick={() => setQuickFilter(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {groups.map(([module, items]) => {
-        const modSum = items.reduce((s, i) => s + lineGross(i), 0);
+        const visibleItems = items.filter(passesFilter);
+        if (!visibleItems.length) return null;
+        const modSum = visibleItems.reduce((s, i) => s + lineGross(i), 0);
         return (
         <Collapsible
           key={module}
           title={module}
-          subtitle={`${items.length} поз. · ${money(modSum, project.currency)}`}
+          subtitle={`${visibleItems.length} поз. · ${money(modSum, project.currency)}`}
           defaultOpen={groups.length <= 4}
           actions={
             <button className="btn btn-sm btn-ghost" onClick={() => addItem(module)}>
@@ -515,8 +592,12 @@ function SpecTab({ project, patchItem, actions, saveRooms, floorPlanUrl, onFloor
                 </tr>
               </thead>
               <tbody>
-                {items.map((it) => (
-                  <tr key={it.id} className={!it.visible || !it.enabled ? "row-hidden" : ""}>
+                {visibleItems.map((it) => (
+                  <tr
+                    key={it.id}
+                    id={`spec-item-${it.id}`}
+                    className={(!it.visible || !it.enabled ? "row-hidden " : "") + (highlightItemId === it.id ? "spec-row--highlight" : "")}
+                  >
                     <td className="spec-photo">
                       {photoSrc(it.imageUrl || it.photoUrl) ? (
                         <img
@@ -703,7 +784,7 @@ function SpecTab({ project, patchItem, actions, saveRooms, floorPlanUrl, onFloor
 function MergedTab({ project }) {
   const rows = useMemo(() => mergedPurchaseList(project), [project.items]);
   const exportMerged = () =>
-    downloadCSV(
+    downloadXlsx(
       `${project.name}_общий_список`,
       rows.map((r) => ({
         Наименование: r.name,

@@ -88,23 +88,23 @@ export function materialCompositionGroup(mat) {
 }
 
 /** Группы по умолчанию — без опций с qty=0 */
-export function defaultStellageGroups() {
-  return STELLAGE_GROUPS.filter((g) => g.id !== "opcii").map((g) => g.id);
+export function defaultStellageGroups(groupDefs = STELLAGE_GROUPS) {
+  return groupDefs.filter((g) => g.id !== "opcii").map((g) => g.id);
 }
 
-export function groupsForModule(materials, modName) {
+export function groupsForModule(materials, modName, groupDefs = STELLAGE_GROUPS) {
   const ids = new Set();
   for (const m of materials) {
     if (m.module !== modName) continue;
     const g = materialCompositionGroup(m);
     if (g) ids.add(g);
   }
-  return STELLAGE_GROUPS.filter((g) => ids.has(g.id));
+  return groupDefs.filter((g) => ids.has(g.id));
 }
 
-export function materialsByGroup(materials, modName) {
+export function materialsByGroup(materials, modName, groupDefs = STELLAGE_GROUPS) {
   const map = new Map();
-  for (const g of STELLAGE_GROUPS) map.set(g.id, []);
+  for (const g of groupDefs) map.set(g.id, []);
   for (const m of materials) {
     if (m.module !== modName || m.status === "archived") continue;
     const g = materialCompositionGroup(m);

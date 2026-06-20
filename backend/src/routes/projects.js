@@ -15,6 +15,7 @@ import {
 } from "../services/buildItems.js";
 import { listMaterials, listModules } from "./materials.js";
 import { validateProjectForPublish } from "../services/publishRules.js";
+import { getAnalytics } from "../services/analytics.js";
 import {
   listActivity,
   logItemPatch,
@@ -301,25 +302,89 @@ export function getDashboard() {
   const projects = listProjects();
   const materials = listMaterials();
   const problems = [];
+  const publishCheck = [];
+  const needHelp = [];
+  const inactiveClient = [];
+  const stuckPurchase = [];
   let noPhoto = 0;
   let noPrice = 0;
   let noLink = 0;
 
   for (const m of materials) {
-    if (!m.photoUrl) noPhoto++;
+    if (!m.photoUrl && !m.imageUrl) noPhoto++;
     if (!m.basePrice) noPrice++;
     if (!m.link) noLink++;
   }
 
+  const now = Date.now();
+  const day = 86400000;
+
   for (const p of projects) {
     const full = loadProject(p.id);
+    const totals = p.totals || projectTotals(full.items);
+    const progress = totals.progress || 0;
+
+    const check = validateProjectForPublish(p.id);
+    if (!check.ok) {
+      const row = {
+        projectId: p.id,
+        name: p.name,
+        client: p.client,
+        type: "publish_check",
+        issueCount: check.counts?.issueCount || check.problems?.length || 0,
+        clientItems: check.counts?.clientItems || 0,
+      };
+      publishCheck.push(row);
+      problems.push(row);
+    }
+
     const help = full.items.filter((i) => i.status === "need_help" && i.approved && i.visible);
-    if (help.length) problems.push({ projectId: p.id, name: p.name, type: "need_help", count: help.length });
-    const stale = p.lastClientActivityAt
-      ? Date.now() - new Date(p.lastClientActivityAt).getTime() > 14 * 864e5
-      : true;
-    if (stale && p.totals?.progress < 100)
-      problems.push({ projectId: p.id, name: p.name, type: "inactive_client", days: 14 });
+    if (help.length) {
+      const row = { projectId: p.id, name: p.name, client: p.client, type: "need_help", count: help.length };
+      needHelp.push(row);
+      problems.push(row);
+    }
+
+    const lastAct = p.lastClientActivityAt ? new Date(p.lastClientActivityAt).getTime() : 0;
+    const staleDays = lastAct ? Math.floor((now - lastAct) / day) : null;
+    const stale = !lastAct || now - lastAct > 14 * day;
+    if (stale && progress < 100 && progress > 0) {
+      const row = {
+        projectId: p.id,
+        name: p.name,
+        client: p.client,
+        type: "inactive_client",
+        days: staleDays ?? 999,
+        progress,
+      };
+      inactiveClient.push(row);
+      problems.push(row);
+    }
+
+    if (progress >= 5 && progress < 92 && stale && (p.clientToken || help.length === 0)) {
+      const row = {
+        projectId: p.id,
+        name: p.name,
+        client: p.client,
+        type: "stuck_purchase",
+        progress,
+        days: staleDays ?? 999,
+      };
+      stuckPurchase.push(row);
+      problems.push(row);
+    }
+  }
+
+  let analyticsPreview = { avgBudgetByType: [], timelineCount: 0 };
+  try {
+    const a = getAnalytics();
+    analyticsPreview = {
+      avgBudgetByType: (a.avgBudgetByType || []).slice(0, 5),
+      timelineCount: (a.purchaseToInstallDays || []).length,
+      costPerM2Count: (a.costPerM2 || []).length,
+    };
+  } catch {
+    /* ignore */
   }
 
   return {
@@ -329,6 +394,8 @@ export function getDashboard() {
     noPrice,
     noLink,
     problems,
+    groups: { publishCheck, needHelp, inactiveClient, stuckPurchase },
+    analyticsPreview,
     projects,
   };
 }

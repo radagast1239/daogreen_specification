@@ -2,6 +2,7 @@ import { uid } from "../store/helpers.js";
 import { defaultResponsible } from "./itemHelpers.js";
 import { hydrateLinePhoto } from "./photoHelpers.js";
 import { groupLabel, materialCompositionGroup } from "../../shared/stellageComposition.js";
+import { projectStellageLinesFromCatalog } from "./stellageCatalogConfig.js";
 
 export function blankLine(overrides = {}) {
   return {
@@ -240,7 +241,7 @@ export function buildProjectFromBuilder({ form, stellages, farmSections, general
   };
 }
 
-export function newStellageDraft(modules, materials, index) {
+export function newStellageDraft(modules, materials, index, stellageCatalogs = {}) {
   const stellageMods = modules.filter((m) => m.type === "stellage");
   const mod = stellageMods[0] || modules[0];
   return {
@@ -250,6 +251,8 @@ export function newStellageDraft(modules, materials, index) {
     tech: mod?.tech || "",
     name: `Стеллаж ${index}`,
     count: 1,
-    items: mod?.name ? catalogLinesForModule(materials, mod.name) : [],
+    items: mod?.id
+      ? projectStellageLinesFromCatalog(stellageCatalogs, mod.id, materials, mod.name)
+      : [],
   };
 }
