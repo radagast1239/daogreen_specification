@@ -9,6 +9,7 @@ import {
   itemsByResponsible,
   lineGross,
 } from "../../lib/itemHelpers.js";
+import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
 import { Progress, StatusChip, Empty } from "../../components/ui.jsx";
 import { downloadCSV, printPDF } from "../../lib/export.js";
 
@@ -81,6 +82,7 @@ export default function ClientProjectPage() {
     downloadCSV(
       `${project.name}_${name}`,
       items.map((i) => ({
+        Фото: absolutePhotoUrl(i.imageUrl || i.photoUrl),
         Категория: i.category,
         Модуль: i.module,
         Наименование: i.name,
@@ -324,7 +326,13 @@ function MergedClientTab({ project, items, onExport }) {
         </button>
       </div>
       {rows.map((r, i) => (
-        <div key={i} className="card card-item" style={{ gridTemplateColumns: "1fr" }}>
+        <div key={i} className="card card-item">
+          {r.imageUrl ? (
+            <img src={absolutePhotoUrl(r.imageUrl)} alt="" className="thumb-img" />
+          ) : (
+            <div className="thumb" style={{ fontSize: 28 }}>{(r.name || "?").charAt(0)}</div>
+          )}
+          <div style={{ minWidth: 0 }}>
           <strong>{r.name}</strong>
           <div className="muted" style={{ fontSize: 12.5 }}>
             <span className="num">{num(r.qty)}</span> {r.unit}
@@ -333,6 +341,7 @@ function MergedClientTab({ project, items, onExport }) {
           </div>
           <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
             {r.sources.map((s) => `${s.module} (${num(s.qty)})`).join(" · ")}
+          </div>
           </div>
         </div>
       ))}

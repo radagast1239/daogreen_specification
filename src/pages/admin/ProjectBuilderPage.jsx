@@ -179,7 +179,7 @@ export default function ProjectBuilderPage() {
         sectionName: sec.name,
         items: farmSectionLines[sec.id] || [],
       }));
-      const payload = buildProjectFromBuilder({ form, stellages, farmSections });
+      const payload = buildProjectFromBuilder({ form, stellages, farmSections, materials: state.materials });
       const project = await actions.projectCreate(payload);
       nav(`/project/${project.id}`);
     } catch (e) {

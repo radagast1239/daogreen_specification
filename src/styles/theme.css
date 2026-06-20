@@ -266,6 +266,16 @@ table.spec { width: 100%; border-collapse: collapse; font-size: 14px; }
   width: var(--thumb-size);
   height: var(--thumb-size);
 }
+.thumb {
+  border-radius: var(--radius-sm);
+  background: var(--brand-tint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--brand);
+  font-weight: 700;
+  flex-shrink: 0;
+}
 .spec td .thumb,
 .spec td .thumb-img,
 .spec td .thumb-img--sm {
@@ -309,4 +319,6 @@ table.spec { width: 100%; border-collapse: collapse; font-size: 14px; }
   body { background: #fff; }
   .shell { display: block; }
   .card, .panel { box-shadow: none; border-color: #ccc; }
+  .card-item { break-inside: avoid; }
+  .thumb-img, .card-item .thumb { width: 80px; height: 80px; }
 }

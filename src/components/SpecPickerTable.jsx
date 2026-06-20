@@ -7,7 +7,8 @@ import {
   lineToMaterialPayload,
   syncLineFromMaterial,
 } from "../lib/projectBuilder.js";
-import { photoSrc } from "../lib/api.js";
+import { photoSrc, api } from "../lib/api.js";
+import { linePhotoSrc, resolveLinePhoto } from "../lib/photoHelpers.js";
 import { Modal } from "./ui.jsx";
 
 function patchLine(lines, id, patch) {
@@ -79,6 +80,13 @@ export default function SpecPickerTable({
   const toggleLine = (ln, included) => {
     const patch = { included };
     if (included && !ln.qty) patch.qty = 1;
+    if (included && !ln.imageUrl && !ln.photoUrl && ln.materialId) {
+      const img = resolveLinePhoto(ln, materials);
+      if (img) {
+        patch.imageUrl = img;
+        patch.photoUrl = img;
+      }
+    }
     onChange(patchLine(lines, ln.id, patch));
   };
 
@@ -170,12 +178,13 @@ export default function SpecPickerTable({
           <table className="spec spec-picker">
             <thead>
               <tr>
+                <th style={{ width: 112 }}>Фото</th>
                 <th style={{ width: 40 }} title="Включить в спецификацию">✓</th>
-                <th style={{ minWidth: 220 }}>Наименование</th>
+                <th style={{ minWidth: 200 }}>Наименование</th>
                 <th style={{ width: 72 }}>Ед.</th>
                 <th className="right" style={{ width: 96 }}>Кол-во</th>
                 <th className="right" style={{ width: 110 }}>Цена, ₽</th>
-                <th style={{ minWidth: 140 }}>Ссылка</th>
+                <th style={{ minWidth: 120 }}>Ссылка</th>
                 <th style={{ width: 72 }} />
               </tr>
             </thead>
@@ -184,13 +193,42 @@ export default function SpecPickerTable({
                 <React.Fragment key={g}>
                   {g !== "other" && (
                     <tr>
-                      <td colSpan={7} className="spec-group-head">
+                      <td colSpan={8} className="spec-group-head">
                         {groupLabel(g)}
                       </td>
                     </tr>
                   )}
-                  {grpLines.map((ln) => (
+                  {grpLines.map((ln) => {
+                    const src = linePhotoSrc(ln, materials);
+                    return (
                     <tr key={ln.id} className={ln.included ? "" : "spec-row-off"}>
+                      <td className="spec-photo">
+                        {src ? (
+                          <img src={src} alt="" className="thumb-img" />
+                        ) : (
+                          <div className="thumb" style={{ fontSize: 22 }}>
+                            {(ln.name || "?").trim().charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <label className="btn btn-ghost btn-sm" style={{ marginTop: 4, fontSize: 11, padding: "2px 6px" }} title="Загрузить фото">
+                          📷
+                          <input
+                            type="file"
+                            accept="image/*"
+                            hidden
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              try {
+                                const { url } = await api.uploadPhoto(file);
+                                onChange(patchLine(lines, ln.id, { imageUrl: url, photoUrl: url }));
+                              } catch (err) {
+                                alert(err.message || "Ошибка загрузки");
+                              }
+                            }}
+                          />
+                        </label>
+                      </td>
                       <td className="center">
                         <input
                           type="checkbox"
@@ -272,7 +310,8 @@ export default function SpecPickerTable({
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </React.Fragment>
               ))}
             </tbody>

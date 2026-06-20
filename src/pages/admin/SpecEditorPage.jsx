@@ -11,6 +11,7 @@ import {
 } from "../../store/helpers.js";
 import { SPECIALIST_MAP } from "../../data/modules.js";
 import { VAT_RATES, lineGross, DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
+import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
 import { clientLink, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { Progress, Stat, Empty } from "../../components/ui.jsx";
@@ -58,6 +59,7 @@ export default function SpecEditorPage() {
 
   const exportSpec = () => {
     const rows = project.items.map((it) => ({
+      Фото: absolutePhotoUrl(it.imageUrl || it.photoUrl),
       Модуль: it.module,
       Категория: it.category,
       Наименование: it.name,

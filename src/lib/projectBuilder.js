@@ -1,5 +1,6 @@
 import { uid } from "../store/helpers.js";
 import { defaultResponsible } from "./itemHelpers.js";
+import { hydrateLinePhoto } from "./photoHelpers.js";
 import { groupLabel, materialCompositionGroup } from "../../shared/stellageComposition.js";
 
 export function blankLine(overrides = {}) {
@@ -138,10 +139,15 @@ export function lineToProjectItem(line, section, sortOrder) {
   };
 }
 
-export function buildProjectFromBuilder({ form, stellages, farmSections, generalLines }) {
+export function buildProjectFromBuilder({ form, stellages, farmSections, generalLines, materials = [] }) {
   const items = [];
   const stellageConfigs = [];
   let order = 0;
+
+  const pushLine = (line, section) => {
+    const hydrated = hydrateLinePhoto(line, materials);
+    items.push(lineToProjectItem(hydrated, section, order++));
+  };
 
   for (const st of stellages) {
     const section = st.name?.trim() || st.moduleName;
@@ -160,7 +166,7 @@ export function buildProjectFromBuilder({ form, stellages, farmSections, general
       })),
     });
     for (const line of activeLines(st.items)) {
-      items.push(lineToProjectItem(line, section, order++));
+      pushLine(line, section);
     }
   }
 
@@ -168,13 +174,13 @@ export function buildProjectFromBuilder({ form, stellages, farmSections, general
     for (const sec of farmSections) {
       const sectionName = sec.sectionName || sec.name;
       for (const line of activeLines(sec.items)) {
-        items.push(lineToProjectItem(line, sectionName, order++));
+        pushLine(line, sectionName);
       }
     }
   } else if (generalLines?.length) {
     const generalSection = "Общая закупка на ферму";
     for (const line of activeLines(generalLines)) {
-      items.push(lineToProjectItem(line, generalSection, order++));
+      pushLine(line, generalSection);
     }
   }
 
