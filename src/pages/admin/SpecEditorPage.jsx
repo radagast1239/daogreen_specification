@@ -214,16 +214,15 @@ function SpecTab({ project, patchItem, actions }) {
               <tbody>
                 {items.map((it) => (
                   <tr key={it.id} className={!it.visible || !it.enabled ? "row-hidden" : ""}>
-                    <td>
+                    <td style={{ width: 64 }}>
                       {photoSrc(it.imageUrl || it.photoUrl) ? (
                         <img
                           src={photoSrc(it.imageUrl || it.photoUrl)}
                           alt=""
-                          className="thumb-img"
-                          style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 6 }}
+                          className="thumb-img thumb-img--sm"
                         />
                       ) : (
-                        <div className="thumb" style={{ width: 36, height: 36, fontSize: 14 }}>
+                        <div className="thumb thumb-img--sm" style={{ fontSize: 16 }}>
                           {(it.name || "?").trim().charAt(0).toUpperCase()}
                         </div>
                       )}

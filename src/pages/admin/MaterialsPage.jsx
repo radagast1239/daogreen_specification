@@ -136,9 +136,9 @@ export default function MaterialsPage() {
               <tbody>
                 {filtered.map((m) => (
                   <tr key={m.id}>
-                    <td style={{ width: 40 }}>
+                    <td style={{ width: 56 }}>
                       {(m.imageUrl || m.photoUrl) ? (
-                        <img src={m.imageUrl || m.photoUrl} alt="" className="thumb-img" style={{ width: 32, height: 32 }} />
+                        <img src={m.imageUrl || m.photoUrl} alt="" className="thumb-img thumb-img--sm" />
                       ) : (
                         <span className="muted">—</span>
                       )}
