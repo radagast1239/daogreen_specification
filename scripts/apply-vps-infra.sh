@@ -20,7 +20,8 @@ nginx -t
 systemctl reload nginx
 
 echo "=== Cron: backup 03:00, health every 5 min ==="
-chmod +x "$APP_DIR/scripts/backup-cron.sh" "$APP_DIR/scripts/health-monitor.sh"
+chmod +x "$APP_DIR/scripts/backup-cron.sh" "$APP_DIR/scripts/health-monitor.sh" \
+  "$APP_DIR/scripts/setup-ssl.sh" "$APP_DIR/scripts/setup-backup-env.sh" 2>/dev/null || true
 CRON_FILE="/etc/cron.d/daogreen-spec"
 cat > "$CRON_FILE" <<EOF
 SHELL=/bin/bash
