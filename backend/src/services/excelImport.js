@@ -80,16 +80,14 @@ export function parseExcelBuffer(buffer, moduleName = "Импорт") {
       const name = cellStr(row[ci.name]);
       if (!name) continue;
 
-      const qty = ci.qty >= 0 ? Number(String(row[ci.qty]).replace(",", ".")) || 0 : 1;
-      const price = ci.price >= 0 ? Number(String(row[ci.price]).replace(",", ".")) || 0 : 0;
-      const hidden = qty === 0;
+      const qty = ci.qty >= 0 ? Number(String(row[ci.qty]).replace(",", ".")) || 0 : 0;
 
       results.push({
         id: uid("m"),
         name,
         unit: ci.unit >= 0 ? cellStr(row[ci.unit]) || "шт." : "шт.",
-        basePrice: price,
-        defaultQty: qty || 0,
+        basePrice: ci.price >= 0 ? Number(String(row[ci.price]).replace(",", ".")) || 0 : 0,
+        defaultQty: 0,
         module: mod,
         category: ci.category >= 0 ? cellStr(row[ci.category]) || "Прочее" : "Прочее",
         subcategory: "",
@@ -98,16 +96,19 @@ export function parseExcelBuffer(buffer, moduleName = "Импорт") {
         link: ci.link >= 0 ? cellStr(row[ci.link]) : "",
         linkAlt: "",
         photoUrl: "",
+        imageUrl: "",
         vatRate: 0,
         vatIncluded: false,
         clientNote: ci.comment >= 0 ? cellStr(row[ci.comment]) : "",
         techNote: "",
         internalNote: "",
-        status: hidden ? "active" : "active",
+        status: "active",
         needsApproval: false,
         isConsumable: false,
         isSparePart: false,
-        clientVisibleDefault: !hidden,
+        clientVisibleDefault: true,
+        _sheet: sheetName,
+        _row: r,
       });
     }
   }

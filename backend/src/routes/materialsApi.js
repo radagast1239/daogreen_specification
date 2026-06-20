@@ -15,7 +15,13 @@ import {
   upsertModule,
 } from "./materials.js";
 import { parseExcelBuffer } from "../services/excelImport.js";
+import {
+  attachImagesToMaterials,
+  extractExcelImages,
+  linkImagesToExistingMaterials,
+} from "../services/excelImages.js";
 import { bulkMatchUploads, importPhotosFromDir } from "../services/photoImport.js";
+import XLSX from "xlsx";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, "../../uploads");
@@ -68,13 +74,38 @@ router.delete("/:id", (req, res) => {
   res.status(204).end();
 });
 
-router.post("/import/excel", memUpload.single("file"), (req, res) => {
+router.post("/import/excel", memUpload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file" });
   const moduleName = req.body.module || "Импорт";
   const mode = req.body.mode || "merge";
-  const result = parseExcelBuffer(req.file.buffer, moduleName);
-  const count = bulkUpsertMaterials(result.materials, mode);
-  res.json({ ...result, imported: count });
+  const withPhotos = req.body.photos !== "false";
+  try {
+    const result = parseExcelBuffer(req.file.buffer, moduleName);
+    let photosLinked = 0;
+    if (withPhotos) {
+      const wb = XLSX.read(req.file.buffer, { type: "buffer" });
+      const images = await extractExcelImages(req.file.buffer, wb.SheetNames);
+      photosLinked = attachImagesToMaterials(result.materials, images, uploadDir);
+    }
+    const count = bulkUpsertMaterials(result.materials, mode);
+    res.json({ ...result, imported: count, photosLinked });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.post("/import/excel-photos", memUpload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file" });
+  try {
+    const wb = XLSX.read(req.file.buffer, { type: "buffer" });
+    const parsed = parseExcelBuffer(req.file.buffer, req.body.module || "Импорт");
+    const images = await extractExcelImages(req.file.buffer, wb.SheetNames);
+    const materials = listMaterials();
+    const result = linkImagesToExistingMaterials(parsed.materials, images, materials, uploadDir, updateMaterial);
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 router.post("/upload-photo", upload.single("file"), (req, res) => {

@@ -77,6 +77,19 @@ export const api = {
     return data;
   },
   importPhotosFolder: () => request("/api/materials/import-photos-folder", { method: "POST" }),
+  importExcelPhotos: async (file, { module } = {}) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (module) fd.append("module", module);
+    const res = await fetch(`${API}/api/materials/import/excel-photos`, {
+      method: "POST",
+      headers: { "X-Admin-Key": getAdminKey() },
+      body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Import failed");
+    return data;
+  },
 
   getProjects: () => request("/api/projects"),
   getDashboard: () => request("/api/projects/dashboard/summary"),

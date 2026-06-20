@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useStore } from "../../store/StoreContext.jsx";
 import { CATEGORIES } from "../../data/modules.js";
-import { money } from "../../store/helpers.js";
 import { api, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { Modal, Empty } from "../../components/ui.jsx";
@@ -19,7 +18,7 @@ const blank = {
   name: "",
   unit: "шт.",
   basePrice: 0,
-  defaultQty: 1,
+  defaultQty: 0,
   module: "Общая закупка на ферму",
   category: "Прочее",
   subcategory: "",
@@ -44,6 +43,7 @@ export default function MaterialsPage() {
   const [modF, setModF] = useState("");
   const [catF, setCatF] = useState("");
   const [editing, setEditing] = useState(null);
+  const [priceDraft, setPriceDraft] = useState({});
 
   const modules = [...new Set(state.materials.map((m) => m.module))];
 
@@ -59,9 +59,19 @@ export default function MaterialsPage() {
 
   const save = async () => {
     if (!editing.name?.trim()) return;
-    if (editing.id) await actions.materialUpdate(editing.id, editing);
-    else await actions.materialAdd(editing);
+    const payload = { ...editing, defaultQty: 0 };
+    if (payload.id) await actions.materialUpdate(payload.id, payload);
+    else await actions.materialAdd(payload);
     setEditing(null);
+  };
+
+  const patchPrice = async (id, basePrice) => {
+    await actions.materialUpdate(id, { basePrice: Number(basePrice) || 0 });
+    setPriceDraft((d) => {
+      const next = { ...d };
+      delete next[id];
+      return next;
+    });
   };
 
   const exportAll = () =>
@@ -71,7 +81,6 @@ export default function MaterialsPage() {
         Наименование: m.name,
         Ед: m.unit,
         Цена: m.basePrice,
-        КолПоУмолч: m.defaultQty,
         Модуль: m.module,
         Категория: m.category,
         Поставщик: m.supplier,
@@ -83,14 +92,14 @@ export default function MaterialsPage() {
     <>
       <PageHeader
         title="База материалов"
-        sub={`${state.materials.length} позиций · ${modules.length} модулей`}
+        sub="Справочник позиций и цен. Количество задаётся только в смете проекта — не здесь."
         actions={
           <>
             <button className="btn" onClick={exportAll}>
               Excel ↓
             </button>
             <button className="btn btn-primary" onClick={() => setEditing({ ...blank })}>
-              ＋ Материал
+              ＋ Позиция
             </button>
           </>
         }
@@ -122,14 +131,12 @@ export default function MaterialsPage() {
             <table className="spec">
               <thead>
                 <tr>
-                  <th></th>
+                  <th>Фото</th>
                   <th>Наименование</th>
                   <th>Модуль</th>
-                  <th>Категория</th>
                   <th>Ед</th>
-                  <th className="right">Кол.</th>
-                  <th className="right">Цена</th>
-                  <th>Поставщик</th>
+                  <th className="right">Цена, ₽</th>
+                  <th>Ссылка</th>
                   <th></th>
                 </tr>
               </thead>
@@ -138,23 +145,36 @@ export default function MaterialsPage() {
                   <tr key={m.id}>
                     <td className="spec-photo">
                       {(m.imageUrl || m.photoUrl) ? (
-                        <img src={m.imageUrl || m.photoUrl} alt="" className="thumb-img" />
+                        <img src={photoSrc(m.imageUrl || m.photoUrl)} alt="" className="thumb-img" />
                       ) : (
-                        <span className="muted">—</span>
+                        <span className="muted" style={{ fontSize: 11 }}>нет фото</span>
                       )}
                     </td>
                     <td style={{ minWidth: 220 }} className="material-name">{m.name}</td>
-                    <td className="muted" style={{ fontSize: 12 }}>
-                      {m.module}
+                    <td className="muted" style={{ fontSize: 12 }}>{m.module}</td>
+                    <td>{m.unit}</td>
+                    <td className="right">
+                      <input
+                        className="spec-cell-input spec-cell-input--num"
+                        style={{ maxWidth: 110, marginLeft: "auto" }}
+                        type="number"
+                        min={0}
+                        value={priceDraft[m.id] ?? m.basePrice}
+                        onChange={(e) => setPriceDraft((d) => ({ ...d, [m.id]: e.target.value }))}
+                        onBlur={() => {
+                          if (priceDraft[m.id] == null) return;
+                          patchPrice(m.id, priceDraft[m.id]);
+                        }}
+                      />
                     </td>
                     <td>
-                      <span className="tag-cat">{m.category}</span>
-                    </td>
-                    <td>{m.unit}</td>
-                    <td className="right num">{m.defaultQty}</td>
-                    <td className="right num">{money(m.basePrice)}</td>
-                    <td className="muted" style={{ fontSize: 12 }}>
-                      {m.supplier || "—"}
+                      {m.link ? (
+                        <a href={m.link} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
+                          ↗
+                        </a>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
                     </td>
                     <td className="row" style={{ gap: 2 }}>
                       <button className="btn btn-ghost btn-sm" onClick={() => setEditing({ ...m })}>
@@ -177,7 +197,7 @@ export default function MaterialsPage() {
 
       {editing && (
         <Modal
-          title={editing.id ? "Редактировать" : "Новый материал"}
+          title={editing.id ? "Редактировать позицию" : "Новая позиция"}
           onClose={() => setEditing(null)}
           footer={
             <>
@@ -190,25 +210,16 @@ export default function MaterialsPage() {
             </>
           }
         >
+          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+            Это справочник. Количество для сметы выбирается при сборке проекта.
+          </p>
           <div className="field">
             <label>Наименование *</label>
             <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
           </div>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <div className="form-grid">
             <div className="field">
-              <label>Единица</label>
-              <input value={editing.unit} onChange={(e) => setEditing({ ...editing, unit: e.target.value })} />
-            </div>
-            <div className="field">
-              <label>Кол-во по умолчанию</label>
-              <input
-                type="number"
-                value={editing.defaultQty}
-                onChange={(e) => setEditing({ ...editing, defaultQty: Number(e.target.value) || 0 })}
-              />
-            </div>
-            <div className="field">
-              <label>Цена</label>
+              <label>Цена, ₽</label>
               <input
                 type="number"
                 value={editing.basePrice}
@@ -216,14 +227,8 @@ export default function MaterialsPage() {
               />
             </div>
             <div className="field">
-              <label>Тип</label>
-              <select value={editing.itemType} onChange={(e) => setEditing({ ...editing, itemType: e.target.value })}>
-                {ITEM_TYPES.map(([v, l]) => (
-                  <option key={v} value={v}>
-                    {l}
-                  </option>
-                ))}
-              </select>
+              <label>Единица</label>
+              <input value={editing.unit} onChange={(e) => setEditing({ ...editing, unit: e.target.value })} />
             </div>
             <div className="field">
               <label>Категория</label>
@@ -234,24 +239,32 @@ export default function MaterialsPage() {
               </select>
             </div>
             <div className="field">
-              <label>Поставщик</label>
-              <input value={editing.supplier} onChange={(e) => setEditing({ ...editing, supplier: e.target.value })} />
+              <label>Тип</label>
+              <select value={editing.itemType} onChange={(e) => setEditing({ ...editing, itemType: e.target.value })}>
+                {ITEM_TYPES.map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
             </div>
           </div>
           <div className="field">
-            <label>Модуль</label>
+            <label>Модуль / раздел</label>
             <input value={editing.module} onChange={(e) => setEditing({ ...editing, module: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Поставщик</label>
+            <input value={editing.supplier} onChange={(e) => setEditing({ ...editing, supplier: e.target.value })} />
           </div>
           <div className="field">
             <label>Ссылка на товар</label>
             <input value={editing.link} onChange={(e) => setEditing({ ...editing, link: e.target.value })} />
           </div>
           <div className="field">
-            <label>URL фото товара</label>
+            <label>Фото</label>
             <input
               value={editing.imageUrl || editing.photoUrl || ""}
               onChange={(e) => setEditing({ ...editing, imageUrl: e.target.value, photoUrl: e.target.value })}
-              placeholder="https://... или загрузите файл"
+              placeholder="URL или загрузите файл"
             />
             <div className="row" style={{ marginTop: 8, gap: 8 }}>
               <label className="btn btn-sm">
@@ -273,7 +286,8 @@ export default function MaterialsPage() {
               <img
                 src={photoSrc(editing.imageUrl || editing.photoUrl)}
                 alt=""
-                style={{ width: 100, height: 100, marginTop: 8, borderRadius: 8, objectFit: "cover" }}
+                className="thumb-img"
+                style={{ marginTop: 8 }}
               />
             )}
           </div>
@@ -288,10 +302,6 @@ export default function MaterialsPage() {
           <div className="field">
             <label>Пояснение клиенту</label>
             <textarea rows={2} value={editing.clientNote} onChange={(e) => setEditing({ ...editing, clientNote: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>Технический комментарий</label>
-            <textarea rows={2} value={editing.techNote} onChange={(e) => setEditing({ ...editing, techNote: e.target.value })} />
           </div>
         </Modal>
       )}

@@ -32,7 +32,7 @@ export function lineToMaterialPayload(line, moduleName) {
     module: moduleName,
     category: line.category || "Прочее",
     subcategory: line.subcategory || "",
-    defaultQty: Number(line.qty) || 1,
+    defaultQty: 0,
     basePrice: Number(line.price) || 0,
     link: line.link || "",
     linkAlt: line.linkAlt || "",
@@ -75,7 +75,7 @@ export function activeLines(lines) {
 
 export function lineFromMaterial(mat, overrides = {}) {
   const img = mat.imageUrl || mat.photoUrl || "";
-  const qty = overrides.qty ?? (Number(mat.defaultQty) || 0);
+  const qty = overrides.qty ?? 0;
   return blankLine({
     materialId: mat.id,
     name: mat.name,

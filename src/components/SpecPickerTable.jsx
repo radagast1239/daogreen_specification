@@ -364,7 +364,7 @@ export default function SpecPickerTable({
                 )}
                 <span style={{ flex: 1, fontSize: 13 }}>{m.name}</span>
                 <span className="muted num" style={{ fontSize: 12 }}>
-                  {m.defaultQty} {m.unit}
+                  {m.unit}
                 </span>
               </button>
             ))}
