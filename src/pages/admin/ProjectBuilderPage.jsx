@@ -1,16 +1,24 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
 import { FARM_TYPES } from "../../data/modules.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
+import { api } from "../../lib/api.js";
+import { orderedFarmSections } from "../../lib/farmSectionOrder.js";
 import {
   activeLines,
   buildProjectFromBuilder,
   catalogLinesForModule,
   newStellageDraft,
 } from "../../lib/projectBuilder.js";
+import {
+  applyFarmPreset,
+  draftFromStellagePreset,
+  emptyFarmSectionsState,
+  presetPayloadFromDraft,
+} from "../../lib/presetHelpers.js";
 
 const STEPS = [
   { id: "basics", label: "1. Проект" },
@@ -25,6 +33,8 @@ export default function ProjectBuilderPage() {
 
   const [step, setStep] = useState("basics");
   const [saving, setSaving] = useState(false);
+  const [presets, setPresets] = useState([]);
+  const [sectionOrder, setSectionOrder] = useState("");
 
   const [form, setForm] = useState({
     name: "",
@@ -42,11 +52,21 @@ export default function ProjectBuilderPage() {
 
   const [stellages, setStellages] = useState([]);
   const [draft, setDraft] = useState(null);
-  const [generalLines, setGeneralLines] = useState([]);
-  const [generalLoaded, setGeneralLoaded] = useState(false);
+  const [farmSectionLines, setFarmSectionLines] = useState({});
+  const [activeFarmSection, setActiveFarmSection] = useState(null);
+  const [farmLoaded, setFarmLoaded] = useState(false);
 
+  const sections = useMemo(() => orderedFarmSections(sectionOrder), [sectionOrder]);
   const stellageMods = state.modules.filter((m) => m.type === "stellage");
+  const stellagePresets = presets.filter((p) => p.presetType === "stellage");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    Promise.all([api.getPresets(), api.getSettings()]).then(([p, s]) => {
+      setPresets(p);
+      setSectionOrder(s.farmSectionOrder || "");
+    });
+  }, []);
 
   useEffect(() => {
     if (step === "stellages" && !draft) {
@@ -55,11 +75,12 @@ export default function ProjectBuilderPage() {
   }, [step, draft, state.modules, state.materials, stellages.length]);
 
   useEffect(() => {
-    if (step === "general" && !generalLoaded) {
-      setGeneralLines(catalogLinesForModule(state.materials, "Общая закупка на ферму"));
-      setGeneralLoaded(true);
+    if (step === "general" && !farmLoaded && sections.length) {
+      setFarmSectionLines(emptyFarmSectionsState(state.materials, sections));
+      setActiveFarmSection(sections[0].id);
+      setFarmLoaded(true);
     }
-  }, [step, generalLoaded, state.materials]);
+  }, [step, farmLoaded, sections, state.materials]);
 
   const changeDraftModule = (moduleId) => {
     const mod = state.modules.find((m) => m.id === moduleId);
@@ -70,17 +91,39 @@ export default function ProjectBuilderPage() {
         moduleId: mod.id,
         moduleName: mod.name,
         tech: mod.tech || "",
+        presetId: null,
         items: catalogLinesForModule(state.materials, mod.name),
       }));
     if (draft?.items?.some((ln) => ln.included)) {
-      if (!window.confirm("Сменить тип стеллажа? Текущие отметки и правки будут заменены списком из базы.")) return;
+      if (!window.confirm("Сменить тип? Текущие отметки будут заменены списком из базы.")) return;
     }
     reload();
   };
 
+  const applyStellagePreset = (preset) => {
+    if (draft?.items?.some((ln) => ln.included) && !window.confirm("Загрузить пресет? Текущая сборка будет заменена.")) return;
+    setDraft(draftFromStellagePreset(preset, preset.name, stellages.length + 1));
+  };
+
+  const saveDraftAsPreset = async () => {
+    const name = window.prompt("Название конфигурации стеллажа (пресет):", draft?.name || "");
+    if (!name?.trim()) return;
+    if (countIncluded(draft.items) === 0) {
+      alert("Отметьте хотя бы одну позицию.");
+      return;
+    }
+    try {
+      await api.createPreset(presetPayloadFromDraft(draft, name));
+      setPresets(await api.getPresets());
+      alert("Пресет сохранён. Найдёте его в разделе «Пресеты».");
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
   const finishStellage = () => {
     if (!draft?.name?.trim()) {
-      alert("Укажите название стеллажа.");
+      alert("Укажите название стеллажа в проекте.");
       return;
     }
     if (countIncluded(draft.items) === 0) {
@@ -110,15 +153,33 @@ export default function ProjectBuilderPage() {
     return m;
   };
 
+  const farmPresetList = presets.filter(
+    (p) => p.presetType === "farm_section" && p.sectionId === activeFarmSection
+  );
+
+  const applyFarmSectionPreset = (preset) => {
+    if (!activeFarmSection) return;
+    const cur = farmSectionLines[activeFarmSection] || [];
+    if (cur.some((ln) => ln.included) && !window.confirm("Заменить позиции раздела пресетом?")) return;
+    setFarmSectionLines((s) => applyFarmPreset(s, activeFarmSection, preset));
+  };
+
+  const farmHasItems = Object.values(farmSectionLines).some((lines) => activeLines(lines).length > 0);
+
   const canCreate =
     form.name.trim() &&
-    (stellages.some((s) => activeLines(s.items).length > 0) || activeLines(generalLines).length > 0);
+    (stellages.some((s) => activeLines(s.items).length > 0) || farmHasItems);
 
   const create = async () => {
     if (!canCreate) return;
     setSaving(true);
     try {
-      const payload = buildProjectFromBuilder({ form, stellages, generalLines });
+      const farmSections = sections.map((sec) => ({
+        sectionId: sec.id,
+        sectionName: sec.name,
+        items: farmSectionLines[sec.id] || [],
+      }));
+      const payload = buildProjectFromBuilder({ form, stellages, farmSections });
       const project = await actions.projectCreate(payload);
       nav(`/project/${project.id}`);
     } catch (e) {
@@ -128,19 +189,26 @@ export default function ProjectBuilderPage() {
     }
   };
 
+  const activeSection = sections.find((s) => s.id === activeFarmSection);
+
   return (
     <>
       <PageHeader
-        title="Новый проект — сборка по позициям"
-        sub="Выберите стеллаж, отметьте галочками что входит, введите количество и цену прямо в таблице. Без отдельного редактирования."
+        title="Новый проект"
+        sub="Выберите готовый пресет или соберите вручную. Пресеты настраиваются в разделе «Пресеты»."
         actions={
-          <Link to="/new/template" className="btn btn-sm">
-            Быстро из шаблона
-          </Link>
+          <>
+            <Link to="/modules" className="btn btn-sm">
+              Пресеты
+            </Link>
+            <Link to="/new/template" className="btn btn-sm">
+              Быстро из шаблона
+            </Link>
+          </>
         }
       />
 
-      <div className="toolbar" style={{ marginBottom: 16, flexWrap: "wrap", gap: 6 }}>
+      <div className="step-tabs">
         {STEPS.map((s) => (
           <button
             key={s.id}
@@ -154,7 +222,7 @@ export default function ProjectBuilderPage() {
       </div>
 
       {step === "basics" && (
-        <div className="card" style={{ maxWidth: 560 }}>
+        <div className="card" style={{ padding: 20 }}>
           <h3 style={{ marginTop: 0 }}>Данные проекта</h3>
           <div className="form-grid">
             <label>
@@ -173,9 +241,7 @@ export default function ProjectBuilderPage() {
               Тип фермы
               <select value={form.type} onChange={(e) => set("type", e.target.value)}>
                 {FARM_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
+                  <option key={t} value={t}>{t}</option>
                 ))}
               </select>
             </label>
@@ -203,54 +269,61 @@ export default function ProjectBuilderPage() {
       {step === "stellages" && draft && (
         <div>
           {stellages.length > 0 && (
-            <div className="card" style={{ marginBottom: 16, padding: 12 }}>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-                Готовые стеллажи ({stellages.length})
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {stellages.map((st, i) => (
-                  <div key={st.id} className="row" style={{ justifyContent: "space-between", gap: 8 }}>
-                    <span>
-                      <strong>{st.name || `Стеллаж ${i + 1}`}</strong>
-                      <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
-                        {st.moduleName} · {countIncluded(st.items)} поз.
-                      </span>
+            <div className="card" style={{ marginBottom: 14, padding: 12 }}>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>В проекте ({stellages.length})</div>
+              {stellages.map((st, i) => (
+                <div key={st.id} className="row between" style={{ marginBottom: 6 }}>
+                  <span>
+                    <strong>{st.name}</strong>
+                    <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
+                      {st.moduleName} · {countIncluded(st.items)} поз.
+                      {st.presetId ? " · пресет" : ""}
                     </span>
-                    <span className="row" style={{ gap: 6 }}>
-                      <button type="button" className="btn btn-sm" onClick={() => editStellage(st.id)}>
-                        Изменить
-                      </button>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeStellage(st.id)}>
-                        ✕
-                      </button>
-                    </span>
-                  </div>
+                  </span>
+                  <span className="row" style={{ gap: 6 }}>
+                    <button type="button" className="btn btn-sm" onClick={() => editStellage(st.id)}>Изменить</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeStellage(st.id)}>✕</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {stellagePresets.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>Готовые конфигурации</div>
+              <div className="preset-grid">
+                {stellagePresets.map((p) => (
+                  <button key={p.id} type="button" className="preset-card" onClick={() => applyStellagePreset(p)}>
+                    <strong>{p.name}</strong>
+                    <span className="muted">{p.moduleName} · {p.items.filter((i) => i.included).length} поз.</span>
+                  </button>
                 ))}
               </div>
             </div>
           )}
 
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>Сборка стеллажа</h3>
-            <div className="form-grid" style={{ marginBottom: 4 }}>
+          <div className="card" style={{ padding: 16, marginBottom: 12 }}>
+            <h3 style={{ marginTop: 0, fontSize: 15 }}>Стеллаж в проекте</h3>
+            <div className="form-grid">
               <label>
-                Название
+                Название в проекте
                 <input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
               </label>
               <label>
-                Тип стеллажа
+                Тип
                 <select value={draft.moduleId} onChange={(e) => changeDraftModule(e.target.value)}>
                   {stellageMods.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
+                    <option key={m.id} value={m.id}>{m.name}</option>
                   ))}
                 </select>
               </label>
             </div>
-            <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>
-              Отметьте ✓ что входит в этот стеллаж. Меняйте название, количество и цену прямо в ячейках.
-            </p>
+            <div className="toolbar" style={{ marginTop: 10 }}>
+              <button type="button" className="btn btn-sm" onClick={saveDraftAsPreset}>
+                💾 Сохранить как пресет
+              </button>
+            </div>
           </div>
 
           <SpecPickerTable
@@ -258,18 +331,15 @@ export default function ProjectBuilderPage() {
             onChange={(items) => setDraft((d) => ({ ...d, items }))}
             materials={state.materials}
             catalogModule={draft.moduleName}
-            catalogLabel="позицию из базы"
+            catalogLabel="позицию"
             onSaveMaterial={saveMaterial}
-            emptyHint="Для выбранного типа в базе пока нет позиций — добавьте новую в базу."
           />
 
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button type="button" className="btn btn-primary" onClick={finishStellage}>
               ✓ Стеллаж готов — следующий
             </button>
-            <button type="button" className="btn" onClick={() => setStep("basics")}>
-              ← Назад
-            </button>
+            <button type="button" className="btn" onClick={() => setStep("basics")}>← Назад</button>
             <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={() => setStep("general")}>
               Ферма целиком →
             </button>
@@ -277,61 +347,81 @@ export default function ProjectBuilderPage() {
         </div>
       )}
 
-      {step === "general" && (
+      {step === "general" && activeSection && (
         <div>
-          <div className="card" style={{ marginBottom: 12, padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Общая спецификация фермы</h3>
-            <p className="muted" style={{ fontSize: 13, margin: 0 }}>
-              Насосы, ёмкости, магистрали, электрика — отметьте галочками, введите количество и цены. Всё сохраняется в проект как есть.
-            </p>
+          <div className="farm-layout">
+            <nav className="section-tabs">
+              {sections.map((sec) => (
+                <button
+                  key={sec.id}
+                  type="button"
+                  className={sec.id === activeFarmSection ? "active" : ""}
+                  onClick={() => setActiveFarmSection(sec.id)}
+                >
+                  {sec.name}
+                  <span className="muted" style={{ display: "block", fontWeight: 400, fontSize: 11, marginTop: 2 }}>
+                    {countIncluded(farmSectionLines[sec.id] || [])} поз.
+                  </span>
+                </button>
+              ))}
+            </nav>
+
+            <div>
+              <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+                <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>{activeSection.name}</h3>
+                <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+                  Отметьте позиции, введите количество и цены. Можно загрузить сохранённый пресет раздела.
+                </p>
+              </div>
+
+              {farmPresetList.length > 0 && (
+                <div className="preset-grid" style={{ marginBottom: 12 }}>
+                  {farmPresetList.map((p) => (
+                    <button key={p.id} type="button" className="preset-card" onClick={() => applyFarmSectionPreset(p)}>
+                      <strong>{p.name}</strong>
+                      <span className="muted">{p.items.filter((i) => i.included).length} поз.</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <SpecPickerTable
+                lines={farmSectionLines[activeFarmSection] || []}
+                onChange={(lines) => setFarmSectionLines((s) => ({ ...s, [activeFarmSection]: lines }))}
+                materials={state.materials}
+                catalogModule={activeSection.module}
+                catalogLabel="позицию"
+                onSaveMaterial={saveMaterial}
+              />
+            </div>
           </div>
 
-          <SpecPickerTable
-            lines={generalLines}
-            onChange={setGeneralLines}
-            materials={state.materials}
-            catalogModule="Общая закупка на ферму"
-            catalogLabel="позицию"
-            onSaveMaterial={saveMaterial}
-            emptyHint="Загрузка позиций из базы…"
-          />
-
           <div className="toolbar" style={{ marginTop: 16 }}>
-            <button type="button" className="btn" onClick={() => setStep("stellages")}>
-              ← Стеллажи
-            </button>
+            <button type="button" className="btn" onClick={() => setStep("stellages")}>← Стеллажи</button>
             <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setStep("review")}>
-              Проверить и создать →
+              Проверить →
             </button>
           </div>
         </div>
       )}
 
       {step === "review" && (
-        <div className="card" style={{ maxWidth: 640 }}>
+        <div className="card" style={{ padding: 20 }}>
           <h3 style={{ marginTop: 0 }}>Итого</h3>
-          <ul style={{ fontSize: 14, lineHeight: 1.8 }}>
-            <li>
-              <strong>{form.name}</strong>
-              {form.client ? ` · ${form.client}` : ""}
-            </li>
-            <li>
-              Стеллажей: <strong>{stellages.length}</strong> (
-              {stellages.reduce((n, s) => n + activeLines(s.items).length, 0)} поз.)
-            </li>
-            <li>
-              Общая спецификация: <strong>{activeLines(generalLines).length}</strong> поз.
-            </li>
+          <ul style={{ fontSize: 14, lineHeight: 1.9 }}>
+            <li><strong>{form.name}</strong>{form.client ? ` · ${form.client}` : ""}</li>
+            <li>Стеллажей: <strong>{stellages.length}</strong></li>
+            {sections.map((sec) => (
+              <li key={sec.id}>
+                {sec.name}: <strong>{activeLines(farmSectionLines[sec.id] || []).length}</strong> поз.
+              </li>
+            ))}
           </ul>
           {!canCreate && (
-            <p style={{ color: "var(--danger)", fontSize: 13 }}>
-              Нужно название проекта и хотя бы одна отмеченная позиция.
-            </p>
+            <p style={{ color: "var(--danger)", fontSize: 13 }}>Нужно название и хотя бы одна позиция.</p>
           )}
           <div className="toolbar" style={{ marginTop: 16 }}>
-            <button type="button" className="btn" onClick={() => setStep("general")}>
-              ← Назад
-            </button>
+            <button type="button" className="btn" onClick={() => setStep("general")}>← Назад</button>
             <button type="button" className="btn btn-primary" disabled={!canCreate || saving} onClick={create}>
               {saving ? "Создание…" : "Создать проект"}
             </button>

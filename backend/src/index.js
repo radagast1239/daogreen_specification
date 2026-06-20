@@ -25,6 +25,7 @@ startDbBackupLoop(dbPath);
 const { default: materialsApi } = await import("./routes/materialsApi.js");
 const { default: projectsApi, clientRouter } = await import("./routes/projects.js");
 const { default: adminApi } = await import("./routes/admin.js");
+const { default: presetsApi } = await import("./routes/presets.js");
 
 const isProd = process.env.NODE_ENV === "production";
 const corsOrigins = process.env.CORS_ORIGIN?.split(",").filter(Boolean);
@@ -58,6 +59,7 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/materials", adminAuth, materialsApi);
 app.use("/api/projects", adminAuth, projectsApi);
+app.use("/api/presets", adminAuth, presetsApi);
 app.use("/api/admin", adminAuth, adminApi);
 app.use("/api/client", clientRouter);
 

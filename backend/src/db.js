@@ -170,6 +170,20 @@ function migrateDb() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL DEFAULT ''
     );
+
+    CREATE TABLE IF NOT EXISTS spec_presets (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      preset_type TEXT NOT NULL,
+      module_id TEXT DEFAULT '',
+      module_name TEXT DEFAULT '',
+      section_id TEXT DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      items_json TEXT NOT NULL DEFAULT '[]',
+      note TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 }
 

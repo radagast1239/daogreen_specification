@@ -57,6 +57,7 @@ router.get("/settings", (_req, res) => {
     contactEmail: obj.contactEmail || "",
     contactTelegram: obj.contactTelegram || "",
     brandColor: obj.brandColor || "#116355",
+    farmSectionOrder: obj.farmSectionOrder || "",
   });
 });
 
@@ -75,6 +76,7 @@ router.patch("/settings", (req, res) => {
     contactEmail: obj.contactEmail || "",
     contactTelegram: obj.contactTelegram || "",
     brandColor: obj.brandColor || "#116355",
+    farmSectionOrder: obj.farmSectionOrder || "",
   });
 });
 

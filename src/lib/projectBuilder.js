@@ -138,7 +138,7 @@ export function lineToProjectItem(line, section, sortOrder) {
   };
 }
 
-export function buildProjectFromBuilder({ form, stellages, generalLines }) {
+export function buildProjectFromBuilder({ form, stellages, farmSections, generalLines }) {
   const items = [];
   const stellageConfigs = [];
   let order = 0;
@@ -151,6 +151,7 @@ export function buildProjectFromBuilder({ form, stellages, generalLines }) {
       moduleId: st.moduleId,
       moduleName: st.moduleName,
       tech: st.tech || "",
+      presetId: st.presetId || null,
       groups: activeLines(st.items).map((ln) => ({
         name: ln.name,
         qty: ln.qty,
@@ -163,9 +164,18 @@ export function buildProjectFromBuilder({ form, stellages, generalLines }) {
     }
   }
 
-  const generalSection = "Общая закупка на ферму";
-  for (const line of activeLines(generalLines)) {
-    items.push(lineToProjectItem(line, generalSection, order++));
+  if (farmSections?.length) {
+    for (const sec of farmSections) {
+      const sectionName = sec.sectionName || sec.name;
+      for (const line of activeLines(sec.items)) {
+        items.push(lineToProjectItem(line, sectionName, order++));
+      }
+    }
+  } else if (generalLines?.length) {
+    const generalSection = "Общая закупка на ферму";
+    for (const line of activeLines(generalLines)) {
+      items.push(lineToProjectItem(line, generalSection, order++));
+    }
   }
 
   return {

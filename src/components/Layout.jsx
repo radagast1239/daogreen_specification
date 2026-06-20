@@ -6,7 +6,7 @@ const NAV = [
   { to: "/clients", label: "Клиенты", ic: "◎" },
   { to: "/materials", label: "Материалы", ic: "▤" },
   { to: "/photos", label: "Фото", ic: "◉" },
-  { to: "/modules", label: "Модули", ic: "▦" },
+  { to: "/modules", label: "Пресеты", ic: "▦" },
   { to: "/suppliers", label: "Поставщики", ic: "◇" },
   { to: "/import", label: "Импорт", ic: "↓" },
   { to: "/archive", label: "Архив", ic: "▢" },
@@ -44,7 +44,9 @@ export default function Layout() {
         </div>
       </aside>
       <div className="main">
-        <Outlet />
+        <div className="main-inner">
+          <Outlet />
+        </div>
       </div>
     </div>
   );
