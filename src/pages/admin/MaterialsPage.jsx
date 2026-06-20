@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { CATEGORIES } from "../../data/modules.js";
 import { resolveCategories } from "../../lib/categories.js";
@@ -6,6 +7,8 @@ import { isExhaustFanName, isSplitSystemName } from "../../lib/materialSpecs.js"
 import { api, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { Modal, Empty } from "../../components/ui.jsx";
+import { useToast } from "../../components/Toast.jsx";
+import ImportPanel from "../../components/ImportPanel.jsx";
 import { downloadCSV } from "../../lib/export.js";
 
 const ITEM_TYPES = [
@@ -44,6 +47,10 @@ const blank = {
 
 export default function MaterialsPage() {
   const { state, actions } = useStore();
+  const { confirm } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") === "import" ? "import" : "base";
+  const setTab = (t) => setSearchParams(t === "import" ? { tab: "import" } : {});
   const [q, setQ] = useState("");
   const [modF, setModF] = useState("");
   const [catF, setCatF] = useState("");
@@ -105,21 +112,50 @@ export default function MaterialsPage() {
   return (
     <>
       <PageHeader
-        title="База материалов"
-        sub="Справочник позиций и цен. Количество задаётся только в смете проекта — не здесь."
+        title="Материалы"
+        sub="Справочник позиций, цен и импорт из Excel"
         actions={
-          <>
-            <button className="btn" onClick={exportAll}>
-              Excel ↓
-            </button>
-            <button className="btn btn-primary" onClick={() => setEditing({ ...blank })}>
-              ＋ Позиция
-            </button>
-          </>
+          tab === "base" ? (
+            <>
+              <button className="btn" onClick={exportAll}>
+                Excel ↓
+              </button>
+              <button className="btn btn-primary" onClick={() => setEditing({ ...blank })}>
+                ＋ Позиция
+              </button>
+            </>
+          ) : null
         }
       />
       <div className="content">
-        <div className="toolbar">
+        <div className="toolbar" style={{ borderBottom: "1px solid var(--line)", paddingBottom: 0, gap: 0 }}>
+          {[
+            ["base", "База"],
+            ["import", "Импорт"],
+          ].map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              className="btn btn-ghost"
+              style={{
+                borderRadius: 0,
+                borderBottom: tab === k ? "2px solid var(--brand)" : "2px solid transparent",
+                color: tab === k ? "var(--brand)" : "var(--muted)",
+              }}
+              onClick={() => setTab(k)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "import" ? (
+          <div style={{ marginTop: 16 }}>
+            <ImportPanel />
+          </div>
+        ) : (
+          <>
+        <div className="toolbar" style={{ marginTop: 16 }}>
           <input placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />
           <select value={modF} onChange={(e) => setModF(e.target.value)} style={{ width: "auto" }}>
             <option value="">Все модули</option>
@@ -141,8 +177,8 @@ export default function MaterialsPage() {
         {filtered.length === 0 ? (
           <Empty title="Ничего не найдено" />
         ) : (
-          <div className="card" style={{ overflowX: "auto" }}>
-            <table className="spec">
+          <div className="card" style={{ overflowX: "auto", padding: "4px 8px 12px" }}>
+            <table className="spec materials-table">
               <thead>
                 <tr>
                   <th>Фото</th>
@@ -156,7 +192,7 @@ export default function MaterialsPage() {
               </thead>
               <tbody>
                 {filtered.map((m) => (
-                  <tr key={m.id}>
+                  <tr key={m.id} className="material-row">
                     <td className="spec-photo">
                       {(m.imageUrl || m.photoUrl) ? (
                         <img src={photoSrc(m.imageUrl || m.photoUrl)} alt="" className="thumb-img" />
@@ -196,7 +232,10 @@ export default function MaterialsPage() {
                       </button>
                       <button
                         className="btn btn-ghost btn-sm"
-                        onClick={() => confirm("Удалить?") && actions.materialDelete(m.id)}
+                        onClick={async () => {
+                          if (await confirm({ title: "Удалить позицию?", message: m.name, confirmLabel: "Удалить" }))
+                            actions.materialDelete(m.id);
+                        }}
                       >
                         ✕
                       </button>
@@ -206,6 +245,8 @@ export default function MaterialsPage() {
               </tbody>
             </table>
           </div>
+        )}
+          </>
         )}
       </div>
 

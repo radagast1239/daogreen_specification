@@ -3,8 +3,10 @@ import { api } from "../../lib/api.js";
 import { resolveCategories } from "../../lib/categories.js";
 import { CATEGORIES } from "../../data/modules.js";
 import { PageHeader } from "../../components/Layout.jsx";
+import { useToast } from "../../components/Toast.jsx";
 
 export default function SettingsPage() {
+  const { confirm, success } = useToast();
   const [form, setForm] = useState({
     companyName: "Daogreen",
     contactPhone: "",
@@ -15,7 +17,6 @@ export default function SettingsPage() {
   });
   const [categories, setCategories] = useState([...CATEGORIES]);
   const [newCat, setNewCat] = useState("");
-  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     api.getSettings().then((s) => {
@@ -31,8 +32,8 @@ export default function SettingsPage() {
     setNewCat("");
   };
 
-  const removeCategory = (name) => {
-    if (!confirm(`Убрать категорию «${name}» из списка?`)) return;
+  const removeCategory = async (name) => {
+    if (!(await confirm({ title: `Убрать категорию «${name}»?` }))) return;
     setCategories((c) => c.filter((x) => x !== name));
   };
 
@@ -43,8 +44,7 @@ export default function SettingsPage() {
     };
     await api.saveSettings(payload);
     setForm(payload);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    success("Настройки сохранены");
   };
 
   return (
@@ -106,7 +106,6 @@ export default function SettingsPage() {
           <button type="button" className="btn btn-primary" onClick={save}>
             Сохранить
           </button>
-          {saved && <span className="muted" style={{ marginLeft: 10 }}>Сохранено на сервере</span>}
         </div>
       </div>
     </>

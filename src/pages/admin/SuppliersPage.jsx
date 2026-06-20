@@ -2,11 +2,13 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
+import { useToast } from "../../components/Toast.jsx";
 import { Modal } from "../../components/ui.jsx";
 
 const blank = { name: "", phone: "", site: "", note: "" };
 
 export default function SuppliersPage() {
+  const { confirm, error, success } = useToast();
   const [list, setList] = useState([]);
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -25,15 +27,16 @@ export default function SuppliersPage() {
       else await api.createSupplier(editing);
       setEditing(null);
       await reload();
+      success("Сохранено");
     } catch (e) {
-      alert(e.message || "Ошибка сохранения");
+      error(e.message || "Ошибка сохранения");
     } finally {
       setSaving(false);
     }
   };
 
   const remove = async (id) => {
-    if (!confirm("Удалить поставщика?")) return;
+    if (!(await confirm({ title: "Удалить поставщика?" }))) return;
     await api.deleteSupplier(id);
     await reload();
   };

@@ -405,11 +405,26 @@ api.post("/:id/restore", (req, res) => {
 
 export default api;
 
+function loadBrandingSettings() {
+  const keys = ["companyName", "contactPhone", "contactEmail", "contactTelegram", "brandColor"];
+  const rows = db
+    .prepare(`SELECT key, value FROM settings WHERE key IN (${keys.map(() => "?").join(",")})`)
+    .all(...keys);
+  const branding = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  return {
+    companyName: branding.companyName || "Daogreen",
+    contactPhone: branding.contactPhone || "",
+    contactEmail: branding.contactEmail || "",
+    contactTelegram: branding.contactTelegram || "",
+    brandColor: branding.brandColor || "#116355",
+  };
+}
+
 function serveClientProject(req, res) {
   const p = loadProjectByToken(req.params.token);
   if (!p) return res.status(404).json({ error: "Not found" });
   const versions = listVersions(p.id);
-  res.json({ project: p, versionInfo: versions[0] || null });
+  res.json({ project: p, versionInfo: versions[0] || null, branding: loadBrandingSettings() });
 }
 
 function patchClientItem(req, res) {

@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { PURCHASE_STATUSES } from "../data/modules.js";
 import { copyToClipboard } from "../lib/copyText.js";
+import { clientLinkMessage } from "../lib/clientLinkText.js";
 
 export function Chip({ kind = "neutral", children, dot = true }) {
   return <span className={`chip chip--${kind} ${dot ? "chip-dot" : ""}`}>{children}</span>;
@@ -44,13 +45,19 @@ export function Modal({ title, onClose, children, footer }) {
   );
 }
 
-export function ClientLinkModal({ url, onClose }) {
+export function ClientLinkModal({ url, projectName = "проект", clientName = "", companyName = "Daogreen", onClose }) {
   const [msg, setMsg] = useState("");
-  const copy = async () => {
-    const ok = await copyToClipboard(url);
-    setMsg(ok ? "Скопировано" : "Выделите ссылку и Ctrl+C");
+  const messengerText = useMemo(
+    () => clientLinkMessage({ projectName, clientName, url, companyName }),
+    [projectName, clientName, url, companyName]
+  );
+
+  const copy = async (text, label) => {
+    const ok = await copyToClipboard(text);
+    setMsg(ok ? `${label} скопировано` : "Выделите текст и Ctrl+C");
     if (ok) setTimeout(() => setMsg(""), 2000);
   };
+
   return (
     <Modal
       title="Ссылка для клиента"
@@ -58,14 +65,26 @@ export function ClientLinkModal({ url, onClose }) {
       footer={
         <>
           <button type="button" className="btn" onClick={onClose}>Закрыть</button>
-          <button type="button" className="btn btn-primary" onClick={copy}>Копировать</button>
+          <button type="button" className="btn" onClick={() => copy(messengerText, "Текст")}>
+            Текст для мессенджера
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => copy(url, "Ссылка")}>
+            Копировать ссылку
+          </button>
         </>
       }
     >
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-        Отправьте клиенту эту ссылку — он увидит список закупки с фото.
+        Отправьте клиенту ссылку или готовый текст — он увидит список закупки с фото.
       </p>
-      <input className="link-copy-input" readOnly value={url} onFocus={(e) => e.target.select()} />
+      <label className="field" style={{ marginBottom: 10 }}>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>Ссылка</span>
+        <input className="link-copy-input" readOnly value={url} onFocus={(e) => e.target.select()} />
+      </label>
+      <label className="field">
+        <span style={{ fontSize: 12, fontWeight: 600 }}>Текст для WhatsApp / Telegram</span>
+        <textarea className="link-copy-input" readOnly rows={7} value={messengerText} onFocus={(e) => e.target.select()} />
+      </label>
       {msg && <p style={{ fontSize: 13, color: "var(--ok)", marginBottom: 0 }}>{msg}</p>}
       <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 13, marginTop: 10, display: "inline-block" }}>
         Открыть в новой вкладке ↗

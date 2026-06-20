@@ -1,14 +1,15 @@
-import React from "react";
+import React, { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { berryCalculatorUrl, economicCalculatorUrl } from "../lib/calcUrls.js";
+import GlobalSearch from "./GlobalSearch.jsx";
+import { getCompactMode, setCompactMode } from "../lib/compactMode.js";
 
 const NAV = [
   { to: "/", label: "Проекты", ic: "▣", end: true },
   { to: "/clients", label: "Клиенты", ic: "◎" },
   { to: "/materials", label: "Материалы", ic: "▤" },
-  { to: "/modules", label: "Пресеты", ic: "▦" },
+  { to: "/modules", label: "Модули / разделы", ic: "▦" },
   { to: "/suppliers", label: "Поставщики", ic: "◇" },
-  { to: "/import", label: "Импорт", ic: "↓" },
   { to: "/archive", label: "Архив", ic: "▢" },
   { to: "/settings", label: "Настройки", ic: "⚙" },
   { to: "/new", label: "Новый проект", ic: "＋" },
@@ -20,6 +21,14 @@ const CALC_LINKS = [
 ];
 
 export default function Layout() {
+  const [compact, setCompact] = useState(getCompactMode());
+
+  const toggleCompact = () => {
+    const next = !compact;
+    setCompactMode(next);
+    setCompact(next);
+  };
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -52,9 +61,14 @@ export default function Layout() {
           </a>
         ))}
         <div className="spacer" />
+        <button type="button" className="navlink navlink--toggle" onClick={toggleCompact}>
+          <span className="ic">≡</span>
+          {compact ? "Обычные таблицы" : "Компактные таблицы"}
+        </button>
         <div className="foot">Спецификации v1</div>
       </aside>
       <div className="main">
+        <GlobalSearch />
         <div className="main-inner">
           <Outlet />
         </div>
@@ -63,10 +77,11 @@ export default function Layout() {
   );
 }
 
-export function PageHeader({ title, sub, actions }) {
+export function PageHeader({ title, sub, actions, breadcrumbs }) {
   return (
     <header className="page-head">
       <div>
+        {breadcrumbs}
         <h1>{title}</h1>
         {sub && <p className="muted">{sub}</p>}
       </div>

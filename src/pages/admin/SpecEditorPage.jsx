@@ -15,22 +15,51 @@ import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
 import { clientLink, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { Progress, Stat, Empty, ClientLinkModal } from "../../components/ui.jsx";
+import Breadcrumbs from "../../components/Breadcrumbs.jsx";
+import Collapsible from "../../components/Collapsible.jsx";
+import PageSkeleton from "../../components/PageSkeleton.jsx";
+import { useToast } from "../../components/Toast.jsx";
+import { api } from "../../lib/api.js";
 import { downloadCSV } from "../../lib/export.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
 import { defaultRooms, isFarmGeneralItem, roomLabel } from "../../lib/roomHelpers.js";
 
+const TAB_LABELS = {
+  spec: "Спецификация",
+  merged: "Общий список",
+  spec_lists: "Специалисты",
+  calc: "Расчёт охлаждения",
+};
+
 export default function SpecEditorPage() {
   const { id } = useParams();
   const { state, actions } = useStore();
+  const { confirm, success } = useToast();
   const project = state.projects.find((p) => p.id === id);
   const [tab, setTab] = useState("spec");
   const [versionMsg, setVersionMsg] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
+  const [loading, setLoading] = useState(!project);
+  const [companyName, setCompanyName] = useState("Daogreen");
 
   useEffect(() => {
-    if (id) actions.loadProject(id);
+    api.getSettings().then((s) => setCompanyName(s.companyName || "Daogreen")).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!id) return;
+    setLoading(true);
+    actions.loadProject(id).finally(() => setLoading(false));
   }, [id, actions]);
+
+  if (loading && !project) {
+    return (
+      <div className="content">
+        <PageSkeleton lines={3} />
+      </div>
+    );
+  }
 
   if (!project) {
     return (
@@ -82,11 +111,45 @@ export default function SpecEditorPage() {
 
   const url = project.clientToken ? clientLink(project.clientToken) : "";
 
+  const regenerateLink = async () => {
+    if (
+      !(await confirm({
+        title: "Перегенерировать ссылку?",
+        message: "Старая ссылка клиента перестанет работать.",
+        confirmLabel: "Перегенерировать",
+      }))
+    )
+      return;
+    await actions.regenerateToken(project.id);
+    success("Новая ссылка создана");
+    setLinkOpen(true);
+  };
+
+  const breadcrumbs = (
+    <Breadcrumbs
+      items={[
+        { label: "Проекты", to: "/" },
+        { label: project.client || "Клиент", to: "/clients" },
+        { label: project.name, to: `/project/${project.id}` },
+        { label: TAB_LABELS[tab] || tab },
+      ]}
+    />
+  );
+
   return (
     <>
-      {linkOpen && url && <ClientLinkModal url={url} onClose={() => setLinkOpen(false)} />}
+      {linkOpen && url && (
+        <ClientLinkModal
+          url={url}
+          projectName={project.name}
+          clientName={project.client}
+          companyName={companyName}
+          onClose={() => setLinkOpen(false)}
+        />
+      )}
       <PageHeader
         title={project.name}
+        breadcrumbs={breadcrumbs}
         sub={`${project.client || "—"}${project.city ? " · " + project.city : ""}${
           project.area ? " · " + project.area + " м²" : ""
         } · ${project.type}`}
@@ -95,14 +158,15 @@ export default function SpecEditorPage() {
             <button className="btn" onClick={exportSpec}>Excel ↓</button>
             <button className="btn" onClick={publishVersion}>Утвердить версию</button>
             <button className="btn" onClick={approveAll}>Утвердить всё</button>
-            <button className="btn btn-primary" disabled={!url} onClick={() => setLinkOpen(true)}>Ссылка клиенту</button>
+            <button className="btn" disabled={!url} onClick={() => setLinkOpen(true)}>Ссылка клиенту</button>
+            <button className="btn btn-ghost" onClick={regenerateLink}>↻ Новая ссылка</button>
           </>
         }
       />
 
       <div className="content">
-        {/* Summary */}
-        <div className="stat-grid" style={{ marginBottom: 18 }}>
+        <Collapsible title="Сводка и прогресс" subtitle={`${stats.total} позиций`} defaultOpen>
+        <div className="stat-grid" style={{ marginBottom: 0 }}>
           <Stat k="Без НДС" v={money(totals.budgetNet, project.currency)} />
           <Stat k="НДС" v={money(totals.vatAmount, project.currency)} />
           <Stat k="Итого" v={money(totals.budget, project.currency)} />
@@ -121,6 +185,7 @@ export default function SpecEditorPage() {
           {stats.noPrice > 0 && <span className="chip chip--amber chip-dot">без цены: {stats.noPrice}</span>}
           {stats.noLink > 0 && <span className="chip chip--neutral chip-dot">без ссылки: {stats.noLink}</span>}
         </div>
+        </Collapsible>
 
         {/* Tabs */}
         <div className="toolbar" style={{ borderBottom: "1px solid var(--line)", paddingBottom: 0, gap: 0 }}>
@@ -176,6 +241,7 @@ export default function SpecEditorPage() {
 
 /* ---------------- Спецификация ---------------- */
 function SpecTab({ project, patchItem, actions, saveRooms }) {
+  const { confirm } = useToast();
   const groups = useMemo(() => groupBy(project.items, "module"), [project.items]);
   const rooms = project.rooms?.length ? project.rooms : defaultRooms();
   const hasFarmItems = project.items.some((it) => isFarmGeneralItem(project, it));
@@ -206,21 +272,24 @@ function SpecTab({ project, patchItem, actions, saveRooms }) {
   return (
     <div style={{ marginTop: 16 }}>
       {hasFarmItems && (
-        <RoomsEditor
-          rooms={rooms}
-          onChange={(next) => saveRooms(next)}
-        />
+        <Collapsible title="Комнаты фермы" defaultOpen>
+          <RoomsEditor rooms={rooms} onChange={(next) => saveRooms(next)} />
+        </Collapsible>
       )}
-      {groups.map(([module, items]) => (
-        <section key={module}>
-          <div className="section-head">
-            <div className="spine" />
-            <h3>{module}</h3>
-            <span className="count">{items.length} позиц.</span>
-            <button className="btn btn-sm btn-ghost" style={{ marginLeft: "auto" }} onClick={() => addItem(module)}>
+      {groups.map(([module, items]) => {
+        const modSum = items.reduce((s, i) => s + lineGross(i), 0);
+        return (
+        <Collapsible
+          key={module}
+          title={module}
+          subtitle={`${items.length} поз. · ${money(modSum, project.currency)}`}
+          defaultOpen={groups.length <= 4}
+          actions={
+            <button className="btn btn-sm btn-ghost" onClick={() => addItem(module)}>
               ＋ позиция
             </button>
-          </div>
+          }
+        >
           <div className="card" style={{ overflowX: "auto" }}>
             <table className="spec">
               <thead>
@@ -365,7 +434,16 @@ function SpecTab({ project, patchItem, actions, saveRooms }) {
                       <button
                         className="btn btn-ghost btn-sm"
                         title="Удалить"
-                        onClick={() => actions.itemDelete(project.id, it.id)}
+                        onClick={async () => {
+                          if (
+                            await confirm({
+                              title: "Удалить позицию?",
+                              message: it.name,
+                              confirmLabel: "Удалить",
+                            })
+                          )
+                            actions.itemDelete(project.id, it.id);
+                        }}
                       >
                         ✕
                       </button>
@@ -375,8 +453,9 @@ function SpecTab({ project, patchItem, actions, saveRooms }) {
               </tbody>
             </table>
           </div>
-        </section>
-      ))}
+        </Collapsible>
+      );
+      })}
     </div>
   );
 }

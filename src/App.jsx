@@ -3,11 +3,9 @@ import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import Layout from "./components/Layout.jsx";
 import AdminGuard from "./components/AdminGuard.jsx";
 import ProjectsPage from "./pages/admin/ProjectsPage.jsx";
-import NewProjectPage from "./pages/admin/NewProjectPage.jsx";
 import ProjectBuilderPage from "./pages/admin/ProjectBuilderPage.jsx";
 import SpecEditorPage from "./pages/admin/SpecEditorPage.jsx";
 import MaterialsPage from "./pages/admin/MaterialsPage.jsx";
-import ImportPage from "./pages/admin/ImportPage.jsx";
 import ClientsPage from "./pages/admin/ClientsPage.jsx";
 import ModulesPage from "./pages/admin/ModulesPage.jsx";
 import SuppliersPage from "./pages/admin/SuppliersPage.jsx";
@@ -33,12 +31,12 @@ export default function App() {
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/modules" element={<ModulesPage />} />
           <Route path="/materials" element={<MaterialsPage />} />
+          <Route path="/import" element={<Navigate to="/materials?tab=import" replace />} />
           <Route path="/suppliers" element={<SuppliersPage />} />
-          <Route path="/import" element={<ImportPage />} />
           <Route path="/archive" element={<ArchivePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/new" element={<ProjectBuilderPage />} />
-          <Route path="/new/template" element={<NewProjectPage />} />
+          <Route path="/new/template" element={<Navigate to="/new" replace />} />
           <Route path="/project/:id" element={<SpecEditorPage />} />
         </Route>
       </Route>

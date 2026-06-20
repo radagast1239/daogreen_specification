@@ -14,6 +14,7 @@ import {
 import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
 import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { Progress, StatusChip, Empty } from "../../components/ui.jsx";
+import PageSkeleton from "../../components/PageSkeleton.jsx";
 import { downloadCSV, printPDF } from "../../lib/export.js";
 
 const TABS = [
@@ -32,13 +33,27 @@ export default function ClientProjectPage() {
   const { token } = useParams();
   const { actions } = useStore();
   const [data, setData] = useState(null);
-  const [tab, setTab] = useState("categories");
+  const [tab, setTab] = useState("overview");
   const [supplierFilter, setSupplierFilter] = useState("");
   const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    actions.loadClientProject(token).then(setData).catch((e) => setErr(e.message));
+    setLoading(true);
+    actions
+      .loadClientProject(token)
+      .then(setData)
+      .catch((e) => setErr(e.message))
+      .finally(() => setLoading(false));
   }, [token, actions]);
+
+  if (loading && !data) {
+    return (
+      <div className="client-wrap" style={{ paddingTop: 40 }}>
+        <PageSkeleton lines={2} />
+      </div>
+    );
+  }
 
   if (err)
     return (
@@ -55,10 +70,18 @@ export default function ClientProjectPage() {
     );
 
   const project = data.project;
+  const branding = data.branding || {};
   const versionInfo = data.versionInfo;
   const visibleItems = clientVisibleItems(project);
   const totals = projectTotals(project);
   const suppliers = [...new Set(visibleItems.map((i) => i.supplier).filter(Boolean))].sort();
+  const filteredCount = supplierFilter
+    ? visibleItems.filter((i) => i.supplier === supplierFilter).length
+    : visibleItems.length;
+
+  const brandStyle = {
+    "--client-brand": branding.brandColor || "#116355",
+  };
 
   const filterSupplier = (list) =>
     supplierFilter ? list.filter((i) => i.supplier === supplierFilter) : list;
@@ -96,8 +119,15 @@ export default function ClientProjectPage() {
   const delta = versionInfo?.summary?.delta;
 
   return (
-    <div className="client-wrap">
-      <BudgetBar project={project} totals={totals} versionInfo={versionInfo} delta={delta} onExport={() => exportRows(visibleItems, "закупка")} />
+    <div className="client-wrap" style={brandStyle}>
+      <BudgetBar
+        project={project}
+        branding={branding}
+        totals={totals}
+        versionInfo={versionInfo}
+        delta={delta}
+        onExport={() => exportRows(visibleItems, "закупка")}
+      />
 
       <div className="client-tabs no-print">
         {TABS.map(([k, label]) => (
@@ -107,16 +137,25 @@ export default function ClientProjectPage() {
         ))}
       </div>
 
-      {tab !== "docs" && tab !== "overview" && (
-        <div className="toolbar no-print">
+      {tab !== "docs" && (
+        <div className="client-supplier-bar no-print">
+          <strong style={{ fontSize: 13 }}>Поставщик:</strong>
           <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} style={{ width: "auto" }}>
-            <option value="">Все поставщики</option>
-            {suppliers.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
+            <option value="">Все поставщики ({visibleItems.length})</option>
+            {suppliers.map((s) => {
+              const cnt = visibleItems.filter((i) => i.supplier === s).length;
+              return (
+                <option key={s} value={s}>
+                  {s} ({cnt})
+                </option>
+              );
+            })}
           </select>
+          {supplierFilter && (
+            <span className="muted" style={{ fontSize: 13 }}>
+              Показано {filteredCount} позиций от «{supplierFilter}»
+            </span>
+          )}
         </div>
       )}
 
@@ -124,7 +163,14 @@ export default function ClientProjectPage() {
         <Empty title="Спецификация готовится" hint="Позиции появятся после утверждения." />
       ) : (
         <>
-          {tab === "overview" && <OverviewTab project={project} totals={totals} items={visibleItems} />}
+          {tab === "overview" && (
+            <OverviewTab
+              project={project}
+              totals={totals}
+              items={filterSupplier(visibleItems)}
+              supplierFilter={supplierFilter}
+            />
+          )}
           {tab === "categories" && (
             <PurchaseSplitView
               items={filterSupplier(visibleItems)}
@@ -221,15 +267,35 @@ export default function ClientProjectPage() {
           )}
         </>
       )}
+
+      <ClientBrandFooter branding={branding} />
     </div>
   );
 }
 
-function BudgetBar({ project, totals, versionInfo, delta, onExport }) {
+function ClientBrandFooter({ branding }) {
+  const parts = [
+    branding.contactPhone,
+    branding.contactEmail,
+    branding.contactTelegram,
+  ].filter(Boolean);
+  if (!parts.length && !branding.companyName) return null;
   return (
-    <div className="budget-bar">
+    <footer className="client-brand-footer no-print">
+      <div style={{ fontWeight: 700, color: "var(--client-brand, var(--brand))" }}>
+        {branding.companyName || "Daogreen"}
+      </div>
+      {parts.length > 0 && <div style={{ marginTop: 6 }}>{parts.join(" · ")}</div>}
+    </footer>
+  );
+}
+
+function BudgetBar({ project, branding, totals, versionInfo, delta, onExport }) {
+  const company = branding?.companyName || "Daogreen";
+  return (
+    <div className="budget-bar" style={{ background: `linear-gradient(135deg, ${branding?.brandColor || "#062920"}, #083028)` }}>
       <div className="eyebrow" style={{ color: "#9ecdb8" }}>
-        Daogreen · список закупки
+        {company} · список закупки
       </div>
       <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4 }}>{project.name}</div>
       <div style={{ fontSize: 12.5, color: "#9ecdb8" }}>
@@ -303,10 +369,15 @@ function PurchaseSplitView({ items, render, renderBought }) {
   );
 }
 
-function OverviewTab({ project, totals, items }) {
+function OverviewTab({ project, totals, items, supplierFilter }) {
   const byCat = groupBy(items, "category");
   return (
     <div style={{ marginTop: 16 }}>
+      {supplierFilter && (
+        <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+          Фильтр: только поставщик «{supplierFilter}»
+        </p>
+      )}
       <div className="stat-grid">
         <div className="card stat">
           <div className="k">Позиций</div>

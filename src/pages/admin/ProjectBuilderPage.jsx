@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
+import { useToast } from "../../components/Toast.jsx";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
 import { FARM_TYPES } from "../../data/modules.js";
 import { resolveCategories } from "../../lib/categories.js";
@@ -38,6 +39,7 @@ const STEPS = [
 
 export default function ProjectBuilderPage() {
   const { state, actions } = useStore();
+  const { confirm, success, error } = useToast();
   const nav = useNavigate();
 
   const [step, setStep] = useState("basics");
@@ -101,7 +103,7 @@ export default function ProjectBuilderPage() {
     }
   }, [step, farmLoaded, sections, farmCatalogs, state.materials]);
 
-  const changeDraftModule = (moduleId) => {
+  const changeDraftModule = async (moduleId) => {
     const mod = state.modules.find((m) => m.id === moduleId);
     if (!mod) return;
     const reload = () =>
@@ -114,13 +116,13 @@ export default function ProjectBuilderPage() {
         items: catalogLinesForModule(state.materials, mod.name),
       }));
     if (draft?.items?.some((ln) => ln.included)) {
-      if (!window.confirm("Сменить тип? Текущие отметки будут заменены списком из базы.")) return;
+      if (!(await confirm({ title: "Сменить тип?", message: "Текущие отметки будут заменены списком из базы." }))) return;
     }
     reload();
   };
 
-  const applyStellagePreset = (preset) => {
-    if (draft?.items?.some((ln) => ln.included) && !window.confirm("Загрузить пресет? Текущая сборка будет заменена.")) return;
+  const applyStellagePreset = async (preset) => {
+    if (draft?.items?.some((ln) => ln.included) && !(await confirm({ title: "Загрузить пресет?", message: "Текущая сборка будет заменена." }))) return;
     setDraft(draftFromStellagePreset(preset, preset.name, stellages.length + 1));
   };
 
@@ -128,41 +130,41 @@ export default function ProjectBuilderPage() {
     const name = window.prompt("Название конфигурации стеллажа (пресет):", draft?.name || "");
     if (!name?.trim()) return;
     if (countIncluded(draft.items) === 0) {
-      alert("Отметьте хотя бы одну позицию.");
+      error("Отметьте хотя бы одну позицию.");
       return;
     }
     try {
       await api.createPreset(presetPayloadFromDraft(draft, name));
       setPresets(await api.getPresets());
-      alert("Пресет сохранён. Найдёте его в разделе «Пресеты».");
+      success("Пресет сохранён в «Модули / разделы».");
     } catch (e) {
-      alert(e.message);
+      error(e.message);
     }
   };
 
   const finishStellage = () => {
     if (!draft?.name?.trim()) {
-      alert("Укажите название стеллажа в проекте.");
+      error("Укажите название стеллажа в проекте.");
       return;
     }
     if (countIncluded(draft.items) === 0) {
-      alert("Отметьте хотя бы одну позицию галочкой.");
+      error("Отметьте хотя бы одну позицию галочкой.");
       return;
     }
     setStellages((list) => [...list, { ...draft, items: draft.items.map((ln) => ({ ...ln })) }]);
     setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 2));
   };
 
-  const editStellage = (id) => {
+  const editStellage = async (id) => {
     const st = stellages.find((s) => s.id === id);
     if (!st) return;
-    if (draft?.items?.some((ln) => ln.included) && !window.confirm("Заменить текущую незавершённую сборку?")) return;
+    if (draft?.items?.some((ln) => ln.included) && !(await confirm({ title: "Заменить сборку?" }))) return;
     setStellages((list) => list.filter((s) => s.id !== id));
     setDraft({ ...st, items: st.items.map((ln) => ({ ...ln })) });
   };
 
-  const removeStellage = (id) => {
-    if (!window.confirm("Удалить готовый стеллаж?")) return;
+  const removeStellage = async (id) => {
+    if (!(await confirm({ title: "Удалить готовый стеллаж?" }))) return;
     setStellages((list) => list.filter((s) => s.id !== id));
   };
 
@@ -172,10 +174,10 @@ export default function ProjectBuilderPage() {
     return m;
   };
 
-  const resetFarmSection = () => {
+  const resetFarmSection = async () => {
     if (!activeFarmSection) return;
     const cur = farmSectionLines[activeFarmSection] || [];
-    if (cur.some((ln) => ln.included) && !window.confirm("Сбросить раздел к сохранённому шаблону?")) return;
+    if (cur.some((ln) => ln.included) && !(await confirm({ title: "Сбросить раздел?" }))) return;
     setFarmSectionLines((s) => ({
       ...s,
       [activeFarmSection]: projectLinesFromCatalog(farmCatalogs, activeFarmSection, state.materials),
@@ -229,7 +231,7 @@ export default function ProjectBuilderPage() {
       const project = await actions.projectCreate(payload);
       nav(`/project/${project.id}`);
     } catch (e) {
-      alert(e.message || "Ошибка создания");
+      error(e.message || "Ошибка создания");
     } finally {
       setSaving(false);
     }
@@ -241,16 +243,11 @@ export default function ProjectBuilderPage() {
     <>
       <PageHeader
         title="Новый проект"
-        sub="Соберите стеллажи и разделы фермы. Состав разделов настраивается в «Пресеты → Разделы фермы»."
+        sub="Соберите стеллажи и разделы фермы. Состав разделов — в «Модули / разделы фермы»."
         actions={
-          <>
-            <Link to="/modules" className="btn btn-sm">
-              Пресеты
-            </Link>
-            <Link to="/new/template" className="btn btn-sm">
-              Быстро из шаблона
-            </Link>
-          </>
+          <Link to="/modules" className="btn btn-sm">
+            Модули / разделы
+          </Link>
         }
       />
 
