@@ -6,7 +6,11 @@ import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable
 import { FARM_TYPES } from "../../data/modules.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
 import { api } from "../../lib/api.js";
-import { orderedFarmSections } from "../../lib/farmSectionOrder.js";
+import {
+  parseFarmSectionCatalogs,
+  projectLinesFromCatalog,
+  resolveFarmSections,
+} from "../../lib/farmSectionsConfig.js";
 import {
   activeLines,
   buildProjectFromBuilder,
@@ -14,7 +18,6 @@ import {
   newStellageDraft,
 } from "../../lib/projectBuilder.js";
 import {
-  applyFarmPreset,
   draftFromStellagePreset,
   emptyFarmSectionsState,
   presetPayloadFromDraft,
@@ -34,8 +37,8 @@ export default function ProjectBuilderPage() {
   const [step, setStep] = useState("basics");
   const [saving, setSaving] = useState(false);
   const [presets, setPresets] = useState([]);
-  const [sectionOrder, setSectionOrder] = useState("");
-  const [sectionNames, setSectionNames] = useState("");
+  const [farmCatalogs, setFarmCatalogs] = useState({});
+  const [farmSettings, setFarmSettings] = useState(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -57,7 +60,10 @@ export default function ProjectBuilderPage() {
   const [activeFarmSection, setActiveFarmSection] = useState(null);
   const [farmLoaded, setFarmLoaded] = useState(false);
 
-  const sections = useMemo(() => orderedFarmSections(sectionOrder, sectionNames), [sectionOrder, sectionNames]);
+  const sections = useMemo(
+    () => resolveFarmSections(farmSettings || {}),
+    [farmSettings]
+  );
   const stellageMods = state.modules.filter((m) => m.type === "stellage");
   const stellagePresets = presets.filter((p) => p.presetType === "stellage");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -65,8 +71,8 @@ export default function ProjectBuilderPage() {
   useEffect(() => {
     Promise.all([api.getPresets(), api.getSettings()]).then(([p, s]) => {
       setPresets(p);
-      setSectionOrder(s.farmSectionOrder || "");
-      setSectionNames(s.farmSectionNames || "");
+      setFarmSettings(s);
+      setFarmCatalogs(parseFarmSectionCatalogs(s.farmSectionCatalogs));
     });
   }, []);
 
@@ -78,11 +84,11 @@ export default function ProjectBuilderPage() {
 
   useEffect(() => {
     if (step === "general" && !farmLoaded && sections.length) {
-      setFarmSectionLines(emptyFarmSectionsState(state.materials, sections));
+      setFarmSectionLines(emptyFarmSectionsState(sections, farmCatalogs, state.materials));
       setActiveFarmSection(sections[0].id);
       setFarmLoaded(true);
     }
-  }, [step, farmLoaded, sections, state.materials]);
+  }, [step, farmLoaded, sections, farmCatalogs, state.materials]);
 
   const changeDraftModule = (moduleId) => {
     const mod = state.modules.find((m) => m.id === moduleId);
@@ -155,15 +161,14 @@ export default function ProjectBuilderPage() {
     return m;
   };
 
-  const farmPresetList = presets.filter(
-    (p) => p.presetType === "farm_section" && p.sectionId === activeFarmSection
-  );
-
-  const applyFarmSectionPreset = (preset) => {
+  const resetFarmSection = () => {
     if (!activeFarmSection) return;
     const cur = farmSectionLines[activeFarmSection] || [];
-    if (cur.some((ln) => ln.included) && !window.confirm("Заменить позиции раздела пресетом?")) return;
-    setFarmSectionLines((s) => applyFarmPreset(s, activeFarmSection, preset));
+    if (cur.some((ln) => ln.included) && !window.confirm("Сбросить раздел к сохранённому шаблону?")) return;
+    setFarmSectionLines((s) => ({
+      ...s,
+      [activeFarmSection]: projectLinesFromCatalog(farmCatalogs, activeFarmSection, state.materials),
+    }));
   };
 
   const farmHasItems = Object.values(farmSectionLines).some((lines) => activeLines(lines).length > 0);
@@ -197,7 +202,7 @@ export default function ProjectBuilderPage() {
     <>
       <PageHeader
         title="Новый проект"
-        sub="Выберите готовый пресет или соберите вручную. Пресеты настраиваются в разделе «Пресеты»."
+        sub="Соберите стеллажи и разделы фермы. Состав разделов настраивается в «Пресеты → Разделы фермы»."
         actions={
           <>
             <Link to="/modules" className="btn btn-sm">
@@ -374,28 +379,19 @@ export default function ProjectBuilderPage() {
               <div className="card" style={{ padding: 14, marginBottom: 12 }}>
                 <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>{activeSection.name}</h3>
                 <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-                  Отметьте позиции, введите количество и цены. Можно загрузить сохранённый пресет раздела.
+                  Отметьте нужные позиции и укажите количество для этой фермы. Список взят из шаблона раздела (Пресеты → Разделы фермы).
                 </p>
+                <button type="button" className="btn btn-sm" style={{ marginTop: 10 }} onClick={resetFarmSection}>
+                  ↺ Сбросить к шаблону раздела
+                </button>
               </div>
-
-              {farmPresetList.length > 0 && (
-                <div className="preset-grid" style={{ marginBottom: 12 }}>
-                  {farmPresetList.map((p) => (
-                    <button key={p.id} type="button" className="preset-card" onClick={() => applyFarmSectionPreset(p)}>
-                      <strong>{p.name}</strong>
-                      <span className="muted">{p.items.filter((i) => i.included).length} поз.</span>
-                    </button>
-                  ))}
-                </div>
-              )}
 
               <SpecPickerTable
                 lines={farmSectionLines[activeFarmSection] || []}
                 onChange={(lines) => setFarmSectionLines((s) => ({ ...s, [activeFarmSection]: lines }))}
                 materials={state.materials}
-                catalogModule="Общая закупка на ферму"
-                farmSectionId={activeSection.id}
-                catalogLabel="позицию"
+                catalogModule=""
+                catalogLabel="материал"
                 onSaveMaterial={saveMaterial}
               />
             </div>

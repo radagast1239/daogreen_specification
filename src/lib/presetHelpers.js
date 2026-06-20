@@ -1,5 +1,5 @@
 import { uid } from "../store/helpers.js";
-import { catalogLinesForFarmSection } from "./projectBuilder.js";
+import { emptyFarmSectionsState as buildFarmSectionsState } from "./farmSectionsConfig.js";
 
 export function cloneBuilderLines(items) {
   return (items || []).map((ln) => ({ ...ln, id: uid("ln") }));
@@ -17,17 +17,6 @@ export function presetPayloadFromDraft(draft, name) {
   };
 }
 
-export function presetPayloadFromFarmSection(sectionId, sectionName, moduleName, lines, name) {
-  return {
-    name: name.trim(),
-    presetType: "farm_section",
-    moduleId: "",
-    moduleName: moduleName,
-    sectionId,
-    items: (lines || []).map(({ id, ...rest }) => rest),
-  };
-}
-
 export function draftFromStellagePreset(preset, instanceName, index) {
   return {
     id: uid("st"),
@@ -40,12 +29,8 @@ export function draftFromStellagePreset(preset, instanceName, index) {
   };
 }
 
-export function emptyFarmSectionsState(materials, sections) {
-  const map = {};
-  for (const sec of sections) {
-    map[sec.id] = catalogLinesForFarmSection(materials, sec.id);
-  }
-  return map;
+export function emptyFarmSectionsState(sections, catalogs, materials) {
+  return buildFarmSectionsState(sections, catalogs, materials);
 }
 
 export function applyFarmPreset(linesState, sectionId, preset) {

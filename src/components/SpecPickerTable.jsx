@@ -100,10 +100,11 @@ export default function SpecPickerTable({
   };
 
   const saveLineToBase = async (ln) => {
-    if (!onSaveMaterial || !catalogModule || !ln.name?.trim()) return;
+    if (!onSaveMaterial || !ln.name?.trim()) return;
+    const mod = catalogModule || ln.module || "Общая закупка на ферму";
     setSavingId(ln.id);
     try {
-      const mat = await onSaveMaterial(lineToMaterialPayload(ln, catalogModule, farmSectionId));
+      const mat = await onSaveMaterial(lineToMaterialPayload(ln, mod, farmSectionId));
       onChange(patchLine(lines, ln.id, syncLineFromMaterial(ln, mat)));
     } catch (e) {
       alert(e.message || "Не удалось сохранить в базу");
@@ -113,7 +114,7 @@ export default function SpecPickerTable({
   };
 
   const createNewInBase = async () => {
-    if (!onSaveMaterial || !catalogModule) {
+    if (!onSaveMaterial) {
       onChange([...lines, blankLine({ ...newForm, included: true })]);
       setNewOpen(false);
       setNewForm(emptyNew());
@@ -123,12 +124,13 @@ export default function SpecPickerTable({
       alert("Укажите название позиции.");
       return;
     }
+    const mod = catalogModule || newForm.module || "Общая закупка на ферму";
     setSavingNew(true);
     try {
       const mat = await onSaveMaterial(
         lineToMaterialPayload(
           { ...newForm, category: newForm.category },
-          catalogModule,
+          mod,
           farmSectionId
         )
       );

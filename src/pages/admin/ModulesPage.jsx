@@ -1,52 +1,60 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { api } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
-import { orderedFarmSections, moveSectionOrder, patchFarmSectionName } from "../../lib/farmSectionOrder.js";
 import {
-  catalogLinesForFarmSection,
-  catalogLinesForModule,
-} from "../../lib/projectBuilder.js";
-import {
-  cloneBuilderLines,
-} from "../../lib/presetHelpers.js";
+  catalogEditorLines,
+  moveSection,
+  newFarmSection,
+  parseFarmSectionCatalogs,
+  patchSectionName,
+  removeSection,
+  resolveFarmSections,
+  stripLineIds,
+} from "../../lib/farmSectionsConfig.js";
+import { catalogLinesForModule } from "../../lib/projectBuilder.js";
+import { cloneBuilderLines } from "../../lib/presetHelpers.js";
 import { useStore } from "../../store/StoreContext.jsx";
 
 const TABS = [
   { id: "stellage", label: "Пресеты стеллажей" },
-  { id: "farm", label: "Пресеты разделов фермы" },
-  { id: "order", label: "Порядок разделов" },
+  { id: "farm", label: "Разделы фермы" },
   { id: "catalog", label: "Модули базы" },
 ];
 
 export default function ModulesPage() {
   const { state, actions } = useStore();
-  const [tab, setTab] = useState("stellage");
+  const [tab, setTab] = useState("farm");
   const [presets, setPresets] = useState([]);
   const [mods, setMods] = useState([]);
-  const [sectionOrder, setSectionOrder] = useState("");
-  const [sectionNames, setSectionNames] = useState("");
+  const [farmSections, setFarmSections] = useState([]);
+  const [farmCatalogs, setFarmCatalogs] = useState({});
   const [editing, setEditing] = useState(null);
+  const [editingSection, setEditingSection] = useState(null);
   const [editLines, setEditLines] = useState([]);
   const [saving, setSaving] = useState(false);
 
-  const sections = useMemo(() => orderedFarmSections(sectionOrder, sectionNames), [sectionOrder, sectionNames]);
   const stellageMods = state.modules.filter((m) => m.type === "stellage");
+  const stellagePresets = presets.filter((p) => p.presetType === "stellage");
+
+  const persistFarm = async (sections, catalogs) => {
+    await api.saveSettings({
+      farmSections: JSON.stringify(sections),
+      farmSectionCatalogs: JSON.stringify(catalogs),
+    });
+  };
 
   const reload = useCallback(async () => {
     const [p, m, s] = await Promise.all([api.getPresets(), api.getModulesAdmin(), api.getSettings()]);
     setPresets(p);
     setMods(m);
-    setSectionOrder(s.farmSectionOrder || "");
-    setSectionNames(s.farmSectionNames || "");
+    setFarmSections(resolveFarmSections(s));
+    setFarmCatalogs(parseFarmSectionCatalogs(s.farmSectionCatalogs));
   }, []);
 
   useEffect(() => {
     reload();
   }, [reload]);
-
-  const stellagePresets = presets.filter((p) => p.presetType === "stellage");
-  const farmPresets = presets.filter((p) => p.presetType === "farm_section");
 
   const saveMaterial = async (payload) => {
     const m = await actions.materialAdd(payload);
@@ -56,6 +64,7 @@ export default function ModulesPage() {
 
   const startNewStellagePreset = () => {
     const mod = stellageMods[0];
+    setEditingSection(null);
     setEditing({
       id: null,
       name: "",
@@ -68,31 +77,70 @@ export default function ModulesPage() {
     setEditLines(mod?.name ? catalogLinesForModule(state.materials, mod.name) : []);
   };
 
-  const startNewFarmPreset = (section) => {
-    setEditing({
-      id: null,
-      name: "",
-      presetType: "farm_section",
-      moduleId: "",
-      moduleName: "Общая закупка на ферму",
-      sectionId: section.id,
-    });
-    setEditLines(catalogLinesForFarmSection(state.materials, section.id));
-  };
-
-  const openPreset = (p) => {
+  const openStellagePreset = (p) => {
+    setEditingSection(null);
     setEditing(p);
     setEditLines(cloneBuilderLines(p.items));
   };
 
-  const changeEditModule = (moduleId) => {
-    const mod = stellageMods.find((m) => m.id === moduleId);
-    if (!mod) return;
-    setEditing((e) => ({ ...e, moduleId: mod.id, moduleName: mod.name, note: mod.tech || "" }));
-    setEditLines(catalogLinesForModule(state.materials, mod.name));
+  const openSectionEditor = (sec) => {
+    setEditing(null);
+    setEditingSection(sec);
+    setEditLines(catalogEditorLines(farmCatalogs, sec.id, state.materials));
   };
 
-  const savePreset = async () => {
+  const addFarmSection = async () => {
+    const name = window.prompt("Название нового раздела:", "Новый раздел");
+    if (!name?.trim()) return;
+    const sec = newFarmSection(name);
+    const sections = [...farmSections, sec];
+    setFarmSections(sections);
+    await persistFarm(sections, farmCatalogs);
+    openSectionEditor(sec);
+  };
+
+  const saveSectionName = async (sectionId, name) => {
+    const sections = patchSectionName(farmSections, sectionId, name);
+    setFarmSections(sections);
+    await persistFarm(sections, farmCatalogs);
+  };
+
+  const moveFarmSection = async (sectionId, dir) => {
+    const sections = moveSection(farmSections, sectionId, dir);
+    setFarmSections(sections);
+    await persistFarm(sections, farmCatalogs);
+  };
+
+  const deleteFarmSection = async (sec) => {
+    if (!window.confirm(`Удалить раздел «${sec.name}» и его состав?`)) return;
+    const { sections, catalogs } = removeSection(farmSections, farmCatalogs, sec.id);
+    setFarmSections(sections);
+    setFarmCatalogs(catalogs);
+    if (editingSection?.id === sec.id) setEditingSection(null);
+    await persistFarm(sections, catalogs);
+  };
+
+  const saveSectionCatalog = async () => {
+    if (!editingSection) return;
+    setSaving(true);
+    try {
+      const catalogs = {
+        ...farmCatalogs,
+        [editingSection.id]: stripLineIds(editLines),
+      };
+      const sections = patchSectionName(farmSections, editingSection.id, editingSection.name);
+      setFarmCatalogs(catalogs);
+      setFarmSections(sections);
+      await persistFarm(sections, catalogs);
+      setEditingSection(null);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveStellagePreset = async () => {
     if (!editing?.name?.trim()) {
       alert("Укажите название пресета.");
       return;
@@ -120,28 +168,13 @@ export default function ModulesPage() {
     await reload();
   };
 
-  const moveSection = async (id, dir) => {
-    const next = moveSectionOrder(sectionOrder, id, dir);
-    setSectionOrder(next);
-    await api.saveSettings({ farmSectionOrder: next });
-  };
-
-  const saveSectionName = async (sectionId, name) => {
-    const next = patchFarmSectionName(sectionNames, sectionId, name);
-    setSectionNames(next);
-    await api.saveSettings({ farmSectionNames: next });
-  };
-
-  const sectionMaterialCount = (sectionId) =>
-    state.materials.filter(
-      (m) => m.module === "Общая закупка на ферму" && m.farmSectionId === sectionId && m.status === "active"
-    ).length;
+  const catalogCount = (sectionId) => (farmCatalogs[sectionId] || []).length;
 
   return (
     <>
       <PageHeader
-        title="Пресеты и структура фермы"
-        sub="Сохраняйте готовые конфигурации стеллажей и разделов — потом выбирайте их при создании проекта."
+        title="Пресеты и разделы фермы"
+        sub="Настройте разделы «Ферма целиком»: состав материалов по умолчанию подтягивается при создании проекта."
       />
 
       <div className="step-tabs">
@@ -157,7 +190,7 @@ export default function ModulesPage() {
         ))}
       </div>
 
-      {tab === "stellage" && !editing && (
+      {tab === "stellage" && !editing && !editingSection && (
         <div className="content">
           <div className="toolbar">
             <button type="button" className="btn btn-primary btn-sm" onClick={startNewStellagePreset}>
@@ -175,7 +208,7 @@ export default function ModulesPage() {
                     {p.moduleName} · {p.items.filter((i) => i.included).length} поз.
                   </span>
                   <div className="row" style={{ marginTop: 10, gap: 6 }}>
-                    <button type="button" className="btn btn-sm" onClick={() => openPreset(p)}>
+                    <button type="button" className="btn btn-sm" onClick={() => openStellagePreset(p)}>
                       Редактировать
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => deletePreset(p.id)}>
@@ -189,94 +222,69 @@ export default function ModulesPage() {
         </div>
       )}
 
-      {tab === "farm" && !editing && (
+      {tab === "farm" && !editingSection && !editing && (
         <div className="content">
+          <div className="toolbar" style={{ marginBottom: 14 }}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={addFarmSection}>
+              ＋ Новый раздел
+            </button>
+          </div>
           <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
-            Пресет привязан к разделу фермы. При сборке проекта можно загрузить его одним кликом.
+            Каждый раздел — шаблон списка материалов. В проекте вы отмечаете нужные позиции и задаёте количество.
+            Материалы можно брать из любого модуля базы.
           </p>
-          {sections.map((sec) => {
-            const list = farmPresets.filter((p) => p.sectionId === sec.id);
-            return (
-              <div key={sec.id} className="card" style={{ padding: 14, marginBottom: 12 }}>
-                <div className="between" style={{ marginBottom: 10 }}>
-                  <div>
-                    <strong style={{ fontSize: 14 }}>{sec.name}</strong>
-                    <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
-                      {sectionMaterialCount(sec.id)} поз. в базе
-                    </span>
-                  </div>
-                  <button type="button" className="btn btn-sm" onClick={() => startNewFarmPreset(sec)}>
-                    ＋ Пресет
-                  </button>
-                </div>
-                {list.length === 0 ? (
-                  <span className="muted" style={{ fontSize: 12 }}>Нет пресетов</span>
-                ) : (
-                  <div className="preset-grid">
-                    {list.map((p) => (
-                      <div key={p.id} className="preset-card" style={{ cursor: "default" }}>
-                        <strong>{p.name}</strong>
-                        <span className="muted">{p.items.filter((i) => i.included).length} поз.</span>
-                        <div className="row" style={{ marginTop: 8, gap: 6 }}>
-                          <button type="button" className="btn btn-sm" onClick={() => openPreset(p)}>
-                            Изменить
-                          </button>
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => deletePreset(p.id)}>
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {tab === "order" && (
-        <div className="content">
-          <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-            Названия и порядок разделов на шаге «Ферма целиком». Позиции берутся из модуля «Общая закупка на ферму».
-          </p>
-          <div className="card" style={{ padding: 0, overflow: "hidden", maxWidth: 720 }}>
+          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
             <table className="spec">
               <thead>
                 <tr>
-                  <th style={{ width: 40 }}>#</th>
-                  <th>Название раздела</th>
-                  <th className="right" style={{ width: 80 }}>В базе</th>
-                  <th className="right" style={{ width: 100 }} />
+                  <th style={{ width: 36 }}>#</th>
+                  <th>Раздел</th>
+                  <th className="right" style={{ width: 90 }}>В составе</th>
+                  <th className="right" style={{ width: 220 }} />
                 </tr>
               </thead>
               <tbody>
-                {sections.map((sec, i) => (
+                {farmSections.map((sec, i) => (
                   <tr key={sec.id}>
                     <td className="muted num">{i + 1}</td>
                     <td>
                       <input
                         className="spec-cell-input"
                         value={sec.name}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setSectionNames(patchFarmSectionName(sectionNames, sec.id, v));
-                        }}
+                        onChange={(e) =>
+                          setFarmSections(patchSectionName(farmSections, sec.id, e.target.value))
+                        }
                         onBlur={(e) => saveSectionName(sec.id, e.target.value)}
                       />
                     </td>
-                    <td className="right num muted">{sectionMaterialCount(sec.id)}</td>
-                    <td className="right" style={{ width: 100 }}>
-                      <button type="button" className="btn btn-ghost btn-sm" disabled={i === 0} onClick={() => moveSection(sec.id, "up")}>
+                    <td className="right num muted">{catalogCount(sec.id)}</td>
+                    <td className="right">
+                      <button type="button" className="btn btn-sm" onClick={() => openSectionEditor(sec)}>
+                        Настроить состав
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={i === 0}
+                        onClick={() => moveFarmSection(sec.id, "up")}
+                      >
                         ↑
                       </button>
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
-                        disabled={i === sections.length - 1}
-                        onClick={() => moveSection(sec.id, "down")}
+                        disabled={i === farmSections.length - 1}
+                        onClick={() => moveFarmSection(sec.id, "down")}
                       >
                         ↓
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        title="Удалить"
+                        onClick={() => deleteFarmSection(sec)}
+                      >
+                        ✕
                       </button>
                     </td>
                   </tr>
@@ -287,7 +295,7 @@ export default function ModulesPage() {
         </div>
       )}
 
-      {tab === "catalog" && (
+      {tab === "catalog" && !editing && !editingSection && (
         <div className="content">
           <div className="card" style={{ overflowX: "auto" }}>
             <table className="spec">
@@ -314,30 +322,72 @@ export default function ModulesPage() {
         </div>
       )}
 
+      {editingSection && (
+        <div className="content">
+          <div className="card" style={{ padding: 16, marginBottom: 12 }}>
+            <h3 style={{ marginTop: 0 }}>Состав раздела: {editingSection.name}</h3>
+            <p className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>
+              Добавьте материалы из базы — они будут появляться в этом разделе при сборке каждого нового проекта.
+              Галочка здесь означает «входит в шаблон раздела».
+            </p>
+            <label>
+              Название раздела
+              <input
+                value={editingSection.name}
+                onChange={(e) => setEditingSection({ ...editingSection, name: e.target.value })}
+                onBlur={(e) => saveSectionName(editingSection.id, e.target.value)}
+              />
+            </label>
+          </div>
+
+          <SpecPickerTable
+            lines={editLines}
+            onChange={setEditLines}
+            materials={state.materials}
+            catalogModule=""
+            catalogLabel="материал"
+            onSaveMaterial={saveMaterial}
+          />
+
+          <div className="toolbar" style={{ marginTop: 16 }}>
+            <button type="button" className="btn btn-primary" disabled={saving} onClick={saveSectionCatalog}>
+              {saving ? "Сохранение…" : "Сохранить раздел"}
+            </button>
+            <button type="button" className="btn" onClick={() => setEditingSection(null)}>
+              Отмена
+            </button>
+            <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>
+              {editLines.length} поз. в шаблоне · {countIncluded(editLines)} отмечено
+            </span>
+          </div>
+        </div>
+      )}
+
       {editing && (
         <div className="content">
           <div className="card" style={{ padding: 16, marginBottom: 12 }}>
-            <h3 style={{ marginTop: 0 }}>{editing.id ? "Редактирование пресета" : "Новый пресет"}</h3>
+            <h3 style={{ marginTop: 0 }}>{editing.id ? "Редактирование пресета" : "Новый пресет стеллажа"}</h3>
             <div className="form-grid">
               <label>
                 Название пресета *
                 <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
               </label>
-              {editing.presetType === "stellage" ? (
-                <label>
-                  Тип стеллажа
-                  <select value={editing.moduleId} onChange={(e) => changeEditModule(e.target.value)}>
-                    {stellageMods.map((m) => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <label>
-                  Раздел
-                  <input value={editing.moduleName} disabled />
-                </label>
-              )}
+              <label>
+                Тип стеллажа
+                <select
+                  value={editing.moduleId}
+                  onChange={(e) => {
+                    const mod = stellageMods.find((m) => m.id === e.target.value);
+                    if (!mod) return;
+                    setEditing({ ...editing, moduleId: mod.id, moduleName: mod.name, note: mod.tech || "" });
+                    setEditLines(catalogLinesForModule(state.materials, mod.name));
+                  }}
+                >
+                  {stellageMods.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </label>
             </div>
           </div>
 
@@ -345,22 +395,18 @@ export default function ModulesPage() {
             lines={editLines}
             onChange={setEditLines}
             materials={state.materials}
-            catalogModule={editing.presetType === "farm_section" ? "Общая закупка на ферму" : editing.moduleName}
-            farmSectionId={editing.presetType === "farm_section" ? editing.sectionId : ""}
+            catalogModule={editing.moduleName}
             catalogLabel="позицию"
             onSaveMaterial={saveMaterial}
           />
 
           <div className="toolbar" style={{ marginTop: 16 }}>
-            <button type="button" className="btn btn-primary" disabled={saving} onClick={savePreset}>
+            <button type="button" className="btn btn-primary" disabled={saving} onClick={saveStellagePreset}>
               {saving ? "Сохранение…" : "Сохранить пресет"}
             </button>
             <button type="button" className="btn" onClick={() => setEditing(null)}>
               Отмена
             </button>
-            <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>
-              {countIncluded(editLines)} поз. в пресете
-            </span>
           </div>
         </div>
       )}

@@ -11,6 +11,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { importPhotosFromDir } from "./services/photoImport.js";
 import { syncFarmSectionsFromExcel } from "./services/syncFarmSections.js";
+import { ensureFarmSectionCatalogs } from "./services/farmSectionCatalogs.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, "../uploads");
@@ -95,6 +96,7 @@ export function runSeedIfEmpty() {
     ensureCompositionSubcategories();
     ensureMaterialPhotos();
     ensureFarmSectionIds();
+    ensureFarmSectionCatalogs();
     return;
   }
 
@@ -126,6 +128,7 @@ export function runSeedIfEmpty() {
   console.log(`Seeded ${materials.length} materials`);
   ensureMaterialPhotos();
   ensureFarmSectionIds();
+  ensureFarmSectionCatalogs();
 }
 
 if (process.argv[1]?.endsWith("seed.js")) {
