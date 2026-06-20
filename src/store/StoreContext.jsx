@@ -67,6 +67,10 @@ export function StoreProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/client/")) {
+      dispatch({ type: "HYDRATE", payload: { loading: false, ready: true } });
+      return;
+    }
     refresh();
   }, [refresh]);
 
@@ -183,6 +187,9 @@ export function StoreProvider({ children }) {
       },
       async loadClientProject(token) {
         return apiClient.getClientProject(token);
+      },
+      async clientPatchCooling(token, safetyFactor) {
+        return apiClient.patchClientCooling(token, safetyFactor);
       },
       rerender: () => tick((n) => n + 1),
     }),

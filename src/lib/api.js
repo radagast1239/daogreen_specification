@@ -25,6 +25,7 @@ async function request(path, { method = "GET", body, admin = true, token } = {})
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.error || `HTTP ${res.status}`);
+    err.status = res.status;
     if (data.problems) err.problems = data.problems;
     throw err;
   }
@@ -112,9 +113,19 @@ export const api = {
   deleteItem: (projectId, itemId) =>
     request(`/api/projects/${projectId}/items/${itemId}`, { method: "DELETE" }),
 
-  getClientProject: (token) => request(`/api/client/p/${token}`, { admin: false }),
+  getClientProject: (token) => request(`/api/client/p/${encodeURIComponent(token)}`, { admin: false }),
   patchClientItem: (token, itemId, patch) =>
-    request(`/api/client/p/${token}/items/${itemId}`, { method: "PATCH", body: patch, admin: false }),
+    request(`/api/client/p/${encodeURIComponent(token)}/items/${encodeURIComponent(itemId)}`, {
+      method: "PATCH",
+      body: patch,
+      admin: false,
+    }),
+  patchClientCooling: (token, safetyFactor) =>
+    request(`/api/client/p/${encodeURIComponent(token)}/cooling`, {
+      method: "PATCH",
+      body: { safetyFactor },
+      admin: false,
+    }),
 
   getClients: () => request("/api/admin/clients"),
   patchClientProfile: (data) => request("/api/admin/clients/profile", { method: "PATCH", body: data }),
@@ -177,5 +188,8 @@ export function photoSrc(url) {
 }
 
 export function clientLink(token) {
-  return `${window.location.origin}/client/p/${token}`;
+  const base =
+    import.meta.env.VITE_PUBLIC_URL?.replace(/\/$/, "") ||
+    (typeof window !== "undefined" ? window.location.origin : "");
+  return `${base}/client/p/${encodeURIComponent(token)}`;
 }

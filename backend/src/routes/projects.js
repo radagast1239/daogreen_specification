@@ -486,10 +486,33 @@ function patchClientItem(req, res) {
   res.json(it);
 }
 
+function patchClientCooling(req, res) {
+  const p = loadProjectByToken(req.params.token);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
+    return res.status(410).json({ error: "Link expired" });
+  }
+  const sf = Number(req.body?.safetyFactor);
+  if (!Number.isFinite(sf) || sf < 1 || sf > 2.5) {
+    return res.status(400).json({ error: "Invalid safetyFactor" });
+  }
+  const mp = typeof p.manualParams === "object" && p.manualParams ? { ...p.manualParams } : {};
+  const cf = mp.coolingFarm && typeof mp.coolingFarm === "object" ? { ...mp.coolingFarm } : {};
+  cf.safetyFactor = sf;
+  mp.coolingFarm = cf;
+  db.prepare("UPDATE projects SET manual_params = ?, updated_at = datetime('now') WHERE id = ?").run(
+    JSON.stringify(mp),
+    p.id
+  );
+  res.json({ manualParams: mp });
+}
+
 // Client router — основной путь /api/client/p/:token
 export const clientRouter = Router();
 
 clientRouter.get("/p/:token", serveClientProject);
 clientRouter.patch("/p/:token/items/:itemId", patchClientItem);
+clientRouter.patch("/p/:token/cooling", patchClientCooling);
 clientRouter.get("/:token", serveClientProject);
 clientRouter.patch("/:token/items/:itemId", patchClientItem);
+clientRouter.patch("/:token/cooling", patchClientCooling);

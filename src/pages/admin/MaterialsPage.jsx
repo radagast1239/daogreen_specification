@@ -9,6 +9,7 @@ import { PageHeader } from "../../components/Layout.jsx";
 import { Modal, Empty } from "../../components/ui.jsx";
 import { useToast } from "../../components/Toast.jsx";
 import ImportPanel from "../../components/ImportPanel.jsx";
+import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import { downloadCSV } from "../../lib/export.js";
 
 const ITEM_TYPES = [
@@ -123,6 +124,7 @@ export default function MaterialsPage() {
         actions={
           tab === "base" ? (
             <>
+              <CompactTableToggle />
               <button className="btn" onClick={exportAll}>
                 Excel ↓
               </button>

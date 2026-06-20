@@ -629,6 +629,30 @@ html.compact-tables .spec td { padding: 5px 7px; font-size: 12.5px; }
 html.compact-tables .spec .thumb-img { width: 40px; height: 40px; object-fit: cover; }
 html.compact-tables .input-inline { font-size: 12.5px; }
 html.compact-tables .card-item { padding: 10px; gap: 10px; }
+html.compact-tables .materials-table { border-spacing: 0 3px; }
+html.compact-tables .materials-table tbody tr.material-row td { padding-top: 4px; padding-bottom: 4px; }
+html.compact-tables .spec-picker .spec-cell-input { padding: 3px 6px; font-size: 12px; }
+html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
+
+/* Cooling calc */
+.cooling-calc { padding-left: 4px; }
+.cooling-calc__section-title { padding: 12px 20px 12px 28px; font-weight: 800; font-size: 14px; background: var(--brand-tint); }
+.cooling-calc__section-title--highlight { background: var(--brand); color: #fff; }
+.cooling-calc__table { margin: 0; }
+.cooling-calc__table th { font-weight: 700; font-size: 12px; padding: 8px 12px 8px 28px; }
+.cooling-calc__table td { padding: 10px 12px; vertical-align: top; }
+.cooling-calc__col-label { min-width: 240px; padding-left: 28px !important; }
+.cooling-calc__col-unit { width: 88px; font-size: 12px; }
+.cooling-calc__col-value { width: 150px; }
+.cooling-calc__label { font-weight: 700; font-size: 13.5px; line-height: 1.35; }
+.cooling-calc__hint { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.35; max-width: 360px; }
+.cooling-calc__value { font-size: 14px; }
+.cooling-calc__value--bold { font-weight: 800; color: var(--brand); font-size: 15px; }
+.cooling-calc__num { font-weight: 800; font-size: 18px; }
+.cooling-calc__num--hero { font-size: 24px; color: var(--brand); }
+.cooling-calc__input { background: #e8f4ff !important; font-weight: 700; max-width: 130px; margin-left: auto; }
+.cooling-calc__row--result td { background: rgba(17, 99, 85, 0.04); }
+.cooling-calc--client .cooling-calc__input { background: #fff8e6 !important; border-color: var(--amber); }
 
 /* Materials bordered rows */
 .materials-table { border-collapse: separate; border-spacing: 0 8px; }

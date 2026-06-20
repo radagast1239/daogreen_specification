@@ -25,6 +25,7 @@ import {
   presetPayloadFromDraft,
 } from "../../lib/presetHelpers.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
+import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
 import { COOLING_FARM_DEFAULTS, computeCoolingFarm } from "../../lib/coolingFarmCalc.js";
 import { defaultRooms } from "../../lib/roomHelpers.js";
@@ -245,9 +246,12 @@ export default function ProjectBuilderPage() {
         title="Новый проект"
         sub="Соберите стеллажи и разделы фермы. Состав разделов — в «Модули / разделы фермы»."
         actions={
-          <Link to="/modules" className="btn btn-sm">
-            Модули / разделы
-          </Link>
+          <>
+            <CompactTableToggle />
+            <Link to="/modules" className="btn btn-sm">
+              Модули / разделы
+            </Link>
+          </>
         }
       />
 
@@ -314,6 +318,16 @@ export default function ProjectBuilderPage() {
 
       {step === "stellages" && draft && (
         <div>
+          <div className="toolbar" style={{ marginBottom: 14 }}>
+            <button type="button" className="btn btn-primary" onClick={finishStellage}>
+              ✓ Стеллаж готов — следующий
+            </button>
+            <button type="button" className="btn" onClick={() => setStep("basics")}>← Назад</button>
+            <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={() => setStep("general")}>
+              Ферма целиком →
+            </button>
+          </div>
+
           {stellages.length > 0 && (
             <div className="card" style={{ marginBottom: 14, padding: 12 }}>
               <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>В проекте ({stellages.length})</div>

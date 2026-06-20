@@ -16,12 +16,14 @@ import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { Progress, StatusChip, Empty } from "../../components/ui.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
 import PhotoGallery from "../../components/PhotoGallery.jsx";
+import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import { generateProjectPdf } from "../../lib/pdfExport.js";
 import QRCode from "qrcode";
 import { downloadCSV, printPDF } from "../../lib/export.js";
 
 const TABS = [
   ["overview", "Обзор"],
+  ["cooling", "Охлаждение"],
   ["categories", "По категориям"],
   ["modules", "По стеллажам"],
   ["merged", "Общий список"],
@@ -56,10 +58,14 @@ export default function ClientProjectPage() {
 
   useEffect(() => {
     setLoading(true);
+    setErr("");
     actions
-      .loadClientProject(token)
+      .loadClientProject(decodeURIComponent(token || ""))
       .then(setData)
-      .catch((e) => setErr(e.message))
+      .catch((e) => {
+        if (e.status === 410) setErr("expired");
+        else setErr(e.message || "notfound");
+      })
       .finally(() => setLoading(false));
   }, [token, actions]);
 
@@ -71,10 +77,17 @@ export default function ClientProjectPage() {
     );
   }
 
+  if (err === "expired")
+    return (
+      <div className="client-wrap" style={{ paddingTop: 60 }}>
+        <Empty title="Ссылка устарела" hint="Попросите Daogreen прислать новую ссылку на проект." />
+      </div>
+    );
+
   if (err)
     return (
       <div className="client-wrap" style={{ paddingTop: 60 }}>
-        <Empty title="Проект не найден" hint="Проверь ссылку." />
+        <Empty title="Проект не найден" hint="Проверьте ссылку — она должна открываться на том же сайте, где вы её получили (с портом :3002, если указан)." />
       </div>
     );
 
@@ -105,6 +118,17 @@ export default function ClientProjectPage() {
 
   const installItems = visibleItems.filter((i) => i.itemRole === "installation" || i.category === "Работы и доставка");
   const purchaseItems = visibleItems.filter((i) => i.itemRole !== "installation");
+  const hasCooling = !!(project.manualParams?.coolingFarm && typeof project.manualParams.coolingFarm === "object");
+  const hasPurchase = visibleItems.length > 0;
+  const clientTabs = TABS.filter(([k]) => k !== "cooling" || hasCooling);
+
+  const patchCoolingFactor = async (safetyFactor) => {
+    const res = await actions.clientPatchCooling(token, safetyFactor);
+    setData((d) => ({
+      ...d,
+      project: { ...d.project, manualParams: res.manualParams },
+    }));
+  };
 
   const patch = async (itemId, p) => {
     const updated = await actions.clientPatchItem(token, itemId, p);
@@ -151,14 +175,14 @@ export default function ClientProjectPage() {
       />
 
       <div className="client-tabs no-print">
-        {TABS.map(([k, label]) => (
+        {clientTabs.map(([k, label]) => (
           <button key={k} className={"btn btn-sm" + (tab === k ? " btn-primary" : "")} onClick={() => setTab(k)}>
             {label}
           </button>
         ))}
       </div>
 
-      {tab !== "docs" && (
+      {tab !== "docs" && tab !== "cooling" && hasPurchase && (
         <div className="client-supplier-bar no-print">
           <strong style={{ fontSize: 13 }}>Поставщик:</strong>
           <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} style={{ width: "auto" }}>
@@ -180,9 +204,42 @@ export default function ClientProjectPage() {
         </div>
       )}
 
-      {visibleItems.length === 0 ? (
-        <Empty title="Спецификация готовится" hint="Позиции появятся после утверждения." />
-      ) : (
+      {tab === "cooling" && hasCooling && (
+        <CoolingFarmTab
+          key={`cool-${project.manualParams?.coolingFarm?.safetyFactor ?? "d"}`}
+          variant="client"
+          project={project}
+          onSafetyFactorChange={patchCoolingFactor}
+        />
+      )}
+
+      {tab === "docs" && (
+        <DocsTab
+          project={project}
+          documents={documents}
+          qrUrl={qrUrl}
+          visibleItems={visibleItems}
+          branding={branding}
+          onExportAll={() => exportRows(visibleItems, "закупка")}
+          onExportMerged={() => {
+            const rows = mergedPurchaseList(project);
+            downloadCSV(
+              `${project.name}_объединённый`,
+              rows.map((r) => ({
+                Наименование: r.name,
+                Поставщик: r.supplier,
+                Кол: r.qty,
+                Сумма: Math.round(r.sumVat),
+              }))
+            );
+          }}
+          onPdf={() => generateProjectPdf({ project, items: visibleItems, branding })}
+        />
+      )}
+
+      {!hasPurchase && tab !== "cooling" && tab !== "docs" ? (
+        <Empty title="Спецификация готовится" hint="Позиции появятся после утверждения. Расчёт охлаждения — во вкладке «Охлаждение»." />
+      ) : tab !== "cooling" && tab !== "docs" ? (
         <>
           {tab === "overview" && (
             <OverviewTab
@@ -278,31 +335,8 @@ export default function ClientProjectPage() {
               renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
             />
           )}
-          {tab === "docs" && (
-            <DocsTab
-              project={project}
-              documents={documents}
-              qrUrl={qrUrl}
-              visibleItems={visibleItems}
-              branding={branding}
-              onExportAll={() => exportRows(visibleItems, "закупка")}
-              onExportMerged={() => {
-                const rows = mergedPurchaseList(project);
-                downloadCSV(
-                  `${project.name}_объединённый`,
-                  rows.map((r) => ({
-                    Наименование: r.name,
-                    Поставщик: r.supplier,
-                    Кол: r.qty,
-                    Сумма: Math.round(r.sumVat),
-                  }))
-                );
-              }}
-              onPdf={() => generateProjectPdf({ project, items: visibleItems, branding })}
-            />
-          )}
         </>
-      )}
+      ) : null}
 
       <ClientBrandFooter branding={branding} />
     </div>
