@@ -50,6 +50,7 @@ export default function PhotosPage() {
       <PageHeader
         title="Фото материалов"
         sub={`${withPhoto} из ${state.materials.length} с фото · стеллажи: ${stellage.length} поз.`}
+        back={{ to: "/", label: "Проекты" }}
       />
       <div className="content" style={{ maxWidth: 720 }}>
         <div className="card" style={{ padding: 22 }}>

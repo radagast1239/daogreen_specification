@@ -126,7 +126,7 @@ export default function ClientsPage() {
 
   return (
     <>
-      <PageHeader title="Клиенты" sub="Статусы, комментарии и проекты по каждому клиенту" />
+      <PageHeader title="Клиенты" sub="Статусы, комментарии и проекты по каждому клиенту" back={{ to: "/", label: "Проекты" }} />
       <div className="content">
         {loading ? (
           <p className="muted">Загрузка…</p>

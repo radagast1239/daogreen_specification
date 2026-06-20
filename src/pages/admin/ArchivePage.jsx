@@ -18,7 +18,7 @@ export default function ArchivePage() {
 
   return (
     <>
-      <PageHeader title="Архив" sub="Архивные проекты не показываются на главной" />
+      <PageHeader title="Архив" sub="Архивные проекты не показываются на главной" back={{ to: "/", label: "Проекты" }} />
       <div className="content">
         {items.length === 0 ? (
           <Empty title="Архив пуст" />

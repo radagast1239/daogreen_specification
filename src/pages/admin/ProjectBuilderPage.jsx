@@ -93,7 +93,7 @@ export default function ProjectBuilderPage() {
   const setManual = (k, v) =>
     setForm((f) => ({ ...f, manualParams: { ...(f.manualParams || {}), [k]: v } }));
   const floorPlanUrl = form.manualParams?.floorPlanUrl || "";
-  const showFloorPlanPin = step !== "stellages" && !!floorPlanUrl;
+  const showFloorPlanPin = (step === "general" || step === "cooling" || step === "review") && !!floorPlanUrl;
 
   useEffect(() => {
     Promise.all([api.getPresets(), api.getSettings(), api.getSuppliers()]).then(([p, s, sup]) => {
@@ -266,6 +266,7 @@ export default function ProjectBuilderPage() {
       <PageHeader
         title="Новый проект"
         sub="Соберите стеллажи и разделы фермы. Состав разделов — в «Модули / разделы фермы»."
+        back={{ to: "/", label: "Проекты" }}
         actions={
           <>
             <CompactTableToggle />
@@ -480,6 +481,8 @@ export default function ProjectBuilderPage() {
 
       {step === "general" && activeSection && (
         <div>
+          <FloorPlanField value={floorPlanUrl} onChange={(url) => setManual("floorPlanUrl", url)} />
+
           {rooms.length > 0 && (
             <p className="muted" style={{ fontSize: 13, margin: "0 0 12px" }}>
               Комнаты ({rooms.length}):{" "}
@@ -555,6 +558,9 @@ export default function ProjectBuilderPage() {
 
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button type="button" className="btn" onClick={() => setStep("stellages")}>← Стеллажи</button>
+            {floorPlanUrl && (
+              <FloorPlanPin url={floorPlanUrl} title="Схема помещения" variant="button" />
+            )}
             <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setStep("cooling")}>
               Расчёт охлаждения →
             </button>
@@ -564,6 +570,11 @@ export default function ProjectBuilderPage() {
 
       {step === "cooling" && (
         <div>
+          {floorPlanUrl && (
+            <div className="toolbar" style={{ marginBottom: 12 }}>
+              <FloorPlanPin url={floorPlanUrl} title="Схема помещения" variant="button" />
+            </div>
+          )}
           <CoolingFarmTab
             inputs={coolingInputs}
             onInputsChange={setCoolingInputs}

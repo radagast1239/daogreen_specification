@@ -50,6 +50,7 @@ export default function ImportPage() {
       <PageHeader
         title="Импорт Excel"
         sub="Загрузка справочника и извлечение фото из ячеек таблицы в материалы"
+        back={{ to: "/", label: "Проекты" }}
       />
       <div className="content">
         <div className="card" style={{ padding: 22 }}>

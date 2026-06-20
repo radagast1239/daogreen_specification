@@ -14,7 +14,7 @@ export default function ReportsPage() {
   if (!data) {
     return (
       <>
-        <PageHeader title="Отчёты и аналитика" sub="Загрузка…" />
+        <PageHeader title="Отчёты и аналитика" sub="Загрузка…" back={{ to: "/", label: "Проекты" }} />
       </>
     );
   }
@@ -23,7 +23,7 @@ export default function ReportsPage() {
 
   return (
     <>
-      <PageHeader title="Отчёты и аналитика" sub="Статистика по проектам и базе материалов" />
+      <PageHeader title="Отчёты и аналитика" sub="Статистика по проектам и базе материалов" back={{ to: "/", label: "Проекты" }} />
       <div className="content">
         <div className="stat-grid" style={{ marginBottom: 24 }}>
           <div className="card stat">

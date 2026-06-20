@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import { berryCalculatorUrl, economicCalculatorUrl } from "../lib/calcUrls.js";
 import GlobalSearch from "./GlobalSearch.jsx";
 import { getCompactMode, setCompactMode } from "../lib/compactMode.js";
@@ -106,10 +106,33 @@ export default function Layout() {
   );
 }
 
-export function PageHeader({ title, sub, actions, breadcrumbs }) {
+export function BackLink({ to, label = "Проекты", onClick }) {
+  const content = <>← {label}</>;
+  if (onClick) {
+    return (
+      <button type="button" className="back-link back-link--btn" onClick={onClick}>
+        {content}
+      </button>
+    );
+  }
+  return (
+    <Link to={to || "/"} className="back-link">
+      {content}
+    </Link>
+  );
+}
+
+export function PageHeader({ title, sub, actions, breadcrumbs, back }) {
   return (
     <header className="page-head">
       <div>
+        {back && (
+          <BackLink
+            to={back.to}
+            label={back.label}
+            onClick={back.onClick}
+          />
+        )}
         {breadcrumbs}
         <h1>{title}</h1>
         {sub && <p className="muted">{sub}</p>}

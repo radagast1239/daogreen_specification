@@ -89,7 +89,7 @@ export default function NewProjectPage() {
 
   return (
     <>
-      <PageHeader title="Новый проект" sub="Вводные, модули, зоны и ручные параметры коммуникаций" />
+      <PageHeader title="Новый проект" sub="Вводные, модули, зоны и ручные параметры коммуникаций" back={{ to: "/", label: "Проекты" }} />
       <div className="content" style={{ maxWidth: 900 }}>
         <div className="card" style={{ padding: 22 }}>
           <div className="section-head" style={{ marginTop: 0 }}>

@@ -324,6 +324,15 @@ body.nav-open { overflow: hidden; }
 }
 .page-head h1 { margin: 0; font-size: clamp(1.25rem, 3vw, 1.65rem); letter-spacing: -.02em; font-weight: 800; }
 .page-head .muted { margin: 6px 0 0; font-size: 13px; }
+.back-link {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-bottom: 8px; padding: 0;
+  font-size: 13px; font-weight: 600; color: var(--brand);
+  text-decoration: none; background: none; border: none; cursor: pointer;
+}
+.back-link:hover { text-decoration: underline; color: var(--brand-dark, #0a4a3d); }
+.back-link--btn { font: inherit; }
+.subnav-back { margin: -6px 0 14px; }
 .topbar {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 18px 28px; border-bottom: 1px solid var(--line); background: var(--paper);

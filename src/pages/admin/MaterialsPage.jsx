@@ -123,6 +123,7 @@ export default function MaterialsPage() {
       <PageHeader
         title="Материалы"
         sub="Справочник позиций, цен и импорт из Excel"
+        back={{ to: "/", label: "Проекты" }}
         actions={
           tab === "base" ? (
             <>

@@ -54,7 +54,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Настройки" sub="Ключи, срок ссылки, категории. Бренд клиента — в «Модули / разделы → Клиент и бренд»." />
+      <PageHeader title="Настройки" sub="Ключи, срок ссылки, категории. Бренд клиента — в «Модули / разделы → Клиент и бренд»." back={{ to: "/", label: "Проекты" }} />
       <div className="content" style={{ maxWidth: 560 }}>
         <div className="card" style={{ padding: 22, marginBottom: 20 }}>
           <h3 style={{ marginTop: 0 }}>Компания</h3>

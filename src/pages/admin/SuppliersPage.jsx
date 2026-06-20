@@ -46,6 +46,7 @@ export default function SuppliersPage() {
       <PageHeader
         title="Поставщики"
         sub="Справочник для привязки к материалам"
+        back={{ to: "/", label: "Проекты" }}
         actions={
           <button type="button" className="btn btn-primary" onClick={() => setEditing({ ...blank })}>
             ＋ Поставщик

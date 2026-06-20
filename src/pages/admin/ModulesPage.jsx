@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/api.js";
-import { PageHeader } from "../../components/Layout.jsx";
+import { PageHeader, BackLink } from "../../components/Layout.jsx";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
 import {
   appendSectionVersion,
@@ -317,6 +317,14 @@ export default function ModulesPage() {
   };
 
   const sectionVersions = editingSection ? farmSectionVersions[editingSection.id] || [] : [];
+  const inEditor = !!(editing || editingSection || editingMod);
+  const tabLabel = TABS.find((t) => t.id === tab)?.label || "раздел";
+
+  const exitEditor = () => {
+    setEditing(null);
+    setEditingSection(null);
+    setEditingMod(null);
+  };
 
   const responsibleLabel = (id) => ref.responsibleRoles.find((r) => r.id === id)?.label || "—";
 
@@ -431,8 +439,16 @@ export default function ModulesPage() {
       <PageHeader
         title="Модули / разделы фермы"
         sub="Настройте разделы «Ферма целиком»: состав материалов по умолчанию подтягивается при создании проекта."
+        back={{ to: "/", label: "Проекты" }}
       />
 
+      {inEditor && (
+        <div className="subnav-back">
+          <BackLink label={`К списку: ${tabLabel}`} onClick={exitEditor} />
+        </div>
+      )}
+
+      {!inEditor && (
       <div className="step-tabs">
         {TABS.map((t) => (
           <button
@@ -445,6 +461,7 @@ export default function ModulesPage() {
           </button>
         ))}
       </div>
+      )}
 
       {tab === "directories" && !editing && !editingSection && !editingMod && (
         <DirectoriesTab

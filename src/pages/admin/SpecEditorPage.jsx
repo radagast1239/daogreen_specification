@@ -180,6 +180,7 @@ export default function SpecEditorPage() {
       <PageHeader
         title={project.name}
         breadcrumbs={breadcrumbs}
+        back={{ to: "/", label: "Проекты" }}
         sub={`${project.client || "—"}${project.city ? " · " + project.city : ""}${
           project.area ? " · " + project.area + " м²" : ""
         } · ${project.type}`}
