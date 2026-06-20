@@ -13,9 +13,9 @@ export VITE_BASE_PATH="$BASE_PATH"
 npm run build
 
 echo "=== Nginx unified config ==="
+rm -f /etc/nginx/sites-enabled/daogreen-hub /etc/nginx/sites-enabled/default 2>/dev/null || true
 cp "$APP_DIR/scripts/nginx-daogreen-unified.conf" /etc/nginx/sites-available/daogreen-unified
 ln -sf /etc/nginx/sites-available/daogreen-unified /etc/nginx/sites-enabled/daogreen-unified
-rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 nginx -t
 systemctl reload nginx
 
