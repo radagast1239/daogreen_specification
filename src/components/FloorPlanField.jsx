@@ -1,9 +1,11 @@
 import React, { useState } from "react";
 import { api, photoSrc } from "../lib/api.js";
+import FloorPlanViewer from "./FloorPlanViewer.jsx";
 
 /** Загрузка одной схемы помещения (на весь объект, не по стеллажам) */
 export default function FloorPlanField({ value, onChange }) {
   const [uploading, setUploading] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
   const src = value ? photoSrc(value) : "";
 
   const upload = async (e) => {
@@ -26,9 +28,9 @@ export default function FloorPlanField({ value, onChange }) {
       <div className="between wrap" style={{ gap: 12, marginBottom: src ? 12 : 0 }}>
         <div>
           <h4 style={{ margin: 0, fontSize: 14 }}>Схема помещения</h4>
-          <p className="muted" style={{ fontSize: 12, margin: "4px 0 0", maxWidth: 520 }}>
-            План с трубами, стеллажами и зонами — одна картинка на всю ферму. После загрузки на шаге «Ферма целиком» появится
-            кнопка «Схема помещения» и миниатюра в углу экрана.
+          <p className="muted" style={{ fontSize: 12, margin: "4px 0 0", maxWidth: 640 }}>
+            План с трубами, стеллажами и зонами — одна картинка на всю ферму. Нажмите на превью или «Открыть схему» —
+            просмотр поверх страницы, без новой вкладки.
           </p>
         </div>
         <div className="row wrap" style={{ gap: 8 }}>
@@ -37,17 +39,29 @@ export default function FloorPlanField({ value, onChange }) {
             <input type="file" accept="image/*" hidden disabled={uploading} onChange={upload} />
           </label>
           {value && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange("")}>
-              Убрать
-            </button>
+            <>
+              <button type="button" className="btn btn-sm" onClick={() => setViewerOpen(true)}>
+                Открыть схему
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange("")}>
+                Убрать
+              </button>
+            </>
           )}
         </div>
       </div>
       {src && (
-        <button type="button" className="floor-plan-field__preview" onClick={() => window.open(src, "_blank")} title="Открыть">
+        <button
+          type="button"
+          className="floor-plan-field__preview"
+          onClick={() => setViewerOpen(true)}
+          title="Открыть схему на весь экран"
+        >
           <img src={src} alt="Схема помещения" />
+          <span className="floor-plan-field__preview-hint">Нажмите, чтобы развернуть</span>
         </button>
       )}
+      <FloorPlanViewer url={value} open={viewerOpen} onClose={() => setViewerOpen(false)} />
     </div>
   );
 }
