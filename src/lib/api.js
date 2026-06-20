@@ -190,8 +190,26 @@ export function photoSrc(url) {
 
 export function clientLink(token) {
   const basePath = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
-  const origin =
-    import.meta.env.VITE_PUBLIC_URL?.replace(/\/$/, "") ||
-    (typeof window !== "undefined" ? window.location.origin : "");
-  return `${origin}${basePath}/client/p/${encodeURIComponent(token)}`;
+  const publicBase = import.meta.env.VITE_PUBLIC_URL?.replace(/\/$/, "");
+  const safeToken = encodeURIComponent(token);
+
+  if (publicBase) {
+    return `${publicBase}/client/p/${safeToken}`;
+  }
+
+  if (typeof window !== "undefined") {
+    const { origin, pathname } = window.location;
+    // Админка на /spec/… — клиентская ссылка всегда с тем же префиксом
+    if (basePath && !pathname.startsWith(basePath)) {
+      return `${origin}${basePath}/client/p/${safeToken}`;
+    }
+    return `${origin}${basePath}/client/p/${safeToken}`;
+  }
+
+  return `${basePath}/client/p/${safeToken}`;
+}
+
+/** Относительный путь для React Router (basename уже учтён) */
+export function clientRoutePath(token) {
+  return `/client/p/${encodeURIComponent(token)}`;
 }

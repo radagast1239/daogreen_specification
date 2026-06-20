@@ -10,6 +10,7 @@ echo "=== Build frontend (base $BASE_PATH) ==="
 export PATH="/opt/node-v22.16.0-linux-x64/bin:$PATH"
 cd "$APP_DIR"
 export VITE_BASE_PATH="$BASE_PATH"
+export VITE_PUBLIC_URL="${VITE_PUBLIC_URL:-http://62.233.35.206/spec}"
 npm run build
 
 echo "=== Nginx unified config ==="

@@ -24,6 +24,7 @@ export function draftFromStellagePreset(preset, instanceName, index) {
     id: uid("st"),
     presetId: preset.id,
     name: instanceName || preset.name || `Стеллаж ${index}`,
+    count: 1,
     moduleId: preset.moduleId,
     moduleName: preset.moduleName,
     tech: preset.note || "",

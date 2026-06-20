@@ -319,9 +319,6 @@ export default function ProjectBuilderPage() {
       {step === "stellages" && draft && (
         <div>
           <div className="toolbar" style={{ marginBottom: 14 }}>
-            <button type="button" className="btn btn-primary" onClick={finishStellage}>
-              ✓ Стеллаж готов — следующий
-            </button>
             <button type="button" className="btn" onClick={() => setStep("basics")}>← Назад</button>
             <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={() => setStep("general")}>
               Ферма целиком →
@@ -331,10 +328,13 @@ export default function ProjectBuilderPage() {
           {stellages.length > 0 && (
             <div className="card" style={{ marginBottom: 14, padding: 12 }}>
               <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>В проекте ({stellages.length})</div>
-              {stellages.map((st, i) => (
+              {stellages.map((st) => (
                 <div key={st.id} className="row between" style={{ marginBottom: 6 }}>
                   <span>
                     <strong>{st.name}</strong>
+                    {(Number(st.count) || 1) > 1 && (
+                      <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>× {st.count} шт.</span>
+                    )}
                     <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
                       {st.moduleName} · {countIncluded(st.items)} поз.
                       {st.presetId ? " · пресет" : ""}
@@ -378,12 +378,34 @@ export default function ProjectBuilderPage() {
                   ))}
                 </select>
               </label>
+              <label>
+                Количество стеллажей
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={draft.count ?? 1}
+                  onChange={(e) =>
+                    setDraft((d) => ({ ...d, count: Math.max(1, Number(e.target.value) || 1) }))
+                  }
+                  title="Материалы умножаются на это число"
+                />
+              </label>
             </div>
             <div className="toolbar" style={{ marginTop: 10 }}>
               <button type="button" className="btn btn-sm" onClick={saveDraftAsPreset}>
                 💾 Сохранить как пресет
               </button>
             </div>
+          </div>
+
+          <div className="toolbar" style={{ marginBottom: 10 }}>
+            <button type="button" className="btn btn-primary" onClick={finishStellage}>
+              ✓ Стеллаж готов — следующий
+            </button>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Отметьте позиции и укажите кол-во — без кол-ва клиенту не попадёт
+            </span>
           </div>
 
           <SpecPickerTable
@@ -503,7 +525,18 @@ export default function ProjectBuilderPage() {
           <h3 style={{ marginTop: 0 }}>Итого</h3>
           <ul style={{ fontSize: 14, lineHeight: 1.9 }}>
             <li><strong>{form.name}</strong>{form.client ? ` · ${form.client}` : ""}</li>
-            <li>Стеллажей: <strong>{stellages.length}</strong></li>
+            <li>
+              Стеллажей:{" "}
+              <strong>
+                {stellages.reduce((n, st) => n + Math.max(1, Number(st.count) || 1), 0)}
+              </strong>
+              {stellages.length > 0 && (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {" "}
+                  ({stellages.length} конфиг.)
+                </span>
+              )}
+            </li>
             {sections.map((sec) => (
               <li key={sec.id}>
                 {sec.name}: <strong>{activeLines(farmSectionLines[sec.id] || []).length}</strong> поз.

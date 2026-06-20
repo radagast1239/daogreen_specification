@@ -93,7 +93,7 @@ export default function ClientProjectPage() {
   if (err)
     return (
       <div className="client-wrap" style={{ paddingTop: 60 }}>
-        <Empty title="Проект не найден" hint="Проверьте ссылку — она должна открываться на том же сайте, где вы её получили (с портом :3002, если указан)." />
+        <Empty title="Проект не найден" hint="Проверьте ссылку — она должна начинаться с /spec/client/p/… (например http://62.233.35.206/spec/client/p/…)." />
       </div>
     );
 
@@ -197,6 +197,14 @@ export default function ClientProjectPage() {
       />
 
       <div className="client-wrap">
+      {!hasPurchase && (
+        <div className="card" style={{ padding: 16, marginBottom: 16, borderColor: "var(--accent)" }}>
+          <strong>Список закупки пока пуст</strong>
+          <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
+            Ссылка работает — администратор ещё не опубликовал позиции (нужны галочка, количество и утверждение в спецификации).
+          </p>
+        </div>
+      )}
       <div className="client-tabs no-print">
         {clientTabs.map(([k, label]) => (
           <button key={k} className={"btn btn-sm" + (tab === k ? " btn-primary" : "")} onClick={() => setTab(k)}>

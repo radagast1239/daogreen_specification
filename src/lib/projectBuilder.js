@@ -160,7 +160,7 @@ export function lineToProjectItem(line, section, sortOrder) {
     roomId: line.roomId || "",
     responsible: defaultResponsible(line.category, line),
     visible: on && qty > 0,
-    approved: false,
+    approved: on && qty > 0,
     enabled: on,
     needsApproval: false,
     status: "not_bought",
@@ -182,9 +182,11 @@ export function buildProjectFromBuilder({ form, stellages, farmSections, general
 
   for (const st of stellages) {
     const section = st.name?.trim() || st.moduleName;
+    const stCount = Math.max(1, Number(st.count) || 1);
     stellageConfigs.push({
       id: st.id,
       name: section,
+      count: stCount,
       moduleId: st.moduleId,
       moduleName: st.moduleName,
       tech: st.tech || "",
@@ -197,7 +199,9 @@ export function buildProjectFromBuilder({ form, stellages, farmSections, general
       })),
     });
     for (const line of activeLines(st.items)) {
-      pushLine(line, section);
+      const baseQty = Number(line.qty) || 0;
+      if (baseQty <= 0) continue;
+      pushLine({ ...line, qty: Math.round(baseQty * stCount * 100) / 100 }, section);
     }
   }
 
@@ -205,12 +209,14 @@ export function buildProjectFromBuilder({ form, stellages, farmSections, general
     for (const sec of farmSections) {
       const sectionName = sec.sectionName || sec.name;
       for (const line of activeLines(sec.items)) {
+        if ((Number(line.qty) || 0) <= 0) continue;
         pushLine(line, sectionName);
       }
     }
   } else if (generalLines?.length) {
     const generalSection = "Общая закупка на ферму";
     for (const line of activeLines(generalLines)) {
+      if ((Number(line.qty) || 0) <= 0) continue;
       pushLine(line, generalSection);
     }
   }
@@ -238,6 +244,7 @@ export function newStellageDraft(modules, materials, index) {
     moduleName: mod?.name || "Стеллаж",
     tech: mod?.tech || "",
     name: `Стеллаж ${index}`,
+    count: 1,
     items: mod?.name ? catalogLinesForModule(materials, mod.name) : [],
   };
 }

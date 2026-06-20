@@ -1,7 +1,7 @@
 import React from "react";
 import { Link, useParams } from "react-router-dom";
 import { Empty } from "./ui.jsx";
-import { clientLink } from "../lib/api.js";
+import { clientLink, clientRoutePath } from "../lib/api.js";
 
 const CLIENT_SCOPE_KEY = "daogreen-client-scope";
 
@@ -29,7 +29,7 @@ export function ClientAccessDenied() {
       <div className="client-wrap">
         <Empty title="Доступ только к вашему списку закупки" hint="Эта ссылка открывает только ваш проект — без доступа к расчётам и админке.">
           {token && (
-            <Link className="btn btn-primary" to={clientLink(token)} style={{ marginTop: 16 }}>
+            <Link className="btn btn-primary" to={clientRoutePath(token)} style={{ marginTop: 16 }}>
               Вернуться к моему списку
             </Link>
           )}
