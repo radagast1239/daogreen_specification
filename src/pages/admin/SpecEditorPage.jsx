@@ -151,9 +151,13 @@ export default function SpecEditorPage() {
             project={project}
             actions={actions}
             onApplyToProject={async ({ coolingKw, coolingBtu }) => {
+              const mp =
+                project.manualParams && typeof project.manualParams === "object"
+                  ? project.manualParams
+                  : {};
               await actions.projectUpdate(project.id, {
                 manualParams: {
-                  ...project.manualParams,
+                  ...mp,
                   coolingPower: coolingKw,
                   coolingBtu,
                 },

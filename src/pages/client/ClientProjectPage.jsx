@@ -502,7 +502,7 @@ function ItemCard({ it, currency, patch, bought = false }) {
           </div>
           <div className="field" style={{ flex: 1, minWidth: 160 }}>
             <label>Комментарий</label>
-            <input value={it.clientComment} onChange={(e) => patch(it.id, { clientComment: e.target.value })} />
+            <input value={it.clientComment || ""} onChange={(e) => patch(it.id, { clientComment: e.target.value })} />
           </div>
         </div>
         )}

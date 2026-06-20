@@ -7,9 +7,9 @@ import {
   seasonalCooling,
 } from "../lib/coolingFarmCalc.js";
 
-function fmt(val, row) {
+function fmt(val, row = {}) {
   if (val == null || val === "") return "—";
-  if (row.pct) return `${(Number(val) * 100).toFixed(1)}%`;
+  if (row?.pct) return `${(Number(val) * 100).toFixed(1)}%`;
   const n = Number(val);
   if (!Number.isFinite(n)) return String(val);
   if (Math.abs(n) >= 1000) return n.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
@@ -18,7 +18,10 @@ function fmt(val, row) {
 }
 
 export default function CoolingFarmTab({ project, actions, onApplyToProject }) {
-  const stored = project.manualParams?.coolingFarm || {};
+  const baseParams =
+    project.manualParams && typeof project.manualParams === "object" ? project.manualParams : {};
+  const stored =
+    baseParams.coolingFarm && typeof baseParams.coolingFarm === "object" ? baseParams.coolingFarm : {};
   const [inputs, setInputs] = useState({ ...COOLING_FARM_DEFAULTS, ...stored });
   const [saved, setSaved] = useState(false);
 
@@ -29,7 +32,7 @@ export default function CoolingFarmTab({ project, actions, onApplyToProject }) {
 
   const save = async () => {
     await actions.projectUpdate(project.id, {
-      manualParams: { ...project.manualParams, coolingFarm: inputs },
+      manualParams: { ...baseParams, coolingFarm: inputs },
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
