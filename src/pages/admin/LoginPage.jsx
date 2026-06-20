@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { setAdminKey, getAdminKey, api } from "../../lib/api.js";
 
 export default function LoginPage() {
@@ -27,17 +27,16 @@ export default function LoginPage() {
   return (
     <div className="login-wrap">
       <form className="card login-card" onSubmit={submit}>
-        <Link to="/hub" className="brandmark" style={{ textDecoration: "none" }}>
+        <div className="brandmark">
           <div className="spine" />
           <div>
             <b>Daogreen</b>
-            <span style={{ color: "var(--muted)" }}>инструменты</span>
+            <span style={{ color: "var(--muted)" }}>спецификации</span>
           </div>
-        </Link>
+        </div>
         <h2 style={{ margin: "0 0 8px" }}>Вход в спецификации</h2>
         <p className="muted" style={{ fontSize: 13, marginBottom: 20 }}>
-          Ключ из <code>backend/.env</code> (ADMIN_KEY). Калькуляторы — без входа на{" "}
-          <Link to="/hub">главной</Link>.
+          Ключ из <code>backend/.env</code> (ADMIN_KEY).
         </p>
         <div className="field">
           <label>Ключ доступа</label>
