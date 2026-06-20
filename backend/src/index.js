@@ -79,5 +79,6 @@ app.use((err, _req, res, _next) => {
 
 app.listen(PORT, () => {
   console.log(`Daogreen Spec API → http://localhost:${PORT}`);
-  console.log(`Admin key: ${ADMIN_KEY.slice(0, 8)}…`);
+  const keyHint = process.env.ADMIN_KEY || "(multi-key mode)";
+  console.log(`Admin key: ${typeof keyHint === "string" && keyHint.length > 8 ? `${keyHint.slice(0, 8)}…` : keyHint}`);
 });
