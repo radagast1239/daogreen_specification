@@ -7,8 +7,8 @@
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/daogreen-spec}"
-DOMAIN="${DOMAIN:?set DOMAIN, e.g. spec.nikita-daogreen.ru}"
-EMAIL="${EMAIL:?set EMAIL for Let's Encrypt notifications}"
+DOMAIN="${DOMAIN:?set DOMAIN e.g. spec.nikita-daogreen.ru}"
+EMAIL="${EMAIL:?set EMAIL for Lets Encrypt notifications}"
 NODE22="/opt/node-v22.16.0-linux-x64/bin"
 
 echo "=== Check DNS ==="
@@ -28,8 +28,8 @@ apt-get install -y certbot python3-certbot-nginx
 
 echo "=== Nginx server_name ==="
 NGINX_CONF="/etc/nginx/sites-available/daogreen-unified"
-if ! grep -q "server_name $DOMAIN" "$NGINX_CONF" 2>/dev/null; then
-  sed -i "s/server_name _;/server_name $DOMAIN $SERVER_IP;/" "$NGINX_CONF"
+if ! grep -q "server_name.*$DOMAIN" "$NGINX_CONF" 2>/dev/null; then
+  sed -i "s/server_name .*;/server_name $DOMAIN $SERVER_IP;/" "$NGINX_CONF"
   nginx -t
   systemctl reload nginx
 fi
