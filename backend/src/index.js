@@ -5,7 +5,6 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { initRemoteDb, startDbBackupLoop } from "./dbBackup.js";
 import { initDb, db } from "./db.js";
-import { runSeedIfEmpty } from "./seed.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
@@ -18,6 +17,8 @@ process.env.DATABASE_PATH = dbPath;
 
 await initRemoteDb(dbPath);
 initDb();
+
+const { runSeedIfEmpty } = await import("./seed.js");
 runSeedIfEmpty();
 startDbBackupLoop(dbPath);
 
