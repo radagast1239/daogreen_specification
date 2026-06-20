@@ -113,6 +113,7 @@ export const api = {
     request(`/api/client/p/${token}/items/${itemId}`, { method: "PATCH", body: patch, admin: false }),
 
   getClients: () => request("/api/admin/clients"),
+  patchClientProfile: (data) => request("/api/admin/clients/profile", { method: "PATCH", body: data }),
   getSuppliers: () => request("/api/suppliers"),
   createSupplier: (data) => request("/api/suppliers", { method: "POST", body: data }),
   updateSupplier: (id, patch) => request(`/api/suppliers/${id}`, { method: "PATCH", body: patch }),

@@ -304,6 +304,9 @@ export default function ProjectBuilderPage() {
               <textarea rows={2} value={form.comment} onChange={(e) => set("comment", e.target.value)} />
             </label>
           </div>
+
+          <RoomsEditor rooms={rooms} onChange={setRooms} />
+
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button type="button" className="btn btn-primary" disabled={!form.name.trim()} onClick={() => setStep("stellages")}>
               Далее: стеллажи →
@@ -398,7 +401,16 @@ export default function ProjectBuilderPage() {
 
       {step === "general" && activeSection && (
         <div>
-          <RoomsEditor rooms={rooms} onChange={setRooms} />
+          {rooms.length > 0 && (
+            <p className="muted" style={{ fontSize: 13, margin: "0 0 12px" }}>
+              Комнаты ({rooms.length}):{" "}
+              {rooms.map((r) => r.name + (r.area ? ` ${r.area} м²` : "")).join(" · ")}
+              {" — "}
+              <button type="button" className="btn btn-ghost btn-sm" style={{ padding: 0, verticalAlign: "baseline" }} onClick={() => setStep("basics")}>
+                изменить в «Проект»
+              </button>
+            </p>
+          )}
 
           <div className="farm-layout">
             <nav className="section-tabs">
@@ -485,7 +497,13 @@ export default function ProjectBuilderPage() {
                 {sec.name}: <strong>{activeLines(farmSectionLines[sec.id] || []).length}</strong> поз.
               </li>
             ))}
-            <li>Комнат: <strong>{rooms.length}</strong></li>
+            <li>Комнат: <strong>{rooms.length}</strong>
+              {rooms.length > 0 && (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {" "}({rooms.map((r) => r.name).join(", ")})
+                </span>
+              )}
+            </li>
             <li>
               Охлаждение: <strong>{Math.round(coolingCalc.totalKwSafety * 10) / 10} кВт</strong>
               {form.manualParams?.coolingPower ? ` (сохранено ${form.manualParams.coolingPower} кВт)` : ""}

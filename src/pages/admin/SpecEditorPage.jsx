@@ -18,7 +18,7 @@ import { Progress, Stat, Empty, ClientLinkModal } from "../../components/ui.jsx"
 import { downloadCSV } from "../../lib/export.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
-import { defaultRooms, isFarmGeneralItem } from "../../lib/roomHelpers.js";
+import { defaultRooms, isFarmGeneralItem, roomLabel } from "../../lib/roomHelpers.js";
 
 export default function SpecEditorPage() {
   const { id } = useParams();
@@ -319,7 +319,7 @@ function SpecTab({ project, patchItem, actions, saveRooms }) {
                           >
                             <option value="">—</option>
                             {rooms.map((r) => (
-                              <option key={r.id} value={r.id}>{r.name}</option>
+                              <option key={r.id} value={r.id}>{roomLabel(rooms, r.id) || r.name}</option>
                             ))}
                           </select>
                         ) : (

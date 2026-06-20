@@ -204,6 +204,14 @@ function migrateDb() {
       note TEXT DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS client_profiles (
+      client_key TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'new',
+      comment TEXT DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 }
 

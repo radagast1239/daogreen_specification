@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { groupLabel } from "../../shared/stellageComposition.js";
 import { CATEGORIES } from "../data/modules.js";
 import { isExhaustFanName, isSplitSystemName } from "../lib/materialSpecs.js";
+import { roomLabel } from "../lib/roomHelpers.js";
 import {
   blankLine,
   lineFromMaterial,
@@ -376,7 +377,7 @@ export default function SpecPickerTable({
                           >
                             <option value="">—</option>
                             {rooms.map((r) => (
-                              <option key={r.id} value={r.id}>{r.name}</option>
+                              <option key={r.id} value={r.id}>{roomLabel(rooms, r.id) || r.name}</option>
                             ))}
                           </select>
                         </td>
