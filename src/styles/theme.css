@@ -722,6 +722,41 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 .photo-gallery-full { max-width: min(92vw, 720px); max-height: 88vh; border-radius: var(--radius); box-shadow: var(--shadow-lg); }
 .photo-gallery-trigger { border: none; padding: 0; background: transparent; cursor: zoom-in; }
 
+.client-admin-note {
+  background: var(--brand-tint);
+  border-left: 3px solid var(--brand);
+  padding: 6px 10px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.activity-feed__list { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow-y: auto; }
+.activity-feed__item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.activity-feed__item:last-child { border-bottom: none; }
+.activity-feed__badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.activity-feed__badge--client { background: var(--amber-tint); color: var(--amber); }
+.activity-feed__badge--admin { background: var(--brand-tint); color: var(--brand); }
+.activity-feed__text { line-height: 1.4; }
+.activity-feed__time { font-size: 11px; white-space: nowrap; }
+
+.client-isolated .sidebar,
+.client-isolated .mobile-menu-btn { display: none !important; }
+
 @media print {
   @page { margin: 12mm 10mm; size: A4; }
   .sidebar, .topbar, .toolbar, .no-print, .budget-bar button, .statusbtns,

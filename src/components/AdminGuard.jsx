@@ -1,16 +1,38 @@
-import React from "react";
-import { Navigate, Outlet } from "react-router-dom";
-import { useStore } from "../store/StoreContext.jsx";
+import React, { useEffect, useState } from "react";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { getAdminKey, api } from "../lib/api.js";
+import { clearClientScope } from "./ClientGuard.jsx";
 
 export default function AdminGuard() {
-  const { state } = useStore();
-  if (state.error && !state.ready) return <Navigate to="/login" replace />;
-  if (state.loading && !state.ready) {
+  const loc = useLocation();
+  const key = getAdminKey();
+  const [ok, setOk] = useState(!!key ? null : false);
+
+  useEffect(() => {
+    if (!key) {
+      setOk(false);
+      return;
+    }
+    api
+      .getMaterials()
+      .then(() => {
+        clearClientScope();
+        setOk(true);
+      })
+      .catch(() => setOk(false));
+  }, [key]);
+
+  if (ok === false) {
+    return <Navigate to="/login" replace state={{ from: loc.pathname }} />;
+  }
+
+  if (ok !== true) {
     return (
       <div className="login-wrap">
-        <div className="muted">Загрузка…</div>
+        <div className="muted">Проверка доступа…</div>
       </div>
     );
   }
+
   return <Outlet />;
 }

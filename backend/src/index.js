@@ -17,6 +17,8 @@ process.env.DATABASE_PATH = dbPath;
 
 await initRemoteDb(dbPath);
 initDb();
+const { initActivityLog } = await import("./services/activityLog.js");
+initActivityLog();
 
 const { runSeedIfEmpty } = await import("./seed.js");
 runSeedIfEmpty();

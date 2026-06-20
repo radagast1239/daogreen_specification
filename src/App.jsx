@@ -2,6 +2,7 @@ import React from "react";
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import Layout from "./components/Layout.jsx";
 import AdminGuard from "./components/AdminGuard.jsx";
+import { ClientAccessDenied, ClientScope } from "./components/ClientGuard.jsx";
 import ProjectsPage from "./pages/admin/ProjectsPage.jsx";
 import ProjectBuilderPage from "./pages/admin/ProjectBuilderPage.jsx";
 import SpecEditorPage from "./pages/admin/SpecEditorPage.jsx";
@@ -14,17 +15,32 @@ import ArchivePage from "./pages/admin/ArchivePage.jsx";
 import SettingsPage from "./pages/admin/SettingsPage.jsx";
 import LoginPage from "./pages/admin/LoginPage.jsx";
 import ClientProjectPage from "./pages/client/ClientProjectPage.jsx";
+
 function ClientLegacyRedirect() {
   const { token } = useParams();
   return <Navigate to={`/client/p/${token}`} replace />;
 }
 
+function FallbackRoute() {
+  return <ClientAccessDenied />;
+}
+
 export default function App() {
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/client/p/:token" element={<ClientProjectPage />} />
+      {/* Клиент — только своя страница, без админки */}
+      <Route
+        path="/client/p/:token"
+        element={
+          <ClientScope>
+            <ClientProjectPage />
+          </ClientScope>
+        }
+      />
       <Route path="/client/:token" element={<ClientLegacyRedirect />} />
+      <Route path="/client/*" element={<ClientAccessDenied />} />
+
+      <Route path="/login" element={<LoginPage />} />
 
       <Route element={<AdminGuard />}>
         <Route element={<Layout />}>
@@ -43,7 +59,7 @@ export default function App() {
         </Route>
       </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<FallbackRoute />} />
     </Routes>
   );
 }

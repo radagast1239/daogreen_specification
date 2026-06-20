@@ -67,8 +67,8 @@ export function StoreProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined" && window.location.pathname.startsWith("/client/")) {
-      dispatch({ type: "HYDRATE", payload: { loading: false, ready: true } });
+    if (typeof window !== "undefined" && /\/client(\/p)?\//.test(window.location.pathname)) {
+      dispatch({ type: "HYDRATE", payload: { loading: false, ready: true, error: null } });
       return;
     }
     refresh();

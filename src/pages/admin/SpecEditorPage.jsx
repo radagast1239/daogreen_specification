@@ -25,6 +25,7 @@ import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
 import { defaultRooms, isFarmGeneralItem, roomLabel } from "../../lib/roomHelpers.js";
 import RoomCoolingSummary from "../../components/RoomCoolingSummary.jsx";
+import ActivityFeed from "../../components/ActivityFeed.jsx";
 
 const TAB_LABELS = {
   spec: "Спецификация",
@@ -43,10 +44,16 @@ export default function SpecEditorPage() {
   const [linkOpen, setLinkOpen] = useState(false);
   const [loading, setLoading] = useState(!project);
   const [companyName, setCompanyName] = useState("Daogreen");
+  const [activity, setActivity] = useState([]);
 
   useEffect(() => {
     api.getSettings().then((s) => setCompanyName(s.companyName || "Daogreen")).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!id) return;
+    api.getProjectActivity(id).then(setActivity).catch(() => setActivity([]));
+  }, [id, project?.updatedAt]);
 
   useEffect(() => {
     if (!id) return;
@@ -78,7 +85,10 @@ export default function SpecEditorPage() {
   const totals = projectTotals(project);
   const stats = projectStats(project);
 
-  const patchItem = (itemId, patch) => actions.itemUpdate(project.id, itemId, patch);
+  const patchItem = (itemId, patch) =>
+    actions.itemUpdate(project.id, itemId, patch).then(() => {
+      api.getProjectActivity(project.id).then(setActivity).catch(() => {});
+    });
 
   const saveRooms = (rooms) => actions.projectUpdate(project.id, { rooms });
 
@@ -184,6 +194,10 @@ export default function SpecEditorPage() {
         </div>
 
         <ProjectDocuments projectId={project.id} />
+
+        <Collapsible title="История: клиент и Daogreen" subtitle={`${activity.length} записей`} defaultOpen={activity.length > 0}>
+          <ActivityFeed activity={activity} title="" />
+        </Collapsible>
 
         <Collapsible title="Сводка и прогресс" subtitle={`${stats.total} позиций`} defaultOpen>
         <div className="stat-grid" style={{ marginBottom: 0 }}>
@@ -403,6 +417,7 @@ function SpecTab({ project, patchItem, actions, saveRooms }) {
                   <th className="right">Сумма</th>
                   <th>Ссылка</th>
                   <th title="Внутренний комментарий">Заметка</th>
+                  <th title="Комментарий клиента">Клиент</th>
                   <th title="Срок поставки, дней">Дней</th>
                   <th>Клиенту</th>
                   <th>Утв.</th>
@@ -435,6 +450,13 @@ function SpecTab({ project, patchItem, actions, saveRooms }) {
                       {it.comment && (
                         <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{it.comment}</div>
                       )}
+                      <input
+                        className="input-inline"
+                        placeholder="сообщение клиенту"
+                        style={{ marginTop: 4, fontSize: 11 }}
+                        value={it.clientNote || ""}
+                        onChange={(e) => patchItem(it.id, { clientNote: e.target.value })}
+                      />
                     </td>
                     <td style={{ width: 70 }}>
                       <input className="input-inline" value={it.unit} onChange={(e) => patchItem(it.id, { unit: e.target.value })} />
@@ -516,6 +538,15 @@ function SpecTab({ project, patchItem, actions, saveRooms }) {
                         value={it.internalNote || ""}
                         onChange={(e) => patchItem(it.id, { internalNote: e.target.value })}
                       />
+                    </td>
+                    <td style={{ minWidth: 100, maxWidth: 160, fontSize: 12 }}>
+                      {it.clientComment ? (
+                        <span className="chip chip--amber" style={{ whiteSpace: "normal", textAlign: "left" }}>
+                          {it.clientComment}
+                        </span>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
                     </td>
                     <td style={{ width: 56 }}>
                       <input

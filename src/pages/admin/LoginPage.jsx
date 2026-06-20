@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { setAdminKey, getAdminKey, api } from "../../lib/api.js";
+import { getAdminKey, api, setAdminKey } from "../../lib/api.js";
+import { clearClientScope } from "../../components/ClientGuard.jsx";
 
 export default function LoginPage() {
   const nav = useNavigate();
@@ -15,6 +16,7 @@ export default function LoginPage() {
     setAdminKey(key.trim());
     try {
       await api.getMaterials();
+      clearClientScope();
       nav("/", { replace: true });
       window.location.reload();
     } catch {

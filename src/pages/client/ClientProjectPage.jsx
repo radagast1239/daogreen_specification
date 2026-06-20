@@ -16,7 +16,9 @@ import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { Progress, StatusChip, Empty } from "../../components/ui.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
 import PhotoGallery from "../../components/PhotoGallery.jsx";
+import ActivityFeed from "../../components/ActivityFeed.jsx";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
+import { setClientScope } from "../../components/ClientGuard.jsx";
 import { generateProjectPdf } from "../../lib/pdfExport.js";
 import QRCode from "qrcode";
 import { downloadCSV, printPDF } from "../../lib/export.js";
@@ -50,6 +52,10 @@ export default function ClientProjectPage() {
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
   const [qrUrl, setQrUrl] = useState("");
+
+  useEffect(() => {
+    if (token) setClientScope(decodeURIComponent(token));
+  }, [token]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -101,6 +107,7 @@ export default function ClientProjectPage() {
   const project = data.project;
   const branding = data.branding || {};
   const documents = data.documents || [];
+  const activity = data.activity || [];
   const versionInfo = data.versionInfo;
   const visibleItems = clientVisibleItems(project);
   const totals = projectTotals(project);
@@ -124,21 +131,14 @@ export default function ClientProjectPage() {
 
   const patchCoolingFactor = async (safetyFactor) => {
     const res = await actions.clientPatchCooling(token, safetyFactor);
-    setData((d) => ({
-      ...d,
-      project: { ...d.project, manualParams: res.manualParams },
-    }));
+    const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
+    setData(fresh);
   };
 
   const patch = async (itemId, p) => {
-    const updated = await actions.clientPatchItem(token, itemId, p);
-    setData((d) => ({
-      ...d,
-      project: {
-        ...d.project,
-        items: d.project.items.map((it) => (it.id === itemId ? { ...it, ...updated } : it)),
-      },
-    }));
+    await actions.clientPatchItem(token, itemId, p);
+    const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
+    setData(fresh);
   };
 
   const exportRows = (items, name) =>
@@ -272,6 +272,7 @@ export default function ClientProjectPage() {
               supplierFilter={supplierFilter}
               qrUrl={qrUrl}
               branding={branding}
+              activity={activity}
             />
           )}
           {tab === "install" && (
@@ -471,7 +472,7 @@ function PurchaseSplitView({ items, render, renderBought }) {
   );
 }
 
-function OverviewTab({ project, totals, items, supplierFilter, qrUrl, branding }) {
+function OverviewTab({ project, totals, items, supplierFilter, qrUrl, branding, activity }) {
   const byCat = groupBy(items, "category");
   return (
     <div style={{ marginTop: 16 }}>
@@ -498,6 +499,11 @@ function OverviewTab({ project, totals, items, supplierFilter, qrUrl, branding }
           <div className="v num">{money(totals.remaining, project.currency)}</div>
         </div>
       </div>
+
+      <div style={{ marginTop: 20 }}>
+        <ActivityFeed activity={activity} title="Что менялось (вы и Daogreen)" />
+      </div>
+
       {qrUrl && (
         <div className="card" style={{ padding: 16, marginTop: 16, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
           <img src={qrUrl} alt="QR ссылка проекта" width={120} height={120} />
@@ -670,10 +676,9 @@ function ItemCard({ it, currency, patch, bought = false }) {
             <b>Поставщик:</b> {it.supplier}
           </div>
         )}
-        {it.clientNote && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{it.clientNote}</div>}
-        {it.techNote && (
-          <div className="muted" style={{ fontSize: 11, marginTop: 2, fontStyle: "italic" }}>
-            {it.techNote}
+        {it.clientNote && (
+          <div className="client-admin-note" style={{ fontSize: 12.5, marginTop: 6 }}>
+            <b>Daogreen:</b> {it.clientNote}
           </div>
         )}
         {it.link && (

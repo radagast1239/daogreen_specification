@@ -161,6 +161,7 @@ export const api = {
   mergeMaterials: (keepId, duplicateId) =>
     request("/api/materials/merge", { method: "POST", body: { keepId, duplicateId } }),
   getPriceHistory: (id) => request(`/api/materials/${id}/price-history`),
+  getProjectActivity: (projectId) => request(`/api/projects/${projectId}/activity`),
   publishCheck: (projectId) => request(`/api/projects/${projectId}/publish-check`),
   getProjectDocuments: (projectId) => request(`/api/admin/projects/${projectId}/documents`),
   uploadProjectDocument: async (projectId, file, type) => {

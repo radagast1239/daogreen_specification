@@ -15,6 +15,13 @@ import {
 } from "../services/buildItems.js";
 import { listMaterials, listModules } from "./materials.js";
 import { validateProjectForPublish } from "../services/analytics.js";
+import {
+  listActivity,
+  logItemPatch,
+  logProjectEvent,
+  sanitizeItemForClient,
+  sanitizeProjectForClient,
+} from "../services/activityLog.js";
 
 const router = Router();
 
@@ -393,9 +400,26 @@ api.get("/:id/versions", (req, res) => {
 });
 
 api.patch("/:id/items/:itemId", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const before = p.items.find((i) => i.id === req.params.itemId);
   const it = patchItem(req.params.id, req.params.itemId, req.body);
   if (!it) return res.status(404).json({ error: "Not found" });
+  logItemPatch({
+    projectId: req.params.id,
+    itemId: it.id,
+    itemName: it.name,
+    actor: "admin",
+    before,
+    patch: req.body,
+  });
   res.json(it);
+});
+
+api.get("/:id/activity", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  res.json(listActivity(req.params.id, { clientOnly: false }));
 });
 
 api.post("/:id/items", (req, res) => {
@@ -461,7 +485,14 @@ function serveClientProject(req, res) {
   const documents = db
     .prepare("SELECT id, type, filename, url, uploaded_at as uploadedAt FROM files WHERE project_id = ? ORDER BY uploaded_at DESC")
     .all(p.id);
-  res.json({ project: p, versionInfo: versions[0] || null, branding: loadBrandingSettings(), documents });
+  const activity = listActivity(p.id, { clientOnly: true });
+  res.json({
+    project: sanitizeProjectForClient(p),
+    versionInfo: versions[0] || null,
+    branding: loadBrandingSettings(),
+    documents,
+    activity,
+  });
 }
 
 function patchClientItem(req, res) {
@@ -470,10 +501,22 @@ function patchClientItem(req, res) {
   if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
     return res.status(410).json({ error: "Link expired" });
   }
+  const before = p.items.find((i) => i.id === req.params.itemId);
+  if (!before || !before.visible || !before.approved) {
+    return res.status(403).json({ error: "Item not available" });
+  }
   const allowed = ["status", "actualPrice", "clientComment"];
   const patch = {};
   for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
   const it = patchItem(p.id, req.params.itemId, patch);
+  logItemPatch({
+    projectId: p.id,
+    itemId: it.id,
+    itemName: it.name,
+    actor: "client",
+    before,
+    patch,
+  });
   const bought = ["bought", "delivered", "have"].includes(patch.status);
   if (bought && !p.purchaseStartedAt) {
     db.prepare("UPDATE projects SET purchase_started_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(
@@ -483,7 +526,7 @@ function patchClientItem(req, res) {
   db.prepare(
     "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
   ).run(p.id);
-  res.json(it);
+  res.json(sanitizeItemForClient(it));
 }
 
 function patchClientCooling(req, res) {
@@ -498,12 +541,23 @@ function patchClientCooling(req, res) {
   }
   const mp = typeof p.manualParams === "object" && p.manualParams ? { ...p.manualParams } : {};
   const cf = mp.coolingFarm && typeof mp.coolingFarm === "object" ? { ...mp.coolingFarm } : {};
+  const oldSf = cf.safetyFactor;
   cf.safetyFactor = sf;
   mp.coolingFarm = cf;
   db.prepare("UPDATE projects SET manual_params = ?, updated_at = datetime('now') WHERE id = ?").run(
     JSON.stringify(mp),
     p.id
   );
+  if (oldSf !== sf) {
+    logProjectEvent({
+      projectId: p.id,
+      actor: "client",
+      summary: `Клиент: запасной коэфф. ${oldSf ?? "—"} → ${sf}`,
+    });
+  }
+  db.prepare(
+    "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+  ).run(p.id);
   res.json({ manualParams: mp });
 }
 
