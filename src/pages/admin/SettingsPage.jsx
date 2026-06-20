@@ -14,7 +14,11 @@ export default function SettingsPage() {
     contactTelegram: "",
     brandColor: "#116355",
     materialCategories: "",
+    clientLinkTtlDays: "0",
+    logoUrl: "",
   });
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [newUser, setNewUser] = useState({ name: "", apiKey: "" });
   const [categories, setCategories] = useState([...CATEGORIES]);
   const [newCat, setNewCat] = useState("");
 
@@ -23,6 +27,7 @@ export default function SettingsPage() {
       setForm(s);
       setCategories(resolveCategories(s));
     });
+    api.getAdminUsers().then(setAdminUsers).catch(() => {});
   }, []);
 
   const addCategory = () => {
@@ -58,7 +63,8 @@ export default function SettingsPage() {
             ["contactPhone", "Телефон"],
             ["contactEmail", "Email"],
             ["contactTelegram", "Telegram"],
-            ["brandColor", "Цвет бренда"],
+            ["clientLinkTtlDays", "Срок ссылки, дней"],
+            ["logoUrl", "URL логотипа (PDF)"],
           ].map(([k, label]) => (
             <div className="field" key={k}>
               <label>{label}</label>
@@ -102,10 +108,53 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div style={{ marginTop: 18 }}>
+        <div className="row wrap" style={{ marginTop: 18, gap: 10 }}>
           <button type="button" className="btn btn-primary" onClick={save}>
             Сохранить
           </button>
+          <button type="button" className="btn" onClick={() => api.downloadBackup().then(() => success("Бэкап скачан"))}>
+            Скачать бэкап БД
+          </button>
+        </div>
+
+        <div className="card" style={{ padding: 22, marginTop: 24 }}>
+          <h3 style={{ marginTop: 0 }}>Клиентская ссылка</h3>
+          <div className="field">
+            <label>Срок действия (дней, 0 = без ограничения)</label>
+            <input
+              type="number"
+              min={0}
+              value={form.clientLinkTtlDays || "0"}
+              onChange={(e) => setForm({ ...form, clientLinkTtlDays: e.target.value })}
+            />
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: 22, marginTop: 24 }}>
+          <h3 style={{ marginTop: 0 }}>Ключи доступа</h3>
+          <p className="muted" style={{ fontSize: 13 }}>Дополнительные ключи админки. Основной — в ADMIN_KEY на сервере.</p>
+          {adminUsers.map((u) => (
+            <div key={u.id} className="row between" style={{ fontSize: 13, marginBottom: 8 }}>
+              <span>{u.name}</span>
+              <code style={{ fontSize: 11 }}>{u.apiKey.slice(0, 8)}…</code>
+            </div>
+          ))}
+          <div className="row" style={{ gap: 8, marginTop: 12 }}>
+            <input placeholder="Имя" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
+            <input placeholder="Ключ" value={newUser.apiKey} onChange={(e) => setNewUser({ ...newUser, apiKey: e.target.value })} />
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={async () => {
+                await api.createAdminUser(newUser);
+                setAdminUsers(await api.getAdminUsers());
+                setNewUser({ name: "", apiKey: "" });
+                success("Ключ добавлен");
+              }}
+            >
+              Добавить
+            </button>
+          </div>
         </div>
       </div>
     </>

@@ -24,6 +24,7 @@ import { downloadCSV } from "../../lib/export.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
 import { defaultRooms, isFarmGeneralItem, roomLabel } from "../../lib/roomHelpers.js";
+import RoomCoolingSummary from "../../components/RoomCoolingSummary.jsx";
 
 const TAB_LABELS = {
   spec: "Спецификация",
@@ -88,8 +89,17 @@ export default function SpecEditorPage() {
   };
 
   const publishVersion = async () => {
-    const v = await actions.createVersion(project.id);
-    setVersionMsg(`Опубликована версия ${v.versionNumber}: Δ ${v.summary.delta} ₽`);
+    try {
+      const v = await actions.createVersion(project.id);
+      setVersionMsg(`Опубликована версия ${v.versionNumber}: Δ ${v.summary.delta} ₽`);
+      success("Версия опубликована");
+    } catch (e) {
+      if (e.problems?.length) {
+        error(`Не хватает данных: ${e.problems.length} позиций (фото/цена/ссылка)`);
+      } else {
+        error(e.message);
+      }
+    }
   };
 
   const exportSpec = () => {
@@ -212,7 +222,12 @@ export default function SpecEditorPage() {
 
         {versionMsg && <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>{versionMsg}</p>}
 
-        {tab === "spec" && <SpecTab project={project} patchItem={patchItem} actions={actions} saveRooms={saveRooms} />}
+        {tab === "spec" && (
+          <>
+            <RoomCoolingSummary project={project} />
+            <SpecTab project={project} patchItem={patchItem} actions={actions} saveRooms={saveRooms} />
+          </>
+        )}
         {tab === "merged" && <MergedTab project={project} />}
         {tab === "spec_lists" && <SpecialistTab project={project} />}
         {tab === "calc" && (

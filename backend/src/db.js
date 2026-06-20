@@ -173,8 +173,31 @@ function migrateDb() {
   addCol("project_items", "exhaust_m3", "REAL DEFAULT 0");
   addCol("projects", "rooms", "TEXT NOT NULL DEFAULT '[]'");
   addCol("project_items", "room_id", "TEXT DEFAULT ''");
+  addCol("materials", "tags", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("materials", "alternative_material_id", "TEXT DEFAULT ''");
+  addCol("materials", "min_order_qty", "REAL DEFAULT 0");
+  addCol("materials", "order_step", "REAL DEFAULT 1");
+  addCol("materials", "default_item_role", "TEXT DEFAULT 'purchase'");
+  addCol("project_items", "internal_note", "TEXT DEFAULT ''");
+  addCol("project_items", "delivery_days", "INTEGER DEFAULT 0");
+  addCol("project_items", "item_role", "TEXT DEFAULT 'purchase'");
+  addCol("projects", "client_token_expires_at", "TEXT DEFAULT ''");
+  addCol("projects", "purchase_started_at", "TEXT DEFAULT ''");
+  addCol("projects", "installation_done_at", "TEXT DEFAULT ''");
+  addCol("client_profiles", "purchase_started_at", "TEXT DEFAULT ''");
+  addCol("client_profiles", "installation_done_at", "TEXT DEFAULT ''");
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS material_price_history (
+      id TEXT PRIMARY KEY,
+      material_id TEXT NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+      old_price REAL NOT NULL DEFAULT 0,
+      new_price REAL NOT NULL DEFAULT 0,
+      source TEXT DEFAULT 'manual',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_price_history_mat ON material_price_history(material_id);
+  `);
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL DEFAULT ''
@@ -247,6 +270,11 @@ export function rowToMaterial(row) {
     coolingKw: row.cooling_kw || 0,
     coolingBtu: row.cooling_btu || "",
     exhaustM3: row.exhaust_m3 || 0,
+    tags: JSON.parse(row.tags || "[]"),
+    alternativeMaterialId: row.alternative_material_id || "",
+    minOrderQty: row.min_order_qty || 0,
+    orderStep: row.order_step || 1,
+    defaultItemRole: row.default_item_role || "purchase",
     comment: row.client_note || row.tech_note,
   };
 }
@@ -297,6 +325,9 @@ export function rowToItem(row) {
     coolingBtu: row.cooling_btu || "",
     exhaustM3: row.exhaust_m3 || 0,
     roomId: row.room_id || "",
+    internalNote: row.internal_note || "",
+    deliveryDays: row.delivery_days || 0,
+    itemRole: row.item_role || "purchase",
   };
 }
 
@@ -323,6 +354,9 @@ export function rowToProject(row, items = []) {
     rooms: JSON.parse(row.rooms || "[]"),
     version: row.version,
     lastClientActivityAt: row.last_client_activity_at,
+    clientTokenExpiresAt: row.client_token_expires_at || "",
+    purchaseStartedAt: row.purchase_started_at || "",
+    installationDoneAt: row.installation_done_at || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     items,

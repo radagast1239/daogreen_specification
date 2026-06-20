@@ -120,8 +120,14 @@ export function StoreProvider({ children }) {
         dispatch({ type: "PROJECT_SET", project: p });
         return p;
       },
-      async createVersion(id) {
-        return apiClient.createVersion(id);
+      async createVersion(id, opts = {}) {
+        try {
+          return await apiClient.createVersion(id, opts);
+        } catch (e) {
+          const err = new Error(e.message);
+          if (e.problems) err.problems = e.problems;
+          throw err;
+        }
       },
       async regenerateToken(id) {
         const { clientToken } = await apiClient.regenerateToken(id);

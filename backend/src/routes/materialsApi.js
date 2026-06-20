@@ -21,6 +21,8 @@ import {
   importPhotosFromExcelBuffer,
 } from "../services/excelImages.js";
 import { bulkMatchUploads, importPhotosFromDir } from "../services/photoImport.js";
+import { findDuplicateGroups, mergeMaterials } from "../services/materialMerge.js";
+import { getPriceHistory } from "../services/priceHistory.js";
 import XLSX from "xlsx";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +50,20 @@ router.get("/", (req, res) => {
 });
 
 router.get("/modules", (_req, res) => res.json(listModules()));
+
+router.get("/meta/duplicates", (_req, res) => res.json(findDuplicateGroups()));
+
+router.post("/merge", (req, res) => {
+  try {
+    res.json(mergeMaterials(req.body.keepId, req.body.duplicateId));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.get("/:id/price-history", (req, res) => {
+  res.json(getPriceHistory(req.params.id));
+});
 
 router.get("/:id", (req, res) => {
   const m = getMaterial(req.params.id);

@@ -1,8 +1,26 @@
 import { Router } from "express";
-import { db } from "../db.js";
+import path from "path";
+import fs from "fs";
+import multer from "multer";
+import { nanoid } from "nanoid";
+import { fileURLToPath } from "url";
+import { db, getDbPath } from "../db.js";
 import { listMaterials, listModules } from "./materials.js";
 import { loadProject, loadProjectItems, rowToProject } from "../db.js";
 import { projectTotals } from "../services/buildItems.js";
+import { getAnalytics } from "../services/analytics.js";
+import { listAdminUsers, upsertAdminUser, deactivateAdminUser } from "../auth.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const uploadDir = path.join(__dirname, "../uploads");
+fs.mkdirSync(uploadDir, { recursive: true });
+const docUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_r, _f, cb) => cb(null, uploadDir),
+    filename: (_r, file, cb) => cb(null, `${nanoid(10)}${path.extname(file.originalname)}`),
+  }),
+  limits: { fileSize: 25 * 1024 * 1024 },
+});
 
 const router = Router();
 
@@ -64,6 +82,12 @@ router.patch("/clients/profile", (req, res) => {
   const allowed = ["status", "comment"];
   const patch = {};
   for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
+  if (patch.status === "buying" && !loadProfile(key)?.purchase_started_at) {
+    db.prepare("UPDATE client_profiles SET purchase_started_at = datetime('now') WHERE client_key = ?").run(key);
+  }
+  if (patch.status === "installed" || patch.status === "launched" || patch.status === "done") {
+    db.prepare("UPDATE client_profiles SET installation_done_at = datetime('now') WHERE client_key = ?").run(key);
+  }
   const prof = upsertProfile(key, name, patch);
   res.json({
     key,
@@ -114,7 +138,57 @@ router.get("/settings", (_req, res) => {
     farmSections: obj.farmSections || "",
     farmSectionCatalogs: obj.farmSectionCatalogs || "",
     materialCategories: obj.materialCategories || "",
+    clientLinkTtlDays: obj.clientLinkTtlDays || "0",
+    logoUrl: obj.logoUrl || "",
   });
+});
+
+router.get("/backup", (_req, res) => {
+  const p = getDbPath();
+  if (!fs.existsSync(p)) return res.status(404).json({ error: "DB not found" });
+  res.download(p, `daogreen-backup-${new Date().toISOString().slice(0, 10)}.db`);
+});
+
+router.get("/analytics", (_req, res) => {
+  res.json(getAnalytics());
+});
+
+router.get("/admin-users", (_req, res) => {
+  res.json(listAdminUsers());
+});
+
+router.post("/admin-users", (req, res) => {
+  const { name, apiKey, active } = req.body;
+  if (!name?.trim() || !apiKey?.trim()) return res.status(400).json({ error: "name and apiKey required" });
+  res.status(201).json(upsertAdminUser({ name: name.trim(), apiKey: apiKey.trim(), active: active !== false }));
+});
+
+router.delete("/admin-users/:id", (req, res) => {
+  deactivateAdminUser(req.params.id);
+  res.json({ ok: true });
+});
+
+router.get("/projects/:id/documents", (req, res) => {
+  const rows = db
+    .prepare("SELECT id, type, filename, url, uploaded_at as uploadedAt FROM files WHERE project_id = ? ORDER BY uploaded_at DESC")
+    .all(req.params.id);
+  res.json(rows);
+});
+
+router.post("/projects/:id/documents", docUpload.single("file"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file" });
+  const id = nanoid(12);
+  const url = `/uploads/${req.file.filename}`;
+  const type = req.body.type || "other";
+  db.prepare(
+    "INSERT INTO files (id, project_id, type, filename, url) VALUES (?, ?, ?, ?, ?)"
+  ).run(id, req.params.id, type, req.file.originalname, url);
+  res.status(201).json({ id, type, filename: req.file.originalname, url, uploadedAt: new Date().toISOString() });
+});
+
+router.delete("/documents/:id", (req, res) => {
+  db.prepare("DELETE FROM files WHERE id = ?").run(req.params.id);
+  res.status(204).end();
 });
 
 router.patch("/settings", (req, res) => {
@@ -137,6 +211,8 @@ router.patch("/settings", (req, res) => {
     farmSections: obj.farmSections || "",
     farmSectionCatalogs: obj.farmSectionCatalogs || "",
     materialCategories: obj.materialCategories || "",
+    clientLinkTtlDays: obj.clientLinkTtlDays || "0",
+    logoUrl: obj.logoUrl || "",
   });
 });
 

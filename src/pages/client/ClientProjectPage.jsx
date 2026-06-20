@@ -15,6 +15,9 @@ import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
 import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { Progress, StatusChip, Empty } from "../../components/ui.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
+import PhotoGallery from "../../components/PhotoGallery.jsx";
+import { generateProjectPdf } from "../../lib/pdfExport.js";
+import QRCode from "qrcode";
 import { downloadCSV, printPDF } from "../../lib/export.js";
 
 const TABS = [
@@ -22,12 +25,19 @@ const TABS = [
   ["categories", "По категориям"],
   ["modules", "По стеллажам"],
   ["merged", "Общий список"],
+  ["install", "Монтаж"],
   ["plumber", "Сантехник"],
   ["electric", "Электрик"],
   ["installer", "Монтажник"],
   ["consumables", "Расходники"],
   ["docs", "Документы"],
 ];
+
+const QUICK_STATUSES = PURCHASE_STATUSES.filter((s) =>
+  ["not_bought", "searching", "ordered", "bought", "delivered", "have", "need_help", "not_fit", "replacement_check"].includes(
+    s.id
+  )
+);
 
 export default function ClientProjectPage() {
   const { token } = useParams();
@@ -37,6 +47,12 @@ export default function ClientProjectPage() {
   const [supplierFilter, setSupplierFilter] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
+  const [qrUrl, setQrUrl] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    QRCode.toDataURL(window.location.href, { width: 200, margin: 1 }).then(setQrUrl).catch(() => {});
+  }, [token]);
 
   useEffect(() => {
     setLoading(true);
@@ -71,6 +87,7 @@ export default function ClientProjectPage() {
 
   const project = data.project;
   const branding = data.branding || {};
+  const documents = data.documents || [];
   const versionInfo = data.versionInfo;
   const visibleItems = clientVisibleItems(project);
   const totals = projectTotals(project);
@@ -85,6 +102,9 @@ export default function ClientProjectPage() {
 
   const filterSupplier = (list) =>
     supplierFilter ? list.filter((i) => i.supplier === supplierFilter) : list;
+
+  const installItems = visibleItems.filter((i) => i.itemRole === "installation" || i.category === "Работы и доставка");
+  const purchaseItems = visibleItems.filter((i) => i.itemRole !== "installation");
 
   const patch = async (itemId, p) => {
     const updated = await actions.clientPatchItem(token, itemId, p);
@@ -127,6 +147,7 @@ export default function ClientProjectPage() {
         versionInfo={versionInfo}
         delta={delta}
         onExport={() => exportRows(visibleItems, "закупка")}
+        onPdf={() => generateProjectPdf({ project, items: visibleItems, branding })}
       />
 
       <div className="client-tabs no-print">
@@ -167,13 +188,24 @@ export default function ClientProjectPage() {
             <OverviewTab
               project={project}
               totals={totals}
-              items={filterSupplier(visibleItems)}
+              items={filterSupplier(purchaseItems)}
               supplierFilter={supplierFilter}
+              qrUrl={qrUrl}
+              branding={branding}
+            />
+          )}
+          {tab === "install" && (
+            <PurchaseSplitView
+              items={filterSupplier(installItems)}
+              currency={project.currency}
+              patch={patch}
+              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} />}
+              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
             />
           )}
           {tab === "categories" && (
             <PurchaseSplitView
-              items={filterSupplier(visibleItems)}
+              items={filterSupplier(purchaseItems)}
               currency={project.currency}
               patch={patch}
               render={(todo) => (
@@ -186,7 +218,7 @@ export default function ClientProjectPage() {
           )}
           {tab === "modules" && (
             <PurchaseSplitView
-              items={filterSupplier(visibleItems)}
+              items={filterSupplier(purchaseItems)}
               currency={project.currency}
               patch={patch}
               render={(todo) => (
@@ -199,7 +231,7 @@ export default function ClientProjectPage() {
           )}
           {tab === "merged" && (
             <PurchaseSplitView
-              items={filterSupplier(visibleItems)}
+              items={filterSupplier(purchaseItems)}
               currency={project.currency}
               patch={patch}
               render={(todo) => (
@@ -249,7 +281,10 @@ export default function ClientProjectPage() {
           {tab === "docs" && (
             <DocsTab
               project={project}
+              documents={documents}
+              qrUrl={qrUrl}
               visibleItems={visibleItems}
+              branding={branding}
               onExportAll={() => exportRows(visibleItems, "закупка")}
               onExportMerged={() => {
                 const rows = mergedPurchaseList(project);
@@ -263,6 +298,7 @@ export default function ClientProjectPage() {
                   }))
                 );
               }}
+              onPdf={() => generateProjectPdf({ project, items: visibleItems, branding })}
             />
           )}
         </>
@@ -290,7 +326,7 @@ function ClientBrandFooter({ branding }) {
   );
 }
 
-function BudgetBar({ project, branding, totals, versionInfo, delta, onExport }) {
+function BudgetBar({ project, branding, totals, versionInfo, delta, onExport, onPdf }) {
   const company = branding?.companyName || "Daogreen";
   return (
     <div className="budget-bar" style={{ background: `linear-gradient(135deg, ${branding?.brandColor || "#062920"}, #083028)` }}>
@@ -312,6 +348,9 @@ function BudgetBar({ project, branding, totals, versionInfo, delta, onExport }) 
       <div style={{ marginTop: 12 }}>
         <Progress value={totals.progress} />
       </div>
+      <p className="muted" style={{ fontSize: 12, margin: "8px 0 0" }}>
+        Закуплено {totals.progress}% · потрачено {money(totals.spent, project.currency)} из {money(totals.budget, project.currency)} · осталось {money(totals.remaining, project.currency)}
+      </p>
       <div className="nums" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
         <div>
           <div className="k">Итого</div>
@@ -336,8 +375,13 @@ function BudgetBar({ project, branding, totals, versionInfo, delta, onExport }) 
         <button className="btn btn-sm" onClick={onExport}>
           Excel ↓
         </button>
+        {onPdf && (
+          <button className="btn btn-sm" onClick={onPdf}>
+            PDF ↓
+          </button>
+        )}
         <button className="btn btn-sm" onClick={printPDF}>
-          PDF
+          Печать
         </button>
       </div>
     </div>
@@ -369,7 +413,7 @@ function PurchaseSplitView({ items, render, renderBought }) {
   );
 }
 
-function OverviewTab({ project, totals, items, supplierFilter }) {
+function OverviewTab({ project, totals, items, supplierFilter, qrUrl, branding }) {
   const byCat = groupBy(items, "category");
   return (
     <div style={{ marginTop: 16 }}>
@@ -391,7 +435,22 @@ function OverviewTab({ project, totals, items, supplierFilter }) {
           <div className="k">Потрачено</div>
           <div className="v num">{money(totals.spent, project.currency)}</div>
         </div>
+        <div className="card stat">
+          <div className="k">Осталось</div>
+          <div className="v num">{money(totals.remaining, project.currency)}</div>
+        </div>
       </div>
+      {qrUrl && (
+        <div className="card" style={{ padding: 16, marginTop: 16, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+          <img src={qrUrl} alt="QR ссылка проекта" width={120} height={120} />
+          <div>
+            <strong>QR-код проекта</strong>
+            <p className="muted" style={{ fontSize: 13, margin: "6px 0 0" }}>
+              Отсканируйте, чтобы открыть список закупки на телефоне.
+            </p>
+          </div>
+        </div>
+      )}
       <h3 style={{ marginTop: 20 }}>По категориям</h3>
       {byCat.map(([cat, list]) => {
         const sum = list.reduce((s, i) => s + lineGross(i), 0);
@@ -472,11 +531,11 @@ function MergedClientTab({ project, items, onExport }) {
   );
 }
 
-function DocsTab({ onExportAll, onExportMerged }) {
+function DocsTab({ documents, qrUrl, onExportAll, onExportMerged, onPdf }) {
   return (
     <div className="card" style={{ padding: 22, marginTop: 16 }}>
       <h3>Документы</h3>
-      <p className="muted" style={{ fontSize: 13 }}>Скачай списки для закупки и передачи подрядчикам.</p>
+      <p className="muted" style={{ fontSize: 13 }}>Скачай списки и приложенные файлы.</p>
       <div className="row wrap" style={{ gap: 8, marginTop: 14 }}>
         <button className="btn" onClick={onExportAll}>
           Excel — полный список
@@ -484,10 +543,32 @@ function DocsTab({ onExportAll, onExportMerged }) {
         <button className="btn" onClick={onExportMerged}>
           Excel — объединённый
         </button>
+        {onPdf && (
+          <button className="btn" onClick={onPdf}>
+            PDF — таблица закупки
+          </button>
+        )}
         <button className="btn" onClick={printPDF}>
-          PDF / печать
+          Печать
         </button>
       </div>
+      {documents?.length > 0 && (
+        <ul style={{ marginTop: 16, paddingLeft: 18 }}>
+          {documents.map((d) => (
+            <li key={d.id} style={{ marginBottom: 8 }}>
+              <a href={d.url} target="_blank" rel="noreferrer">
+                {d.filename}
+              </a>
+              <span className="muted" style={{ fontSize: 12 }}> · {d.type}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {qrUrl && (
+        <div style={{ marginTop: 20 }}>
+          <img src={qrUrl} alt="QR" width={140} />
+        </div>
+      )}
     </div>
   );
 }
@@ -502,7 +583,7 @@ function ItemCard({ it, currency, patch, bought = false }) {
   return (
     <div className={"card card-item" + (bought ? " card-item--bought" : "")}>
       {img ? (
-        <img src={img} alt={it.name} className="thumb-img" />
+        <PhotoGallery src={img} alt={it.name} />
       ) : (
         <div className="thumb">{(it.name || "?").trim().charAt(0).toUpperCase()}</div>
       )}
@@ -544,15 +625,17 @@ function ItemCard({ it, currency, patch, bought = false }) {
         )}
 
         {!bought ? (
-          <div className="row no-print wrap" style={{ marginTop: 12, gap: 8 }}>
-            <button type="button" className="btn btn-primary" onClick={markBought}>
-              ✓ Куплено
-            </button>
-            {it.status !== "need_help" && (
-              <button type="button" className="btn btn-sm" onClick={() => patch(it.id, { status: "need_help" })}>
-                Нужна помощь
+          <div className="row no-print wrap" style={{ marginTop: 12, gap: 6 }}>
+            {QUICK_STATUSES.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={"btn btn-sm" + (it.status === s.id ? " btn-primary" : "")}
+                onClick={() => patch(it.id, { status: s.id })}
+              >
+                {s.label}
               </button>
-            )}
+            ))}
           </div>
         ) : (
           <button type="button" className="btn btn-sm btn-ghost no-print" style={{ marginTop: 10 }} onClick={markTodo}>

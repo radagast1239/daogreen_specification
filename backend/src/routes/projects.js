@@ -14,6 +14,7 @@ import {
   projectTotals,
 } from "../services/buildItems.js";
 import { listMaterials, listModules } from "./materials.js";
+import { validateProjectForPublish } from "../services/analytics.js";
 
 const router = Router();
 
@@ -43,13 +44,13 @@ const INSERT_ITEM = db.prepare(`
     supplier, link, link_alt, photo_url, client_note, tech_note,
     qty, price, vat_rate, visible, approved, enabled, needs_approval,
     status, actual_price, client_comment, sort_order, responsible,
-    cooling_kw, cooling_btu, exhaust_m3, room_id
+    cooling_kw, cooling_btu, exhaust_m3, room_id, internal_note, delivery_days, item_role
   ) VALUES (
     @id, @project_id, @material_id, @module, @section, @name, @unit, @category,
     @supplier, @link, @link_alt, @photo_url, @client_note, @tech_note,
     @qty, @price, @vat_rate, @visible, @approved, @enabled, @needs_approval,
     @status, @actual_price, @client_comment, @sort_order, @responsible,
-    @cooling_kw, @cooling_btu, @exhaust_m3, @room_id
+    @cooling_kw, @cooling_btu, @exhaust_m3, @room_id, @internal_note, @delivery_days, @item_role
   )
 `);
 
@@ -62,7 +63,7 @@ const UPDATE_ITEM = db.prepare(`
     visible=@visible, approved=@approved, enabled=@enabled, needs_approval=@needs_approval,
     status=@status, actual_price=@actual_price, client_comment=@client_comment,
     responsible=@responsible, cooling_kw=@cooling_kw, cooling_btu=@cooling_btu, exhaust_m3=@exhaust_m3,
-    room_id=@room_id
+    room_id=@room_id, internal_note=@internal_note, delivery_days=@delivery_days, item_role=@item_role
   WHERE id=@id AND project_id=@project_id
 `);
 
@@ -98,6 +99,9 @@ function itemToParams(it, projectId) {
     cooling_btu: it.coolingBtu || "",
     exhaust_m3: Number(it.exhaustM3) || 0,
     room_id: it.roomId || "",
+    internal_note: it.internalNote || "",
+    delivery_days: Number(it.deliveryDays) || 0,
+    item_role: it.itemRole || "purchase",
   };
 }
 
@@ -209,9 +213,18 @@ export function approveAll(id) {
   return loadProject(id);
 }
 
-export function createVersion(id, createdBy = "admin") {
+export function createVersion(id, createdBy = "admin", { force = false } = {}) {
   const p = loadProject(id);
   if (!p) return null;
+  if (!force) {
+    const check = validateProjectForPublish(id);
+    if (!check.ok) {
+      const err = new Error("Publish validation failed");
+      err.code = "PUBLISH_VALIDATION";
+      err.problems = check.problems;
+      throw err;
+    }
+  }
   const prev = db
     .prepare("SELECT * FROM spec_versions WHERE project_id = ? ORDER BY version_number DESC LIMIT 1")
     .get(id);
@@ -359,9 +372,20 @@ api.post("/:id/approve-all", (req, res) => {
 });
 
 api.post("/:id/versions", (req, res) => {
-  const v = createVersion(req.params.id, req.body?.createdBy);
-  if (!v) return res.status(404).json({ error: "Not found" });
-  res.status(201).json(v);
+  try {
+    const v = createVersion(req.params.id, req.body?.createdBy, { force: !!req.body?.force });
+    if (!v) return res.status(404).json({ error: "Not found" });
+    res.status(201).json(v);
+  } catch (e) {
+    if (e.code === "PUBLISH_VALIDATION") {
+      return res.status(422).json({ error: e.message, problems: e.problems });
+    }
+    throw e;
+  }
+});
+
+api.get("/:id/publish-check", (req, res) => {
+  res.json(validateProjectForPublish(req.params.id));
 });
 
 api.get("/:id/versions", (req, res) => {
@@ -384,13 +408,20 @@ api.delete("/:id/items/:itemId", (req, res) => {
   res.status(204).end();
 });
 
+function linkExpiresAt() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'clientLinkTtlDays'").get();
+  const days = Number(row?.value) || 0;
+  if (!days) return "";
+  return new Date(Date.now() + days * 86400000).toISOString();
+}
+
 api.post("/:id/regenerate-token", (req, res) => {
   const token = clientToken();
-  db.prepare("UPDATE projects SET client_token = ?, updated_at = datetime('now') WHERE id = ?").run(
-    token,
-    req.params.id
-  );
-  res.json({ clientToken: token });
+  const expires = linkExpiresAt();
+  db.prepare(
+    "UPDATE projects SET client_token = ?, client_token_expires_at = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(token, expires, req.params.id);
+  res.json({ clientToken: token, clientTokenExpiresAt: expires });
 });
 
 api.post("/:id/archive", (req, res) => {
@@ -423,17 +454,32 @@ function loadBrandingSettings() {
 function serveClientProject(req, res) {
   const p = loadProjectByToken(req.params.token);
   if (!p) return res.status(404).json({ error: "Not found" });
+  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
+    return res.status(410).json({ error: "Link expired" });
+  }
   const versions = listVersions(p.id);
-  res.json({ project: p, versionInfo: versions[0] || null, branding: loadBrandingSettings() });
+  const documents = db
+    .prepare("SELECT id, type, filename, url, uploaded_at as uploadedAt FROM files WHERE project_id = ? ORDER BY uploaded_at DESC")
+    .all(p.id);
+  res.json({ project: p, versionInfo: versions[0] || null, branding: loadBrandingSettings(), documents });
 }
 
 function patchClientItem(req, res) {
   const p = loadProjectByToken(req.params.token);
   if (!p) return res.status(404).json({ error: "Not found" });
+  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
+    return res.status(410).json({ error: "Link expired" });
+  }
   const allowed = ["status", "actualPrice", "clientComment"];
   const patch = {};
   for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
   const it = patchItem(p.id, req.params.itemId, patch);
+  const bought = ["bought", "delivered", "have"].includes(patch.status);
+  if (bought && !p.purchaseStartedAt) {
+    db.prepare("UPDATE projects SET purchase_started_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(
+      p.id
+    );
+  }
   db.prepare(
     "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
   ).run(p.id);

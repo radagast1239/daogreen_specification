@@ -3,7 +3,7 @@ const API = import.meta.env.VITE_API_URL || "";
 const ADMIN_KEY_STORAGE = "daogreen-admin-key";
 
 export function getAdminKey() {
-  return localStorage.getItem(ADMIN_KEY_STORAGE) || import.meta.env.VITE_ADMIN_KEY || "daogreen-admin-change-me";
+  return localStorage.getItem(ADMIN_KEY_STORAGE) || import.meta.env.VITE_ADMIN_KEY || "";
 }
 
 export function setAdminKey(key) {
@@ -23,7 +23,11 @@ async function request(path, { method = "GET", body, admin = true, token } = {})
 
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(data.error || `HTTP ${res.status}`);
+    if (data.problems) err.problems = data.problems;
+    throw err;
+  }
   return data;
 }
 
@@ -99,7 +103,7 @@ export const api = {
   deleteProject: (id) => request(`/api/projects/${id}`, { method: "DELETE" }),
   duplicateProject: (id) => request(`/api/projects/${id}/duplicate`, { method: "POST" }),
   approveAll: (id) => request(`/api/projects/${id}/approve-all`, { method: "POST" }),
-  createVersion: (id) => request(`/api/projects/${id}/versions`, { method: "POST" }),
+  createVersion: (id, body) => request(`/api/projects/${id}/versions`, { method: "POST", body: body || {} }),
   getVersions: (id) => request(`/api/projects/${id}/versions`),
   regenerateToken: (id) => request(`/api/projects/${id}/regenerate-token`, { method: "POST" }),
   patchItem: (projectId, itemId, patch) =>
@@ -128,6 +132,40 @@ export const api = {
   getArchive: () => request("/api/admin/archive"),
   getSettings: () => request("/api/admin/settings"),
   saveSettings: (data) => request("/api/admin/settings", { method: "PATCH", body: data }),
+  downloadBackup: () =>
+    fetch(`${API}/api/admin/backup`, { headers: { "X-Admin-Key": getAdminKey() } }).then(async (res) => {
+      if (!res.ok) throw new Error("Backup failed");
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `daogreen-backup-${new Date().toISOString().slice(0, 10)}.db`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }),
+  getAnalytics: () => request("/api/admin/analytics"),
+  getAdminUsers: () => request("/api/admin/admin-users"),
+  createAdminUser: (data) => request("/api/admin/admin-users", { method: "POST", body: data }),
+  deleteAdminUser: (id) => request(`/api/admin/admin-users/${id}`, { method: "DELETE" }),
+  getDuplicates: () => request("/api/materials/meta/duplicates"),
+  mergeMaterials: (keepId, duplicateId) =>
+    request("/api/materials/merge", { method: "POST", body: { keepId, duplicateId } }),
+  getPriceHistory: (id) => request(`/api/materials/${id}/price-history`),
+  publishCheck: (projectId) => request(`/api/projects/${projectId}/publish-check`),
+  getProjectDocuments: (projectId) => request(`/api/admin/projects/${projectId}/documents`),
+  uploadProjectDocument: async (projectId, file, type) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("type", type || "other");
+    const res = await fetch(`${API}/api/admin/projects/${projectId}/documents`, {
+      method: "POST",
+      headers: { "X-Admin-Key": getAdminKey() },
+      body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Upload failed");
+    return data;
+  },
+  deleteDocument: (id) => request(`/api/admin/documents/${id}`, { method: "DELETE" }),
   archiveProject: (id) => request(`/api/projects/${id}/archive`, { method: "POST" }),
   restoreProject: (id) => request(`/api/projects/${id}/restore`, { method: "POST" }),
 };

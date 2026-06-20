@@ -10,6 +10,7 @@ const NAV = [
   { to: "/materials", label: "Материалы", ic: "▤" },
   { to: "/modules", label: "Модули / разделы", ic: "▦" },
   { to: "/suppliers", label: "Поставщики", ic: "◇" },
+  { to: "/reports", label: "Отчёты", ic: "◧" },
   { to: "/archive", label: "Архив", ic: "▢" },
   { to: "/settings", label: "Настройки", ic: "⚙" },
   { to: "/new", label: "Новый проект", ic: "＋" },

@@ -4,11 +4,11 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import { initRemoteDb, startDbBackupLoop } from "./dbBackup.js";
-import { initDb, db } from "./db.js";
+import { initDb, db, getDbPath } from "./db.js";
+import { adminAuthMiddleware } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
-const ADMIN_KEY = process.env.ADMIN_KEY || "daogreen-admin-change-me";
 
 const dbPath = path.resolve(
   process.env.DATABASE_PATH || path.join(__dirname, "../data/daogreen.db")
@@ -42,9 +42,7 @@ app.use(express.json({ limit: "10mb" }));
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 function adminAuth(req, res, next) {
-  const key = req.headers["x-admin-key"] || req.query.adminKey;
-  if (key !== ADMIN_KEY) return res.status(401).json({ error: "Unauthorized" });
-  next();
+  adminAuthMiddleware(req, res, next);
 }
 
 app.get("/api/health", (_req, res) => {

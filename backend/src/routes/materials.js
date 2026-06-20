@@ -1,5 +1,6 @@
 import { db, rowToMaterial, rowToModule } from "../db.js";
 import { uid } from "../services/buildItems.js";
+import { logPriceChange } from "../services/priceHistory.js";
 
 const INSERT_MAT = db.prepare(`
   INSERT INTO materials (
@@ -7,13 +8,13 @@ const INSERT_MAT = db.prepare(`
     supplier, link, link_alt, photo_url, vat_rate, vat_included,
     client_note, tech_note, internal_note, status,
     needs_approval, is_consumable, is_spare_part, client_visible_default, responsible,
-    cooling_kw, cooling_btu, exhaust_m3, updated_at
+    cooling_kw, cooling_btu, exhaust_m3, tags, alternative_material_id, min_order_qty, order_step, default_item_role, updated_at
   ) VALUES (
     @id, @name, @unit, @base_price, @default_qty, @module, @category, @subcategory, @farm_section_id, @item_type,
     @supplier, @link, @link_alt, @photo_url, @vat_rate, @vat_included,
     @client_note, @tech_note, @internal_note, @status,
     @needs_approval, @is_consumable, @is_spare_part, @client_visible_default, @responsible,
-    @cooling_kw, @cooling_btu, @exhaust_m3, datetime('now')
+    @cooling_kw, @cooling_btu, @exhaust_m3, @tags, @alternative_material_id, @min_order_qty, @order_step, @default_item_role, datetime('now')
   )
 `);
 
@@ -27,6 +28,8 @@ const UPDATE_MAT = db.prepare(`
     status=@status, needs_approval=@needs_approval, is_consumable=@is_consumable,
     is_spare_part=@is_spare_part, client_visible_default=@client_visible_default,
     responsible=@responsible, cooling_kw=@cooling_kw, cooling_btu=@cooling_btu, exhaust_m3=@exhaust_m3,
+    tags=@tags, alternative_material_id=@alternative_material_id, min_order_qty=@min_order_qty,
+    order_step=@order_step, default_item_role=@default_item_role,
     updated_at=datetime('now')
   WHERE id=@id
 `);
@@ -61,6 +64,11 @@ function matToParams(m, id) {
     cooling_kw: Number(m.coolingKw) || 0,
     cooling_btu: m.coolingBtu || "",
     exhaust_m3: Number(m.exhaustM3) || 0,
+    tags: JSON.stringify(Array.isArray(m.tags) ? m.tags : []),
+    alternative_material_id: m.alternativeMaterialId || "",
+    min_order_qty: Number(m.minOrderQty) || 0,
+    order_step: Number(m.orderStep) || 1,
+    default_item_role: m.defaultItemRole || "purchase",
   };
 }
 
@@ -97,6 +105,9 @@ export function updateMaterial(id, patch) {
   const cur = getMaterial(id);
   if (!cur) return null;
   const merged = { ...cur, ...patch, id };
+  if (patch.basePrice != null && patch.basePrice !== cur.basePrice) {
+    logPriceChange(id, cur.basePrice, Number(patch.basePrice) || 0, patch.priceSource || "manual");
+  }
   UPDATE_MAT.run(matToParams(merged, id));
   return getMaterial(id);
 }

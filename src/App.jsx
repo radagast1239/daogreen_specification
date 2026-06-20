@@ -9,6 +9,7 @@ import MaterialsPage from "./pages/admin/MaterialsPage.jsx";
 import ClientsPage from "./pages/admin/ClientsPage.jsx";
 import ModulesPage from "./pages/admin/ModulesPage.jsx";
 import SuppliersPage from "./pages/admin/SuppliersPage.jsx";
+import ReportsPage from "./pages/admin/ReportsPage.jsx";
 import ArchivePage from "./pages/admin/ArchivePage.jsx";
 import SettingsPage from "./pages/admin/SettingsPage.jsx";
 import LoginPage from "./pages/admin/LoginPage.jsx";
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="/import" element={<Navigate to="/materials?tab=import" replace />} />
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/archive" element={<ArchivePage />} />
+          <Route path="/reports" element={<ReportsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/new" element={<ProjectBuilderPage />} />
           <Route path="/new/template" element={<Navigate to="/new" replace />} />

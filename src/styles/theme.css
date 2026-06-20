@@ -651,6 +651,11 @@ html.compact-tables .card-item { padding: 10px; gap: 10px; }
 .pin-btn { background: transparent; border: none; cursor: pointer; font-size: 16px; padding: 2px 6px; opacity: .35; }
 .pin-btn--on { opacity: 1; }
 
+.thumb-img--lg { width: 120px; height: 120px; object-fit: cover; border-radius: var(--radius-sm); cursor: zoom-in; }
+.photo-gallery-overlay { z-index: 60; }
+.photo-gallery-full { max-width: min(92vw, 720px); max-height: 88vh; border-radius: var(--radius); box-shadow: var(--shadow-lg); }
+.photo-gallery-trigger { border: none; padding: 0; background: transparent; cursor: zoom-in; }
+
 @media print {
   .sidebar, .topbar, .toolbar, .no-print, .budget-bar button, .statusbtns { display: none !important; }
   body { background: #fff; }
