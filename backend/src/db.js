@@ -198,6 +198,8 @@ function migrateDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_price_history_mat ON material_price_history(material_id);
   `);
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL DEFAULT ''

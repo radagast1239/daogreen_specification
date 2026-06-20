@@ -19,6 +19,8 @@ const ITEM_TYPES = [
   ["delivery", "Доставка"],
 ];
 
+const TAG_PRESETS = ["охлаждение", "электрика", "гидропоника", "вентиляция", "освещение", "монтаж"];
+
 const blank = {
   name: "",
   unit: "шт.",
@@ -43,14 +45,18 @@ const blank = {
   coolingKw: 0,
   coolingBtu: 0,
   exhaustM3: 0,
+  tags: [],
+  alternativeMaterialId: "",
+  minOrderQty: 0,
+  orderStep: 1,
 };
 
 export default function MaterialsPage() {
   const { state, actions } = useStore();
   const { confirm } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get("tab") === "import" ? "import" : "base";
-  const setTab = (t) => setSearchParams(t === "import" ? { tab: "import" } : {});
+  const tab = ["import", "duplicates"].includes(searchParams.get("tab")) ? searchParams.get("tab") : "base";
+  const setTab = (t) => setSearchParams(t === "base" ? {} : { tab: t });
   const [q, setQ] = useState("");
   const [modF, setModF] = useState("");
   const [catF, setCatF] = useState("");
@@ -132,6 +138,7 @@ export default function MaterialsPage() {
           {[
             ["base", "База"],
             ["import", "Импорт"],
+            ["duplicates", "Дубликаты"],
           ].map(([k, label]) => (
             <button
               key={k}
@@ -153,6 +160,8 @@ export default function MaterialsPage() {
           <div style={{ marginTop: 16 }}>
             <ImportPanel />
           </div>
+        ) : tab === "duplicates" ? (
+          <DuplicatesTab materials={state.materials} onMerged={() => actions.refresh()} />
         ) : (
           <>
         <div className="toolbar" style={{ marginTop: 16 }}>
@@ -406,8 +415,187 @@ export default function MaterialsPage() {
             <label>Пояснение клиенту</label>
             <textarea rows={2} value={editing.clientNote} onChange={(e) => setEditing({ ...editing, clientNote: e.target.value })} />
           </div>
+          <TagsEditor editing={editing} setEditing={setEditing} />
+          <div className="form-grid">
+            <div className="field">
+              <label>Мин. заказ</label>
+              <input
+                type="number"
+                min={0}
+                value={editing.minOrderQty || ""}
+                onChange={(e) => setEditing({ ...editing, minOrderQty: Number(e.target.value) || 0 })}
+              />
+            </div>
+            <div className="field">
+              <label>Кратность</label>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={editing.orderStep || 1}
+                onChange={(e) => setEditing({ ...editing, orderStep: Number(e.target.value) || 1 })}
+              />
+            </div>
+          </div>
+          <div className="field">
+            <label>Альтернатива (если нет в наличии)</label>
+            <select
+              value={editing.alternativeMaterialId || ""}
+              onChange={(e) => setEditing({ ...editing, alternativeMaterialId: e.target.value })}
+            >
+              <option value="">— не задана —</option>
+              {state.materials
+                .filter((m) => m.id !== editing.id)
+                .map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+            </select>
+          </div>
+          {editing.id && <PriceHistoryBlock materialId={editing.id} />}
         </Modal>
       )}
     </>
+  );
+}
+
+function TagsEditor({ editing, setEditing }) {
+  const [tagDraft, setTagDraft] = useState("");
+  const tags = Array.isArray(editing.tags) ? editing.tags : [];
+
+  const addTag = (raw) => {
+    const t = raw.trim().toLowerCase();
+    if (!t || tags.includes(t)) return;
+    setEditing({ ...editing, tags: [...tags, t] });
+    setTagDraft("");
+  };
+
+  return (
+    <div className="field">
+      <label>Теги</label>
+      <div className="row wrap" style={{ gap: 6, marginBottom: 8 }}>
+        {tags.map((t) => (
+          <span key={t} className="chip chip--neutral" style={{ gap: 4 }}>
+            {t}
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ padding: "0 4px", minHeight: 0 }}
+              onClick={() => setEditing({ ...editing, tags: tags.filter((x) => x !== t) })}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+      </div>
+      <div className="row wrap" style={{ gap: 6, marginBottom: 8 }}>
+        {TAG_PRESETS.filter((p) => !tags.includes(p)).map((p) => (
+          <button key={p} type="button" className="btn btn-sm btn-ghost" onClick={() => addTag(p)}>
+            + {p}
+          </button>
+        ))}
+      </div>
+      <div className="row" style={{ gap: 8 }}>
+        <input
+          value={tagDraft}
+          placeholder="свой тег"
+          onChange={(e) => setTagDraft(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTag(tagDraft))}
+        />
+        <button type="button" className="btn btn-sm" onClick={() => addTag(tagDraft)}>Добавить</button>
+      </div>
+    </div>
+  );
+}
+
+function PriceHistoryBlock({ materialId }) {
+  const [rows, setRows] = useState(null);
+
+  useEffect(() => {
+    api.getPriceHistory(materialId).then(setRows).catch(() => setRows([]));
+  }, [materialId]);
+
+  if (!rows?.length) return null;
+
+  return (
+    <div className="field">
+      <label>История цен</label>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }} className="muted">
+        {rows.slice(0, 8).map((r, i) => (
+          <li key={`${r.createdAt}-${i}`}>
+            {r.oldPrice} → {r.newPrice} ₽ · {new Date(r.createdAt).toLocaleDateString("ru-RU")}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function DuplicatesTab({ materials, onMerged }) {
+  const { confirm, success, error } = useToast();
+  const [groups, setGroups] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = () => {
+    setLoading(true);
+    api
+      .getDuplicates()
+      .then(setGroups)
+      .catch(() => setGroups([]))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const nameById = useMemo(() => Object.fromEntries(materials.map((m) => [m.id, m.name])), [materials]);
+
+  const merge = async (keepId, group) => {
+    const others = group.items.filter((x) => x.id !== keepId);
+    const keepName = nameById[keepId] || keepId;
+    if (
+      !(await confirm({
+        title: "Слить дубликаты?",
+        message: `Оставить «${keepName}», удалить ${others.length} дублик.`,
+        confirmLabel: "Слить",
+      }))
+    )
+      return;
+    try {
+      for (const dup of others) {
+        await api.mergeMaterials(keepId, dup.id);
+      }
+      success("Дубликаты объединены");
+      load();
+      onMerged?.();
+    } catch (e) {
+      error(e.message);
+    }
+  };
+
+  if (loading) return <p className="muted" style={{ marginTop: 16 }}>Поиск дубликатов…</p>;
+  if (!groups?.length) return <Empty title="Дубликаты не найдены" hint="Одинаковые названия появятся здесь." />;
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <p className="muted" style={{ fontSize: 13 }}>Группы с одинаковым названием. Выберите, какую позицию оставить.</p>
+      {groups.map((g) => (
+        <div key={g.key} className="card" style={{ padding: 14, marginBottom: 12 }}>
+          <div style={{ fontWeight: 600, marginBottom: 10 }}>{g.items[0]?.name}</div>
+          {g.items.map((it) => (
+            <div key={it.id} className="row between" style={{ fontSize: 13, marginBottom: 6 }}>
+              <span>
+                {it.module} · {it.supplier || "—"} · {it.base_price} ₽
+              </span>
+              <div className="row" style={{ gap: 6 }}>
+                <button className="btn btn-sm btn-primary" onClick={() => merge(it.id, g)}>
+                  Оставить эту
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }

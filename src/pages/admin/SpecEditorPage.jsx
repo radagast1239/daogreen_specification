@@ -36,7 +36,7 @@ const TAB_LABELS = {
 export default function SpecEditorPage() {
   const { id } = useParams();
   const { state, actions } = useStore();
-  const { confirm, success } = useToast();
+  const { confirm, success, error } = useToast();
   const project = state.projects.find((p) => p.id === id);
   const [tab, setTab] = useState("spec");
   const [versionMsg, setVersionMsg] = useState("");
@@ -175,6 +175,8 @@ export default function SpecEditorPage() {
       />
 
       <div className="content">
+        <ProjectDocuments projectId={project.id} />
+
         <Collapsible title="Сводка и прогресс" subtitle={`${stats.total} позиций`} defaultOpen>
         <div className="stat-grid" style={{ marginBottom: 0 }}>
           <Stat k="Без НДС" v={money(totals.budgetNet, project.currency)} />
@@ -254,6 +256,79 @@ export default function SpecEditorPage() {
   );
 }
 
+const DOC_TYPES = [
+  ["invoice", "Счёт"],
+  ["quote", "КП"],
+  ["manual", "Инструкция"],
+  ["other", "Прочее"],
+];
+
+function ProjectDocuments({ projectId }) {
+  const { confirm, success, error } = useToast();
+  const [docs, setDocs] = useState([]);
+  const [docType, setDocType] = useState("other");
+  const [loading, setLoading] = useState(true);
+
+  const load = () =>
+    api
+      .getProjectDocuments(projectId)
+      .then(setDocs)
+      .catch(() => setDocs([]))
+      .finally(() => setLoading(false));
+
+  useEffect(() => {
+    load();
+  }, [projectId]);
+
+  const upload = async (file) => {
+    if (!file) return;
+    try {
+      await api.uploadProjectDocument(projectId, file, docType);
+      success("Файл загружен");
+      load();
+    } catch (e) {
+      error(e.message);
+    }
+  };
+
+  const remove = async (d) => {
+    if (!(await confirm({ title: "Удалить документ?", message: d.filename, confirmLabel: "Удалить" }))) return;
+    await api.deleteDocument(d.id);
+    load();
+  };
+
+  const typeLabel = (t) => DOC_TYPES.find(([k]) => k === t)?.[1] || t;
+
+  return (
+    <Collapsible title="Документы проекта" subtitle={loading ? "…" : `${docs.length} файлов`} defaultOpen={false}>
+      <div className="row wrap" style={{ gap: 8, marginBottom: 12 }}>
+        <select value={docType} onChange={(e) => setDocType(e.target.value)} style={{ width: "auto" }}>
+          {DOC_TYPES.map(([k, l]) => (
+            <option key={k} value={k}>{l}</option>
+          ))}
+        </select>
+        <label className="btn btn-sm">
+          Загрузить файл
+          <input type="file" hidden onChange={(e) => upload(e.target.files?.[0])} />
+        </label>
+      </div>
+      {!docs.length ? (
+        <p className="muted" style={{ fontSize: 13, margin: 0 }}>Счета, КП и инструкции — видны клиенту во вкладке «Документы».</p>
+      ) : (
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+          {docs.map((d) => (
+            <li key={d.id} style={{ marginBottom: 6 }}>
+              <span className="chip chip--neutral" style={{ marginRight: 6 }}>{typeLabel(d.type)}</span>
+              <a href={photoSrc(d.url)} target="_blank" rel="noreferrer">{d.filename}</a>
+              <button className="btn btn-ghost btn-sm" style={{ marginLeft: 6 }} onClick={() => remove(d)}>✕</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Collapsible>
+  );
+}
+
 /* ---------------- Спецификация ---------------- */
 function SpecTab({ project, patchItem, actions, saveRooms }) {
   const { confirm } = useToast();
@@ -319,6 +394,8 @@ function SpecTab({ project, patchItem, actions, saveRooms }) {
                   {hasFarmItems && <th style={{ width: 130 }}>Комната</th>}
                   <th className="right">Сумма</th>
                   <th>Ссылка</th>
+                  <th title="Внутренний комментарий">Заметка</th>
+                  <th title="Срок поставки, дней">Дней</th>
                   <th>Клиенту</th>
                   <th>Утв.</th>
                   <th>Вкл.</th>
@@ -422,6 +499,25 @@ function SpecTab({ project, patchItem, actions, saveRooms }) {
                       ) : (
                         <input className="input-inline" placeholder="url" onBlur={(e) => patchItem(it.id, { link: e.target.value })} />
                       )}
+                    </td>
+                    <td style={{ minWidth: 100, maxWidth: 140 }}>
+                      <input
+                        className="input-inline"
+                        placeholder="внутр."
+                        title="Не видно клиенту"
+                        value={it.internalNote || ""}
+                        onChange={(e) => patchItem(it.id, { internalNote: e.target.value })}
+                      />
+                    </td>
+                    <td style={{ width: 56 }}>
+                      <input
+                        className="input-inline num"
+                        type="number"
+                        min={0}
+                        placeholder="—"
+                        value={it.deliveryDays || ""}
+                        onChange={(e) => patchItem(it.id, { deliveryDays: Number(e.target.value) || 0 })}
+                      />
                     </td>
                     <td style={{ width: 60, textAlign: "center" }}>
                       <input
