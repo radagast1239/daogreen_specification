@@ -96,6 +96,8 @@ export default function SpecPickerTable({
   categories: categoriesProp,
   suppliers = [],
   showQty = false,
+  rooms = [],
+  showRoom = false,
 }) {
   const categories = categoriesProp?.length ? categoriesProp : CATEGORIES;
   const [picker, setPicker] = useState(false);
@@ -211,7 +213,7 @@ export default function SpecPickerTable({
     }
   };
 
-  const colSpan = showQty ? 10 : 9;
+  const colSpan = (showQty ? 10 : 9) + (showRoom ? 1 : 0);
 
   return (
     <>
@@ -258,6 +260,7 @@ export default function SpecPickerTable({
                 <th style={{ width: 120 }}>Категория</th>
                 <th style={{ width: 110 }}>Поставщик</th>
                 <th style={{ width: 72 }}>Ед.</th>
+                {showRoom && <th style={{ width: 130 }}>Комната</th>}
                 {showQty && <th className="right" style={{ width: 96 }}>Кол-во</th>}
                 <th className="right" style={{ width: 110 }}>Цена, ₽</th>
                 <th style={{ minWidth: 120 }}>Ссылка</th>
@@ -363,6 +366,21 @@ export default function SpecPickerTable({
                           onChange={(e) => onChange(patchLine(lines, ln.id, { unit: e.target.value }))}
                         />
                       </td>
+                      {showRoom && (
+                        <td>
+                          <select
+                            className="spec-cell-input"
+                            value={ln.roomId || ""}
+                            disabled={!ln.included}
+                            onChange={(e) => onChange(patchLine(lines, ln.id, { roomId: e.target.value }))}
+                          >
+                            <option value="">—</option>
+                            {rooms.map((r) => (
+                              <option key={r.id} value={r.id}>{r.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
                       {showQty && (
                       <td>
                         <input

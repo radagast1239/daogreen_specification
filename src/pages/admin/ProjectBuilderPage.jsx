@@ -23,12 +23,17 @@ import {
   emptyFarmSectionsState,
   presetPayloadFromDraft,
 } from "../../lib/presetHelpers.js";
+import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
+import RoomsEditor from "../../components/RoomsEditor.jsx";
+import { COOLING_FARM_DEFAULTS, computeCoolingFarm } from "../../lib/coolingFarmCalc.js";
+import { defaultRooms } from "../../lib/roomHelpers.js";
 
 const STEPS = [
   { id: "basics", label: "1. Проект" },
   { id: "stellages", label: "2. Стеллажи" },
   { id: "general", label: "3. Ферма целиком" },
-  { id: "review", label: "4. Создание" },
+  { id: "cooling", label: "4. Расчёт охлаждения" },
+  { id: "review", label: "5. Создание" },
 ];
 
 export default function ProjectBuilderPage() {
@@ -62,6 +67,7 @@ export default function ProjectBuilderPage() {
   const [farmSectionLines, setFarmSectionLines] = useState({});
   const [activeFarmSection, setActiveFarmSection] = useState(null);
   const [farmLoaded, setFarmLoaded] = useState(false);
+  const [rooms, setRooms] = useState(defaultRooms);
 
   const sections = useMemo(
     () => resolveFarmSections(farmSettings || {}),
@@ -178,6 +184,28 @@ export default function ProjectBuilderPage() {
 
   const farmHasItems = Object.values(farmSectionLines).some((lines) => activeLines(lines).length > 0);
 
+  const coolingInputs = form.manualParams?.coolingFarm || COOLING_FARM_DEFAULTS;
+  const coolingCalc = useMemo(() => computeCoolingFarm(coolingInputs), [coolingInputs]);
+
+  const setCoolingInputs = (next) => {
+    setForm((f) => ({
+      ...f,
+      manualParams: { ...f.manualParams, coolingFarm: next },
+    }));
+  };
+
+  const applyCoolingToForm = ({ coolingKw, coolingBtu }) => {
+    setForm((f) => ({
+      ...f,
+      manualParams: {
+        ...f.manualParams,
+        coolingFarm: coolingInputs,
+        coolingPower: coolingKw,
+        coolingBtu,
+      },
+    }));
+  };
+
   const canCreate =
     form.name.trim() &&
     (stellages.some((s) => activeLines(s.items).length > 0) || farmHasItems);
@@ -191,7 +219,13 @@ export default function ProjectBuilderPage() {
         sectionName: sec.name,
         items: farmSectionLines[sec.id] || [],
       }));
-      const payload = buildProjectFromBuilder({ form, stellages, farmSections, materials: state.materials });
+      const payload = buildProjectFromBuilder({
+        form,
+        stellages,
+        farmSections,
+        materials: state.materials,
+        rooms,
+      });
       const project = await actions.projectCreate(payload);
       nav(`/project/${project.id}`);
     } catch (e) {
@@ -364,6 +398,8 @@ export default function ProjectBuilderPage() {
 
       {step === "general" && activeSection && (
         <div>
+          <RoomsEditor rooms={rooms} onChange={setRooms} />
+
           <div className="farm-layout">
             <nav className="section-tabs">
               {sections.map((sec) => (
@@ -387,7 +423,7 @@ export default function ProjectBuilderPage() {
               <div className="card" style={{ padding: 14, marginBottom: 12 }}>
                 <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>{activeSection.name}</h3>
                 <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-                  Отметьте нужные позиции и укажите количество для этой фермы. Список взят из шаблона раздела (Пресеты → Разделы фермы).
+                  Отметьте нужные позиции, укажите количество и комнату. Список взят из шаблона раздела (Пресеты → Разделы фермы).
                 </p>
                 <button type="button" className="btn btn-sm" style={{ marginTop: 10 }} onClick={resetFarmSection}>
                   ↺ Сбросить к шаблону раздела
@@ -402,6 +438,8 @@ export default function ProjectBuilderPage() {
                 catalogLabel="материал"
                 onSaveMaterial={saveMaterial}
                 showQty
+                showRoom={rooms.length > 0}
+                rooms={rooms}
                 categories={categories}
                 suppliers={suppliers}
                 farmSectionId={activeFarmSection}
@@ -411,6 +449,24 @@ export default function ProjectBuilderPage() {
 
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button type="button" className="btn" onClick={() => setStep("stellages")}>← Стеллажи</button>
+            <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setStep("cooling")}>
+              Расчёт охлаждения →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === "cooling" && (
+        <div>
+          <CoolingFarmTab
+            inputs={coolingInputs}
+            onInputsChange={setCoolingInputs}
+            draftArea={form.area}
+            draftHeight={form.height}
+            onApplyToProject={applyCoolingToForm}
+          />
+          <div className="toolbar" style={{ marginTop: 16 }}>
+            <button type="button" className="btn" onClick={() => setStep("general")}>← Ферма целиком</button>
             <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setStep("review")}>
               Проверить →
             </button>
@@ -429,12 +485,17 @@ export default function ProjectBuilderPage() {
                 {sec.name}: <strong>{activeLines(farmSectionLines[sec.id] || []).length}</strong> поз.
               </li>
             ))}
+            <li>Комнат: <strong>{rooms.length}</strong></li>
+            <li>
+              Охлаждение: <strong>{Math.round(coolingCalc.totalKwSafety * 10) / 10} кВт</strong>
+              {form.manualParams?.coolingPower ? ` (сохранено ${form.manualParams.coolingPower} кВт)` : ""}
+            </li>
           </ul>
           {!canCreate && (
             <p style={{ color: "var(--danger)", fontSize: 13 }}>Нужно название и хотя бы одна позиция.</p>
           )}
           <div className="toolbar" style={{ marginTop: 16 }}>
-            <button type="button" className="btn" onClick={() => setStep("general")}>← Назад</button>
+            <button type="button" className="btn" onClick={() => setStep("cooling")}>← Назад</button>
             <button type="button" className="btn btn-primary" disabled={!canCreate || saving} onClick={create}>
               {saving ? "Создание…" : "Создать проект"}
             </button>

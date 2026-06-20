@@ -20,10 +20,10 @@ const router = Router();
 const INSERT_PROJECT = db.prepare(`
   INSERT INTO projects (
     id, name, client, city, area, height, sowing_area, type, currency, vat, comment,
-    status, client_token, selected_modules, zones, stellage_configs, manual_params, version
+    status, client_token, selected_modules, zones, stellage_configs, manual_params, rooms, version
   ) VALUES (
     @id, @name, @client, @city, @area, @height, @sowing_area, @type, @currency, @vat, @comment,
-    @status, @client_token, @selected_modules, @zones, @stellage_configs, @manual_params, @version
+    @status, @client_token, @selected_modules, @zones, @stellage_configs, @manual_params, @rooms, @version
   )
 `);
 
@@ -32,7 +32,7 @@ const UPDATE_PROJECT = db.prepare(`
     name=@name, client=@client, city=@city, area=@area, height=@height,
     sowing_area=@sowing_area, type=@type, currency=@currency, vat=@vat, comment=@comment,
     status=@status, selected_modules=@selected_modules, zones=@zones,
-    stellage_configs=@stellage_configs, manual_params=@manual_params, version=@version,
+    stellage_configs=@stellage_configs, manual_params=@manual_params, rooms=@rooms, version=@version,
     last_client_activity_at=@last_client_activity_at, updated_at=datetime('now')
   WHERE id=@id
 `);
@@ -43,13 +43,13 @@ const INSERT_ITEM = db.prepare(`
     supplier, link, link_alt, photo_url, client_note, tech_note,
     qty, price, vat_rate, visible, approved, enabled, needs_approval,
     status, actual_price, client_comment, sort_order, responsible,
-    cooling_kw, cooling_btu, exhaust_m3
+    cooling_kw, cooling_btu, exhaust_m3, room_id
   ) VALUES (
     @id, @project_id, @material_id, @module, @section, @name, @unit, @category,
     @supplier, @link, @link_alt, @photo_url, @client_note, @tech_note,
     @qty, @price, @vat_rate, @visible, @approved, @enabled, @needs_approval,
     @status, @actual_price, @client_comment, @sort_order, @responsible,
-    @cooling_kw, @cooling_btu, @exhaust_m3
+    @cooling_kw, @cooling_btu, @exhaust_m3, @room_id
   )
 `);
 
@@ -61,7 +61,8 @@ const UPDATE_ITEM = db.prepare(`
     qty=@qty, price=@price, vat_rate=@vat_rate,
     visible=@visible, approved=@approved, enabled=@enabled, needs_approval=@needs_approval,
     status=@status, actual_price=@actual_price, client_comment=@client_comment,
-    responsible=@responsible, cooling_kw=@cooling_kw, cooling_btu=@cooling_btu, exhaust_m3=@exhaust_m3
+    responsible=@responsible, cooling_kw=@cooling_kw, cooling_btu=@cooling_btu, exhaust_m3=@exhaust_m3,
+    room_id=@room_id
   WHERE id=@id AND project_id=@project_id
 `);
 
@@ -96,6 +97,7 @@ function itemToParams(it, projectId) {
     cooling_kw: Number(it.coolingKw) || 0,
     cooling_btu: it.coolingBtu || "",
     exhaust_m3: Number(it.exhaustM3) || 0,
+    room_id: it.roomId || "",
   };
 }
 
@@ -123,6 +125,7 @@ function projectRow(p) {
     zones: JSON.stringify(p.zones || []),
     stellage_configs: JSON.stringify(p.stellageConfigs || []),
     manual_params: JSON.stringify(p.manualParams || {}),
+    rooms: JSON.stringify(p.rooms || []),
     version: p.version || 1,
     last_client_activity_at: p.lastClientActivityAt || null,
   };

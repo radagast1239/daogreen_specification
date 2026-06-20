@@ -24,6 +24,7 @@ export function blankLine(overrides = {}) {
     coolingKw: 0,
     coolingBtu: 0,
     exhaustM3: 0,
+    roomId: "",
     included: true,
     ...overrides,
   };
@@ -156,6 +157,7 @@ export function lineToProjectItem(line, section, sortOrder) {
     coolingKw: Number(line.coolingKw) || 0,
     coolingBtu: Number(line.coolingBtu) || 0,
     exhaustM3: Number(line.exhaustM3) || 0,
+    roomId: line.roomId || "",
     responsible: defaultResponsible(line.category, line),
     visible: on && qty > 0,
     approved: false,
@@ -168,7 +170,7 @@ export function lineToProjectItem(line, section, sortOrder) {
   };
 }
 
-export function buildProjectFromBuilder({ form, stellages, farmSections, generalLines, materials = [] }) {
+export function buildProjectFromBuilder({ form, stellages, farmSections, generalLines, materials = [], rooms = [] }) {
   const items = [];
   const stellageConfigs = [];
   let order = 0;
@@ -222,6 +224,7 @@ export function buildProjectFromBuilder({ form, stellages, farmSections, general
     stellageConfigs,
     zones: [],
     manualParams: form.manualParams || {},
+    rooms: rooms || [],
     items,
   };
 }

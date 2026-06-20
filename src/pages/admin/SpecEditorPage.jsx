@@ -17,6 +17,8 @@ import { PageHeader } from "../../components/Layout.jsx";
 import { Progress, Stat, Empty, ClientLinkModal } from "../../components/ui.jsx";
 import { downloadCSV } from "../../lib/export.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
+import RoomsEditor from "../../components/RoomsEditor.jsx";
+import { defaultRooms, isFarmGeneralItem } from "../../lib/roomHelpers.js";
 
 export default function SpecEditorPage() {
   const { id } = useParams();
@@ -47,6 +49,8 @@ export default function SpecEditorPage() {
   const stats = projectStats(project);
 
   const patchItem = (itemId, patch) => actions.itemUpdate(project.id, itemId, patch);
+
+  const saveRooms = (rooms) => actions.projectUpdate(project.id, { rooms });
 
   const approveAll = async () => {
     await actions.approveAll(project.id);
@@ -143,7 +147,7 @@ export default function SpecEditorPage() {
 
         {versionMsg && <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>{versionMsg}</p>}
 
-        {tab === "spec" && <SpecTab project={project} patchItem={patchItem} actions={actions} />}
+        {tab === "spec" && <SpecTab project={project} patchItem={patchItem} actions={actions} saveRooms={saveRooms} />}
         {tab === "merged" && <MergedTab project={project} />}
         {tab === "spec_lists" && <SpecialistTab project={project} />}
         {tab === "calc" && (
@@ -171,8 +175,10 @@ export default function SpecEditorPage() {
 }
 
 /* ---------------- Спецификация ---------------- */
-function SpecTab({ project, patchItem, actions }) {
+function SpecTab({ project, patchItem, actions, saveRooms }) {
   const groups = useMemo(() => groupBy(project.items, "module"), [project.items]);
+  const rooms = project.rooms?.length ? project.rooms : defaultRooms();
+  const hasFarmItems = project.items.some((it) => isFarmGeneralItem(project, it));
 
   const addItem = (module) => {
     actions.itemAdd(project.id, {
@@ -199,6 +205,12 @@ function SpecTab({ project, patchItem, actions }) {
 
   return (
     <div style={{ marginTop: 16 }}>
+      {hasFarmItems && (
+        <RoomsEditor
+          rooms={rooms}
+          onChange={(next) => saveRooms(next)}
+        />
+      )}
       {groups.map(([module, items]) => (
         <section key={module}>
           <div className="section-head">
@@ -220,6 +232,7 @@ function SpecTab({ project, patchItem, actions }) {
                   <th className="right">Цена</th>
                   <th>НДС</th>
                   <th>Поставщик</th>
+                  {hasFarmItems && <th style={{ width: 130 }}>Комната</th>}
                   <th className="right">Сумма</th>
                   <th>Ссылка</th>
                   <th>Клиенту</th>
@@ -296,6 +309,24 @@ function SpecTab({ project, patchItem, actions }) {
                         onChange={(e) => patchItem(it.id, { supplier: e.target.value })}
                       />
                     </td>
+                    {hasFarmItems && (
+                      <td style={{ width: 130 }}>
+                        {isFarmGeneralItem(project, it) ? (
+                          <select
+                            className="input-inline"
+                            value={it.roomId || ""}
+                            onChange={(e) => patchItem(it.id, { roomId: e.target.value })}
+                          >
+                            <option value="">—</option>
+                            {rooms.map((r) => (
+                              <option key={r.id} value={r.id}>{r.name}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="muted" style={{ fontSize: 12 }}>—</span>
+                        )}
+                      </td>
+                    )}
                     <td className="right num" style={{ width: 100, fontWeight: 600 }}>
                       {money(lineGross(it), project.currency)}
                     </td>

@@ -171,6 +171,8 @@ function migrateDb() {
   addCol("project_items", "cooling_kw", "REAL DEFAULT 0");
   addCol("project_items", "cooling_btu", "TEXT DEFAULT ''");
   addCol("project_items", "exhaust_m3", "REAL DEFAULT 0");
+  addCol("projects", "rooms", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("project_items", "room_id", "TEXT DEFAULT ''");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
@@ -286,6 +288,7 @@ export function rowToItem(row) {
     coolingKw: row.cooling_kw || 0,
     coolingBtu: row.cooling_btu || "",
     exhaustM3: row.exhaust_m3 || 0,
+    roomId: row.room_id || "",
   };
 }
 
@@ -309,6 +312,7 @@ export function rowToProject(row, items = []) {
     zones: JSON.parse(row.zones || "[]"),
     stellageConfigs: JSON.parse(row.stellage_configs || "[]"),
     manualParams: JSON.parse(row.manual_params || "{}"),
+    rooms: JSON.parse(row.rooms || "[]"),
     version: row.version,
     lastClientActivityAt: row.last_client_activity_at,
     createdAt: row.created_at,

@@ -17,20 +17,47 @@ function fmt(val, row = {}) {
   return n.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
 }
 
-export default function CoolingFarmTab({ project, actions, onApplyToProject }) {
+export default function CoolingFarmTab({
+  project,
+  actions,
+  onApplyToProject,
+  inputs: externalInputs,
+  onInputsChange,
+  draftArea,
+  draftHeight,
+}) {
   const baseParams =
-    project.manualParams && typeof project.manualParams === "object" ? project.manualParams : {};
+    project?.manualParams && typeof project.manualParams === "object" ? project.manualParams : {};
   const stored =
     baseParams.coolingFarm && typeof baseParams.coolingFarm === "object" ? baseParams.coolingFarm : {};
-  const [inputs, setInputs] = useState({ ...COOLING_FARM_DEFAULTS, ...stored });
+  const [internalInputs, setInternalInputs] = useState(() => {
+    const base = { ...COOLING_FARM_DEFAULTS, ...stored };
+    if (draftHeight && !stored.height) base.height = Number(draftHeight) || base.height;
+    if (draftArea && !stored.length && !stored.width) {
+      const a = Number(draftArea);
+      if (a > 0) {
+        const side = Math.sqrt(a);
+        base.length = Math.round(side * 100) / 100;
+        base.width = Math.round(side * 100) / 100;
+      }
+    }
+    return base;
+  });
+  const inputs = externalInputs ?? internalInputs;
   const [saved, setSaved] = useState(false);
+  const canPersist = !!(project?.id && actions?.projectUpdate);
 
   const calc = useMemo(() => computeCoolingFarm(inputs), [inputs]);
   const seasons = useMemo(() => seasonalCooling(calc, COOLING_SEASONS_DEFAULT), [calc]);
 
-  const set = (key, value) => setInputs((p) => ({ ...p, [key]: value }));
+  const set = (key, value) => {
+    const next = { ...inputs, [key]: value };
+    if (onInputsChange) onInputsChange(next);
+    else setInternalInputs(next);
+  };
 
   const save = async () => {
+    if (!canPersist) return;
     await actions.projectUpdate(project.id, {
       manualParams: { ...baseParams, coolingFarm: inputs },
     });
@@ -39,7 +66,7 @@ export default function CoolingFarmTab({ project, actions, onApplyToProject }) {
   };
 
   const applyCooling = async () => {
-    await save();
+    if (canPersist) await save();
     if (onApplyToProject) {
       await onApplyToProject({
         coolingKw: calc.totalKwSafety,
@@ -59,13 +86,15 @@ export default function CoolingFarmTab({ project, actions, onApplyToProject }) {
             </p>
           </div>
           <div className="row wrap" style={{ gap: 8 }}>
-            <button type="button" className="btn" onClick={save}>Сохранить</button>
+            {canPersist && (
+              <button type="button" className="btn" onClick={save}>Сохранить</button>
+            )}
             <button type="button" className="btn btn-primary" onClick={applyCooling}>
-              Применить {fmt(calc.totalKwSafety)} кВт к проекту
+              {canPersist ? `Применить ${fmt(calc.totalKwSafety)} кВт к проекту` : `Использовать ${fmt(calc.totalKwSafety)} кВт`}
             </button>
           </div>
         </div>
-        {saved && <p className="muted" style={{ fontSize: 13, margin: "10px 0 0" }}>Сохранено в проекте</p>}
+        {saved && canPersist && <p className="muted" style={{ fontSize: 13, margin: "10px 0 0" }}>Сохранено в проекте</p>}
       </div>
 
       <div className="card" style={{ padding: 16, marginBottom: 16, background: "var(--brand-tint)" }}>
