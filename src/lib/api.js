@@ -113,7 +113,11 @@ export const api = {
     request(`/api/client/p/${token}/items/${itemId}`, { method: "PATCH", body: patch, admin: false }),
 
   getClients: () => request("/api/admin/clients"),
-  getSuppliers: () => request("/api/admin/suppliers"),
+  getSuppliers: () => request("/api/suppliers"),
+  createSupplier: (data) => request("/api/suppliers", { method: "POST", body: data }),
+  updateSupplier: (id, patch) => request(`/api/suppliers/${id}`, { method: "PATCH", body: patch }),
+  deleteSupplier: (id) => request(`/api/suppliers/${id}`, { method: "DELETE" }),
+  getSuppliersLegacy: () => request("/api/admin/suppliers"),
   getModulesAdmin: () => request("/api/admin/modules"),
   getPresets: () => request("/api/presets"),
   createPreset: (data) => request("/api/presets", { method: "POST", body: data }),

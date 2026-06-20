@@ -6,12 +6,14 @@ const INSERT_MAT = db.prepare(`
     id, name, unit, base_price, default_qty, module, category, subcategory, farm_section_id, item_type,
     supplier, link, link_alt, photo_url, vat_rate, vat_included,
     client_note, tech_note, internal_note, status,
-    needs_approval, is_consumable, is_spare_part, client_visible_default, responsible, updated_at
+    needs_approval, is_consumable, is_spare_part, client_visible_default, responsible,
+    cooling_kw, cooling_btu, exhaust_m3, updated_at
   ) VALUES (
     @id, @name, @unit, @base_price, @default_qty, @module, @category, @subcategory, @farm_section_id, @item_type,
     @supplier, @link, @link_alt, @photo_url, @vat_rate, @vat_included,
     @client_note, @tech_note, @internal_note, @status,
-    @needs_approval, @is_consumable, @is_spare_part, @client_visible_default, @responsible, datetime('now')
+    @needs_approval, @is_consumable, @is_spare_part, @client_visible_default, @responsible,
+    @cooling_kw, @cooling_btu, @exhaust_m3, datetime('now')
   )
 `);
 
@@ -24,7 +26,7 @@ const UPDATE_MAT = db.prepare(`
     client_note=@client_note, tech_note=@tech_note, internal_note=@internal_note,
     status=@status, needs_approval=@needs_approval, is_consumable=@is_consumable,
     is_spare_part=@is_spare_part, client_visible_default=@client_visible_default,
-    responsible=@responsible,
+    responsible=@responsible, cooling_kw=@cooling_kw, cooling_btu=@cooling_btu, exhaust_m3=@exhaust_m3,
     updated_at=datetime('now')
   WHERE id=@id
 `);
@@ -56,6 +58,9 @@ function matToParams(m, id) {
     is_spare_part: m.isSparePart ? 1 : 0,
     client_visible_default: m.clientVisibleDefault !== false ? 1 : 0,
     responsible: m.responsible || "general",
+    cooling_kw: Number(m.coolingKw) || 0,
+    cooling_btu: m.coolingBtu || "",
+    exhaust_m3: Number(m.exhaustM3) || 0,
   };
 }
 

@@ -1,6 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../store/StoreContext.jsx";
 import { CATEGORIES } from "../../data/modules.js";
+import { resolveCategories } from "../../lib/categories.js";
+import { isExhaustFanName, isSplitSystemName } from "../../lib/materialSpecs.js";
 import { api, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { Modal, Empty } from "../../components/ui.jsx";
@@ -35,6 +37,9 @@ const blank = {
   status: "active",
   needsApproval: false,
   clientVisibleDefault: true,
+  coolingKw: 0,
+  coolingBtu: 0,
+  exhaustM3: 0,
 };
 
 export default function MaterialsPage() {
@@ -44,6 +49,15 @@ export default function MaterialsPage() {
   const [catF, setCatF] = useState("");
   const [editing, setEditing] = useState(null);
   const [priceDraft, setPriceDraft] = useState({});
+  const [suppliers, setSuppliers] = useState([]);
+  const [categories, setCategories] = useState([...CATEGORIES]);
+
+  useEffect(() => {
+    Promise.all([api.getSuppliers(), api.getSettings()]).then(([sup, settings]) => {
+      setSuppliers(sup);
+      setCategories(resolveCategories(settings));
+    });
+  }, []);
 
   const modules = [...new Set(state.materials.map((m) => m.module))];
 
@@ -115,7 +129,7 @@ export default function MaterialsPage() {
           </select>
           <select value={catF} onChange={(e) => setCatF(e.target.value)} style={{ width: "auto" }}>
             <option value="">Все категории</option>
-            {CATEGORIES.map((c) => (
+            {categories.map((c) => (
               <option key={c}>{c}</option>
             ))}
           </select>
@@ -233,7 +247,7 @@ export default function MaterialsPage() {
             <div className="field">
               <label>Категория</label>
               <select value={editing.category} onChange={(e) => setEditing({ ...editing, category: e.target.value })}>
-                {CATEGORIES.map((c) => (
+                {categories.map((c) => (
                   <option key={c}>{c}</option>
                 ))}
               </select>
@@ -253,8 +267,56 @@ export default function MaterialsPage() {
           </div>
           <div className="field">
             <label>Поставщик</label>
-            <input value={editing.supplier} onChange={(e) => setEditing({ ...editing, supplier: e.target.value })} />
+            <select value={editing.supplier || ""} onChange={(e) => setEditing({ ...editing, supplier: e.target.value })}>
+              <option value="">— не выбран —</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.name}>{s.name}</option>
+              ))}
+            </select>
+            <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
+              <a href="/suppliers">Создать поставщика</a>
+            </p>
           </div>
+          {(isSplitSystemName(editing.name) || isExhaustFanName(editing.name)) && (
+            <div className="form-grid">
+              {isSplitSystemName(editing.name) && (
+                <>
+                  <div className="field">
+                    <label>Охлаждение, кВт</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={editing.coolingKw || ""}
+                      onChange={(e) => setEditing({ ...editing, coolingKw: Number(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>BTU</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={editing.coolingBtu || ""}
+                      onChange={(e) => setEditing({ ...editing, coolingBtu: Number(e.target.value) || 0 })}
+                    />
+                  </div>
+                </>
+              )}
+              {isExhaustFanName(editing.name) && (
+                <div className="field">
+                  <label>Производительность, м³/ч</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={editing.exhaustM3 || ""}
+                    onChange={(e) => setEditing({ ...editing, exhaustM3: Number(e.target.value) || 0 })}
+                  />
+                </div>
+              )}
+            </div>
+          )}
           <div className="field">
             <label>Ссылка на товар</label>
             <input value={editing.link} onChange={(e) => setEditing({ ...editing, link: e.target.value })} />

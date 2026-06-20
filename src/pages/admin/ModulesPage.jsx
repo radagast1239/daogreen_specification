@@ -12,6 +12,7 @@ import {
   resolveFarmSections,
   stripLineIds,
 } from "../../lib/farmSectionsConfig.js";
+import { resolveCategories } from "../../lib/categories.js";
 import { catalogLinesForModule } from "../../lib/projectBuilder.js";
 import { cloneBuilderLines } from "../../lib/presetHelpers.js";
 import { useStore } from "../../store/StoreContext.jsx";
@@ -33,6 +34,8 @@ export default function ModulesPage() {
   const [editingSection, setEditingSection] = useState(null);
   const [editLines, setEditLines] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
 
   const stellageMods = state.modules.filter((m) => m.type === "stellage");
   const stellagePresets = presets.filter((p) => p.presetType === "stellage");
@@ -45,9 +48,16 @@ export default function ModulesPage() {
   };
 
   const reload = useCallback(async () => {
-    const [p, m, s] = await Promise.all([api.getPresets(), api.getModulesAdmin(), api.getSettings()]);
+    const [p, m, s, sup] = await Promise.all([
+      api.getPresets(),
+      api.getModulesAdmin(),
+      api.getSettings(),
+      api.getSuppliers(),
+    ]);
     setPresets(p);
     setMods(m);
+    setCategories(resolveCategories(s));
+    setSuppliers(sup);
     setFarmSections(resolveFarmSections(s));
     setFarmCatalogs(parseFarmSectionCatalogs(s.farmSectionCatalogs));
   }, []);
@@ -230,7 +240,7 @@ export default function ModulesPage() {
             </button>
           </div>
           <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
-            Каждый раздел — шаблон списка материалов. В проекте вы отмечаете нужные позиции и задаёте количество.
+            Каждый раздел — шаблон списка материалов. В проекте вы отмечаете нужные позиции и задаёте количество при создании.
             Материалы можно брать из любого модуля базы.
           </p>
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
@@ -345,8 +355,11 @@ export default function ModulesPage() {
             onChange={setEditLines}
             materials={state.materials}
             catalogModule=""
+            farmSectionId={editingSection.id}
             catalogLabel="материал"
             onSaveMaterial={saveMaterial}
+            categories={categories}
+            suppliers={suppliers}
           />
 
           <div className="toolbar" style={{ marginTop: 16 }}>
@@ -398,6 +411,8 @@ export default function ModulesPage() {
             catalogModule={editing.moduleName}
             catalogLabel="позицию"
             onSaveMaterial={saveMaterial}
+            categories={categories}
+            suppliers={suppliers}
           />
 
           <div className="toolbar" style={{ marginTop: 16 }}>

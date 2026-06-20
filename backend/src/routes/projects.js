@@ -42,12 +42,14 @@ const INSERT_ITEM = db.prepare(`
     id, project_id, material_id, module, section, name, unit, category,
     supplier, link, link_alt, photo_url, client_note, tech_note,
     qty, price, vat_rate, visible, approved, enabled, needs_approval,
-    status, actual_price, client_comment, sort_order, responsible
+    status, actual_price, client_comment, sort_order, responsible,
+    cooling_kw, cooling_btu, exhaust_m3
   ) VALUES (
     @id, @project_id, @material_id, @module, @section, @name, @unit, @category,
     @supplier, @link, @link_alt, @photo_url, @client_note, @tech_note,
     @qty, @price, @vat_rate, @visible, @approved, @enabled, @needs_approval,
-    @status, @actual_price, @client_comment, @sort_order, @responsible
+    @status, @actual_price, @client_comment, @sort_order, @responsible,
+    @cooling_kw, @cooling_btu, @exhaust_m3
   )
 `);
 
@@ -59,7 +61,7 @@ const UPDATE_ITEM = db.prepare(`
     qty=@qty, price=@price, vat_rate=@vat_rate,
     visible=@visible, approved=@approved, enabled=@enabled, needs_approval=@needs_approval,
     status=@status, actual_price=@actual_price, client_comment=@client_comment,
-    responsible=@responsible
+    responsible=@responsible, cooling_kw=@cooling_kw, cooling_btu=@cooling_btu, exhaust_m3=@exhaust_m3
   WHERE id=@id AND project_id=@project_id
 `);
 
@@ -91,6 +93,9 @@ function itemToParams(it, projectId) {
     client_comment: it.clientComment || "",
     sort_order: it.sortOrder || 0,
     responsible: it.responsible || "general",
+    cooling_kw: Number(it.coolingKw) || 0,
+    cooling_btu: it.coolingBtu || "",
+    exhaust_m3: Number(it.exhaustM3) || 0,
   };
 }
 

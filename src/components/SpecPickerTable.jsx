@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { groupLabel } from "../../shared/stellageComposition.js";
 import { CATEGORIES } from "../data/modules.js";
+import { isExhaustFanName, isSplitSystemName } from "../lib/materialSpecs.js";
 import {
   blankLine,
   lineFromMaterial,
@@ -22,11 +23,66 @@ export function countIncluded(lines) {
 const emptyNew = () => ({
   name: "",
   unit: "шт.",
-  qty: 1,
   price: 0,
   link: "",
   category: "Прочее",
+  supplier: "",
 });
+
+function SpecFields({ ln, disabled, onPatch }) {
+  const split = isSplitSystemName(ln.name);
+  const exhaust = isExhaustFanName(ln.name);
+  if (!split && !exhaust) return null;
+  return (
+    <div className="row wrap" style={{ gap: 6, marginTop: 4 }}>
+      {split && (
+        <>
+          <label className="row" style={{ fontSize: 11, gap: 4 }}>
+            кВт
+            <input
+              className="spec-cell-input spec-cell-input--sm"
+              type="number"
+              min={0}
+              step="any"
+              style={{ width: 56 }}
+              disabled={disabled}
+              value={ln.coolingKw || ""}
+              onChange={(e) => onPatch({ coolingKw: Number(e.target.value) || 0 })}
+            />
+          </label>
+          <label className="row" style={{ fontSize: 11, gap: 4 }}>
+            BTU
+            <input
+              className="spec-cell-input spec-cell-input--sm"
+              type="number"
+              min={0}
+              step="any"
+              style={{ width: 72 }}
+              disabled={disabled}
+              value={ln.coolingBtu || ""}
+              onChange={(e) => onPatch({ coolingBtu: Number(e.target.value) || 0 })}
+            />
+          </label>
+        </>
+      )}
+      {exhaust && (
+        <label className="row" style={{ fontSize: 11, gap: 4 }}>
+          м³/ч
+          <input
+            className="spec-cell-input spec-cell-input--sm"
+            type="number"
+            min={0}
+            step="any"
+            style={{ width: 72 }}
+            disabled={disabled}
+            value={ln.exhaustM3 || ""}
+            onChange={(e) => onPatch({ exhaustM3: Number(e.target.value) || 0 })}
+          />
+        </label>
+      )}
+    </div>
+  );
+}
 
 export default function SpecPickerTable({
   lines,
@@ -37,7 +93,11 @@ export default function SpecPickerTable({
   catalogLabel = "из базы",
   emptyHint = "Выберите тип стеллажа — позиции появятся в таблице.",
   onSaveMaterial,
+  categories: categoriesProp,
+  suppliers = [],
+  showQty = false,
 }) {
+  const categories = categoriesProp?.length ? categoriesProp : CATEGORIES;
   const [picker, setPicker] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [newForm, setNewForm] = useState(emptyNew);
@@ -81,7 +141,7 @@ export default function SpecPickerTable({
 
   const toggleLine = (ln, included) => {
     const patch = { included };
-    if (included && !ln.qty) patch.qty = 1;
+    if (showQty && included && !ln.qty) patch.qty = 1;
     if (included && !ln.imageUrl && !ln.photoUrl && ln.materialId) {
       const img = resolveLinePhoto(ln, materials);
       if (img) {
@@ -134,7 +194,14 @@ export default function SpecPickerTable({
           farmSectionId
         )
       );
-      onChange([...lines, lineFromMaterial(mat, { included: true, qty: newForm.qty, price: newForm.price })]);
+      onChange([
+        ...lines,
+        lineFromMaterial(mat, {
+          included: true,
+          price: newForm.price,
+          ...(showQty ? { qty: 1 } : {}),
+        }),
+      ]);
       setNewOpen(false);
       setNewForm(emptyNew());
     } catch (e) {
@@ -143,6 +210,8 @@ export default function SpecPickerTable({
       setSavingNew(false);
     }
   };
+
+  const colSpan = showQty ? 10 : 9;
 
   return (
     <>
@@ -170,7 +239,7 @@ export default function SpecPickerTable({
           ＋ новая позиция в базу
         </button>
         <span className="muted" style={{ fontSize: 12 }}>
-          {countIncluded(lines)} / {lines.length} в спецификации
+          {countIncluded(lines)} / {lines.length} {showQty ? "в спецификации" : "отмечено"}
         </span>
       </div>
 
@@ -186,8 +255,10 @@ export default function SpecPickerTable({
                 <th style={{ width: 112 }}>Фото</th>
                 <th style={{ width: 40 }} title="Включить в спецификацию">✓</th>
                 <th style={{ minWidth: 200 }}>Наименование</th>
+                <th style={{ width: 120 }}>Категория</th>
+                <th style={{ width: 110 }}>Поставщик</th>
                 <th style={{ width: 72 }}>Ед.</th>
-                <th className="right" style={{ width: 96 }}>Кол-во</th>
+                {showQty && <th className="right" style={{ width: 96 }}>Кол-во</th>}
                 <th className="right" style={{ width: 110 }}>Цена, ₽</th>
                 <th style={{ minWidth: 120 }}>Ссылка</th>
                 <th style={{ width: 72 }} />
@@ -198,7 +269,7 @@ export default function SpecPickerTable({
                 <React.Fragment key={g}>
                   {g !== "other" && (
                     <tr>
-                      <td colSpan={8} className="spec-group-head">
+                      <td colSpan={colSpan} className="spec-group-head">
                         {groupLabel(g)}
                       </td>
                     </tr>
@@ -249,11 +320,41 @@ export default function SpecPickerTable({
                           placeholder="наименование"
                           onChange={(e) => onChange(patchLine(lines, ln.id, { name: e.target.value }))}
                         />
+                        <SpecFields
+                          ln={ln}
+                          disabled={!ln.included}
+                          onPatch={(patch) => onChange(patchLine(lines, ln.id, patch))}
+                        />
                         {!ln.materialId && ln.name?.trim() && (
                           <span className="muted" style={{ fontSize: 10, display: "block", marginTop: 2 }}>
                             не в базе
                           </span>
                         )}
+                      </td>
+                      <td>
+                        <select
+                          className="spec-cell-input"
+                          value={ln.category || "Прочее"}
+                          disabled={!ln.included}
+                          onChange={(e) => onChange(patchLine(lines, ln.id, { category: e.target.value }))}
+                        >
+                          {categories.map((c) => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          className="spec-cell-input"
+                          value={ln.supplier || ""}
+                          disabled={!ln.included}
+                          onChange={(e) => onChange(patchLine(lines, ln.id, { supplier: e.target.value }))}
+                        >
+                          <option value="">—</option>
+                          {suppliers.map((s) => (
+                            <option key={s.id} value={s.name}>{s.name}</option>
+                          ))}
+                        </select>
                       </td>
                       <td>
                         <input
@@ -262,6 +363,7 @@ export default function SpecPickerTable({
                           onChange={(e) => onChange(patchLine(lines, ln.id, { unit: e.target.value }))}
                         />
                       </td>
+                      {showQty && (
                       <td>
                         <input
                           className="spec-cell-input spec-cell-input--num"
@@ -273,6 +375,7 @@ export default function SpecPickerTable({
                           onChange={(e) => onChange(patchLine(lines, ln.id, { qty: Number(e.target.value) || 0 }))}
                         />
                       </td>
+                      )}
                       <td>
                         <input
                           className="spec-cell-input spec-cell-input--num"
@@ -356,15 +459,6 @@ export default function SpecPickerTable({
               <input value={newForm.unit} onChange={(e) => setNewForm((f) => ({ ...f, unit: e.target.value }))} />
             </label>
             <label>
-              Кол-во по умолчанию
-              <input
-                type="number"
-                min={0}
-                value={newForm.qty}
-                onChange={(e) => setNewForm((f) => ({ ...f, qty: Number(e.target.value) || 0 }))}
-              />
-            </label>
-            <label>
               Цена, ₽
               <input
                 type="number"
@@ -376,10 +470,19 @@ export default function SpecPickerTable({
             <label>
               Категория
               <select value={newForm.category} onChange={(e) => setNewForm((f) => ({ ...f, category: e.target.value }))}>
-                {CATEGORIES.map((c) => (
+                {categories.map((c) => (
                   <option key={c} value={c}>
                     {c}
                   </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Поставщик
+              <select value={newForm.supplier || ""} onChange={(e) => setNewForm((f) => ({ ...f, supplier: e.target.value }))}>
+                <option value="">—</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.name}>{s.name}</option>
                 ))}
               </select>
             </label>

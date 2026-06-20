@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import { PURCHASE_STATUSES } from "../data/modules.js";
+import { copyToClipboard } from "../lib/copyText.js";
 
 export function Chip({ kind = "neutral", children, dot = true }) {
   return <span className={`chip chip--${kind} ${dot ? "chip-dot" : ""}`}>{children}</span>;
@@ -40,6 +41,36 @@ export function Modal({ title, onClose, children, footer }) {
         {footer && <div className="modal-foot">{footer}</div>}
       </div>
     </div>
+  );
+}
+
+export function ClientLinkModal({ url, onClose }) {
+  const [msg, setMsg] = useState("");
+  const copy = async () => {
+    const ok = await copyToClipboard(url);
+    setMsg(ok ? "Скопировано" : "Выделите ссылку и Ctrl+C");
+    if (ok) setTimeout(() => setMsg(""), 2000);
+  };
+  return (
+    <Modal
+      title="Ссылка для клиента"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onClose}>Закрыть</button>
+          <button type="button" className="btn btn-primary" onClick={copy}>Копировать</button>
+        </>
+      }
+    >
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+        Отправьте клиенту эту ссылку — он увидит список закупки с фото.
+      </p>
+      <input className="link-copy-input" readOnly value={url} onFocus={(e) => e.target.select()} />
+      {msg && <p style={{ fontSize: 13, color: "var(--ok)", marginBottom: 0 }}>{msg}</p>}
+      <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 13, marginTop: 10, display: "inline-block" }}>
+        Открыть в новой вкладке ↗
+      </a>
+    </Modal>
   );
 }
 

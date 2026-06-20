@@ -1,19 +1,21 @@
-import React from "react";
+import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { projectTotals, money } from "../../store/helpers.js";
 import { clientLink } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
-import { Progress, Empty } from "../../components/ui.jsx";
+import { Progress, Empty, ClientLinkModal } from "../../components/ui.jsx";
 
 export default function ProjectsPage() {
   const { state, actions } = useStore();
   const nav = useNavigate();
   const projects = state.projects;
   const dash = state.dashboard;
+  const [linkModal, setLinkModal] = useState(null);
 
   return (
     <>
+      {linkModal && <ClientLinkModal url={linkModal} onClose={() => setLinkModal(null)} />}
       <PageHeader
         title="Проекты"
         sub={`${projects.length} проект(ов) · база: ${state.materials.length} материалов`}
@@ -115,9 +117,14 @@ export default function ProjectsPage() {
                       Открыть
                     </Link>
                     {link && (
-                      <a className="btn btn-sm" href={link} target="_blank" rel="noreferrer">
-                        Клиент ↗
-                      </a>
+                      <>
+                        <button type="button" className="btn btn-sm" onClick={() => setLinkModal(link)}>
+                          Ссылка
+                        </button>
+                        <a className="btn btn-sm" href={link} target="_blank" rel="noreferrer">
+                          Клиент ↗
+                        </a>
+                      </>
                     )}
                     <button className="btn btn-sm" onClick={() => actions.projectDuplicate(p.id)}>
                       Дублировать

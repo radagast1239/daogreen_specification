@@ -21,6 +21,9 @@ export function blankLine(overrides = {}) {
     vatRate: 0,
     techNote: "",
     clientNote: "",
+    coolingKw: 0,
+    coolingBtu: 0,
+    exhaustM3: 0,
     included: true,
     ...overrides,
   };
@@ -41,6 +44,10 @@ export function lineToMaterialPayload(line, moduleName, farmSectionId = "") {
     vatRate: Number(line.vatRate) || 0,
     techNote: line.techNote || "",
     clientNote: line.clientNote || "",
+    supplier: line.supplier || "",
+    coolingKw: Number(line.coolingKw) || 0,
+    coolingBtu: Number(line.coolingBtu) || 0,
+    exhaustM3: Number(line.exhaustM3) || 0,
     status: "active",
   };
 }
@@ -61,6 +68,9 @@ export function syncLineFromMaterial(line, mat) {
     photoUrl: img,
     price: Number(mat.basePrice) || line.price,
     vatRate: Number(mat.vatRate) || 0,
+    coolingKw: Number(mat.coolingKw) || 0,
+    coolingBtu: Number(mat.coolingBtu) || 0,
+    exhaustM3: Number(mat.exhaustM3) || 0,
   };
 }
 
@@ -106,6 +116,9 @@ export function lineFromMaterial(mat, overrides = {}) {
     vatRate: [0, 5, 20].includes(Number(mat.vatRate)) ? Number(mat.vatRate) : 0,
     techNote: mat.techNote || "",
     clientNote: mat.clientNote || mat.comment || "",
+    coolingKw: Number(mat.coolingKw) || 0,
+    coolingBtu: Number(mat.coolingBtu) || 0,
+    exhaustM3: Number(mat.exhaustM3) || 0,
     ...overrides,
   });
 }
@@ -140,6 +153,9 @@ export function lineToProjectItem(line, section, sortOrder) {
     qty,
     price: Number(line.price) || 0,
     vatRate: Number(line.vatRate) || 0,
+    coolingKw: Number(line.coolingKw) || 0,
+    coolingBtu: Number(line.coolingBtu) || 0,
+    exhaustM3: Number(line.exhaustM3) || 0,
     responsible: defaultResponsible(line.category, line),
     visible: on && qty > 0,
     approved: false,

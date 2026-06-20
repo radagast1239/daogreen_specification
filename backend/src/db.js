@@ -164,6 +164,13 @@ function migrateDb() {
   };
   addCol("materials", "responsible", "TEXT DEFAULT 'general'");
   addCol("project_items", "responsible", "TEXT DEFAULT 'general'");
+  addCol("materials", "farm_section_id", "TEXT DEFAULT ''");
+  addCol("materials", "cooling_kw", "REAL DEFAULT 0");
+  addCol("materials", "cooling_btu", "TEXT DEFAULT ''");
+  addCol("materials", "exhaust_m3", "REAL DEFAULT 0");
+  addCol("project_items", "cooling_kw", "REAL DEFAULT 0");
+  addCol("project_items", "cooling_btu", "TEXT DEFAULT ''");
+  addCol("project_items", "exhaust_m3", "REAL DEFAULT 0");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
@@ -186,11 +193,16 @@ function migrateDb() {
     );
   `);
 
-  try {
-    db.exec(`ALTER TABLE materials ADD COLUMN farm_section_id TEXT DEFAULT ''`);
-  } catch {
-    /* column exists */
-  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      phone TEXT DEFAULT '',
+      site TEXT DEFAULT '',
+      note TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 }
 
 export function rowToMaterial(row) {
@@ -222,6 +234,9 @@ export function rowToMaterial(row) {
     isSparePart: !!row.is_spare_part,
     clientVisibleDefault: !!row.client_visible_default,
     responsible: row.responsible || "general",
+    coolingKw: row.cooling_kw || 0,
+    coolingBtu: row.cooling_btu || "",
+    exhaustM3: row.exhaust_m3 || 0,
     comment: row.client_note || row.tech_note,
   };
 }
@@ -268,6 +283,9 @@ export function rowToItem(row) {
     actualPrice: row.actual_price,
     clientComment: row.client_comment,
     responsible: row.responsible || "general",
+    coolingKw: row.cooling_kw || 0,
+    coolingBtu: row.cooling_btu || "",
+    exhaustM3: row.exhaust_m3 || 0,
   };
 }
 

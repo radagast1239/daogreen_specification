@@ -4,6 +4,7 @@ import { useStore } from "../../store/StoreContext.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
 import { FARM_TYPES } from "../../data/modules.js";
+import { resolveCategories } from "../../lib/categories.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
 import { api } from "../../lib/api.js";
 import {
@@ -39,6 +40,8 @@ export default function ProjectBuilderPage() {
   const [presets, setPresets] = useState([]);
   const [farmCatalogs, setFarmCatalogs] = useState({});
   const [farmSettings, setFarmSettings] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
 
   const [form, setForm] = useState({
     name: "",
@@ -69,10 +72,12 @@ export default function ProjectBuilderPage() {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   useEffect(() => {
-    Promise.all([api.getPresets(), api.getSettings()]).then(([p, s]) => {
+    Promise.all([api.getPresets(), api.getSettings(), api.getSuppliers()]).then(([p, s, sup]) => {
       setPresets(p);
       setFarmSettings(s);
       setFarmCatalogs(parseFarmSectionCatalogs(s.farmSectionCatalogs));
+      setCategories(resolveCategories(s));
+      setSuppliers(sup);
     });
   }, []);
 
@@ -340,6 +345,9 @@ export default function ProjectBuilderPage() {
             catalogModule={draft.moduleName}
             catalogLabel="позицию"
             onSaveMaterial={saveMaterial}
+            showQty
+            categories={categories}
+            suppliers={suppliers}
           />
 
           <div className="toolbar" style={{ marginTop: 16 }}>
@@ -393,6 +401,10 @@ export default function ProjectBuilderPage() {
                 catalogModule=""
                 catalogLabel="материал"
                 onSaveMaterial={saveMaterial}
+                showQty
+                categories={categories}
+                suppliers={suppliers}
+                farmSectionId={activeFarmSection}
               />
             </div>
           </div>

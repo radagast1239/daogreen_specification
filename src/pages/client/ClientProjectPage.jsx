@@ -8,8 +8,11 @@ import {
   itemImageUrl,
   itemsByResponsible,
   lineGross,
+  lineVat,
+  splitPurchaseItems,
 } from "../../lib/itemHelpers.js";
 import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
+import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { Progress, StatusChip, Empty } from "../../components/ui.jsx";
 import { downloadCSV, printPDF } from "../../lib/export.js";
 
@@ -30,7 +33,6 @@ export default function ClientProjectPage() {
   const { actions } = useStore();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("categories");
-  const [statusFilter, setStatusFilter] = useState("all");
   const [supplierFilter, setSupplierFilter] = useState("");
   const [err, setErr] = useState("");
 
@@ -58,14 +60,8 @@ export default function ClientProjectPage() {
   const totals = projectTotals(project);
   const suppliers = [...new Set(visibleItems.map((i) => i.supplier).filter(Boolean))].sort();
 
-  const applyFilters = (list) => {
-    let r = list;
-    if (statusFilter === "todo") r = r.filter((i) => i.status === "not_bought");
-    else if (statusFilter === "help") r = r.filter((i) => i.status === "need_help");
-    else if (statusFilter !== "all") r = r.filter((i) => i.status === statusFilter);
-    if (supplierFilter) r = r.filter((i) => i.supplier === supplierFilter);
-    return r;
-  };
+  const filterSupplier = (list) =>
+    supplierFilter ? list.filter((i) => i.supplier === supplierFilter) : list;
 
   const patch = async (itemId, p) => {
     const updated = await actions.clientPatchItem(token, itemId, p);
@@ -121,21 +117,6 @@ export default function ClientProjectPage() {
               </option>
             ))}
           </select>
-          {[
-            ["all", "Все"],
-            ["todo", "Не куплено"],
-            ["ordered", "Заказано"],
-            ["bought", "Куплено"],
-            ["help", "Помощь"],
-          ].map(([k, label]) => (
-            <button
-              key={k}
-              className={"btn btn-sm" + (statusFilter === k ? " btn-primary" : "")}
-              onClick={() => setStatusFilter(k)}
-            >
-              {label}
-            </button>
-          ))}
         </div>
       )}
 
@@ -145,33 +126,79 @@ export default function ClientProjectPage() {
         <>
           {tab === "overview" && <OverviewTab project={project} totals={totals} items={visibleItems} />}
           {tab === "categories" && (
-            <ItemsByGroup
-              groups={groupBy(applyFilters(visibleItems), "category")}
+            <PurchaseSplitView
+              items={filterSupplier(visibleItems)}
               currency={project.currency}
               patch={patch}
+              render={(todo) => (
+                <ItemsByGroup groups={groupBy(todo, "category")} currency={project.currency} patch={patch} />
+              )}
+              renderBought={(bought) => (
+                <ItemsByGroup groups={groupBy(bought, "category")} currency={project.currency} patch={patch} bought />
+              )}
             />
           )}
           {tab === "modules" && (
-            <ItemsByGroup
-              groups={groupBy(applyFilters(visibleItems), "module")}
+            <PurchaseSplitView
+              items={filterSupplier(visibleItems)}
               currency={project.currency}
               patch={patch}
+              render={(todo) => (
+                <ItemsByGroup groups={groupBy(todo, "module")} currency={project.currency} patch={patch} />
+              )}
+              renderBought={(bought) => (
+                <ItemsByGroup groups={groupBy(bought, "module")} currency={project.currency} patch={patch} bought />
+              )}
             />
           )}
           {tab === "merged" && (
-            <MergedClientTab project={project} items={applyFilters(visibleItems)} onExport={() => exportRows(visibleItems, "общий")} />
+            <PurchaseSplitView
+              items={filterSupplier(visibleItems)}
+              currency={project.currency}
+              patch={patch}
+              render={(todo) => (
+                <MergedClientTab project={project} items={todo} onExport={() => exportRows(visibleItems, "общий")} />
+              )}
+              renderBought={(bought) => (
+                <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />
+              )}
+            />
           )}
           {tab === "plumber" && (
-            <ItemsFlat items={applyFilters(itemsByResponsible(visibleItems, "plumber"))} currency={project.currency} patch={patch} />
+            <PurchaseSplitView
+              items={filterSupplier(itemsByResponsible(visibleItems, "plumber"))}
+              currency={project.currency}
+              patch={patch}
+              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} />}
+              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
+            />
           )}
           {tab === "electric" && (
-            <ItemsFlat items={applyFilters(itemsByResponsible(visibleItems, "electrician"))} currency={project.currency} patch={patch} />
+            <PurchaseSplitView
+              items={filterSupplier(itemsByResponsible(visibleItems, "electrician"))}
+              currency={project.currency}
+              patch={patch}
+              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} />}
+              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
+            />
           )}
           {tab === "installer" && (
-            <ItemsFlat items={applyFilters(itemsByResponsible(visibleItems, "installer"))} currency={project.currency} patch={patch} />
+            <PurchaseSplitView
+              items={filterSupplier(itemsByResponsible(visibleItems, "installer"))}
+              currency={project.currency}
+              patch={patch}
+              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} />}
+              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
+            />
           )}
           {tab === "consumables" && (
-            <ItemsFlat items={applyFilters(itemsByResponsible(visibleItems, "consumables"))} currency={project.currency} patch={patch} />
+            <PurchaseSplitView
+              items={filterSupplier(itemsByResponsible(visibleItems, "consumables"))}
+              currency={project.currency}
+              patch={patch}
+              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} />}
+              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought />}
+            />
           )}
           {tab === "docs" && (
             <DocsTab
@@ -251,6 +278,31 @@ function BudgetBar({ project, totals, versionInfo, delta, onExport }) {
   );
 }
 
+function PurchaseSplitView({ items, render, renderBought }) {
+  const { todo, bought } = splitPurchaseItems(items);
+  if (!todo.length && !bought.length) {
+    return <Empty title="Нет позиций в этом списке" />;
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      {todo.length > 0 ? (
+        <>
+          <h3 className="purchase-section-title">К закупке · {todo.length}</h3>
+          {render(todo)}
+        </>
+      ) : (
+        <p className="muted" style={{ fontSize: 14, margin: "16px 0" }}>Всё из этого списка уже куплено.</p>
+      )}
+      {bought.length > 0 && (
+        <div className="purchase-bought-block">
+          <h3 className="purchase-section-title purchase-section-title--done">Куплено · {bought.length}</h3>
+          {renderBought(bought)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OverviewTab({ project, totals, items }) {
   const byCat = groupBy(items, "category");
   return (
@@ -286,7 +338,7 @@ function OverviewTab({ project, totals, items }) {
   );
 }
 
-function ItemsByGroup({ groups, currency, patch }) {
+function ItemsByGroup({ groups, currency, patch, bought = false }) {
   return (
     <>
       {groups.map(([title, items]) => {
@@ -301,7 +353,7 @@ function ItemsByGroup({ groups, currency, patch }) {
               </span>
             </div>
             {items.map((it) => (
-              <ItemCard key={it.id} it={it} currency={currency} patch={patch} />
+              <ItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} />
             ))}
           </section>
         );
@@ -310,9 +362,9 @@ function ItemsByGroup({ groups, currency, patch }) {
   );
 }
 
-function ItemsFlat({ items, currency, patch }) {
-  if (!items.length) return <Empty title="Нет позиций в этом списке" />;
-  return items.map((it) => <ItemCard key={it.id} it={it} currency={currency} patch={patch} />);
+function ItemsFlat({ items, currency, patch, bought = false }) {
+  if (!items.length) return null;
+  return items.map((it) => <ItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} />);
 }
 
 function MergedClientTab({ project, items, onExport }) {
@@ -369,13 +421,15 @@ function DocsTab({ onExportAll, onExportMerged }) {
   );
 }
 
-function ItemCard({ it, currency, patch }) {
+function ItemCard({ it, currency, patch, bought = false }) {
   const img = itemImageUrl(it);
   const gross = lineGross(it);
   const vat = lineVat(it);
+  const markBought = () => patch(it.id, { status: "bought" });
+  const markTodo = () => patch(it.id, { status: "not_bought" });
 
   return (
-    <div className="card card-item">
+    <div className={"card card-item" + (bought ? " card-item--bought" : "")}>
       {img ? (
         <img src={img} alt={it.name} className="thumb-img" />
       ) : (
@@ -384,8 +438,15 @@ function ItemCard({ it, currency, patch }) {
       <div style={{ minWidth: 0 }}>
         <div className="between">
           <strong style={{ fontSize: 14 }}>{it.name}</strong>
-          <StatusChip status={it.status} />
+          {bought ? (
+            <span className="chip chip--ok chip-dot" style={{ fontSize: 11 }}>Куплено</span>
+          ) : it.status === "need_help" ? (
+            <StatusChip status={it.status} />
+          ) : null}
         </div>
+        {materialSpecLabel(it) && (
+          <div style={{ fontSize: 12, marginTop: 2, color: "var(--brand)" }}>{materialSpecLabel(it)}</div>
+        )}
         <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
           <span className="num">{num(it.qty)}</span> {it.unit} ·{" "}
           <span className="num">{money(it.price, currency)}</span>/ед
@@ -411,14 +472,24 @@ function ItemCard({ it, currency, patch }) {
           </a>
         )}
 
-        <div className="statusbtns no-print" style={{ marginTop: 10 }}>
-          {PURCHASE_STATUSES.map((s) => (
-            <button key={s.id} className={it.status === s.id ? "sel" : ""} onClick={() => patch(it.id, { status: s.id })}>
-              {s.label}
+        {!bought ? (
+          <div className="row no-print wrap" style={{ marginTop: 12, gap: 8 }}>
+            <button type="button" className="btn btn-primary" onClick={markBought}>
+              ✓ Куплено
             </button>
-          ))}
-        </div>
+            {it.status !== "need_help" && (
+              <button type="button" className="btn btn-sm" onClick={() => patch(it.id, { status: "need_help" })}>
+                Нужна помощь
+              </button>
+            )}
+          </div>
+        ) : (
+          <button type="button" className="btn btn-sm btn-ghost no-print" style={{ marginTop: 10 }} onClick={markTodo}>
+            Вернуть в список
+          </button>
+        )}
 
+        {!bought && (
         <div className="row no-print" style={{ marginTop: 10, gap: 8, flexWrap: "wrap" }}>
           <div className="field" style={{ flex: "0 0 150px" }}>
             <label>Факт. цена</label>
@@ -434,6 +505,7 @@ function ItemCard({ it, currency, patch }) {
             <input value={it.clientComment} onChange={(e) => patch(it.id, { clientComment: e.target.value })} />
           </div>
         </div>
+        )}
       </div>
     </div>
   );

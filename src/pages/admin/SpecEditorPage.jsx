@@ -10,12 +10,13 @@ import {
   num,
 } from "../../store/helpers.js";
 import { SPECIALIST_MAP } from "../../data/modules.js";
-import { VAT_RATES, lineGross, DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
+import { VAT_RATES, lineGross } from "../../lib/itemHelpers.js";
 import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
 import { clientLink, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
-import { Progress, Stat, Empty } from "../../components/ui.jsx";
+import { Progress, Stat, Empty, ClientLinkModal } from "../../components/ui.jsx";
 import { downloadCSV } from "../../lib/export.js";
+import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 
 export default function SpecEditorPage() {
   const { id } = useParams();
@@ -23,6 +24,7 @@ export default function SpecEditorPage() {
   const project = state.projects.find((p) => p.id === id);
   const [tab, setTab] = useState("spec");
   const [versionMsg, setVersionMsg] = useState("");
+  const [linkOpen, setLinkOpen] = useState(false);
 
   useEffect(() => {
     if (id) actions.loadProject(id);
@@ -76,14 +78,9 @@ export default function SpecEditorPage() {
 
   const url = project.clientToken ? clientLink(project.clientToken) : "";
 
-  const copyLink = () => {
-    if (!url) return;
-    navigator.clipboard?.writeText(url);
-    alert("Ссылка для клиента:\n" + url);
-  };
-
   return (
     <>
+      {linkOpen && url && <ClientLinkModal url={url} onClose={() => setLinkOpen(false)} />}
       <PageHeader
         title={project.name}
         sub={`${project.client || "—"}${project.city ? " · " + project.city : ""}${
@@ -94,7 +91,7 @@ export default function SpecEditorPage() {
             <button className="btn" onClick={exportSpec}>Excel ↓</button>
             <button className="btn" onClick={publishVersion}>Утвердить версию</button>
             <button className="btn" onClick={approveAll}>Утвердить всё</button>
-            <button className="btn btn-primary" onClick={copyLink}>Ссылка клиенту</button>
+            <button className="btn btn-primary" disabled={!url} onClick={() => setLinkOpen(true)}>Ссылка клиенту</button>
           </>
         }
       />
@@ -127,7 +124,7 @@ export default function SpecEditorPage() {
             ["spec", "Спецификация"],
             ["merged", "Общий список"],
             ["spec_lists", "Специалисты"],
-            ["calc", "Расчёты / вводные"],
+            ["calc", "Расчёт охлаждения ферма"],
           ].map(([k, label]) => (
             <button
               key={k}
@@ -149,7 +146,21 @@ export default function SpecEditorPage() {
         {tab === "spec" && <SpecTab project={project} patchItem={patchItem} actions={actions} />}
         {tab === "merged" && <MergedTab project={project} />}
         {tab === "spec_lists" && <SpecialistTab project={project} />}
-        {tab === "calc" && <CalcTab project={project} actions={actions} />}
+        {tab === "calc" && (
+          <CoolingFarmTab
+            project={project}
+            actions={actions}
+            onApplyToProject={async ({ coolingKw, coolingBtu }) => {
+              await actions.projectUpdate(project.id, {
+                manualParams: {
+                  ...project.manualParams,
+                  coolingPower: coolingKw,
+                  coolingBtu,
+                },
+              });
+            }}
+          />
+        )}
       </div>
     </>
   );
@@ -437,56 +448,6 @@ function SpecialistTab({ project }) {
           </div>
         </section>
       ))}
-    </div>
-  );
-}
-
-function CalcTab({ project, actions }) {
-  const [params, setParams] = useState({ ...DEFAULT_MANUAL_PARAMS, ...project.manualParams });
-  const [saved, setSaved] = useState(false);
-
-  const save = async () => {
-    await actions.projectUpdate(project.id, { manualParams: params });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  const fields = [
-    ["waterLineLength", "Магистраль воды, м"],
-    ["drainLineLength", "Дренаж, м"],
-    ["cableLength", "Кабель, м"],
-    ["toSewer", "До канализации, м"],
-    ["toWater", "До воды, м"],
-    ["toPanel", "До щита, м"],
-    ["ventilationCapacity", "Вентиляция, м³/ч"],
-    ["coolingPower", "Охлаждение, кВт"],
-    ["tankVolume", "Ёмкость, л"],
-    ["exhaust", "Вытяжка"],
-    ["cooling", "Кондиционер"],
-    ["ventilation", "Вентиляция"],
-  ];
-
-  return (
-    <div className="card" style={{ padding: 22, marginTop: 16, maxWidth: 720 }}>
-      <p className="muted" style={{ fontSize: 13, marginBottom: 16 }}>
-        Ручные вводные после планировки. Пока не пересчитывают позиции автоматически — ориентир для тебя и подрядчиков.
-      </p>
-      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        {fields.map(([k, label]) => (
-          <div className="field" key={k}>
-            <label>{label}</label>
-            <input value={params[k] ?? ""} onChange={(e) => setParams((p) => ({ ...p, [k]: e.target.value }))} />
-          </div>
-        ))}
-      </div>
-      <div className="field" style={{ marginTop: 12 }}>
-        <label>Заметки</label>
-        <textarea rows={3} value={params.notes || ""} onChange={(e) => setParams((p) => ({ ...p, notes: e.target.value }))} />
-      </div>
-      <button className="btn btn-primary" style={{ marginTop: 14 }} onClick={save}>
-        Сохранить вводные
-      </button>
-      {saved && <span className="muted" style={{ marginLeft: 10, fontSize: 13 }}>Сохранено</span>}
     </div>
   );
 }

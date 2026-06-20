@@ -1,4 +1,4 @@
-import { SPECIALIST_MAP } from "../data/modules.js";
+import { DONE_STATUSES, SPECIALIST_MAP } from "../data/modules.js";
 
 export const RESPONSIBLE_OPTIONS = [
   { id: "plumber", label: "Сантехник" },
@@ -51,6 +51,19 @@ export function lineVat(it) {
 
 export function lineGross(it) {
   return lineNet(it) + lineVat(it);
+}
+
+export function isPurchaseDone(it) {
+  return DONE_STATUSES.includes(it?.status);
+}
+
+export function splitPurchaseItems(items) {
+  const todo = [];
+  const bought = [];
+  for (const it of items || []) {
+    (isPurchaseDone(it) ? bought : todo).push(it);
+  }
+  return { todo, bought };
 }
 
 export const DEFAULT_MANUAL_PARAMS = {

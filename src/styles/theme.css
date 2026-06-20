@@ -23,6 +23,8 @@
 
   --radius: 10px;
   --radius-sm: 7px;
+  --thumb-w: 100px;
+  --thumb-h: 150px;
   --thumb-size: 100px;
   --shadow: 0 1px 2px rgba(16, 50, 40, 0.06), 0 8px 24px rgba(16, 50, 40, 0.06);
   --mono: "SF Mono", "JetBrains Mono", "Roboto Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -36,7 +38,7 @@ body {
   font-family: var(--sans);
   color: var(--ink);
   background: var(--surface);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 }
@@ -98,7 +100,7 @@ table.spec { width: 100%; border-collapse: collapse; font-size: 14px; }
   padding: 10px 12px; border-bottom: 1px solid var(--line-strong); white-space: nowrap;
 }
 .spec td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-.spec td.spec-photo { width: 112px; padding: 8px 10px; }
+.spec td.spec-photo { width: 116px; padding: 8px 10px; }
 .spec .material-name { font-size: 14.5px; font-weight: 500; line-height: 1.35; }
 .spec tr:hover td { background: var(--brand-tint); }
 .spec td.right, .spec th.right { text-align: right; }
@@ -133,8 +135,8 @@ table.spec { width: 100%; border-collapse: collapse; font-size: 14px; }
 .brandmark b { color: #fff; font-size: 16px; letter-spacing: -0.01em; }
 .brandmark span { display: block; font-size: 10.5px; color: #8fb3a4; letter-spacing: .1em; text-transform: uppercase; }
 .navlink {
-  display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: var(--radius-sm);
-  color: #bfe0cf; font-weight: 600; font-size: 13.5px;
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
+  color: #d8ebe2; font-weight: 700; font-size: 15px;
 }
 .navlink:hover { background: rgba(255,255,255,.06); text-decoration: none; color: #fff; }
 .navlink.active { background: var(--brand); color: #fff; }
@@ -220,9 +222,17 @@ table.spec { width: 100%; border-collapse: collapse; font-size: 14px; }
 .budget-bar .nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
 .budget-bar .nums .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: #9ecdb8; font-weight: 700; }
 .budget-bar .nums .v { font-size: 18px; font-weight: 700; }
-.card-item { padding: 14px; display: grid; grid-template-columns: var(--thumb-size) 1fr; gap: 16px; margin-bottom: 10px; }
+.card-item { padding: 14px; display: grid; grid-template-columns: var(--thumb-w) 1fr; gap: 16px; margin-bottom: 10px; }
+.card-item--bought { opacity: 0.72; background: #f6faf8; }
+.purchase-section-title {
+  font-size: 15px; font-weight: 800; margin: 20px 0 10px; color: var(--ink);
+}
+.purchase-section-title--done { color: var(--ok); }
+.purchase-bought-block {
+  margin-top: 28px; padding-top: 8px; border-top: 2px dashed var(--line);
+}
 .card-item .thumb {
-  width: var(--thumb-size); height: var(--thumb-size); border-radius: var(--radius-sm); background: var(--brand-tint);
+  width: var(--thumb-w); height: var(--thumb-h); border-radius: var(--radius-sm); background: var(--brand-tint);
   display: flex; align-items: center; justify-content: center; color: var(--brand); font-weight: 700; font-size: 28px;
 }
 .statusbtns { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -255,16 +265,17 @@ table.spec { width: 100%; border-collapse: collapse; font-size: 14px; }
 .login-card { width: 100%; max-width: 400px; padding: 28px; }
 .version-banner { margin-top: 10px; padding: 8px 12px; background: rgba(255,255,255,.12); border-radius: var(--radius-sm); font-size: 12.5px; }
 .thumb-img {
-  width: var(--thumb-size);
-  height: var(--thumb-size);
+  width: var(--thumb-w);
+  height: var(--thumb-h);
   border-radius: var(--radius-sm);
-  object-fit: cover;
+  object-fit: contain;
+  background: var(--brand-tint);
   flex-shrink: 0;
 }
 .thumb,
 .thumb-img--sm {
-  width: var(--thumb-size);
-  height: var(--thumb-size);
+  width: var(--thumb-w);
+  height: var(--thumb-h);
 }
 .thumb {
   border-radius: var(--radius-sm);
@@ -314,11 +325,16 @@ table.spec { width: 100%; border-collapse: collapse; font-size: 14px; }
 .spec-cell-input--sm { max-width: 64px; }
 .spec-cell-input--num { text-align: right; font-variant-numeric: tabular-nums; }
 
+.link-copy-input {
+  width: 100%; font-family: var(--mono); font-size: 13px; padding: 10px 12px;
+  user-select: all; cursor: text;
+}
+
 @media print {
   .sidebar, .topbar, .toolbar, .no-print, .budget-bar button, .statusbtns { display: none !important; }
   body { background: #fff; }
   .shell { display: block; }
   .card, .panel { box-shadow: none; border-color: #ccc; }
   .card-item { break-inside: avoid; }
-  .thumb-img, .card-item .thumb { width: 80px; height: 80px; }
+  .thumb-img, .card-item .thumb { width: 80px; height: 120px; }
 }

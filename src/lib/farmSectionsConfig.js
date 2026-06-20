@@ -87,7 +87,7 @@ export function projectLinesFromCatalog(catalogs, sectionId, materials) {
   const saved = catalogs[sectionId];
   if (saved?.length) {
     return cloneBuilderLines(saved).map((ln) => {
-      const base = { ...ln, included: false, qty: Number(ln.qty) || 0 };
+      const base = { ...ln, included: false, qty: 0 };
       if (!ln.materialId) return base;
       const mat = materials.find((m) => m.id === ln.materialId);
       return mat
@@ -109,7 +109,7 @@ export function emptyFarmSectionsState(sections, catalogs, materials) {
 export function stripLineIds(lines) {
   return (lines || [])
     .filter((ln) => ln.name?.trim() && ln.included !== false)
-    .map(({ id, ...rest }) => ({
+    .map(({ id, qty, ...rest }) => ({
       ...rest,
       included: true,
     }));

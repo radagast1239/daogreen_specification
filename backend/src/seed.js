@@ -12,6 +12,7 @@ import { fileURLToPath } from "url";
 import { importPhotosFromDir } from "./services/photoImport.js";
 import { syncFarmSectionsFromExcel } from "./services/syncFarmSections.js";
 import { ensureFarmSectionCatalogs } from "./services/farmSectionCatalogs.js";
+import { uid } from "./services/buildItems.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, "../uploads");
@@ -89,6 +90,20 @@ export function ensureMaterialPhotos() {
   return result;
 }
 
+export function ensureSuppliersFromMaterials() {
+  const names = db
+    .prepare("SELECT DISTINCT supplier FROM materials WHERE supplier != '' ORDER BY supplier")
+    .all()
+    .map((r) => r.supplier);
+  const ins = db.prepare("INSERT OR IGNORE INTO suppliers (id, name) VALUES (?, ?)");
+  let n = 0;
+  for (const name of names) {
+    const r = ins.run(uid("sup"), name);
+    if (r.changes) n++;
+  }
+  if (n) console.log(`Suppliers: imported ${n} from materials`);
+}
+
 export function runSeedIfEmpty() {
   ensureModules();
   const count = db.prepare("SELECT COUNT(*) as c FROM materials").get().c;
@@ -97,6 +112,7 @@ export function runSeedIfEmpty() {
     ensureMaterialPhotos();
     ensureFarmSectionIds();
     ensureFarmSectionCatalogs();
+    ensureSuppliersFromMaterials();
     return;
   }
 
@@ -129,6 +145,7 @@ export function runSeedIfEmpty() {
   ensureMaterialPhotos();
   ensureFarmSectionIds();
   ensureFarmSectionCatalogs();
+  ensureSuppliersFromMaterials();
 }
 
 if (process.argv[1]?.endsWith("seed.js")) {

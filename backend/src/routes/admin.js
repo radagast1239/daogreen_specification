@@ -61,6 +61,7 @@ router.get("/settings", (_req, res) => {
     farmSectionNames: obj.farmSectionNames || "",
     farmSections: obj.farmSections || "",
     farmSectionCatalogs: obj.farmSectionCatalogs || "",
+    materialCategories: obj.materialCategories || "",
   });
 });
 
@@ -83,6 +84,7 @@ router.patch("/settings", (req, res) => {
     farmSectionNames: obj.farmSectionNames || "",
     farmSections: obj.farmSections || "",
     farmSectionCatalogs: obj.farmSectionCatalogs || "",
+    materialCategories: obj.materialCategories || "",
   });
 });
 

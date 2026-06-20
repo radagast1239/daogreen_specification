@@ -12,7 +12,9 @@ export function presetPayloadFromDraft(draft, name) {
     moduleId: draft.moduleId,
     moduleName: draft.moduleName,
     sectionId: "",
-    items: (draft.items || []).map(({ id, ...rest }) => rest),
+    items: (draft.items || [])
+      .filter((ln) => ln.included && ln.name?.trim())
+      .map(({ id, qty, ...rest }) => rest),
     note: draft.tech || "",
   };
 }
