@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: daogreen-spec
+    runtime: node
+    plan: free
+    buildCommand: npm run build:all
+    startCommand: NODE_ENV=production npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: DATABASE_PATH
+        value: /opt/render/project/src/backend/data/daogreen.db
+    disk:
+      name: daogreen-data
+      mountPath: /opt/render/project/src/backend/data
+      sizeGB: 1
