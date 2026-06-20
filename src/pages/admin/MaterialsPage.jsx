@@ -136,14 +136,14 @@ export default function MaterialsPage() {
               <tbody>
                 {filtered.map((m) => (
                   <tr key={m.id}>
-                    <td style={{ width: 56 }}>
+                    <td className="spec-photo">
                       {(m.imageUrl || m.photoUrl) ? (
-                        <img src={m.imageUrl || m.photoUrl} alt="" className="thumb-img thumb-img--sm" />
+                        <img src={m.imageUrl || m.photoUrl} alt="" className="thumb-img" />
                       ) : (
                         <span className="muted">—</span>
                       )}
                     </td>
-                    <td style={{ minWidth: 220 }}>{m.name}</td>
+                    <td style={{ minWidth: 220 }} className="material-name">{m.name}</td>
                     <td className="muted" style={{ fontSize: 12 }}>
                       {m.module}
                     </td>
@@ -273,7 +273,7 @@ export default function MaterialsPage() {
               <img
                 src={photoSrc(editing.imageUrl || editing.photoUrl)}
                 alt=""
-                style={{ maxHeight: 80, marginTop: 8, borderRadius: 8 }}
+                style={{ width: 100, height: 100, marginTop: 8, borderRadius: 8, objectFit: "cover" }}
               />
             )}
           </div>

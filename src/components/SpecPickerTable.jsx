@@ -360,7 +360,7 @@ export default function SpecPickerTable({
                 onClick={() => addFromCatalog(m)}
               >
                 {(m.imageUrl || m.photoUrl) && (
-                  <img src={photoSrc(m.imageUrl || m.photoUrl)} alt="" className="thumb-img thumb-img--sm" />
+                  <img src={photoSrc(m.imageUrl || m.photoUrl)} alt="" className="thumb-img" />
                 )}
                 <span style={{ flex: 1, fontSize: 13 }}>{m.name}</span>
                 <span className="muted num" style={{ fontSize: 12 }}>
