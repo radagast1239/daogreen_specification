@@ -127,13 +127,17 @@ if (dryRun) {
   process.exit(0);
 }
 
-const tx = db.transaction(() => {
+db.exec("BEGIN");
+try {
   for (const { id, from, to } of changes) {
     updMat.run(to, id);
     updItem.run(to, id, from);
   }
-});
-tx();
+  db.exec("COMMIT");
+} catch (e) {
+  db.exec("ROLLBACK");
+  throw e;
+}
 
 console.log(`Updated ${changes.length} material names`);
 for (const c of changes) {
