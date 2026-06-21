@@ -3,8 +3,10 @@ const DEFAULT_TRUST_LINES = [
   "Отметки «куплено» сохраняются автоматически",
 ];
 
-const DEFAULT_VISIBLE_TABS = [
-  "overview",
+const DEFAULT_VISIBLE_TABS = ["overview", "purchase", "merged", "docs"];
+
+const ALLOWED_TABS = new Set([
+  ...DEFAULT_VISIBLE_TABS,
   "cooling",
   "categories",
   "modules",
@@ -15,7 +17,7 @@ const DEFAULT_VISIBLE_TABS = [
   "installer",
   "consumables",
   "docs",
-];
+]);
 
 const DEFAULT_PDF_COLUMNS = ["name", "qty", "unit", "price", "sum", "supplier"];
 
@@ -48,7 +50,20 @@ export function buildClientBrandFromSettings(obj = {}) {
         : [...DEFAULT_TRUST_LINES],
     clientVisibleTabs:
       Array.isArray(visibleTabs) && visibleTabs.length
-        ? visibleTabs.filter((id) => DEFAULT_VISIBLE_TABS.includes(id))
+        ? visibleTabs.filter((id) => ALLOWED_TABS.has(id)).reduce((acc, id) => {
+            const mapped =
+              id === "categories" ||
+              id === "modules" ||
+              id === "plumber" ||
+              id === "electric" ||
+              id === "installer" ||
+              id === "consumables" ||
+              id === "install"
+                ? "purchase"
+                : id;
+            if (!acc.includes(mapped) && DEFAULT_VISIBLE_TABS.includes(mapped)) acc.push(mapped);
+            return acc;
+          }, [])
         : [...DEFAULT_VISIBLE_TABS],
     pdfColumns:
       Array.isArray(pdfColumns) && pdfColumns.length

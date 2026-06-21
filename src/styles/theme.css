@@ -750,6 +750,35 @@ body.nav-open { overflow: hidden; }
 .rooms-editor { margin-top: 16px; }
 
 .client-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 16px 0; }
+
+.client-stat-grid--4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.client-purchase-modes,
+.client-purchase-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px 0;
+  align-items: center;
+}
+
+.client-section-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  transition: border-color 0.15s;
+}
+.client-section-card:hover {
+  border-color: var(--client-brand, var(--brand));
+}
+
+@media (max-width: 720px) {
+  .client-stat-grid--4 { grid-template-columns: repeat(2, 1fr); }
+}
 .login-wrap {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
   padding: 24px;

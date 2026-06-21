@@ -142,6 +142,8 @@ export function lineFromMaterial(mat, overrides = {}) {
     breakerSpecs: resolveBreakerSpecs(mat),
     flowSpecs: resolveFlowSpecs(mat),
     splitSpecs: resolveSplitSpecs(mat),
+    clientSection: mat.clientSection || "",
+    clientSubsection: mat.clientSubsection || "",
     coolingKw: Number(mat.coolingKw) || 0,
     coolingBtu: Number(mat.coolingBtu) || 0,
     exhaustM3: Number(mat.exhaustM3) || 0,

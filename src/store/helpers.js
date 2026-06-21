@@ -69,7 +69,8 @@ export function groupBy(items, key) {
 export function mergedPurchaseList(project) {
   const map = new Map();
   for (const it of clientVisibleItems(project)) {
-    const key = (it.name || "").trim().toLowerCase() + "|" + (it.unit || "").toLowerCase();
+    const normName = (it.name || "").trim().toLowerCase().replace(/\s+/g, " ");
+    const key = [normName, (it.unit || "").toLowerCase(), (it.supplier || "").trim(), (it.link || "").trim()].join("|");
     if (!map.has(key)) {
       map.set(key, {
         name: it.name,

@@ -163,10 +163,31 @@ export function initDb() {
 function migrateDb() {
   const addCol = (table, col, def) => {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (!cols.length) return;
     if (!cols.some((c) => c.name === col)) {
       db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
     }
   };
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      phone TEXT DEFAULT '',
+      site TEXT DEFAULT '',
+      note TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS client_profiles (
+      client_key TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'new',
+      comment TEXT DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   addCol("materials", "responsible", "TEXT DEFAULT 'general'");
   addCol("project_items", "responsible", "TEXT DEFAULT 'general'");
   addCol("materials", "farm_section_id", "TEXT DEFAULT ''");
@@ -203,6 +224,10 @@ function migrateDb() {
   addCol("project_items", "flow_specs", "TEXT NOT NULL DEFAULT '[]'");
   addCol("materials", "split_specs", "TEXT NOT NULL DEFAULT '[]'");
   addCol("project_items", "split_specs", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("materials", "client_section", "TEXT DEFAULT ''");
+  addCol("materials", "client_subsection", "TEXT DEFAULT ''");
+  addCol("project_items", "client_section", "TEXT DEFAULT ''");
+  addCol("project_items", "client_subsection", "TEXT DEFAULT ''");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS material_price_history (
@@ -231,30 +256,14 @@ function migrateDb() {
       section_id TEXT DEFAULT '',
       sort_order INTEGER NOT NULL DEFAULT 0,
       items_json TEXT NOT NULL DEFAULT '[]',
+      params_json TEXT NOT NULL DEFAULT '{}',
       note TEXT DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
 
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS suppliers (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      phone TEXT DEFAULT '',
-      site TEXT DEFAULT '',
-      note TEXT DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS client_profiles (
-      client_key TEXT PRIMARY KEY,
-      display_name TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'new',
-      comment TEXT DEFAULT '',
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
+  addCol("spec_presets", "params_json", "TEXT NOT NULL DEFAULT '{}'");
 }
 
 export function rowToMaterial(row) {
@@ -269,6 +278,8 @@ export function rowToMaterial(row) {
     modules: resolveMaterialModules(row),
     category: row.category,
     subcategory: row.subcategory,
+    clientSection: row.client_section || "",
+    clientSubsection: row.client_subsection || "",
     farmSectionId: row.farm_section_id || "",
     itemType: row.item_type,
     supplier: row.supplier,
@@ -330,6 +341,8 @@ export function rowToItem(row) {
     name: row.name,
     unit: row.unit,
     category: row.category,
+    clientSection: row.client_section || "",
+    clientSubsection: row.client_subsection || "",
     supplier: row.supplier,
     link: row.link,
     linkAlt: row.link_alt,

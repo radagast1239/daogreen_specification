@@ -1,39 +1,22 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
-import { projectTotals, groupBy, mergedPurchaseList, money, num } from "../../store/helpers.js";
+import { projectTotals, mergedPurchaseList, money } from "../../store/helpers.js";
 import { PURCHASE_STATUSES } from "../../data/modules.js";
-import {
-  clientVisibleItems,
-  itemImageUrl,
-  itemsByResponsible,
-  lineGross,
-  lineVat,
-  splitPurchaseItems,
-} from "../../lib/itemHelpers.js";
-import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
-import { materialSpecLabel } from "../../lib/materialSpecs.js";
-import { Progress, StatusChip, Empty } from "../../components/ui.jsx";
+import { clientVisibleItems, lineGross } from "../../lib/itemHelpers.js";
+import { Progress, Empty } from "../../components/ui.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
-import PhotoGallery from "../../components/PhotoGallery.jsx";
-import ActivityFeed from "../../components/ActivityFeed.jsx";
-import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import { setClientScope } from "../../components/ClientGuard.jsx";
-import { generateProjectPdf } from "../../lib/pdfExport.js";
-import { clientTabDefs, heroEyebrow } from "../../lib/clientBrandConfig.js";
+import { generateClientPurchasePdf } from "../../lib/clientPdfExport.js";
+import { clientTabDefs, heroEyebrow, legacyTabToPurchaseMode } from "../../lib/clientBrandConfig.js";
 import QRCode from "qrcode";
-import { downloadXlsx, printPDF } from "../../lib/export.js";
+import { printPDF } from "../../lib/export.js";
+import { downloadClientWorkbook } from "../../lib/clientExcelExport.js";
 import { ClientSchemesViewer } from "../../components/ClientSchemesEditor.jsx";
-import {
-  compositionGroupLabel,
-  groupItemsByComposition,
-  isStellageModuleTitle,
-  STELLAGE_GROUPS,
-} from "../../../shared/stellageComposition.js";
-
-const QUICK_STATUS_IDS = [
-  "not_bought", "searching", "ordered", "bought", "delivered", "have", "need_help", "not_fit", "replacement_check",
-];
+import ClientOverviewPanel from "../../components/client/ClientOverviewPanel.jsx";
+import ClientPurchasePanel, { ClientMergedList } from "../../components/client/ClientPurchasePanel.jsx";
+import { isBoughtStatus } from "../../components/client/ClientItemCard.jsx";
+import { STELLAGE_GROUPS } from "../../../shared/stellageComposition.js";
 
 function clientPageStyle(branding) {
   const brand = branding.brandColor || "#116355";
@@ -57,8 +40,10 @@ export default function ClientProjectPage() {
   const { state, actions } = useStore();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("overview");
+  const [purchaseMode, setPurchaseMode] = useState("categories");
+  const [purchaseFilter, setPurchaseFilter] = useState("all");
+  const [showBought, setShowBought] = useState(false);
   const purchaseStatuses = data?.purchaseStatuses || PURCHASE_STATUSES;
-  const quickStatuses = purchaseStatuses.filter((s) => s.clientVisible !== false);
   const [supplierFilter, setSupplierFilter] = useState("");
   const [purchaseQuery, setPurchaseQuery] = useState("");
   const [purchaseSort, setPurchaseSort] = useState("category");
@@ -161,18 +146,27 @@ export default function ClientProjectPage() {
     return sorted;
   };
 
-  const installItems = visibleItems.filter((i) => i.itemRole === "installation" || i.category === "Работы и доставка");
   const purchaseItems = visibleItems.filter((i) => i.itemRole !== "installation");
-  const hasCooling = !!(project.manualParams?.coolingFarm && typeof project.manualParams.coolingFarm === "object");
   const hasPurchase = visibleItems.length > 0;
-  const clientTabs = clientTabDefs(branding).filter(([k]) => k !== "cooling" || hasCooling);
+  const clientTabs = clientTabDefs(branding);
   const trustLines = (branding.clientTrustLines || []).filter(Boolean);
   const activeTab = clientTabs.some(([k]) => k === tab) ? tab : clientTabs[0]?.[0] || "overview";
+  const stellageGroups = state.reference?.stellageGroups?.length ? state.reference.stellageGroups : STELLAGE_GROUPS;
+  const delta = versionInfo?.summary?.delta;
 
-  const patchCoolingFactor = async (safetyFactor) => {
-    const res = await actions.clientPatchCooling(token, safetyFactor);
-    const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
-    setData(fresh);
+  const openPurchase = (mode = "categories") => {
+    setPurchaseMode(mode);
+    setTab("purchase");
+  };
+
+  const mapLegacyTab = (nextTab) => {
+    const legacy = ["categories", "modules", "plumber", "electric", "installer", "consumables", "install", "cooling"];
+    if (legacy.includes(nextTab)) {
+      setPurchaseMode(legacyTabToPurchaseMode(nextTab));
+      setTab("purchase");
+      return;
+    }
+    setTab(nextTab);
   };
 
   const patch = async (itemId, p) => {
@@ -181,33 +175,21 @@ export default function ClientProjectPage() {
     setData(fresh);
   };
 
-  const exportRows = (items, name) =>
-    downloadXlsx(
-      `${project.name}_${name}`,
-      items.map((i) => ({
-        Фото: absolutePhotoUrl(i.imageUrl || i.photoUrl),
-        Категория: i.category,
-        Модуль: i.module,
-        Наименование: i.name,
-        Поставщик: i.supplier,
-        Ед: i.unit,
-        Кол: i.qty,
-        Цена: i.price,
-        НДС: i.vatRate || 0,
-        Сумма: Math.round(lineGross(i)),
-        Ссылка: i.link,
-        Статус: purchaseStatuses.find((s) => s.id === i.status)?.label,
-      }))
-    );
-
-  const delta = versionInfo?.summary?.delta;
   const exportPdf = () =>
-    generateProjectPdf({
+    generateClientPurchasePdf({
       project,
       items: visibleItems,
       branding,
       purchaseStatuses,
       pageUrl: typeof window !== "undefined" ? window.location.href : "",
+      mode: "client",
+    });
+
+  const exportExcel = () =>
+    downloadClientWorkbook(project, visibleItems, {
+      purchaseStatuses,
+      branding,
+      versionInfo,
     });
 
   return (
@@ -243,8 +225,9 @@ export default function ClientProjectPage() {
         totals={totals}
         versionInfo={versionInfo}
         delta={delta}
-        onExport={() => exportRows(visibleItems, "закупка")}
+        onExport={exportExcel}
         onPdf={exportPdf}
+        onMerged={() => setTab("merged")}
       />
 
       <div className="client-wrap">
@@ -259,57 +242,51 @@ export default function ClientProjectPage() {
       )}
       <div className="client-tabs no-print">
         {clientTabs.map(([k, label]) => (
-          <button key={k} className={"btn btn-sm" + (activeTab === k ? " btn-primary" : "")} onClick={() => setTab(k)}>
+          <button key={k} className={"btn btn-sm" + (activeTab === k ? " btn-primary" : "")} onClick={() => mapLegacyTab(k)}>
             {label}
           </button>
         ))}
       </div>
 
-      {activeTab !== "docs" && activeTab !== "cooling" && hasPurchase && (
+      {(activeTab === "purchase" || activeTab === "merged") && hasPurchase && (
         <>
-        <div className="client-purchase-toolbar no-print">
-          <input
-            placeholder="Поиск: название или поставщик…"
-            value={purchaseQuery}
-            onChange={(e) => setPurchaseQuery(e.target.value)}
-            style={{ flex: "1 1 180px", maxWidth: 280 }}
-          />
-          <select value={purchaseSort} onChange={(e) => setPurchaseSort(e.target.value)} style={{ width: "auto" }}>
-            <option value="category">По категории</option>
-            <option value="sum">По сумме</option>
-            <option value="status">По статусу</option>
-            <option value="name">По названию</option>
-          </select>
-        </div>
-        <div className="client-supplier-bar no-print">
-          <strong style={{ fontSize: 13 }}>Поставщик:</strong>
-          <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} style={{ width: "auto" }}>
-            <option value="">Все поставщики ({visibleItems.length})</option>
-            {suppliers.map((s) => {
-              const cnt = visibleItems.filter((i) => i.supplier === s).length;
-              return (
-                <option key={s} value={s}>
-                  {s} ({cnt})
-                </option>
-              );
-            })}
-          </select>
-          {supplierFilter && (
-            <span className="muted" style={{ fontSize: 13 }}>
-              Показано {filteredCount} позиций от «{supplierFilter}»
+          <div className="client-purchase-toolbar no-print">
+            <input
+              placeholder="Поиск: название или поставщик…"
+              value={purchaseQuery}
+              onChange={(e) => setPurchaseQuery(e.target.value)}
+              style={{ flex: "1 1 180px", maxWidth: 280 }}
+            />
+            <select value={purchaseSort} onChange={(e) => setPurchaseSort(e.target.value)} style={{ width: "auto" }}>
+              <option value="category">По разделу</option>
+              <option value="sum">По сумме</option>
+              <option value="status">По статусу</option>
+              <option value="name">По названию</option>
+            </select>
+          </div>
+          <div className="client-supplier-bar no-print">
+            <strong style={{ fontSize: 13 }}>Поставщик:</strong>
+            <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} style={{ width: "auto" }}>
+              <option value="">Все поставщики ({visibleItems.length})</option>
+              {suppliers.map((s) => {
+                const cnt = visibleItems.filter((i) => i.supplier === s).length;
+                return (
+                  <option key={s} value={s}>
+                    {s} ({cnt})
+                  </option>
+                );
+              })}
+            </select>
+            {supplierFilter && (
+              <span className="muted" style={{ fontSize: 13 }}>
+                Показано {filteredCount} позиций от «{supplierFilter}»
+              </span>
+            )}
+            <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>
+              Куплено {purchaseItems.filter((i) => isBoughtStatus(i.status)).length} из {purchaseItems.length}
             </span>
-          )}
-        </div>
+          </div>
         </>
-      )}
-
-      {activeTab === "cooling" && hasCooling && (
-        <CoolingFarmTab
-          key={`cool-${project.manualParams?.coolingFarm?.safetyFactor ?? "d"}`}
-          variant="client"
-          project={project}
-          onSafetyFactorChange={patchCoolingFactor}
-        />
       )}
 
       {activeTab === "docs" && (
@@ -317,158 +294,67 @@ export default function ClientProjectPage() {
           project={project}
           documents={documents}
           qrUrl={qrUrl}
-          visibleItems={visibleItems}
-          branding={branding}
-          onExportAll={() => exportRows(visibleItems, "закупка")}
-          onExportMerged={() => {
-            const rows = mergedPurchaseList(project);
-            downloadXlsx(
-              `${project.name}_объединённый`,
-              rows.map((r) => ({
-                Наименование: r.name,
-                Поставщик: r.supplier,
-                Кол: r.qty,
-                Сумма: Math.round(r.sumVat),
-              }))
-            );
-          }}
+          onExportAll={exportExcel}
+          onExportMerged={exportExcel}
           onPdf={exportPdf}
+          onPdfPlumber={() =>
+            generateClientPurchasePdf({
+              project,
+              items: visibleItems,
+              branding,
+              purchaseStatuses,
+              pageUrl: typeof window !== "undefined" ? window.location.href : "",
+              mode: "plumber",
+            })
+          }
         />
       )}
 
-      {!hasPurchase && activeTab !== "cooling" && activeTab !== "docs" ? (
-        <Empty title="Спецификация готовится" hint="Позиции появятся после утверждения. Расчёт охлаждения — во вкладке «Охлаждение»." />
-      ) : activeTab !== "cooling" && activeTab !== "docs" ? (
+      {!hasPurchase && activeTab !== "docs" ? (
+        <Empty title="Спецификация готовится" hint="Позиции появятся после утверждения администратором." />
+      ) : activeTab !== "docs" ? (
         <>
           {activeTab === "overview" && (
-            <OverviewTab
+            <ClientOverviewPanel
               project={project}
               totals={totals}
-              items={filterAndSortPurchase(purchaseItems)}
-              supplierFilter={supplierFilter}
-              qrUrl={qrUrl}
+              items={purchaseItems}
               branding={branding}
               activity={activity}
+              qrUrl={qrUrl}
+              onOpenPurchase={() => openPurchase("categories")}
             />
           )}
-          {activeTab === "install" && (
-            <PurchaseSplitView
-              items={filterAndSortPurchase(installItems)}
-              currency={project.currency}
+          {activeTab === "purchase" && (
+            <ClientPurchasePanel
+              project={project}
+              items={purchaseItems}
+              mode={purchaseMode}
+              onModeChange={setPurchaseMode}
+              filter={purchaseFilter}
+              onFilterChange={setPurchaseFilter}
+              showBought={showBought}
+              onShowBoughtChange={setShowBought}
+              supplierFilter={supplierFilter}
+              purchaseQuery={purchaseQuery}
+              purchaseSort={purchaseSort}
               patch={patch}
               purchaseStatuses={purchaseStatuses}
-              quickStatuses={quickStatuses}
-              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
-              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
-            />
-          )}
-          {activeTab === "categories" && (
-            <PurchaseSplitView
-              items={filterAndSortPurchase(purchaseItems)}
-              currency={project.currency}
-              patch={patch}
-              purchaseStatuses={purchaseStatuses}
-              quickStatuses={quickStatuses}
-              render={(todo) => (
-                <ItemsByGroup groups={groupBy(todo, "category")} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />
-              )}
-              renderBought={(bought) => (
-                <ItemsByGroup groups={groupBy(bought, "category")} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />
-              )}
-            />
-          )}
-          {activeTab === "modules" && (
-            <PurchaseSplitView
-              items={filterAndSortPurchase(purchaseItems)}
-              currency={project.currency}
-              patch={patch}
-              purchaseStatuses={purchaseStatuses}
-              quickStatuses={quickStatuses}
-              render={(todo) => (
-                <ItemsByGroup
-                  groups={groupBy(todo, "module")}
-                  currency={project.currency}
-                  patch={patch}
-                  purchaseStatuses={purchaseStatuses}
-                  quickStatuses={quickStatuses}
-                  materials={state.materials}
-                  modules={state.modules}
-                  stellageGroups={state.reference?.stellageGroups?.length ? state.reference.stellageGroups : STELLAGE_GROUPS}
-                />
-              )}
-              renderBought={(bought) => (
-                <ItemsByGroup
-                  groups={groupBy(bought, "module")}
-                  currency={project.currency}
-                  patch={patch}
-                  bought
-                  purchaseStatuses={purchaseStatuses}
-                  quickStatuses={quickStatuses}
-                  materials={state.materials}
-                  modules={state.modules}
-                  stellageGroups={state.reference?.stellageGroups?.length ? state.reference.stellageGroups : STELLAGE_GROUPS}
-                />
-              )}
+              materials={state.materials}
+              modules={state.modules}
+              stellageGroups={stellageGroups}
             />
           )}
           {activeTab === "merged" && (
-            <PurchaseSplitView
-              items={filterAndSortPurchase(purchaseItems)}
-              currency={project.currency}
-              patch={patch}
-              purchaseStatuses={purchaseStatuses}
-              quickStatuses={quickStatuses}
-              render={(todo) => (
-                <MergedClientTab project={project} items={todo} onExport={() => exportRows(visibleItems, "общий")} />
-              )}
-              renderBought={(bought) => (
-                <ItemsFlat items={bought} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />
-              )}
-            />
-          )}
-          {activeTab === "plumber" && (
-            <PurchaseSplitView
-              items={filterAndSortPurchase(itemsByResponsible(visibleItems, "plumber"))}
-              currency={project.currency}
-              patch={patch}
-              purchaseStatuses={purchaseStatuses}
-              quickStatuses={quickStatuses}
-              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
-              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
-            />
-          )}
-          {activeTab === "electric" && (
-            <PurchaseSplitView
-              items={filterAndSortPurchase(itemsByResponsible(visibleItems, "electrician"))}
-              currency={project.currency}
-              patch={patch}
-              purchaseStatuses={purchaseStatuses}
-              quickStatuses={quickStatuses}
-              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
-              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
-            />
-          )}
-          {activeTab === "installer" && (
-            <PurchaseSplitView
-              items={filterAndSortPurchase(itemsByResponsible(visibleItems, "installer"))}
-              currency={project.currency}
-              patch={patch}
-              purchaseStatuses={purchaseStatuses}
-              quickStatuses={quickStatuses}
-              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
-              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
-            />
-          )}
-          {activeTab === "consumables" && (
-            <PurchaseSplitView
-              items={filterAndSortPurchase(itemsByResponsible(visibleItems, "consumables"))}
-              currency={project.currency}
-              patch={patch}
-              purchaseStatuses={purchaseStatuses}
-              quickStatuses={quickStatuses}
-              render={(todo) => <ItemsFlat items={todo} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
-              renderBought={(bought) => <ItemsFlat items={bought} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />}
-            />
+            <div style={{ marginTop: 8 }}>
+              <div className="toolbar no-print" style={{ marginBottom: 10 }}>
+                <span className="muted">Объединённые позиции: имя + ед. + поставщик + ссылка</span>
+                <button type="button" className="btn btn-sm" style={{ marginLeft: "auto" }} onClick={exportExcel}>
+                  Excel ↓
+                </button>
+              </div>
+              <ClientMergedList project={project} items={filterAndSortPurchase(purchaseItems)} />
+            </div>
           )}
         </>
       ) : null}
@@ -496,12 +382,12 @@ function ClientBrandFooter({ branding }) {
   );
 }
 
-function BudgetBar({ project, branding, totals, versionInfo, delta, onExport, onPdf }) {
+function BudgetBar({ project, branding, totals, versionInfo, delta, onExport, onPdf, onMerged }) {
   const company = branding?.companyName || "Daogreen";
   return (
     <div className="budget-bar" style={{ background: `linear-gradient(135deg, ${branding?.brandColor || "#062920"}, #083028)` }}>
       <div className="eyebrow" style={{ color: "#9ecdb8" }}>
-        {company} · список закупки
+        {company} · закупочный список
       </div>
       <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4 }}>{project.name}</div>
       <div style={{ fontSize: 12.5, color: "#9ecdb8" }}>
@@ -515,42 +401,42 @@ function BudgetBar({ project, branding, totals, versionInfo, delta, onExport, on
           {money(delta, project.currency)}
         </div>
       )}
-      <div style={{ marginTop: 12 }}>
-        <Progress value={totals.progress} />
-      </div>
-      <p className="muted" style={{ fontSize: 12, margin: "8px 0 0" }}>
-        Закуплено {totals.progress}% · потрачено {money(totals.spent, project.currency)} из {money(totals.budget, project.currency)} · осталось {money(totals.remaining, project.currency)}
-      </p>
-      <div className="nums" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+      <div className="nums client-stat-grid--4" style={{ marginTop: 12 }}>
         <div>
-          <div className="k">Итого</div>
+          <div className="k">Всего</div>
           <div className="v num">{money(totals.budget, project.currency)}</div>
         </div>
         <div>
-          <div className="k">Потрачено</div>
+          <div className="k">Куплено</div>
           <div className="v num">{money(totals.spent, project.currency)}</div>
         </div>
         <div>
           <div className="k">Осталось</div>
           <div className="v num">{money(totals.remaining, project.currency)}</div>
         </div>
-      </div>
-      {(totals.overrun > 0 || totals.economy > 0) && (
-        <div className="row" style={{ marginTop: 10, gap: 12, fontSize: 12.5 }}>
-          {totals.overrun > 0 && <span style={{ color: "#f5a623" }}>Перерасход: {money(totals.overrun, project.currency)}</span>}
-          {totals.economy > 0 && <span style={{ color: "#9ecdb8" }}>Экономия: {money(totals.economy, project.currency)}</span>}
+        <div>
+          <div className="k">Готовность</div>
+          <div className="v num">{totals.progress}%</div>
         </div>
-      )}
-      <div className="row" style={{ marginTop: 12, gap: 8 }}>
-        <button className="btn btn-sm" onClick={onExport}>
-          Excel ↓
+      </div>
+      <div style={{ marginTop: 10 }}>
+        <Progress value={totals.progress} />
+      </div>
+      <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap" }}>
+        <button type="button" className="btn btn-sm" onClick={onExport}>
+          Скачать Excel
         </button>
         {onPdf && (
-          <button className="btn btn-sm" onClick={onPdf}>
-            PDF ↓
+          <button type="button" className="btn btn-sm" onClick={onPdf}>
+            Скачать PDF
           </button>
         )}
-        <button className="btn btn-sm" onClick={printPDF}>
+        {onMerged && (
+          <button type="button" className="btn btn-sm" onClick={onMerged}>
+            Общий список
+          </button>
+        )}
+        <button type="button" className="btn btn-sm" onClick={printPDF}>
           Печать
         </button>
       </div>
@@ -558,225 +444,31 @@ function BudgetBar({ project, branding, totals, versionInfo, delta, onExport, on
   );
 }
 
-function PurchaseSplitView({ items, render, renderBought }) {
-  const { todo, bought } = splitPurchaseItems(items);
-  if (!todo.length && !bought.length) {
-    return <Empty title="Нет позиций в этом списке" />;
-  }
-  return (
-    <div style={{ marginTop: 8 }}>
-      {todo.length > 0 ? (
-        <>
-          <h3 className="purchase-section-title">К закупке · {todo.length}</h3>
-          {render(todo)}
-        </>
-      ) : (
-        <p className="muted" style={{ fontSize: 14, margin: "16px 0" }}>Всё из этого списка уже куплено.</p>
-      )}
-      {bought.length > 0 && (
-        <div className="purchase-bought-block">
-          <h3 className="purchase-section-title purchase-section-title--done">Куплено · {bought.length}</h3>
-          {renderBought(bought)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function OverviewTab({ project, totals, items, supplierFilter, qrUrl, branding, activity }) {
-  const byCat = groupBy(items, "category");
-  return (
-    <div style={{ marginTop: 16 }}>
-      {supplierFilter && (
-        <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-          Фильтр: только поставщик «{supplierFilter}»
-        </p>
-      )}
-      <div className="stat-grid">
-        <div className="card stat">
-          <div className="k">Позиций</div>
-          <div className="v num">{totals.total}</div>
-        </div>
-        <div className="card stat">
-          <div className="k">Закуплено</div>
-          <div className="v num">{totals.progress}%</div>
-        </div>
-        <div className="card stat">
-          <div className="k">Потрачено</div>
-          <div className="v num">{money(totals.spent, project.currency)}</div>
-        </div>
-        <div className="card stat">
-          <div className="k">Осталось</div>
-          <div className="v num">{money(totals.remaining, project.currency)}</div>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 20 }}>
-        <ActivityFeed activity={activity} title="Что менялось (вы и Daogreen)" />
-      </div>
-
-      {qrUrl && (
-        <div className="card" style={{ padding: 16, marginTop: 16, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-          <img src={qrUrl} alt="QR ссылка проекта" width={120} height={120} />
-          <div>
-            <strong>QR-код проекта</strong>
-            <p className="muted" style={{ fontSize: 13, margin: "6px 0 0" }}>
-              Отсканируйте, чтобы открыть список закупки на телефоне.
-            </p>
-          </div>
-        </div>
-      )}
-      <h3 style={{ marginTop: 20 }}>По категориям</h3>
-      {byCat.map(([cat, list]) => {
-        const sum = list.reduce((s, i) => s + lineGross(i), 0);
-        const done = list.filter((i) => ["bought", "delivered", "have"].includes(i.status)).length;
-        return (
-          <div key={cat} className="between panel" style={{ padding: 12, marginBottom: 8 }}>
-            <span>{cat}</span>
-            <span className="muted" style={{ fontSize: 13 }}>
-              {done}/{list.length} · <span className="num">{money(sum, project.currency)}</span>
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function ItemsByGroup({
-  groups,
-  currency,
-  patch,
-  bought = false,
-  purchaseStatuses,
-  quickStatuses,
-  materials = [],
-  modules = [],
-  stellageGroups = STELLAGE_GROUPS,
-}) {
-  return (
-    <>
-      {groups.map(([title, items]) => {
-        const sum = items.reduce((s, i) => s + lineGross(i), 0);
-        const stellageModule = isStellageModuleTitle(title, modules);
-        const compositionGroups = stellageModule
-          ? groupItemsByComposition(items, materials, stellageGroups)
-          : null;
-        return (
-          <section key={title}>
-            <div className="section-head">
-              <div className="spine" />
-              <h3>{title}</h3>
-              <span className="count num" style={{ marginLeft: "auto" }}>
-                {money(sum, currency)}
-              </span>
-            </div>
-            {compositionGroups
-              ? compositionGroups.map(([gId, gItems]) => (
-                  <React.Fragment key={gId}>
-                    {gId !== "other" && (
-                      <div className="stellage-group-head stellage-group-head--block">
-                        {compositionGroupLabel(gId, stellageGroups)}
-                      </div>
-                    )}
-                    {gItems.map((it) => (
-                      <ItemCard
-                        key={it.id}
-                        it={it}
-                        currency={currency}
-                        patch={patch}
-                        bought={bought}
-                        purchaseStatuses={purchaseStatuses}
-                        quickStatuses={quickStatuses}
-                      />
-                    ))}
-                  </React.Fragment>
-                ))
-              : items.map((it) => (
-                  <ItemCard
-                    key={it.id}
-                    it={it}
-                    currency={currency}
-                    patch={patch}
-                    bought={bought}
-                    purchaseStatuses={purchaseStatuses}
-                    quickStatuses={quickStatuses}
-                  />
-                ))}
-          </section>
-        );
-      })}
-    </>
-  );
-}
-
-function ItemsFlat({ items, currency, patch, bought = false, purchaseStatuses, quickStatuses }) {
-  if (!items.length) return null;
-  return items.map((it) => (
-    <ItemCard
-      key={it.id}
-      it={it}
-      currency={currency}
-      patch={patch}
-      bought={bought}
-      purchaseStatuses={purchaseStatuses}
-      quickStatuses={quickStatuses}
-    />
-  ));
-}
-
-function MergedClientTab({ project, items, onExport }) {
-  const rows = mergedPurchaseList({ ...project, items });
-  return (
-    <div style={{ marginTop: 16 }}>
-      <div className="toolbar">
-        <span className="muted">{rows.length} уникальных позиций</span>
-        <button className="btn btn-sm" style={{ marginLeft: "auto" }} onClick={onExport}>
-          Excel ↓
-        </button>
-      </div>
-      {rows.map((r, i) => (
-        <div key={i} className="card card-item">
-          {r.imageUrl ? (
-            <img src={absolutePhotoUrl(r.imageUrl)} alt="" className="thumb-img" />
-          ) : (
-            <div className="thumb" style={{ fontSize: 28 }}>{(r.name || "?").charAt(0)}</div>
-          )}
-          <div style={{ minWidth: 0 }}>
-          <strong>{r.name}</strong>
-          <div className="muted" style={{ fontSize: 12.5 }}>
-            <span className="num">{num(r.qty)}</span> {r.unit}
-            {r.supplier ? ` · ${r.supplier}` : ""} ·{" "}
-            <span className="num">{money(r.sumVat, project.currency)}</span>
-          </div>
-          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-            {r.sources.map((s) => `${s.module} (${num(s.qty)})`).join(" · ")}
-          </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function DocsTab({ documents, qrUrl, onExportAll, onExportMerged, onPdf }) {
+function DocsTab({ documents, qrUrl, onExportAll, onExportMerged, onPdf, onPdfPlumber }) {
   return (
     <div className="card" style={{ padding: 22, marginTop: 16 }}>
       <h3>Документы</h3>
-      <p className="muted" style={{ fontSize: 13 }}>Скачай списки и приложенные файлы.</p>
+      <p className="muted" style={{ fontSize: 13 }}>
+        Книга закупки в Excel (несколько листов), PDF по разделам, списки для специалистов.
+      </p>
       <div className="row wrap" style={{ gap: 8, marginTop: 14 }}>
-        <button className="btn" onClick={onExportAll}>
-          Excel — полный список
+        <button type="button" className="btn" onClick={onExportAll}>
+          Excel — книга закупки
         </button>
-        <button className="btn" onClick={onExportMerged}>
-          Excel — объединённый
+        <button type="button" className="btn" onClick={onExportMerged}>
+          Excel — повтор
         </button>
         {onPdf && (
-          <button className="btn" onClick={onPdf}>
-            PDF — таблица закупки
+          <button type="button" className="btn" onClick={onPdf}>
+            PDF — полный
           </button>
         )}
-        <button className="btn" onClick={printPDF}>
+        {onPdfPlumber && (
+          <button type="button" className="btn" onClick={onPdfPlumber}>
+            PDF — сантехник
+          </button>
+        )}
+        <button type="button" className="btn" onClick={printPDF}>
           Печать
         </button>
       </div>
@@ -797,99 +489,6 @@ function DocsTab({ documents, qrUrl, onExportAll, onExportMerged, onPdf }) {
           <img src={qrUrl} alt="QR" width={140} />
         </div>
       )}
-    </div>
-  );
-}
-
-function ItemCard({ it, currency, patch, bought = false, purchaseStatuses, quickStatuses }) {
-  const statuses = purchaseStatuses || PURCHASE_STATUSES;
-  const quick = quickStatuses || statuses.filter((s) => s.clientVisible !== false);
-  const img = itemImageUrl(it);
-  const gross = lineGross(it);
-  const vat = lineVat(it);
-  const markBought = () => patch(it.id, { status: "bought" });
-  const markTodo = () => patch(it.id, { status: "not_bought" });
-
-  return (
-    <div className={"card card-item" + (bought ? " card-item--bought" : "")}>
-      {img ? (
-        <PhotoGallery src={img} alt={it.name} />
-      ) : (
-        <div className="thumb">{(it.name || "?").trim().charAt(0).toUpperCase()}</div>
-      )}
-      <div style={{ minWidth: 0 }}>
-        <div className="between">
-          <strong style={{ fontSize: 14 }}>{it.name}</strong>
-          {bought ? (
-            <span className="chip chip--ok chip-dot" style={{ fontSize: 11 }}>Куплено</span>
-          ) : it.status === "need_help" ? (
-            <StatusChip status={it.status} statuses={statuses} />
-          ) : null}
-        </div>
-        {materialSpecLabel(it) && (
-          <div style={{ fontSize: 12, marginTop: 2, color: "var(--brand)" }}>{materialSpecLabel(it)}</div>
-        )}
-        <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-          <span className="num">{num(it.qty)}</span> {it.unit} ·{" "}
-          <span className="num">{money(it.price, currency)}</span>/ед
-          {(it.vatRate || 0) > 0 && <span> · НДС {it.vatRate}%</span>}
-          {" · "}
-          <b className="num">{money(gross, currency)}</b>
-          {vat > 0 && <span className="muted"> (в т.ч. НДС {money(vat, currency)})</span>}
-        </div>
-        {it.supplier && (
-          <div style={{ fontSize: 12.5, marginTop: 4 }}>
-            <b>Поставщик:</b> {it.supplier}
-          </div>
-        )}
-        {it.clientNote && (
-          <div className="client-admin-note" style={{ fontSize: 12.5, marginTop: 6 }}>
-            <b>Daogreen:</b> {it.clientNote}
-          </div>
-        )}
-        {it.link && (
-          <a href={it.link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, display: "inline-block", marginTop: 4 }}>
-            Ссылка на товар ↗
-          </a>
-        )}
-
-        {!bought ? (
-          <div className="row no-print wrap" style={{ marginTop: 12, gap: 6 }}>
-            {quick.filter((s) => QUICK_STATUS_IDS.includes(s.id)).map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                className={"btn btn-sm" + (it.status === s.id ? " btn-primary" : "")}
-                onClick={() => patch(it.id, { status: s.id })}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <button type="button" className="btn btn-sm btn-ghost no-print" style={{ marginTop: 10 }} onClick={markTodo}>
-            Вернуть в список
-          </button>
-        )}
-
-        {!bought && (
-        <div className="row no-print" style={{ marginTop: 10, gap: 8, flexWrap: "wrap" }}>
-          <div className="field" style={{ flex: "0 0 150px" }}>
-            <label>Факт. цена</label>
-            <input
-              type="number"
-              value={it.actualPrice ?? ""}
-              placeholder={String(it.price)}
-              onChange={(e) => patch(it.id, { actualPrice: e.target.value === "" ? null : Number(e.target.value) })}
-            />
-          </div>
-          <div className="field" style={{ flex: 1, minWidth: 160 }}>
-            <label>Комментарий</label>
-            <input value={it.clientComment || ""} onChange={(e) => patch(it.id, { clientComment: e.target.value })} />
-          </div>
-        </div>
-        )}
-      </div>
     </div>
   );
 }

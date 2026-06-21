@@ -1,18 +1,64 @@
 export const CLIENT_TAB_OPTIONS = [
   { id: "overview", label: "Обзор" },
-  { id: "cooling", label: "Охлаждение" },
+  { id: "purchase", label: "Закупка" },
+  { id: "merged", label: "Общий список" },
+  { id: "docs", label: "Документы" },
+  // legacy — для настроек бренда и миграции старых ссылок
+  { id: "cooling", label: "Охлаждение", legacy: true },
+  { id: "categories", label: "По категориям", legacy: true },
+  { id: "modules", label: "По стеллажам", legacy: true },
+  { id: "install", label: "Монтаж", legacy: true },
+  { id: "plumber", label: "Сантехник", legacy: true },
+  { id: "electric", label: "Электрик", legacy: true },
+  { id: "installer", label: "Монтажник", legacy: true },
+  { id: "consumables", label: "Расходники", legacy: true },
+];
+
+export const DEFAULT_VISIBLE_TAB_IDS = ["overview", "purchase", "merged", "docs"];
+
+/** Режимы внутри вкладки «Закупка» */
+export const PURCHASE_MODES = [
   { id: "categories", label: "По категориям" },
   { id: "modules", label: "По стеллажам" },
-  { id: "merged", label: "Общий список" },
-  { id: "install", label: "Монтаж" },
+  { id: "suppliers", label: "По поставщикам" },
   { id: "plumber", label: "Сантехник" },
   { id: "electric", label: "Электрик" },
   { id: "installer", label: "Монтажник" },
   { id: "consumables", label: "Расходники" },
-  { id: "docs", label: "Документы" },
+  { id: "install", label: "Монтаж" },
 ];
 
-export const DEFAULT_VISIBLE_TAB_IDS = CLIENT_TAB_OPTIONS.map((t) => t.id);
+const LEGACY_PURCHASE_TABS = new Set([
+  "categories",
+  "modules",
+  "plumber",
+  "electric",
+  "installer",
+  "consumables",
+  "install",
+  "cooling",
+]);
+
+const ALL_TAB_IDS = new Set(CLIENT_TAB_OPTIONS.map((t) => t.id));
+
+/** Нормализация старых настроек вкладок → 4 основные */
+export function normalizeVisibleTabIds(raw) {
+  const out = new Set();
+  for (const id of raw || []) {
+    if (!ALL_TAB_IDS.has(id)) continue;
+    if (LEGACY_PURCHASE_TABS.has(id)) out.add("purchase");
+    else out.add(id);
+  }
+  if (!out.size) return [...DEFAULT_VISIBLE_TAB_IDS];
+  return DEFAULT_VISIBLE_TAB_IDS.filter((id) => out.has(id));
+}
+
+/** Старую вкладку → режим закупки */
+export function legacyTabToPurchaseMode(tabId) {
+  if (tabId === "modules") return "modules";
+  if (LEGACY_PURCHASE_TABS.has(tabId) && tabId !== "cooling") return tabId;
+  return "categories";
+}
 
 export const PDF_COLUMN_OPTIONS = [
   { id: "name", label: "Наименование", required: true },
@@ -22,6 +68,7 @@ export const PDF_COLUMN_OPTIONS = [
   { id: "sum", label: "Сумма" },
   { id: "supplier", label: "Поставщик" },
   { id: "category", label: "Категория" },
+  { id: "clientSection", label: "Раздел закупки" },
   { id: "module", label: "Модуль" },
   { id: "link", label: "Ссылка" },
   { id: "status", label: "Статус" },
@@ -45,10 +92,7 @@ function parseJson(raw, fallback) {
 
 export function resolveVisibleTabs(settings = {}) {
   const list = parseJson(settings.clientVisibleTabs, null);
-  if (Array.isArray(list) && list.length) {
-    const allowed = new Set(DEFAULT_VISIBLE_TAB_IDS);
-    return list.filter((id) => allowed.has(id));
-  }
+  if (Array.isArray(list) && list.length) return normalizeVisibleTabIds(list);
   return [...DEFAULT_VISIBLE_TAB_IDS];
 }
 
@@ -104,7 +148,9 @@ export function clientBrandToSettings(brand) {
     clientTrustLines: JSON.stringify(
       (brand.clientTrustLines || DEFAULT_TRUST_LINES).map((s) => String(s).trim()).filter(Boolean)
     ),
-    clientVisibleTabs: JSON.stringify(brand.clientVisibleTabs || DEFAULT_VISIBLE_TAB_IDS),
+    clientVisibleTabs: JSON.stringify(
+      normalizeVisibleTabIds(brand.clientVisibleTabs || DEFAULT_VISIBLE_TAB_IDS)
+    ),
     clientPdfColumns: JSON.stringify(brand.pdfColumns || DEFAULT_PDF_COLUMN_IDS),
     clientPdfFooter: brand.pdfFooter || "",
     clientPdfShowQr: brand.pdfShowQr === false ? "false" : "true",
@@ -112,13 +158,13 @@ export function clientBrandToSettings(brand) {
 }
 
 export function clientTabDefs(brand) {
-  const visible = new Set(brand?.clientVisibleTabs || DEFAULT_VISIBLE_TAB_IDS);
-  return CLIENT_TAB_OPTIONS.filter((t) => visible.has(t.id)).map((t) => [t.id, t.label]);
+  const visible = new Set(normalizeVisibleTabIds(brand?.clientVisibleTabs || DEFAULT_VISIBLE_TAB_IDS));
+  return CLIENT_TAB_OPTIONS.filter((t) => !t.legacy && visible.has(t.id)).map((t) => [t.id, t.label]);
 }
 
 export function heroEyebrow(brand) {
   const company = brand?.companyName || "Daogreen";
   const tpl = brand?.clientHeroEyebrow?.trim();
   if (tpl) return tpl.replace(/\{company\}/gi, company);
-  return `${company} · вертикальные фермы`;
+  return `${company} · закупочный список`;
 }

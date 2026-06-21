@@ -31,13 +31,13 @@ const INSERT_MAT = db.prepare(`
     supplier, link, link_alt, photo_url, vat_rate, vat_included,
     client_note, tech_note, internal_note, status,
     needs_approval, is_consumable, is_spare_part, client_visible_default, responsible,
-    cooling_kw, cooling_btu, exhaust_m3, tags, alternative_material_id, min_order_qty, order_step, default_item_role, pipe_cuts, breaker_specs, flow_specs, split_specs, modules_json, updated_at
+    cooling_kw, cooling_btu, exhaust_m3, tags, alternative_material_id, min_order_qty, order_step, default_item_role, pipe_cuts, breaker_specs, flow_specs, split_specs, modules_json, client_section, client_subsection, updated_at
   ) VALUES (
     @id, @name, @unit, @base_price, @default_qty, @module, @category, @subcategory, @farm_section_id, @item_type,
     @supplier, @link, @link_alt, @photo_url, @vat_rate, @vat_included,
     @client_note, @tech_note, @internal_note, @status,
     @needs_approval, @is_consumable, @is_spare_part, @client_visible_default, @responsible,
-    @cooling_kw, @cooling_btu, @exhaust_m3, @tags, @alternative_material_id, @min_order_qty, @order_step, @default_item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs, @modules_json, datetime('now')
+    @cooling_kw, @cooling_btu, @exhaust_m3, @tags, @alternative_material_id, @min_order_qty, @order_step, @default_item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs, @modules_json, @client_section, @client_subsection, datetime('now')
   )
 `);
 
@@ -58,6 +58,8 @@ const UPDATE_MAT = db.prepare(`
     flow_specs=@flow_specs,
     split_specs=@split_specs,
     modules_json=@modules_json,
+    client_section=@client_section,
+    client_subsection=@client_subsection,
     updated_at=datetime('now')
   WHERE id=@id
 `);
@@ -119,6 +121,8 @@ function matToParams(m, id) {
     flow_specs: JSON.stringify(flowSpecs),
     split_specs: JSON.stringify(splitSpecs),
     modules_json: JSON.stringify(modules),
+    client_section: m.clientSection || "",
+    client_subsection: m.clientSubsection || "",
   };
 }
 

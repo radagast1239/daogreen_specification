@@ -70,13 +70,13 @@ const INSERT_ITEM = db.prepare(`
     supplier, link, link_alt, photo_url, client_note, tech_note,
     qty, price, vat_rate, visible, approved, enabled, needs_approval,
     status, actual_price, client_comment, sort_order, responsible,
-    cooling_kw, cooling_btu, exhaust_m3, room_id, internal_note, delivery_days, item_role, pipe_cuts, breaker_specs, flow_specs, split_specs
+    cooling_kw, cooling_btu, exhaust_m3, room_id, internal_note, delivery_days, item_role, pipe_cuts, breaker_specs, flow_specs, split_specs, client_section, client_subsection
   ) VALUES (
     @id, @project_id, @material_id, @module, @section, @name, @unit, @category,
     @supplier, @link, @link_alt, @photo_url, @client_note, @tech_note,
     @qty, @price, @vat_rate, @visible, @approved, @enabled, @needs_approval,
     @status, @actual_price, @client_comment, @sort_order, @responsible,
-    @cooling_kw, @cooling_btu, @exhaust_m3, @room_id, @internal_note, @delivery_days, @item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs
+    @cooling_kw, @cooling_btu, @exhaust_m3, @room_id, @internal_note, @delivery_days, @item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs, @client_section, @client_subsection
   )
 `);
 
@@ -90,7 +90,8 @@ const UPDATE_ITEM = db.prepare(`
     status=@status, actual_price=@actual_price, client_comment=@client_comment,
     responsible=@responsible, cooling_kw=@cooling_kw, cooling_btu=@cooling_btu, exhaust_m3=@exhaust_m3,
     room_id=@room_id, internal_note=@internal_note, delivery_days=@delivery_days, item_role=@item_role,
-    pipe_cuts=@pipe_cuts, breaker_specs=@breaker_specs, flow_specs=@flow_specs, split_specs=@split_specs
+    pipe_cuts=@pipe_cuts, breaker_specs=@breaker_specs, flow_specs=@flow_specs, split_specs=@split_specs,
+    client_section=@client_section, client_subsection=@client_subsection
   WHERE id=@id AND project_id=@project_id
 `);
 
@@ -149,6 +150,8 @@ function itemToParams(it, projectId) {
     breaker_specs: JSON.stringify(breakerSpecs),
     flow_specs: JSON.stringify(flowSpecs),
     split_specs: JSON.stringify(splitSpecs),
+    client_section: it.clientSection || "",
+    client_subsection: it.clientSubsection || "",
   };
 }
 

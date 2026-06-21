@@ -48,6 +48,8 @@ function cellValue(col, it, project, purchaseStatuses) {
       return it.supplier || "—";
     case "category":
       return it.category || "—";
+    case "clientSection":
+      return it.clientSection || it.category || "—";
     case "module":
       return it.module || "—";
     case "link":

@@ -35,6 +35,8 @@ function itemFromMaterial(mat, mod, qty, order) {
     name: mat.name,
     unit: mat.unit,
     category: mat.category,
+    clientSection: mat.clientSection || "",
+    clientSubsection: mat.clientSubsection || "",
     supplier: mat.supplier || "",
     link: mat.link || "",
     linkAlt: mat.linkAlt || "",

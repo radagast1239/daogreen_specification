@@ -1,5 +1,7 @@
 /** Правила публикации / отправки клиенту — общая логика front + back */
 
+import { isMiscCategory } from "./clientSections.js";
+
 export const PUBLISH_RULE_OPTIONS = [
   { id: "requirePrice", label: "Цена указана (> 0)" },
   { id: "requirePhoto", label: "Есть фото" },
@@ -7,6 +9,7 @@ export const PUBLISH_RULE_OPTIONS = [
   { id: "requireSupplier", label: "Указан поставщик" },
   { id: "requireQtyPositive", label: "Количество > 0" },
   { id: "requireApproved", label: "Галочка «Утверждено»" },
+  { id: "blockMiscCategory", label: "Не «Прочее» — указана клиентская категория" },
 ];
 
 export const ISSUE_LABELS = {
@@ -16,6 +19,7 @@ export const ISSUE_LABELS = {
   no_supplier: "Нет поставщика",
   no_qty: "Количество = 0",
   not_approved: "Не утверждено",
+  misc_category: "Категория «Прочее» — укажите клиентский раздел",
   min_client_items: "Мало позиций для клиента",
 };
 
@@ -35,6 +39,7 @@ export const DEFAULT_PUBLISH_RULES = {
   requireSupplier: false,
   requireQtyPositive: true,
   requireApproved: true,
+  blockMiscCategory: true,
   requireMinClientItems: true,
   minClientItems: 1,
   allowForcePublish: true,
@@ -71,6 +76,7 @@ export function publishRulesToSettings({ rules, clientLinkTemplate }) {
       requireSupplier: !!r.requireSupplier,
       requireQtyPositive: !!r.requireQtyPositive,
       requireApproved: !!r.requireApproved,
+      blockMiscCategory: r.blockMiscCategory !== false,
       requireMinClientItems: !!r.requireMinClientItems,
       minClientItems: Math.max(0, Number(r.minClientItems) || 0),
       allowForcePublish: r.allowForcePublish !== false,
@@ -115,6 +121,9 @@ function checkItem(it, rules) {
   }
   if (rules.requireApproved && !it.approved) {
     problems.push("not_approved");
+  }
+  if (rules.blockMiscCategory !== false && isMiscCategory(it)) {
+    problems.push("misc_category");
   }
   return problems;
 }
