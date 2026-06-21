@@ -6,6 +6,8 @@ import { projectStellageLinesFromCatalog, stellageModulePhoto, resolveStellagePh
 import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
 import { resolvePipeCuts, normalizePipeCuts } from "../../shared/profilePipeCuts.js";
 import { resolveBreakerSpecs, normalizeBreakerSpecs } from "../../shared/breakerSpecs.js";
+import { resolveFlowSpecs, normalizeFlowSpecs } from "../../shared/flowSpecs.js";
+import { resolveSplitSpecs, normalizeSplitSpecs } from "../../shared/splitSpecs.js";
 import { patchMaterialModules, normalizeMaterialModules, primaryMaterialModule, materialInModule } from "../../shared/materialModules.js";
 
 export function blankLine(overrides = {}) {
@@ -28,6 +30,8 @@ export function blankLine(overrides = {}) {
     clientNote: "",
     pipeCuts: [],
     breakerSpecs: [],
+    flowSpecs: [],
+    splitSpecs: [],
     coolingKw: 0,
     coolingBtu: 0,
     exhaustM3: 0,
@@ -55,6 +59,8 @@ export function lineToMaterialPayload(line, moduleName, farmSectionId = "") {
     clientNote: line.clientNote || "",
     pipeCuts: normalizePipeCuts(line.pipeCuts ?? resolvePipeCuts(line)),
     breakerSpecs: normalizeBreakerSpecs(line.breakerSpecs ?? resolveBreakerSpecs(line)),
+    flowSpecs: normalizeFlowSpecs(line.flowSpecs ?? resolveFlowSpecs(line)),
+    splitSpecs: normalizeSplitSpecs(line.splitSpecs ?? resolveSplitSpecs(line)),
     supplier: line.supplier || "",
     coolingKw: Number(line.coolingKw) || 0,
     coolingBtu: Number(line.coolingBtu) || 0,
@@ -84,6 +90,8 @@ export function syncLineFromMaterial(line, mat) {
     exhaustM3: Number(mat.exhaustM3) || 0,
     pipeCuts: resolvePipeCuts(mat),
     breakerSpecs: resolveBreakerSpecs(mat),
+    flowSpecs: resolveFlowSpecs(mat),
+    splitSpecs: resolveSplitSpecs(mat),
     clientNote: mat.clientNote || mat.comment || "",
   };
 }
@@ -132,6 +140,8 @@ export function lineFromMaterial(mat, overrides = {}) {
     clientNote: mat.clientNote || mat.comment || "",
     pipeCuts: resolvePipeCuts(mat),
     breakerSpecs: resolveBreakerSpecs(mat),
+    flowSpecs: resolveFlowSpecs(mat),
+    splitSpecs: resolveSplitSpecs(mat),
     coolingKw: Number(mat.coolingKw) || 0,
     coolingBtu: Number(mat.coolingBtu) || 0,
     exhaustM3: Number(mat.exhaustM3) || 0,
@@ -168,6 +178,8 @@ export function lineToProjectItem(line, section, sortOrder) {
     comment: line.clientNote || line.techNote || "",
     pipeCuts: normalizePipeCuts(line.pipeCuts ?? resolvePipeCuts(line)),
     breakerSpecs: normalizeBreakerSpecs(line.breakerSpecs ?? resolveBreakerSpecs(line)),
+    flowSpecs: normalizeFlowSpecs(line.flowSpecs ?? resolveFlowSpecs(line)),
+    splitSpecs: normalizeSplitSpecs(line.splitSpecs ?? resolveSplitSpecs(line)),
     qty,
     price: Number(line.price) || 0,
     vatRate: Number(line.vatRate) || 0,

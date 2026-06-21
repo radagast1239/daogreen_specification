@@ -23,10 +23,7 @@ import { api } from "../../lib/api.js";
 import { downloadXlsx } from "../../lib/export.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
-import ProfilePipeCutsEditor from "../../components/ProfilePipeCutsEditor.jsx";
-import BreakerSpecsEditor from "../../components/BreakerSpecsEditor.jsx";
-import { isProfilePipeName } from "../../../shared/profilePipeCuts.js";
-import { isBreakerName } from "../../../shared/breakerSpecs.js";
+import StructuredSpecEditor from "../../components/StructuredSpecEditor.jsx";
 import { hasStructuredSpecEditor } from "../../lib/materialDisplay.js";
 import FloorPlanField from "../../components/FloorPlanField.jsx";
 import FloorPlanPin from "../../components/FloorPlanPin.jsx";
@@ -640,18 +637,11 @@ function SpecTab({
                       {it.comment && !hasStructuredSpecEditor(it.name) && (
                         <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{it.comment}</div>
                       )}
-                      {isProfilePipeName(it.name) ? (
-                        <ProfilePipeCutsEditor
+                      {hasStructuredSpecEditor(it.name) ? (
+                        <StructuredSpecEditor
                           compact
                           name={it.name}
-                          value={it.pipeCuts}
-                          onChange={(patch) => patchItem(it.id, patch)}
-                        />
-                      ) : isBreakerName(it.name) ? (
-                        <BreakerSpecsEditor
-                          compact
-                          name={it.name}
-                          value={it.breakerSpecs}
+                          values={it}
                           onChange={(patch) => patchItem(it.id, patch)}
                         />
                       ) : (

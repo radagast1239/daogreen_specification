@@ -3,6 +3,19 @@ import { uid } from "../services/buildItems.js";
 import { logPriceChange } from "../services/priceHistory.js";
 import { normalizePipeCuts, resolvePipeCuts } from "../../../shared/profilePipeCuts.js";
 import { normalizeBreakerSpecs, resolveBreakerSpecs } from "../../../shared/breakerSpecs.js";
+import {
+  normalizeFlowSpecs,
+  resolveFlowSpecs,
+  aggregateFlowM3,
+  primaryFlowLink,
+  isFlowSpecName,
+} from "../../../shared/flowSpecs.js";
+import {
+  normalizeSplitSpecs,
+  resolveSplitSpecs,
+  aggregateSplitCoolingKw,
+  isSplitSystemName,
+} from "../../../shared/splitSpecs.js";
 import { structuredClientNote } from "../../../shared/structuredClientNote.js";
 import {
   normalizeMaterialModules,
@@ -18,13 +31,13 @@ const INSERT_MAT = db.prepare(`
     supplier, link, link_alt, photo_url, vat_rate, vat_included,
     client_note, tech_note, internal_note, status,
     needs_approval, is_consumable, is_spare_part, client_visible_default, responsible,
-    cooling_kw, cooling_btu, exhaust_m3, tags, alternative_material_id, min_order_qty, order_step, default_item_role, pipe_cuts, breaker_specs, modules_json, updated_at
+    cooling_kw, cooling_btu, exhaust_m3, tags, alternative_material_id, min_order_qty, order_step, default_item_role, pipe_cuts, breaker_specs, flow_specs, split_specs, modules_json, updated_at
   ) VALUES (
     @id, @name, @unit, @base_price, @default_qty, @module, @category, @subcategory, @farm_section_id, @item_type,
     @supplier, @link, @link_alt, @photo_url, @vat_rate, @vat_included,
     @client_note, @tech_note, @internal_note, @status,
     @needs_approval, @is_consumable, @is_spare_part, @client_visible_default, @responsible,
-    @cooling_kw, @cooling_btu, @exhaust_m3, @tags, @alternative_material_id, @min_order_qty, @order_step, @default_item_role, @pipe_cuts, @breaker_specs, @modules_json, datetime('now')
+    @cooling_kw, @cooling_btu, @exhaust_m3, @tags, @alternative_material_id, @min_order_qty, @order_step, @default_item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs, @modules_json, datetime('now')
   )
 `);
 
@@ -42,6 +55,8 @@ const UPDATE_MAT = db.prepare(`
     order_step=@order_step, default_item_role=@default_item_role,
     pipe_cuts=@pipe_cuts,
     breaker_specs=@breaker_specs,
+    flow_specs=@flow_specs,
+    split_specs=@split_specs,
     modules_json=@modules_json,
     updated_at=datetime('now')
   WHERE id=@id
@@ -50,8 +65,21 @@ const UPDATE_MAT = db.prepare(`
 function matToParams(m, id) {
   const cuts = normalizePipeCuts(m.pipeCuts ?? resolvePipeCuts(m));
   const breakerSpecs = normalizeBreakerSpecs(m.breakerSpecs ?? resolveBreakerSpecs(m));
+  const flowSpecs = normalizeFlowSpecs(m.flowSpecs ?? resolveFlowSpecs(m));
+  const splitSpecs = normalizeSplitSpecs(m.splitSpecs ?? resolveSplitSpecs(m));
   const modules = normalizeMaterialModules(m.modules ?? resolveMaterialModules(m));
-  const clientNote = structuredClientNote({ ...m, pipeCuts: cuts, breakerSpecs });
+  const enriched = { ...m, pipeCuts: cuts, breakerSpecs, flowSpecs, splitSpecs };
+  const clientNote = structuredClientNote(enriched);
+  let link = m.link || "";
+  let coolingKw = Number(m.coolingKw) || 0;
+  let exhaustM3 = Number(m.exhaustM3) || 0;
+  if (isFlowSpecName(m.name)) {
+    exhaustM3 = aggregateFlowM3(flowSpecs);
+    link = primaryFlowLink(flowSpecs, link);
+  }
+  if (isSplitSystemName(m.name)) {
+    coolingKw = aggregateSplitCoolingKw(splitSpecs);
+  }
   return {
     id: id || m.id || uid("m"),
     name: m.name,
@@ -64,7 +92,7 @@ function matToParams(m, id) {
     farm_section_id: m.farmSectionId || "",
     item_type: m.itemType || "material",
     supplier: m.supplier || "",
-    link: m.link || "",
+    link,
     link_alt: m.linkAlt || "",
     photo_url: m.imageUrl || m.photoUrl || "",
     vat_rate: Number(m.vatRate) || 0,
@@ -78,9 +106,9 @@ function matToParams(m, id) {
     is_spare_part: m.isSparePart ? 1 : 0,
     client_visible_default: m.clientVisibleDefault !== false ? 1 : 0,
     responsible: m.responsible || "general",
-    cooling_kw: Number(m.coolingKw) || 0,
+    cooling_kw: coolingKw,
     cooling_btu: m.coolingBtu || "",
-    exhaust_m3: Number(m.exhaustM3) || 0,
+    exhaust_m3: exhaustM3,
     tags: JSON.stringify(Array.isArray(m.tags) ? m.tags : []),
     alternative_material_id: m.alternativeMaterialId || "",
     min_order_qty: Number(m.minOrderQty) || 0,
@@ -88,6 +116,8 @@ function matToParams(m, id) {
     default_item_role: m.defaultItemRole || "purchase",
     pipe_cuts: JSON.stringify(cuts),
     breaker_specs: JSON.stringify(breakerSpecs),
+    flow_specs: JSON.stringify(flowSpecs),
+    split_specs: JSON.stringify(splitSpecs),
     modules_json: JSON.stringify(modules),
   };
 }

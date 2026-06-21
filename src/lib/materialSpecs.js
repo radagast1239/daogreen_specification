@@ -1,15 +1,7 @@
-/** Сплит-система — поля кВт и BTU */
-export function isSplitSystemName(name) {
-  return /сплит/i.test(String(name || ""));
-}
-
-/** Основная вытяжка (не гофра/скотч) */
-export function isExhaustFanName(name) {
-  const n = String(name || "").toLowerCase();
-  if (!/вытяж/i.test(n)) return false;
-  if (/гофр|скотч|решётк|клапан/i.test(n)) return false;
-  return true;
-}
+export { isSplitSystemName } from "../../shared/splitSpecs.js";
+export { isExhaustFanName, isPumpName, isFlowSpecName } from "../../shared/flowSpecs.js";
+import { isSplitSystemName } from "../../shared/splitSpecs.js";
+import { isExhaustFanName } from "../../shared/flowSpecs.js";
 
 export function splitSpecFromMaterial(mat) {
   return {

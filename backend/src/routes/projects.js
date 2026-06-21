@@ -27,6 +27,19 @@ import { clientPurchaseStatuses } from "../services/referenceData.js";
 import { loadClientBrand } from "../services/clientBrand.js";
 import { normalizePipeCuts, resolvePipeCuts } from "../../../shared/profilePipeCuts.js";
 import { normalizeBreakerSpecs, resolveBreakerSpecs } from "../../../shared/breakerSpecs.js";
+import {
+  normalizeFlowSpecs,
+  resolveFlowSpecs,
+  aggregateFlowM3,
+  primaryFlowLink,
+  isFlowSpecName,
+} from "../../../shared/flowSpecs.js";
+import {
+  normalizeSplitSpecs,
+  resolveSplitSpecs,
+  aggregateSplitCoolingKw,
+  isSplitSystemName,
+} from "../../../shared/splitSpecs.js";
 import { structuredClientNote } from "../../../shared/structuredClientNote.js";
 
 const router = Router();
@@ -57,13 +70,13 @@ const INSERT_ITEM = db.prepare(`
     supplier, link, link_alt, photo_url, client_note, tech_note,
     qty, price, vat_rate, visible, approved, enabled, needs_approval,
     status, actual_price, client_comment, sort_order, responsible,
-    cooling_kw, cooling_btu, exhaust_m3, room_id, internal_note, delivery_days, item_role, pipe_cuts, breaker_specs
+    cooling_kw, cooling_btu, exhaust_m3, room_id, internal_note, delivery_days, item_role, pipe_cuts, breaker_specs, flow_specs, split_specs
   ) VALUES (
     @id, @project_id, @material_id, @module, @section, @name, @unit, @category,
     @supplier, @link, @link_alt, @photo_url, @client_note, @tech_note,
     @qty, @price, @vat_rate, @visible, @approved, @enabled, @needs_approval,
     @status, @actual_price, @client_comment, @sort_order, @responsible,
-    @cooling_kw, @cooling_btu, @exhaust_m3, @room_id, @internal_note, @delivery_days, @item_role, @pipe_cuts, @breaker_specs
+    @cooling_kw, @cooling_btu, @exhaust_m3, @room_id, @internal_note, @delivery_days, @item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs
   )
 `);
 
@@ -77,14 +90,27 @@ const UPDATE_ITEM = db.prepare(`
     status=@status, actual_price=@actual_price, client_comment=@client_comment,
     responsible=@responsible, cooling_kw=@cooling_kw, cooling_btu=@cooling_btu, exhaust_m3=@exhaust_m3,
     room_id=@room_id, internal_note=@internal_note, delivery_days=@delivery_days, item_role=@item_role,
-    pipe_cuts=@pipe_cuts, breaker_specs=@breaker_specs
+    pipe_cuts=@pipe_cuts, breaker_specs=@breaker_specs, flow_specs=@flow_specs, split_specs=@split_specs
   WHERE id=@id AND project_id=@project_id
 `);
 
 function itemToParams(it, projectId) {
   const cuts = normalizePipeCuts(it.pipeCuts ?? resolvePipeCuts(it));
   const breakerSpecs = normalizeBreakerSpecs(it.breakerSpecs ?? resolveBreakerSpecs(it));
-  const clientNote = structuredClientNote({ ...it, pipeCuts: cuts, breakerSpecs });
+  const flowSpecs = normalizeFlowSpecs(it.flowSpecs ?? resolveFlowSpecs(it));
+  const splitSpecs = normalizeSplitSpecs(it.splitSpecs ?? resolveSplitSpecs(it));
+  const enriched = { ...it, pipeCuts: cuts, breakerSpecs, flowSpecs, splitSpecs };
+  const clientNote = structuredClientNote(enriched);
+  let link = it.link || "";
+  let coolingKw = Number(it.coolingKw) || 0;
+  let exhaustM3 = Number(it.exhaustM3) || 0;
+  if (isFlowSpecName(it.name)) {
+    exhaustM3 = aggregateFlowM3(flowSpecs);
+    link = primaryFlowLink(flowSpecs, link);
+  }
+  if (isSplitSystemName(it.name)) {
+    coolingKw = aggregateSplitCoolingKw(splitSpecs);
+  }
   return {
     id: it.id,
     project_id: projectId,
@@ -95,7 +121,7 @@ function itemToParams(it, projectId) {
     unit: it.unit || "шт.",
     category: it.category || "Прочее",
     supplier: it.supplier || "",
-    link: it.link || "",
+    link,
     link_alt: it.linkAlt || "",
     photo_url: it.imageUrl || it.photoUrl || "",
     client_note: clientNote,
@@ -112,15 +138,17 @@ function itemToParams(it, projectId) {
     client_comment: it.clientComment || "",
     sort_order: it.sortOrder || 0,
     responsible: it.responsible || "general",
-    cooling_kw: Number(it.coolingKw) || 0,
+    cooling_kw: coolingKw,
     cooling_btu: it.coolingBtu || "",
-    exhaust_m3: Number(it.exhaustM3) || 0,
+    exhaust_m3: exhaustM3,
     room_id: it.roomId || "",
     internal_note: it.internalNote || "",
     delivery_days: Number(it.deliveryDays) || 0,
     item_role: it.itemRole || "purchase",
     pipe_cuts: JSON.stringify(cuts),
     breaker_specs: JSON.stringify(breakerSpecs),
+    flow_specs: JSON.stringify(flowSpecs),
+    split_specs: JSON.stringify(splitSpecs),
   };
 }
 

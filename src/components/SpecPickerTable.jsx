@@ -2,13 +2,9 @@ import React, { useMemo, useState, useCallback } from "react";
 import { groupLabel, STELLAGE_GROUPS } from "../../shared/stellageComposition.js";
 import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
 import { formatMaterialModulesLabel } from "../../shared/materialModules.js";
-import { materialSpecSubtitle } from "../lib/materialDisplay.js";
-import ProfilePipeCutsEditor from "./ProfilePipeCutsEditor.jsx";
-import BreakerSpecsEditor from "./BreakerSpecsEditor.jsx";
-import { isProfilePipeName } from "../../shared/profilePipeCuts.js";
-import { isBreakerName } from "../../shared/breakerSpecs.js";
+import { materialSpecSubtitle, hasStructuredSpecEditor } from "../lib/materialDisplay.js";
+import StructuredSpecEditor from "./StructuredSpecEditor.jsx";
 import { CATEGORIES } from "../data/modules.js";
-import { isExhaustFanName, isSplitSystemName } from "../lib/materialSpecs.js";
 import { roomLabel } from "../lib/roomHelpers.js";
 import {
   blankLine,
@@ -66,61 +62,6 @@ const emptyNew = () => ({
   category: "Прочее",
   supplier: "",
 });
-
-function SpecFields({ ln, disabled, onPatch }) {
-  const split = isSplitSystemName(ln.name);
-  const exhaust = isExhaustFanName(ln.name);
-  if (!split && !exhaust) return null;
-  return (
-    <div className="row wrap" style={{ gap: 6, marginTop: 4 }}>
-      {split && (
-        <>
-          <label className="row" style={{ fontSize: 11, gap: 4 }}>
-            кВт
-            <input
-              className="spec-cell-input spec-cell-input--sm"
-              type="number"
-              min={0}
-              step="any"
-              style={{ width: 56 }}
-              disabled={disabled}
-              value={ln.coolingKw || ""}
-              onChange={(e) => onPatch({ coolingKw: Number(e.target.value) || 0 })}
-            />
-          </label>
-          <label className="row" style={{ fontSize: 11, gap: 4 }}>
-            BTU
-            <input
-              className="spec-cell-input spec-cell-input--sm"
-              type="number"
-              min={0}
-              step="any"
-              style={{ width: 72 }}
-              disabled={disabled}
-              value={ln.coolingBtu || ""}
-              onChange={(e) => onPatch({ coolingBtu: Number(e.target.value) || 0 })}
-            />
-          </label>
-        </>
-      )}
-      {exhaust && (
-        <label className="row" style={{ fontSize: 11, gap: 4 }}>
-          м³/ч
-          <input
-            className="spec-cell-input spec-cell-input--sm"
-            type="number"
-            min={0}
-            step="any"
-            style={{ width: 72 }}
-            disabled={disabled}
-            value={ln.exhaustM3 || ""}
-            onChange={(e) => onPatch({ exhaustM3: Number(e.target.value) || 0 })}
-          />
-        </label>
-      )}
-    </div>
-  );
-}
 
 export default function SpecPickerTable({
   lines,
@@ -418,38 +359,22 @@ export default function SpecPickerTable({
                           placeholder="наименование"
                           onChange={(e) => emitLines(patchLine(lines, ln.id, { name: e.target.value }))}
                         />
-                        <SpecFields
-                          ln={ln}
-                          disabled={!ln.included}
-                          onPatch={(patch) => emitLines(patchLine(lines, ln.id, patch))}
-                        />
                         {!ln.materialId && ln.name?.trim() && (
                           <span className="muted" style={{ fontSize: 10, display: "block", marginTop: 2 }}>
                             не в базе
                           </span>
                         )}
-                        {isProfilePipeName(ln.name) ? (
-                          <ProfilePipeCutsEditor
-                            compact
-                            name={ln.name}
-                            value={ln.pipeCuts}
-                            disabled={!ln.included}
-                            onChange={(patch) => emitLines(patchLine(lines, ln.id, patch))}
-                          />
-                        ) : isBreakerName(ln.name) ? (
-                          <BreakerSpecsEditor
-                            compact
-                            name={ln.name}
-                            value={ln.breakerSpecs}
-                            disabled={!ln.included}
-                            onChange={(patch) => emitLines(patchLine(lines, ln.id, patch))}
-                          />
-                        ) : (
-                          materialSpecSubtitle(ln) && (
-                            <span className="muted" style={{ fontSize: 10, display: "block", marginTop: 2 }}>
-                              {materialSpecSubtitle(ln)}
-                            </span>
-                          )
+                        <StructuredSpecEditor
+                          compact
+                          name={ln.name}
+                          values={ln}
+                          disabled={!ln.included}
+                          onChange={(patch) => emitLines(patchLine(lines, ln.id, patch))}
+                        />
+                        {!hasStructuredSpecEditor(ln.name) && materialSpecSubtitle(ln) && (
+                          <span className="muted" style={{ fontSize: 10, display: "block", marginTop: 2 }}>
+                            {materialSpecSubtitle(ln)}
+                          </span>
                         )}
                       </td>
                       <td>

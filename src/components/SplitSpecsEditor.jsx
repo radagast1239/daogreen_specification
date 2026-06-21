@@ -1,62 +1,58 @@
 import React from "react";
 import {
-  blankBreakerSpec,
-  draftBreakerSpecs,
-  formatBreakerSpecsLabel,
-  isRatedAmpsName,
-  ratedAmpsKind,
-  normalizeBreakerSpecs,
-  breakerSpecsClientNote,
-} from "../../shared/breakerSpecs.js";
+  blankSplitSpec,
+  draftSplitSpecs,
+  formatSplitSpecsLabel,
+  isSplitSystemName,
+  normalizeSplitSpecs,
+  splitSpecsClientNote,
+  aggregateSplitCoolingKw,
+} from "../../shared/splitSpecs.js";
 
-/** Редактор автоматов: амперы + кол-во шт */
-export default function BreakerSpecsEditor({
+/** Сплит-системы: шт × кВт */
+export default function SplitSpecsEditor({
   name,
   value,
   onChange,
   disabled = false,
   compact = false,
 }) {
-  if (!isRatedAmpsName(name)) return null;
+  if (!isSplitSystemName(name)) return null;
 
-  const kind = ratedAmpsKind(name);
-  const titleShort = kind === "contactor" ? "Контакторы (А × шт)" : "Автоматы (А × шт)";
-  const titleFull = kind === "contactor" ? "Контакторы по номиналу" : "Автоматы по номиналу";
-  const specs = normalizeBreakerSpecs(value);
-  const rows = draftBreakerSpecs(value);
+  const specs = normalizeSplitSpecs(value);
+  const rows = draftSplitSpecs(value);
 
   const emit = (next) => {
-    const draft = draftBreakerSpecs(next);
+    const draft = draftSplitSpecs(next);
     onChange({
-      breakerSpecs: draft,
-      clientNote: breakerSpecsClientNote(draft, name),
+      splitSpecs: draft,
+      clientNote: splitSpecsClientNote(draft),
+      coolingKw: aggregateSplitCoolingKw(draft),
     });
   };
 
   const updateRow = (index, patch) => {
-    const next = rows.map((r, i) => (i === index ? { ...r, ...patch } : r));
-    emit(next);
+    emit(rows.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   };
 
-  const addRow = () => emit([...rows, blankBreakerSpec()]);
-
+  const addRow = () => emit([...rows, blankSplitSpec()]);
   const removeRow = (index) => {
     const next = rows.filter((_, i) => i !== index);
-    emit(next.length ? next : [blankBreakerSpec()]);
+    emit(next.length ? next : [blankSplitSpec()]);
   };
 
   if (compact) {
     return (
-      <div className="breaker-specs-editor breaker-specs-editor--compact" style={{ marginTop: 6 }}>
+      <div className="split-specs-editor split-specs-editor--compact" style={{ marginTop: 6 }}>
         <div className="muted" style={{ fontSize: 10, marginBottom: 4 }}>
-          {titleShort}
+          Сплит (шт × кВт)
         </div>
         {rows.map((row, i) => (
           <div
             key={i}
             style={{
               display: "grid",
-              gridTemplateColumns: "56px 12px 52px 28px",
+              gridTemplateColumns: "44px 12px 56px 28px",
               alignItems: "center",
               gap: 4,
               marginBottom: 4,
@@ -67,11 +63,11 @@ export default function BreakerSpecsEditor({
               min={0}
               step={1}
               className="spec-cell-input num"
-              placeholder="А"
+              placeholder="шт"
               style={{ width: "100%", fontSize: 11 }}
               disabled={disabled}
-              value={row.amps}
-              onChange={(e) => updateRow(i, { amps: e.target.value })}
+              value={row.qty}
+              onChange={(e) => updateRow(i, { qty: e.target.value })}
             />
             <span className="muted" style={{ fontSize: 10, textAlign: "center" }}>
               ×
@@ -79,13 +75,13 @@ export default function BreakerSpecsEditor({
             <input
               type="number"
               min={0}
-              step={1}
+              step="any"
               className="spec-cell-input num"
-              placeholder="шт"
+              placeholder="кВт"
               style={{ width: "100%", fontSize: 11 }}
               disabled={disabled}
-              value={row.qty}
-              onChange={(e) => updateRow(i, { qty: e.target.value })}
+              value={row.coolingKw}
+              onChange={(e) => updateRow(i, { coolingKw: e.target.value })}
             />
             <button
               type="button"
@@ -106,16 +102,16 @@ export default function BreakerSpecsEditor({
           disabled={disabled}
           onClick={addRow}
         >
-          ＋ номинал
+          ＋ сплит
         </button>
       </div>
     );
   }
 
   return (
-    <div className="breaker-specs-editor card" style={{ padding: 12, marginTop: 10 }}>
+    <div className="split-specs-editor card" style={{ padding: 12, marginTop: 10 }}>
       <div className="between wrap" style={{ gap: 8, marginBottom: 8 }}>
-        <strong style={{ fontSize: 13 }}>{titleFull}</strong>
+        <strong style={{ fontSize: 13 }}>Сплит-системы: шт × кВт</strong>
         <button type="button" className="btn btn-sm" disabled={disabled} onClick={addRow}>
           ＋ Добавить
         </button>
@@ -123,8 +119,8 @@ export default function BreakerSpecsEditor({
       <table className="spec" style={{ fontSize: 12 }}>
         <thead>
           <tr>
-            <th>Амперы, А</th>
             <th>Кол-во, шт</th>
+            <th>Мощность, кВт</th>
             <th style={{ width: 40 }} />
           </tr>
         </thead>
@@ -138,19 +134,19 @@ export default function BreakerSpecsEditor({
                   step={1}
                   className="spec-cell-input num"
                   disabled={disabled}
-                  value={row.amps}
-                  onChange={(e) => updateRow(i, { amps: e.target.value })}
+                  value={row.qty}
+                  onChange={(e) => updateRow(i, { qty: e.target.value })}
                 />
               </td>
               <td>
                 <input
                   type="number"
                   min={0}
-                  step={1}
+                  step="any"
                   className="spec-cell-input num"
                   disabled={disabled}
-                  value={row.qty}
-                  onChange={(e) => updateRow(i, { qty: e.target.value })}
+                  value={row.coolingKw}
+                  onChange={(e) => updateRow(i, { coolingKw: e.target.value })}
                 />
               </td>
               <td>
@@ -167,9 +163,9 @@ export default function BreakerSpecsEditor({
           ))}
         </tbody>
       </table>
-      {formatBreakerSpecsLabel(specs) && (
+      {formatSplitSpecsLabel(specs) && (
         <p className="muted" style={{ fontSize: 11, margin: "8px 0 0" }}>
-          Итого: {formatBreakerSpecsLabel(specs)}
+          Итого: {formatSplitSpecsLabel(specs)}
         </p>
       )}
     </div>

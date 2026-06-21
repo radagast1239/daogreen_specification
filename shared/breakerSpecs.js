@@ -1,4 +1,4 @@
-/** Автоматы: номинал (А) + количество (шт) */
+/** Автоматы и контакторы: номинал (А) + количество (шт) */
 
 export function isBreakerName(name) {
   const n = String(name || "")
@@ -7,6 +7,23 @@ export function isBreakerName(name) {
   if (!/\bавтомат/.test(n) && !n.startsWith("автомат")) return false;
   if (/автоматик|автоматизац/.test(n)) return false;
   return true;
+}
+
+export function isContactorName(name) {
+  const n = String(name || "")
+    .toLowerCase()
+    .replace(/ё/g, "е");
+  return /\bконтактор/.test(n) || n.startsWith("контактор");
+}
+
+export function isRatedAmpsName(name) {
+  return isBreakerName(name) || isContactorName(name);
+}
+
+export function ratedAmpsKind(name) {
+  if (isContactorName(name)) return "contactor";
+  if (isBreakerName(name)) return "breaker";
+  return null;
 }
 
 export function blankBreakerSpec() {
@@ -80,15 +97,21 @@ export function formatBreakerSpecsLabel(specs) {
   return list.map((s) => `${s.amps} А — ${s.qty} шт`).join(", ");
 }
 
-export function breakerSpecsClientNote(specs) {
+export function breakerSpecsClientNote(specs, name) {
   const label = formatBreakerSpecsLabel(specs);
-  return label ? `Автоматы: ${label}` : "";
+  if (!label) return "";
+  const prefix = isContactorName(name) ? "Контакторы" : "Автоматы";
+  return `${prefix}: ${label}`;
 }
 
 export function breakerSpecsSubtitle(matOrLine) {
-  if (!isBreakerName(matOrLine?.name)) return "";
+  const kind = ratedAmpsKind(matOrLine?.name);
+  if (!kind) return "";
   const label = formatBreakerSpecsLabel(resolveBreakerSpecs(matOrLine));
-  if (label) return `Автоматы: ${label}`;
+  if (label) {
+    const prefix = kind === "contactor" ? "Контакторы" : "Автоматы";
+    return `${prefix}: ${label}`;
+  }
   const qty = Number(matOrLine.qty ?? matOrLine.defaultQty);
   const unit = matOrLine.unit || "шт.";
   if (Number.isFinite(qty) && qty > 0) return `${qty} ${unit}`;
@@ -100,6 +123,6 @@ export function patchWithBreakerSpecs(obj, specs) {
   return {
     ...obj,
     breakerSpecs: normalized,
-    clientNote: breakerSpecsClientNote(normalized) || obj?.clientNote || "",
+    clientNote: breakerSpecsClientNote(normalized, obj?.name) || obj?.clientNote || "",
   };
 }

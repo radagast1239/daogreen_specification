@@ -4,6 +4,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { parsePipeCutsFromDb } from "../../shared/profilePipeCuts.js";
 import { parseBreakerSpecsFromDb } from "../../shared/breakerSpecs.js";
+import { parseFlowSpecsFromDb } from "../../shared/flowSpecs.js";
+import { parseSplitSpecsFromDb } from "../../shared/splitSpecs.js";
 import { resolveMaterialModules } from "../../shared/materialModules.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -197,6 +199,10 @@ function migrateDb() {
   addCol("project_items", "pipe_cuts", "TEXT NOT NULL DEFAULT '[]'");
   addCol("materials", "breaker_specs", "TEXT NOT NULL DEFAULT '[]'");
   addCol("project_items", "breaker_specs", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("materials", "flow_specs", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("project_items", "flow_specs", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("materials", "split_specs", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("project_items", "split_specs", "TEXT NOT NULL DEFAULT '[]'");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS material_price_history (
@@ -292,6 +298,8 @@ export function rowToMaterial(row) {
     comment: row.client_note || row.tech_note,
     pipeCuts: parsePipeCutsFromDb(row.pipe_cuts, row.client_note || row.tech_note),
     breakerSpecs: parseBreakerSpecsFromDb(row.breaker_specs, row.client_note || row.tech_note),
+    flowSpecs: parseFlowSpecsFromDb(row.flow_specs, row.client_note || row.tech_note, row.link),
+    splitSpecs: parseSplitSpecsFromDb(row.split_specs, row.client_note || row.tech_note),
     updatedAt: row.updated_at || "",
   };
 }
@@ -350,6 +358,8 @@ export function rowToItem(row) {
     itemRole: row.item_role || "purchase",
     pipeCuts: parsePipeCutsFromDb(row.pipe_cuts, row.client_note || row.tech_note),
     breakerSpecs: parseBreakerSpecsFromDb(row.breaker_specs, row.client_note || row.tech_note),
+    flowSpecs: parseFlowSpecsFromDb(row.flow_specs, row.client_note || row.tech_note, row.link),
+    splitSpecs: parseSplitSpecsFromDb(row.split_specs, row.client_note || row.tech_note),
   };
 }
 

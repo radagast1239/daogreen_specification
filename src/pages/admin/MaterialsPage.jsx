@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { CATEGORIES } from "../../data/modules.js";
 import { resolveCategories } from "../../lib/categories.js";
-import { isExhaustFanName, isSplitSystemName } from "../../lib/materialSpecs.js";
+import { isFlowSpecName } from "../../lib/materialSpecs.js";
 import { api, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { Modal, Empty } from "../../components/ui.jsx";
@@ -11,13 +11,10 @@ import { useToast } from "../../components/Toast.jsx";
 import ImportPanel from "../../components/ImportPanel.jsx";
 import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import { downloadCSV } from "../../lib/export.js";
-import { materialSpecSubtitle } from "../../lib/materialDisplay.js";
-import ProfilePipeCutsEditor from "../../components/ProfilePipeCutsEditor.jsx";
-import BreakerSpecsEditor from "../../components/BreakerSpecsEditor.jsx";
+import { materialSpecSubtitle, hasStructuredSpecEditor } from "../../lib/materialDisplay.js";
+import StructuredSpecEditor from "../../components/StructuredSpecEditor.jsx";
 import MaterialModulesEditor from "../../components/MaterialModulesEditor.jsx";
 import PhotoUploadField from "../../components/PhotoUploadField.jsx";
-import { isProfilePipeName } from "../../../shared/profilePipeCuts.js";
-import { isBreakerName } from "../../../shared/breakerSpecs.js";
 import {
   formatMaterialModulesLabel,
   materialInModule,
@@ -46,6 +43,8 @@ const blank = {
   clientNote: "",
   pipeCuts: [],
   breakerSpecs: [],
+  flowSpecs: [],
+  splitSpecs: [],
   techNote: "",
   status: "active",
   needsApproval: false,
@@ -361,50 +360,12 @@ export default function MaterialsPage() {
               <a href="/suppliers">Создать поставщика</a>
             </p>
           </div>
-          {(isSplitSystemName(editing.name) || isExhaustFanName(editing.name)) && (
-            <div className="form-grid">
-              {isSplitSystemName(editing.name) && (
-                <>
-                  <div className="field">
-                    <label>Охлаждение, кВт</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step="any"
-                      value={editing.coolingKw || ""}
-                      onChange={(e) => setEditing({ ...editing, coolingKw: Number(e.target.value) || 0 })}
-                    />
-                  </div>
-                  <div className="field">
-                    <label>BTU</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step="any"
-                      value={editing.coolingBtu || ""}
-                      onChange={(e) => setEditing({ ...editing, coolingBtu: Number(e.target.value) || 0 })}
-                    />
-                  </div>
-                </>
-              )}
-              {isExhaustFanName(editing.name) && (
-                <div className="field">
-                  <label>Производительность, м³/ч</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={editing.exhaustM3 || ""}
-                    onChange={(e) => setEditing({ ...editing, exhaustM3: Number(e.target.value) || 0 })}
-                  />
-                </div>
-              )}
+          {!isFlowSpecName(editing.name) && (
+            <div className="field">
+              <label>Ссылка на товар</label>
+              <input value={editing.link} onChange={(e) => setEditing({ ...editing, link: e.target.value })} />
             </div>
           )}
-          <div className="field">
-            <label>Ссылка на товар</label>
-            <input value={editing.link} onChange={(e) => setEditing({ ...editing, link: e.target.value })} />
-          </div>
           <PhotoUploadField
             label="Фото"
             value={editing.imageUrl || editing.photoUrl || ""}
@@ -419,16 +380,10 @@ export default function MaterialsPage() {
               <option value={20}>20%</option>
             </select>
           </div>
-          {isProfilePipeName(editing.name) ? (
-            <ProfilePipeCutsEditor
+          {hasStructuredSpecEditor(editing.name) ? (
+            <StructuredSpecEditor
               name={editing.name}
-              value={editing.pipeCuts}
-              onChange={(patch) => setEditing({ ...editing, ...patch })}
-            />
-          ) : isBreakerName(editing.name) ? (
-            <BreakerSpecsEditor
-              name={editing.name}
-              value={editing.breakerSpecs}
+              values={editing}
               onChange={(patch) => setEditing({ ...editing, ...patch })}
             />
           ) : (
