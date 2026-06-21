@@ -2,9 +2,11 @@ import React, { useMemo, useState, useCallback } from "react";
 import { groupLabel, STELLAGE_GROUPS } from "../../shared/stellageComposition.js";
 import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
 import { formatMaterialModulesLabel } from "../../shared/materialModules.js";
-import { profilePipeSubtitle } from "../lib/materialDisplay.js";
+import { materialSpecSubtitle } from "../lib/materialDisplay.js";
 import ProfilePipeCutsEditor from "./ProfilePipeCutsEditor.jsx";
+import BreakerSpecsEditor from "./BreakerSpecsEditor.jsx";
 import { isProfilePipeName } from "../../shared/profilePipeCuts.js";
+import { isBreakerName } from "../../shared/breakerSpecs.js";
 import { CATEGORIES } from "../data/modules.js";
 import { isExhaustFanName, isSplitSystemName } from "../lib/materialSpecs.js";
 import { roomLabel } from "../lib/roomHelpers.js";
@@ -434,10 +436,18 @@ export default function SpecPickerTable({
                             disabled={!ln.included}
                             onChange={(patch) => emitLines(patchLine(lines, ln.id, patch))}
                           />
+                        ) : isBreakerName(ln.name) ? (
+                          <BreakerSpecsEditor
+                            compact
+                            name={ln.name}
+                            value={ln.breakerSpecs}
+                            disabled={!ln.included}
+                            onChange={(patch) => emitLines(patchLine(lines, ln.id, patch))}
+                          />
                         ) : (
-                          profilePipeSubtitle(ln) && (
+                          materialSpecSubtitle(ln) && (
                             <span className="muted" style={{ fontSize: 10, display: "block", marginTop: 2 }}>
-                              {profilePipeSubtitle(ln)}
+                              {materialSpecSubtitle(ln)}
                             </span>
                           )
                         )}
@@ -742,9 +752,9 @@ export default function SpecPickerTable({
                                 {formatMaterialModulesLabel(m) || "—"}
                                 {m.supplier ? ` · ${m.supplier}` : ""}
                               </div>
-                              {profilePipeSubtitle(m) && (
+                              {materialSpecSubtitle(m) && (
                                 <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>
-                                  {profilePipeSubtitle(m)}
+                                  {materialSpecSubtitle(m)}
                                 </div>
                               )}
                             </td>

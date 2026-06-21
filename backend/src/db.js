@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { parsePipeCutsFromDb } from "../../shared/profilePipeCuts.js";
+import { parseBreakerSpecsFromDb } from "../../shared/breakerSpecs.js";
 import { resolveMaterialModules } from "../../shared/materialModules.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -194,6 +195,8 @@ function migrateDb() {
   addCol("materials", "pipe_cuts", "TEXT NOT NULL DEFAULT '[]'");
   addCol("materials", "modules_json", "TEXT NOT NULL DEFAULT '[]'");
   addCol("project_items", "pipe_cuts", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("materials", "breaker_specs", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("project_items", "breaker_specs", "TEXT NOT NULL DEFAULT '[]'");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS material_price_history (
@@ -288,6 +291,7 @@ export function rowToMaterial(row) {
     defaultItemRole: row.default_item_role || "purchase",
     comment: row.client_note || row.tech_note,
     pipeCuts: parsePipeCutsFromDb(row.pipe_cuts, row.client_note || row.tech_note),
+    breakerSpecs: parseBreakerSpecsFromDb(row.breaker_specs, row.client_note || row.tech_note),
     updatedAt: row.updated_at || "",
   };
 }
@@ -345,6 +349,7 @@ export function rowToItem(row) {
     deliveryDays: row.delivery_days || 0,
     itemRole: row.item_role || "purchase",
     pipeCuts: parsePipeCutsFromDb(row.pipe_cuts, row.client_note || row.tech_note),
+    breakerSpecs: parseBreakerSpecsFromDb(row.breaker_specs, row.client_note || row.tech_note),
   };
 }
 

@@ -1,12 +1,9 @@
 import { db, rowToMaterial, rowToModule } from "../db.js";
 import { uid } from "../services/buildItems.js";
 import { logPriceChange } from "../services/priceHistory.js";
-import {
-  isProfilePipeName,
-  normalizePipeCuts,
-  pipeCutsClientNote,
-  resolvePipeCuts,
-} from "../../../shared/profilePipeCuts.js";
+import { normalizePipeCuts, resolvePipeCuts } from "../../../shared/profilePipeCuts.js";
+import { normalizeBreakerSpecs, resolveBreakerSpecs } from "../../../shared/breakerSpecs.js";
+import { structuredClientNote } from "../../../shared/structuredClientNote.js";
 import {
   normalizeMaterialModules,
   primaryMaterialModule,
@@ -21,13 +18,13 @@ const INSERT_MAT = db.prepare(`
     supplier, link, link_alt, photo_url, vat_rate, vat_included,
     client_note, tech_note, internal_note, status,
     needs_approval, is_consumable, is_spare_part, client_visible_default, responsible,
-    cooling_kw, cooling_btu, exhaust_m3, tags, alternative_material_id, min_order_qty, order_step, default_item_role, pipe_cuts, modules_json, updated_at
+    cooling_kw, cooling_btu, exhaust_m3, tags, alternative_material_id, min_order_qty, order_step, default_item_role, pipe_cuts, breaker_specs, modules_json, updated_at
   ) VALUES (
     @id, @name, @unit, @base_price, @default_qty, @module, @category, @subcategory, @farm_section_id, @item_type,
     @supplier, @link, @link_alt, @photo_url, @vat_rate, @vat_included,
     @client_note, @tech_note, @internal_note, @status,
     @needs_approval, @is_consumable, @is_spare_part, @client_visible_default, @responsible,
-    @cooling_kw, @cooling_btu, @exhaust_m3, @tags, @alternative_material_id, @min_order_qty, @order_step, @default_item_role, @pipe_cuts, @modules_json, datetime('now')
+    @cooling_kw, @cooling_btu, @exhaust_m3, @tags, @alternative_material_id, @min_order_qty, @order_step, @default_item_role, @pipe_cuts, @breaker_specs, @modules_json, datetime('now')
   )
 `);
 
@@ -44,6 +41,7 @@ const UPDATE_MAT = db.prepare(`
     tags=@tags, alternative_material_id=@alternative_material_id, min_order_qty=@min_order_qty,
     order_step=@order_step, default_item_role=@default_item_role,
     pipe_cuts=@pipe_cuts,
+    breaker_specs=@breaker_specs,
     modules_json=@modules_json,
     updated_at=datetime('now')
   WHERE id=@id
@@ -51,11 +49,9 @@ const UPDATE_MAT = db.prepare(`
 
 function matToParams(m, id) {
   const cuts = normalizePipeCuts(m.pipeCuts ?? resolvePipeCuts(m));
+  const breakerSpecs = normalizeBreakerSpecs(m.breakerSpecs ?? resolveBreakerSpecs(m));
   const modules = normalizeMaterialModules(m.modules ?? resolveMaterialModules(m));
-  const clientNote =
-    isProfilePipeName(m.name) && cuts.length
-      ? pipeCutsClientNote(cuts)
-      : m.clientNote || m.comment || "";
+  const clientNote = structuredClientNote({ ...m, pipeCuts: cuts, breakerSpecs });
   return {
     id: id || m.id || uid("m"),
     name: m.name,
@@ -91,6 +87,7 @@ function matToParams(m, id) {
     order_step: Number(m.orderStep) || 1,
     default_item_role: m.defaultItemRole || "purchase",
     pipe_cuts: JSON.stringify(cuts),
+    breaker_specs: JSON.stringify(breakerSpecs),
     modules_json: JSON.stringify(modules),
   };
 }

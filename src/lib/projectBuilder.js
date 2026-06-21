@@ -5,6 +5,7 @@ import { groupLabel, materialCompositionGroup } from "../../shared/stellageCompo
 import { projectStellageLinesFromCatalog, stellageModulePhoto, resolveStellagePhoto } from "./stellageCatalogConfig.js";
 import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
 import { resolvePipeCuts, normalizePipeCuts } from "../../shared/profilePipeCuts.js";
+import { resolveBreakerSpecs, normalizeBreakerSpecs } from "../../shared/breakerSpecs.js";
 import { patchMaterialModules, normalizeMaterialModules, primaryMaterialModule, materialInModule } from "../../shared/materialModules.js";
 
 export function blankLine(overrides = {}) {
@@ -26,6 +27,7 @@ export function blankLine(overrides = {}) {
     techNote: "",
     clientNote: "",
     pipeCuts: [],
+    breakerSpecs: [],
     coolingKw: 0,
     coolingBtu: 0,
     exhaustM3: 0,
@@ -52,6 +54,7 @@ export function lineToMaterialPayload(line, moduleName, farmSectionId = "") {
     techNote: line.techNote || "",
     clientNote: line.clientNote || "",
     pipeCuts: normalizePipeCuts(line.pipeCuts ?? resolvePipeCuts(line)),
+    breakerSpecs: normalizeBreakerSpecs(line.breakerSpecs ?? resolveBreakerSpecs(line)),
     supplier: line.supplier || "",
     coolingKw: Number(line.coolingKw) || 0,
     coolingBtu: Number(line.coolingBtu) || 0,
@@ -80,6 +83,7 @@ export function syncLineFromMaterial(line, mat) {
     coolingBtu: Number(mat.coolingBtu) || 0,
     exhaustM3: Number(mat.exhaustM3) || 0,
     pipeCuts: resolvePipeCuts(mat),
+    breakerSpecs: resolveBreakerSpecs(mat),
     clientNote: mat.clientNote || mat.comment || "",
   };
 }
@@ -127,6 +131,7 @@ export function lineFromMaterial(mat, overrides = {}) {
     techNote: mat.techNote || "",
     clientNote: mat.clientNote || mat.comment || "",
     pipeCuts: resolvePipeCuts(mat),
+    breakerSpecs: resolveBreakerSpecs(mat),
     coolingKw: Number(mat.coolingKw) || 0,
     coolingBtu: Number(mat.coolingBtu) || 0,
     exhaustM3: Number(mat.exhaustM3) || 0,
@@ -162,6 +167,7 @@ export function lineToProjectItem(line, section, sortOrder) {
     techNote: line.techNote || "",
     comment: line.clientNote || line.techNote || "",
     pipeCuts: normalizePipeCuts(line.pipeCuts ?? resolvePipeCuts(line)),
+    breakerSpecs: normalizeBreakerSpecs(line.breakerSpecs ?? resolveBreakerSpecs(line)),
     qty,
     price: Number(line.price) || 0,
     vatRate: Number(line.vatRate) || 0,

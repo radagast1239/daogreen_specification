@@ -24,7 +24,10 @@ import { downloadXlsx } from "../../lib/export.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
 import ProfilePipeCutsEditor from "../../components/ProfilePipeCutsEditor.jsx";
+import BreakerSpecsEditor from "../../components/BreakerSpecsEditor.jsx";
 import { isProfilePipeName } from "../../../shared/profilePipeCuts.js";
+import { isBreakerName } from "../../../shared/breakerSpecs.js";
+import { hasStructuredSpecEditor } from "../../lib/materialDisplay.js";
 import FloorPlanField from "../../components/FloorPlanField.jsx";
 import FloorPlanPin from "../../components/FloorPlanPin.jsx";
 import { defaultRooms, isFarmGeneralItem, roomLabel } from "../../lib/roomHelpers.js";
@@ -634,7 +637,7 @@ function SpecTab({
                         value={it.name}
                         onChange={(e) => patchItem(it.id, { name: e.target.value })}
                       />
-                      {it.comment && !isProfilePipeName(it.name) && (
+                      {it.comment && !hasStructuredSpecEditor(it.name) && (
                         <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{it.comment}</div>
                       )}
                       {isProfilePipeName(it.name) ? (
@@ -642,6 +645,13 @@ function SpecTab({
                           compact
                           name={it.name}
                           value={it.pipeCuts}
+                          onChange={(patch) => patchItem(it.id, patch)}
+                        />
+                      ) : isBreakerName(it.name) ? (
+                        <BreakerSpecsEditor
+                          compact
+                          name={it.name}
+                          value={it.breakerSpecs}
                           onChange={(patch) => patchItem(it.id, patch)}
                         />
                       ) : (

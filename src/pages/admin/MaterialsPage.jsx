@@ -11,11 +11,13 @@ import { useToast } from "../../components/Toast.jsx";
 import ImportPanel from "../../components/ImportPanel.jsx";
 import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import { downloadCSV } from "../../lib/export.js";
-import { profilePipeSubtitle } from "../../lib/materialDisplay.js";
+import { materialSpecSubtitle } from "../../lib/materialDisplay.js";
 import ProfilePipeCutsEditor from "../../components/ProfilePipeCutsEditor.jsx";
+import BreakerSpecsEditor from "../../components/BreakerSpecsEditor.jsx";
 import MaterialModulesEditor from "../../components/MaterialModulesEditor.jsx";
 import PhotoUploadField from "../../components/PhotoUploadField.jsx";
 import { isProfilePipeName } from "../../../shared/profilePipeCuts.js";
+import { isBreakerName } from "../../../shared/breakerSpecs.js";
 import {
   formatMaterialModulesLabel,
   materialInModule,
@@ -43,6 +45,7 @@ const blank = {
   vatIncluded: false,
   clientNote: "",
   pipeCuts: [],
+  breakerSpecs: [],
   techNote: "",
   status: "active",
   needsApproval: false,
@@ -234,9 +237,9 @@ export default function MaterialsPage() {
                     </td>
                     <td style={{ minWidth: 220 }} className="material-name">
                       {m.name}
-                      {profilePipeSubtitle(m) && (
+                      {materialSpecSubtitle(m) && (
                         <div className="muted" style={{ fontSize: 11, marginTop: 4, fontWeight: 400 }}>
-                          {profilePipeSubtitle(m)}
+                          {materialSpecSubtitle(m)}
                         </div>
                       )}
                     </td>
@@ -420,6 +423,12 @@ export default function MaterialsPage() {
             <ProfilePipeCutsEditor
               name={editing.name}
               value={editing.pipeCuts}
+              onChange={(patch) => setEditing({ ...editing, ...patch })}
+            />
+          ) : isBreakerName(editing.name) ? (
+            <BreakerSpecsEditor
+              name={editing.name}
+              value={editing.breakerSpecs}
               onChange={(patch) => setEditing({ ...editing, ...patch })}
             />
           ) : (
