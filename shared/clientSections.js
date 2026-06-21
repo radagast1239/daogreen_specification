@@ -46,6 +46,17 @@ function inferFromName(name = "") {
   return { section: "", subsection: "" };
 }
 
+/** Подсказка раздела при выборе внутренней категории */
+export function suggestClientSectionFromCategory(category) {
+  const mapped = CATEGORY_MAP[(category || "").trim()];
+  return mapped?.section || "";
+}
+
+export function suggestClientSubsectionFromCategory(category) {
+  const mapped = CATEGORY_MAP[(category || "").trim()];
+  return mapped?.subsection || "";
+}
+
 export function resolveClientSection(item) {
   const explicit = (item?.clientSection || "").trim();
   if (explicit) {

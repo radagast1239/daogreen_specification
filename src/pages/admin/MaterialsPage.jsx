@@ -22,6 +22,13 @@ import {
   patchMaterialModules,
   resolveMaterialModules,
 } from "../../../shared/materialModules.js";
+import {
+  CLIENT_SECTIONS,
+  clientSectionLabel,
+  suggestClientSectionFromCategory,
+  suggestClientSubsectionFromCategory,
+  isMiscCategory,
+} from "../../../shared/clientSections.js";
 
 const blank = {
   name: "",
@@ -32,6 +39,8 @@ const blank = {
   modules: ["Общая закупка на ферму"],
   category: "Прочее",
   subcategory: "",
+  clientSection: "",
+  clientSubsection: "",
   itemType: "material",
   supplier: "",
   link: "",
@@ -334,14 +343,58 @@ export default function MaterialsPage() {
               </select>
             </div>
             <div className="field">
-              <label>Категория</label>
-              <select value={editing.category} onChange={(e) => setEditing({ ...editing, category: e.target.value })}>
+              <label>Категория (внутренняя)</label>
+              <select
+                value={editing.category}
+                onChange={(e) => {
+                  const category = e.target.value;
+                  const patch = { category };
+                  if (!editing.clientSection) {
+                    patch.clientSection = suggestClientSectionFromCategory(category);
+                    patch.clientSubsection = suggestClientSubsectionFromCategory(category);
+                  }
+                  setEditing({ ...editing, ...patch });
+                }}
+              >
                 {categories.map((c) => (
                   <option key={c}>{c}</option>
                 ))}
               </select>
             </div>
           </div>
+          <div className="form-grid">
+            <div className="field">
+              <label>Раздел для клиента</label>
+              <select
+                value={editing.clientSection || ""}
+                onChange={(e) => setEditing({ ...editing, clientSection: e.target.value })}
+              >
+                <option value="">— авто (из категории / названия) —</option>
+                {CLIENT_SECTIONS.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Подраздел для клиента</label>
+              <input
+                value={editing.clientSubsection || ""}
+                placeholder="Каркас, Фитинги, Насосы…"
+                onChange={(e) => setEditing({ ...editing, clientSubsection: e.target.value })}
+              />
+            </div>
+          </div>
+          <p className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>
+            В закупочном листе: <strong>{clientSectionLabel(editing)}</strong>
+            {editing.clientSubsection ? ` · ${editing.clientSubsection}` : ""}
+            {editing.category === "Прочее" && isMiscCategory(editing) && (
+              <span style={{ color: "var(--danger)", display: "block", marginTop: 4 }}>
+                Категория «Прочее» — укажите раздел для клиента, иначе публикация заблокирована.
+              </span>
+            )}
+          </p>
           <MaterialModulesEditor
             value={editing.modules ?? editing.module}
             activeModules={activeModules}
