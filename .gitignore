@@ -8,6 +8,7 @@ backend/.env
 backend/node_modules
 backend/data/*.db
 backend/data/*.db-*
+backend/data/*.json
 backend/uploads/*
 !backend/uploads/.gitkeep
 materials-photos/*

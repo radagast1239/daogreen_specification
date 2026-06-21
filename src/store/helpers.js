@@ -96,7 +96,10 @@ export function mergedPurchaseRows(items) {
   const map = new Map();
   for (const it of items || []) {
     const normName = (it.name || "").trim().toLowerCase().replace(/\s+/g, " ");
-    const key = [normName, (it.unit || "").toLowerCase(), (it.supplier || "").trim(), (it.link || "").trim()].join("|");
+    const purchaseKey = (it.purchaseKey || it.purchase_key || "").trim();
+    const key =
+      purchaseKey ||
+      [normName, (it.unit || "").toLowerCase(), (it.supplier || "").trim(), (it.link || "").trim()].join("|");
     if (!map.has(key)) {
       map.set(key, {
         mergeKey: key,

@@ -29,7 +29,10 @@ import {
   isMiscCategory,
   getClientSections,
   subsectionsForSection,
+  isSubsectionValid,
+  getClientSectionLabel,
 } from "../../../shared/clientSections.js";
+import { MaterialsQualityPanel } from "./MaterialsQualityPage.jsx";
 
 const blank = {
   name: "",
@@ -73,7 +76,9 @@ export default function MaterialsPage() {
   const ref = state.reference;
   const { confirm } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = ["import", "duplicates"].includes(searchParams.get("tab")) ? searchParams.get("tab") : "base";
+  const tab = ["import", "duplicates", "quality"].includes(searchParams.get("tab"))
+    ? searchParams.get("tab")
+    : "base";
   const setTab = (t) => setSearchParams(t === "base" ? {} : { tab: t });
   const [q, setQ] = useState("");
   const [modF, setModF] = useState("");
@@ -106,13 +111,27 @@ export default function MaterialsPage() {
     return getClientSections();
   }, [state.reference?.clientSections]);
 
-  const subsectionHints = useMemo(() => {
+  const subsectionOptions = useMemo(() => {
     const sectionId = editing?.clientSection;
     if (!sectionId) return [];
     const fromRef = state.reference?.clientSections?.find((s) => s.id === sectionId);
     if (fromRef?.subsections?.length) return fromRef.subsections;
     return subsectionsForSection(sectionId);
   }, [editing?.clientSection, state.reference?.clientSections]);
+
+  const subsectionMismatch = useMemo(() => {
+    const sectionId = editing?.clientSection;
+    const sub = editing?.clientSubsection;
+    if (!sectionId || !sub) return false;
+    return !isSubsectionValid(sectionId, sub);
+  }, [editing?.clientSection, editing?.clientSubsection]);
+
+  const purchaseListPreview = useMemo(() => {
+    if (!editing) return "";
+    const sectionLabel = getClientSectionLabel(editing.clientSection) || clientSectionLabel(editing);
+    if (editing.clientSubsection) return `${sectionLabel} → ${editing.clientSubsection}`;
+    return sectionLabel;
+  }, [editing]);
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
@@ -188,6 +207,7 @@ export default function MaterialsPage() {
             ["base", "База"],
             ["import", "Импорт"],
             ["duplicates", "Дубликаты"],
+            ["quality", "Проверка"],
           ].map(([k, label]) => (
             <button
               key={k}
@@ -211,6 +231,10 @@ export default function MaterialsPage() {
           </div>
         ) : tab === "duplicates" ? (
           <DuplicatesTab materials={state.materials} onMerged={() => actions.refresh()} />
+        ) : tab === "quality" ? (
+          <div style={{ marginTop: 16 }}>
+            <MaterialsQualityPanel materials={state.materials} modules={state.modules} />
+          </div>
         ) : (
           <>
         <div className="toolbar" style={{ marginTop: 16 }}>
@@ -382,7 +406,15 @@ export default function MaterialsPage() {
               <label>Раздел для клиента</label>
               <select
                 value={editing.clientSection || ""}
-                onChange={(e) => setEditing({ ...editing, clientSection: e.target.value })}
+                onChange={(e) => {
+                  const clientSection = e.target.value;
+                  const subs = subsectionsForSection(clientSection);
+                  const patch = { clientSection };
+                  if (editing.clientSubsection && !subs.includes(editing.clientSubsection)) {
+                    patch.clientSubsection = "";
+                  }
+                  setEditing({ ...editing, ...patch });
+                }}
               >
                 <option value="">— авто (из категории / названия) —</option>
                 {clientSectionOptions.map((s) => (
@@ -397,22 +429,27 @@ export default function MaterialsPage() {
             </div>
             <div className="field">
               <label>Подраздел для клиента</label>
-              <input
-                list="client-subsection-hints"
+              <select
                 value={editing.clientSubsection || ""}
-                placeholder="Каркас, Фитинги, Насосы…"
+                disabled={!editing.clientSection}
                 onChange={(e) => setEditing({ ...editing, clientSubsection: e.target.value })}
-              />
-              <datalist id="client-subsection-hints">
-                {subsectionHints.map((sub) => (
-                  <option key={sub} value={sub} />
+              >
+                <option value="">— не выбран —</option>
+                {subsectionOptions.map((sub) => (
+                  <option key={sub} value={sub}>
+                    {sub}
+                  </option>
                 ))}
-              </datalist>
+              </select>
+              {subsectionMismatch && (
+                <p style={{ color: "var(--danger)", fontSize: 12, margin: "4px 0 0" }}>
+                  Подраздел не относится к выбранному разделу — выберите из списка.
+                </p>
+              )}
             </div>
           </div>
           <p className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>
-            В закупочном листе: <strong>{clientSectionLabel(editing)}</strong>
-            {editing.clientSubsection ? ` · ${editing.clientSubsection}` : ""}
+            В закупочном листе: <strong>{purchaseListPreview || "—"}</strong>
             {editing.category === "Прочее" && isMiscCategory(editing) && (
               <span style={{ color: "var(--danger)", display: "block", marginTop: 4 }}>
                 Категория «Прочее» — укажите раздел для клиента, иначе публикация заблокирована.

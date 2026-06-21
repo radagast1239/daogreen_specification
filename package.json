@@ -10,6 +10,7 @@
     "build": "vite build",
     "build:all": "npm install && npm run build && npm install --prefix backend",
     "start": "npm run start --prefix backend",
+    "import:materials-map": "npm run import:materials-map --prefix backend",
     "preview": "vite preview"
   },
   "dependencies": {

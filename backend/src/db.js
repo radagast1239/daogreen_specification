@@ -228,6 +228,7 @@ function migrateDb() {
   addCol("materials", "client_subsection", "TEXT DEFAULT ''");
   addCol("project_items", "client_section", "TEXT DEFAULT ''");
   addCol("project_items", "client_subsection", "TEXT DEFAULT ''");
+  addCol("materials", "purchase_key", "TEXT DEFAULT ''");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS material_price_history (
@@ -280,6 +281,7 @@ export function rowToMaterial(row) {
     subcategory: row.subcategory,
     clientSection: row.client_section || "",
     clientSubsection: row.client_subsection || "",
+    purchaseKey: row.purchase_key || "",
     farmSectionId: row.farm_section_id || "",
     itemType: row.item_type,
     supplier: row.supplier,

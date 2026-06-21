@@ -6,6 +6,7 @@ import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { itemImageUrl, lineGross, lineVat } from "../../lib/itemHelpers.js";
 import { money, num } from "../../store/helpers.js";
 import { isBoughtStatus } from "../../lib/itemHelpers.js";
+import ClientStatusActions from "./ClientStatusActions.jsx";
 
 export default function ClientItemCard({
   it,
@@ -72,30 +73,11 @@ export default function ClientItemCard({
         )}
 
         {!bought ? (
-          <div className="row no-print wrap" style={{ marginTop: 12, gap: 8, alignItems: "center" }}>
-            <button type="button" className="btn btn-sm" onClick={() => patch(it.id, { status: "ordered" })}>
-              Заказал
-            </button>
-            <button type="button" className="btn btn-sm btn-primary" onClick={() => patch(it.id, { status: "bought" })}>
-              Купил
-            </button>
-            <label className="row" style={{ gap: 6, fontSize: 12.5 }}>
-              Статус
-              <select
-                value={it.status || "not_bought"}
-                onChange={(e) => patch(it.id, { status: e.target.value })}
-                style={{ width: "auto", maxWidth: 200 }}
-              >
-                {statuses
-                  .filter((s) => s.clientVisible !== false)
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          </div>
+          <ClientStatusActions
+            status={it.status}
+            onStatusChange={(next) => patch(it.id, { status: next })}
+            purchaseStatuses={statuses}
+          />
         ) : (
           <button
             type="button"

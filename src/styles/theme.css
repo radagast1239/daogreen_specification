@@ -791,6 +791,41 @@ body.nav-open { overflow: hidden; }
 }
 .client-purchase-subsection .collapsible__title { font-weight: 600; font-size: 13px; }
 .client-merged-sources { padding: 6px 8px; background: var(--surface); border-radius: var(--radius-sm); border-left: 3px solid var(--client-brand, var(--brand)); }
+
+.client-status-actions {
+  margin-top: 12px;
+}
+.client-status-actions__quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.client-status-actions__more {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+.client-status-actions__more select {
+  flex: 1;
+  min-width: 0;
+  max-width: 240px;
+  width: auto;
+}
+.btn-attention {
+  background: #fff8eb;
+  border-color: #e8b84a;
+  color: #8a5a00;
+}
+.btn-attention:hover {
+  background: #fff3d6;
+}
+.btn-active:not(.btn-primary):not(.btn-attention) {
+  background: var(--brand-tint);
+  border-color: var(--client-brand, var(--brand));
+  color: var(--client-brand, var(--brand));
+}
 .client-hero__eyebrow {
   font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: #9ecdb8;
 }

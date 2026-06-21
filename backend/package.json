@@ -9,6 +9,7 @@
     "photos:import": "node scripts/importPhotos.js",
     "photos:excel": "node scripts/importExcelPhotosBatch.mjs",
     "farm:sync": "node scripts/syncFarmSections.mjs",
+    "import:materials-map": "node scripts/importMaterialsNamingMap.js",
     "seed": "node src/seed.js"
   },
   "dependencies": {

@@ -6,6 +6,7 @@ import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { itemImageUrl } from "../../lib/itemHelpers.js";
 import { money, num } from "../../store/helpers.js";
 import { isBoughtStatus } from "../../lib/itemHelpers.js";
+import ClientStatusActions from "./ClientStatusActions.jsx";
 
 function mergedRowStatus(row) {
   if (row.statusSummary?.status) return row.statusSummary.status;
@@ -97,30 +98,11 @@ export default function ClientMergedItemCard({
         )}
 
         {!bought ? (
-          <div className="row no-print wrap" style={{ marginTop: 12, gap: 8, alignItems: "center" }}>
-            <button type="button" className="btn btn-sm" onClick={() => patchMerged(patch, row, { status: "ordered" })}>
-              Заказал
-            </button>
-            <button type="button" className="btn btn-sm btn-primary" onClick={() => patchMerged(patch, row, { status: "bought" })}>
-              Купил
-            </button>
-            <label className="row" style={{ gap: 6, fontSize: 12.5 }}>
-              Статус
-              <select
-                value={status}
-                onChange={(e) => patchMerged(patch, row, { status: e.target.value })}
-                style={{ width: "auto", maxWidth: 200 }}
-              >
-                {statuses
-                  .filter((s) => s.clientVisible !== false)
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          </div>
+          <ClientStatusActions
+            status={status}
+            onStatusChange={(next) => patchMerged(patch, row, { status: next })}
+            purchaseStatuses={statuses}
+          />
         ) : (
           <button
             type="button"
