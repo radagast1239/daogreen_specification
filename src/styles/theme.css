@@ -27,9 +27,9 @@
   --radius: 14px;
   --radius-sm: 9px;
   --radius-pill: 999px;
-  --thumb-w: 100px;
-  --thumb-h: 150px;
-  --thumb-size: 100px;
+  --thumb-w: 120px;
+  --thumb-h: 80px;
+  --thumb-size: 120px;
   --shadow: 0 2px 8px rgba(6, 41, 32, 0.06), 0 16px 40px rgba(6, 41, 32, 0.08);
   --shadow-lg: 0 24px 60px rgba(6, 41, 32, 0.12);
   --mono: "SF Mono", "JetBrains Mono", "Roboto Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -603,7 +603,7 @@ body.nav-open { overflow: hidden; }
 }
 
 @media (max-width: 520px) {
-  .thumb, .thumb-img, .card-item { --thumb-w: 72px; --thumb-h: 108px; }
+  .thumb, .thumb-img, .card-item { --thumb-w: 88px; --thumb-h: 58px; }
   .card-item { grid-template-columns: 72px 1fr; gap: 10px; padding: 12px; }
   .stat-grid { grid-template-columns: 1fr; }
   .preset-grid { grid-template-columns: 1fr; }
@@ -635,7 +635,8 @@ body.nav-open { overflow: hidden; }
   width: var(--thumb-w);
   height: var(--thumb-h);
   border-radius: var(--radius-sm);
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center;
   background: var(--brand-tint);
   flex-shrink: 0;
 }
@@ -744,7 +745,7 @@ body.nav-open { overflow: hidden; }
 /* Compact tables */
 html.compact-tables .spec th,
 html.compact-tables .spec td { padding: 5px 7px; font-size: 12.5px; }
-html.compact-tables .spec .thumb-img { width: 40px; height: 40px; object-fit: cover; }
+html.compact-tables .spec .thumb-img { width: 56px; height: 38px; object-fit: cover; }
 html.compact-tables .input-inline { font-size: 12.5px; }
 html.compact-tables .card-item { padding: 10px; gap: 10px; }
 html.compact-tables .materials-table { border-spacing: 0 3px; }

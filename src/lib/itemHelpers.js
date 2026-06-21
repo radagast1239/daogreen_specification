@@ -81,6 +81,7 @@ export const DEFAULT_MANUAL_PARAMS = {
   schemeStellagesUrl: "",
   schemeTechnicalUrl: "",
   schemeElectricalUrl: "",
+  consumablesCartUrl: "",
 };
 
 export function clientVisibleItems(project) {

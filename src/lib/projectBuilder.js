@@ -3,6 +3,7 @@ import { defaultResponsible } from "./itemHelpers.js";
 import { hydrateLinePhoto } from "./photoHelpers.js";
 import { groupLabel, materialCompositionGroup } from "../../shared/stellageComposition.js";
 import { projectStellageLinesFromCatalog, stellageModulePhoto, resolveStellagePhoto } from "./stellageCatalogConfig.js";
+import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
 
 export function blankLine(overrides = {}) {
   return {
@@ -209,7 +210,7 @@ export function buildProjectFromBuilder({
         group: groupLabel(ln.subcategory),
       })),
     });
-    for (const line of activeLines(st.items)) {
+    for (const line of activeLines(syncFastenersFromCrabs(st.items))) {
       const baseQty = Number(line.qty) || 0;
       if (baseQty <= 0) continue;
       pushLine({ ...line, qty: Math.round(baseQty * stCount * 100) / 100 }, section);
@@ -220,7 +221,7 @@ export function buildProjectFromBuilder({
     for (const sec of farmSections) {
       const sectionName = sec.sectionName || sec.name;
       const defaultResp = sec.defaultResponsible || "";
-      for (const line of activeLines(sec.items)) {
+      for (const line of activeLines(syncFastenersFromCrabs(sec.items))) {
         if ((Number(line.qty) || 0) <= 0) continue;
         pushLine(
           { ...line, responsible: line.responsible || defaultResp || undefined },

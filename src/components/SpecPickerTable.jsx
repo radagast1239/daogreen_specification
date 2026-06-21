@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import { groupLabel, STELLAGE_GROUPS } from "../../shared/stellageComposition.js";
+import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
+import { profilePipeSubtitle } from "../lib/materialDisplay.js";
 import { CATEGORIES } from "../data/modules.js";
 import { isExhaustFanName, isSplitSystemName } from "../lib/materialSpecs.js";
 import { roomLabel } from "../lib/roomHelpers.js";
@@ -146,6 +148,11 @@ export default function SpecPickerTable({
   const [savingId, setSavingId] = useState(null);
   const [savingNew, setSavingNew] = useState(false);
 
+  const emitLines = useCallback(
+    (next) => onChange(syncFastenersFromCrabs(next)),
+    [onChange]
+  );
+
   /** Все активные материалы базы (без привязки к модулю/разделу) */
   const catalog = useMemo(() => {
     const ql = q.trim().toLowerCase();
@@ -200,7 +207,7 @@ export default function SpecPickerTable({
     return ordered;
   }, [visibleLines, showCompositionGroups, stellageGroups]);
 
-  const setAll = (included) => onChange(lines.map((ln) => ({ ...ln, included })));
+  const setAll = (included) => emitLines(lines.map((ln) => ({ ...ln, included })));
 
   const toggleLine = (ln, included) => {
     const patch = { included };
@@ -212,7 +219,7 @@ export default function SpecPickerTable({
         patch.photoUrl = img;
       }
     }
-    onChange(patchLine(lines, ln.id, patch));
+    emitLines(patchLine(lines, ln.id, patch));
   };
 
   const openPicker = () => {
@@ -241,7 +248,7 @@ export default function SpecPickerTable({
     if (!pickedIds.size) return;
     const toAdd = materials.filter((m) => pickedIds.has(m.id) && !existingMaterialIds.has(m.id));
     if (!toAdd.length) return;
-    onChange([
+    emitLines([
       ...lines,
       ...toAdd.map((m) =>
         lineFromMaterial(m, {
@@ -257,7 +264,7 @@ export default function SpecPickerTable({
 
   const addFromCatalog = (mat) => {
     if (lines.some((ln) => ln.materialId === mat.id)) return;
-    onChange([...lines, lineFromMaterial(mat, { included: true })]);
+    emitLines([...lines, lineFromMaterial(mat, { included: true })]);
     setPicker(false);
     setQ("");
     setPickedIds(new Set());
@@ -269,7 +276,7 @@ export default function SpecPickerTable({
     setSavingId(ln.id);
     try {
       const mat = await onSaveMaterial(lineToMaterialPayload(ln, mod, farmSectionId));
-      onChange(patchLine(lines, ln.id, syncLineFromMaterial(ln, mat)));
+      emitLines(patchLine(lines, ln.id, syncLineFromMaterial(ln, mat)));
     } catch (e) {
       alert(e.message || "Не удалось сохранить в базу");
     } finally {
@@ -279,7 +286,7 @@ export default function SpecPickerTable({
 
   const createNewInBase = async () => {
     if (!onSaveMaterial) {
-      onChange([...lines, blankLine({ ...newForm, included: true })]);
+      emitLines([...lines, blankLine({ ...newForm, included: true })]);
       setNewOpen(false);
       setNewForm(emptyNew());
       return;
@@ -298,7 +305,7 @@ export default function SpecPickerTable({
           farmSectionId
         )
       );
-      onChange([
+      emitLines([
         ...lines,
         lineFromMaterial(mat, {
           included: true,
@@ -403,7 +410,7 @@ export default function SpecPickerTable({
                               if (!file) return;
                               try {
                                 const { url } = await api.uploadPhoto(file);
-                                onChange(patchLine(lines, ln.id, { imageUrl: url, photoUrl: url }));
+                                emitLines(patchLine(lines, ln.id, { imageUrl: url, photoUrl: url }));
                               } catch (err) {
                                 alert(err.message || "Ошибка загрузки");
                               }
@@ -424,16 +431,21 @@ export default function SpecPickerTable({
                           className="spec-cell-input"
                           value={ln.name}
                           placeholder="наименование"
-                          onChange={(e) => onChange(patchLine(lines, ln.id, { name: e.target.value }))}
+                          onChange={(e) => emitLines(patchLine(lines, ln.id, { name: e.target.value }))}
                         />
                         <SpecFields
                           ln={ln}
                           disabled={!ln.included}
-                          onPatch={(patch) => onChange(patchLine(lines, ln.id, patch))}
+                          onPatch={(patch) => emitLines(patchLine(lines, ln.id, patch))}
                         />
                         {!ln.materialId && ln.name?.trim() && (
                           <span className="muted" style={{ fontSize: 10, display: "block", marginTop: 2 }}>
                             не в базе
+                          </span>
+                        )}
+                        {profilePipeSubtitle(ln) && (
+                          <span className="muted" style={{ fontSize: 10, display: "block", marginTop: 2 }}>
+                            {profilePipeSubtitle(ln)}
                           </span>
                         )}
                       </td>
@@ -442,7 +454,7 @@ export default function SpecPickerTable({
                           className="spec-cell-input"
                           value={ln.category || "Прочее"}
                           disabled={!ln.included}
-                          onChange={(e) => onChange(patchLine(lines, ln.id, { category: e.target.value }))}
+                          onChange={(e) => emitLines(patchLine(lines, ln.id, { category: e.target.value }))}
                         >
                           {categories.map((c) => (
                             <option key={c} value={c}>{c}</option>
@@ -454,7 +466,7 @@ export default function SpecPickerTable({
                           className="spec-cell-input"
                           value={ln.supplier || ""}
                           disabled={!ln.included}
-                          onChange={(e) => onChange(patchLine(lines, ln.id, { supplier: e.target.value }))}
+                          onChange={(e) => emitLines(patchLine(lines, ln.id, { supplier: e.target.value }))}
                         >
                           <option value="">—</option>
                           {suppliers.map((s) => (
@@ -468,7 +480,7 @@ export default function SpecPickerTable({
                             className="spec-cell-input spec-cell-input--sm"
                             value={ln.unit}
                             disabled={!ln.included}
-                            onChange={(e) => onChange(patchLine(lines, ln.id, { unit: e.target.value }))}
+                            onChange={(e) => emitLines(patchLine(lines, ln.id, { unit: e.target.value }))}
                           >
                             {unitOptions.map((u) => (
                               <option key={u} value={u}>{u}</option>
@@ -478,7 +490,7 @@ export default function SpecPickerTable({
                           <input
                             className="spec-cell-input spec-cell-input--sm"
                             value={ln.unit}
-                            onChange={(e) => onChange(patchLine(lines, ln.id, { unit: e.target.value }))}
+                            onChange={(e) => emitLines(patchLine(lines, ln.id, { unit: e.target.value }))}
                           />
                         )}
                       </td>
@@ -489,7 +501,7 @@ export default function SpecPickerTable({
                             value={ln.subcategory || ""}
                             disabled={!ln.included}
                             onChange={(e) =>
-                              onChange(patchLine(lines, ln.id, { subcategory: e.target.value }))
+                              emitLines(patchLine(lines, ln.id, { subcategory: e.target.value }))
                             }
                           >
                             <option value="">—</option>
@@ -505,7 +517,7 @@ export default function SpecPickerTable({
                             className="spec-cell-input"
                             value={ln.roomId || ""}
                             disabled={!ln.included}
-                            onChange={(e) => onChange(patchLine(lines, ln.id, { roomId: e.target.value }))}
+                            onChange={(e) => emitLines(patchLine(lines, ln.id, { roomId: e.target.value }))}
                           >
                             <option value="">—</option>
                             {rooms.map((r) => (
@@ -523,7 +535,7 @@ export default function SpecPickerTable({
                           step="any"
                           value={ln.qty}
                           disabled={!ln.included}
-                          onChange={(e) => onChange(patchLine(lines, ln.id, { qty: Number(e.target.value) || 0 }))}
+                          onChange={(e) => emitLines(patchLine(lines, ln.id, { qty: Number(e.target.value) || 0 }))}
                         />
                       </td>
                       )}
@@ -535,7 +547,7 @@ export default function SpecPickerTable({
                           step="any"
                           value={ln.price}
                           disabled={!ln.included}
-                          onChange={(e) => onChange(patchLine(lines, ln.id, { price: Number(e.target.value) || 0 }))}
+                          onChange={(e) => emitLines(patchLine(lines, ln.id, { price: Number(e.target.value) || 0 }))}
                         />
                       </td>
                       <td>
@@ -544,7 +556,7 @@ export default function SpecPickerTable({
                           value={ln.link || ""}
                           placeholder="ссылка"
                           disabled={!ln.included}
-                          onChange={(e) => onChange(patchLine(lines, ln.id, { link: e.target.value }))}
+                          onChange={(e) => emitLines(patchLine(lines, ln.id, { link: e.target.value }))}
                         />
                       </td>
                       <td className="row" style={{ gap: 2, justifyContent: "flex-end" }}>
@@ -563,7 +575,7 @@ export default function SpecPickerTable({
                           type="button"
                           className="btn btn-ghost btn-sm"
                           title="Удалить строку"
-                          onClick={() => onChange(lines.filter((x) => x.id !== ln.id))}
+                          onClick={() => emitLines(lines.filter((x) => x.id !== ln.id))}
                         >
                           ✕
                         </button>
@@ -725,7 +737,7 @@ export default function SpecPickerTable({
                             </td>
                             <td style={{ width: 52 }}>
                               {src ? (
-                                <img src={src} alt="" className="thumb-img" style={{ width: 40, height: 40 }} />
+                                <img src={src} alt="" className="thumb-img" style={{ width: 48, height: 32, objectFit: "cover" }} />
                               ) : (
                                 <div className="thumb" style={{ width: 40, height: 40, fontSize: 16 }}>
                                   {(m.name || "?").charAt(0)}
@@ -738,6 +750,11 @@ export default function SpecPickerTable({
                                 {m.module || "—"}
                                 {m.supplier ? ` · ${m.supplier}` : ""}
                               </div>
+                              {profilePipeSubtitle(m) && (
+                                <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>
+                                  {profilePipeSubtitle(m)}
+                                </div>
+                              )}
                             </td>
                             <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
                               {m.unit}

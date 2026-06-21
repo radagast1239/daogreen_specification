@@ -41,7 +41,8 @@ const STEPS = [
   { id: "stellages", label: "2. Стеллажи" },
   { id: "general", label: "3. Ферма целиком" },
   { id: "cooling", label: "4. Расчёт охлаждения" },
-  { id: "review", label: "5. Создание" },
+  { id: "consumables", label: "5. Расходные материалы" },
+  { id: "review", label: "6. Создание" },
 ];
 
 export default function ProjectBuilderPage() {
@@ -97,7 +98,7 @@ export default function ProjectBuilderPage() {
   const setManual = (k, v) =>
     setForm((f) => ({ ...f, manualParams: { ...(f.manualParams || {}), [k]: v } }));
   const floorPlanUrl = form.manualParams?.floorPlanUrl || "";
-  const showFloorPlanPin = (step === "general" || step === "cooling" || step === "review") && !!floorPlanUrl;
+  const showFloorPlanPin = (step === "general" || step === "cooling" || step === "consumables" || step === "review") && !!floorPlanUrl;
 
   useEffect(() => {
     Promise.all([api.getPresets(), api.getSettings(), api.getSuppliers()]).then(([p, s, sup]) => {
@@ -606,6 +607,37 @@ export default function ProjectBuilderPage() {
           />
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button type="button" className="btn" onClick={() => setStep("general")}>← Ферма целиком</button>
+            <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setStep("consumables")}>
+              Расходные материалы →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === "consumables" && (
+        <div className="card" style={{ padding: 20 }}>
+          <h3 style={{ marginTop: 0 }}>Расходные материалы</h3>
+          <p className="muted" style={{ fontSize: 13, marginBottom: 16 }}>
+            Ссылка на корзину с расходниками (Ozon, Wildberries, поставщик) — сохранится в проекте и будет видна в спецификации.
+          </p>
+          <label className="field" style={{ display: "block", maxWidth: 640 }}>
+            Ссылка на корзину / список расходников
+            <input
+              type="url"
+              placeholder="https://…"
+              value={form.manualParams?.consumablesCartUrl || ""}
+              onChange={(e) => setManual("consumablesCartUrl", e.target.value)}
+            />
+          </label>
+          {form.manualParams?.consumablesCartUrl && (
+            <p style={{ fontSize: 13, marginTop: 12 }}>
+              <a href={form.manualParams.consumablesCartUrl} target="_blank" rel="noreferrer">
+                Открыть корзину ↗
+              </a>
+            </p>
+          )}
+          <div className="toolbar" style={{ marginTop: 20 }}>
+            <button type="button" className="btn" onClick={() => setStep("cooling")}>← Расчёт охлаждения</button>
             <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setStep("review")}>
               Проверить →
             </button>
@@ -646,12 +678,20 @@ export default function ProjectBuilderPage() {
               Охлаждение: <strong>{Math.round(coolingCalc.totalKwSafety * 10) / 10} кВт</strong>
               {form.manualParams?.coolingPower ? ` (сохранено ${form.manualParams.coolingPower} кВт)` : ""}
             </li>
+            {form.manualParams?.consumablesCartUrl && (
+              <li>
+                Корзина расходников:{" "}
+                <a href={form.manualParams.consumablesCartUrl} target="_blank" rel="noreferrer">
+                  открыть ↗
+                </a>
+              </li>
+            )}
           </ul>
           {!canCreate && (
             <p style={{ color: "var(--danger)", fontSize: 13 }}>Нужно название и хотя бы одна позиция.</p>
           )}
           <div className="toolbar" style={{ marginTop: 16 }}>
-            <button type="button" className="btn" onClick={() => setStep("cooling")}>← Назад</button>
+            <button type="button" className="btn" onClick={() => setStep("consumables")}>← Назад</button>
             <button type="button" className="btn btn-primary" disabled={!canCreate || saving} onClick={create}>
               {saving ? "Создание…" : "Создать проект"}
             </button>

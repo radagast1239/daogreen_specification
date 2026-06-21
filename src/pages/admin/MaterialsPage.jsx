@@ -11,6 +11,7 @@ import { useToast } from "../../components/Toast.jsx";
 import ImportPanel from "../../components/ImportPanel.jsx";
 import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import { downloadCSV } from "../../lib/export.js";
+import { profilePipeSubtitle } from "../../lib/materialDisplay.js";
 
 const ITEM_TYPES = [
   ["material", "Материал"],
@@ -75,7 +76,12 @@ export default function MaterialsPage() {
     });
   }, []);
 
-  const modules = [...new Set(state.materials.map((m) => m.module))];
+  const modules = useMemo(() => {
+    const names = new Set();
+    for (const mod of state.modules) names.add(mod.name);
+    for (const m of state.materials) if (m.module) names.add(m.module);
+    return [...names].sort((a, b) => a.localeCompare(b, "ru"));
+  }, [state.modules, state.materials]);
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
@@ -214,7 +220,14 @@ export default function MaterialsPage() {
                         <span className="muted" style={{ fontSize: 11 }}>нет фото</span>
                       )}
                     </td>
-                    <td style={{ minWidth: 220 }} className="material-name">{m.name}</td>
+                    <td style={{ minWidth: 220 }} className="material-name">
+                      {m.name}
+                      {profilePipeSubtitle(m) && (
+                        <div className="muted" style={{ fontSize: 11, marginTop: 4, fontWeight: 400 }}>
+                          {profilePipeSubtitle(m)}
+                        </div>
+                      )}
+                    </td>
                     <td className="muted" style={{ fontSize: 12 }}>{m.module}</td>
                     <td>{m.unit}</td>
                     <td className="right">
@@ -322,7 +335,11 @@ export default function MaterialsPage() {
           </div>
           <div className="field">
             <label>Модуль / раздел</label>
-            <input value={editing.module} onChange={(e) => setEditing({ ...editing, module: e.target.value })} />
+            <select value={editing.module} onChange={(e) => setEditing({ ...editing, module: e.target.value })}>
+              {modules.map((modName) => (
+                <option key={modName} value={modName}>{modName}</option>
+              ))}
+            </select>
           </div>
           <div className="field">
             <label>Поставщик</label>

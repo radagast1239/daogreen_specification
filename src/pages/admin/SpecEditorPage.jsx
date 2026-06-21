@@ -533,6 +533,21 @@ function SpecTab({
         />
       </Collapsible>
 
+      <Collapsible title="Корзина расходников" defaultOpen={!!manualParams?.consumablesCartUrl}>
+        <p className="muted" style={{ fontSize: 12, margin: "0 0 10px" }}>
+          Ссылка на собранную корзину расходных материалов (из мастера «Новый проект»).
+        </p>
+        <input
+          type="url"
+          className="spec-cell-input"
+          placeholder="https://…"
+          value={manualParams?.consumablesCartUrl || ""}
+          onChange={(e) =>
+            onManualParamsChange({ ...(manualParams || {}), consumablesCartUrl: e.target.value })
+          }
+        />
+      </Collapsible>
+
       <div className="spec-quick-filters no-print">
         <span className="muted" style={{ fontSize: 12 }}>Быстрый фильтр:</span>
         {[
