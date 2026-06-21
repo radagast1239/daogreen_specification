@@ -67,6 +67,8 @@ const ICON_PRESETS = ["📦", "🌱", "💧", "⚡", "🌡️", "🔧", "🏗️
 
 const TYPE_LABEL = Object.fromEntries(MODULE_TYPES.map((t) => [t.id, t.label]));
 
+const PROTECTED_MODULE_NAMES = new Set(["Общая закупка на ферму"]);
+
 const emptyModuleForm = () => ({
   name: "",
   type: "general",
@@ -112,6 +114,7 @@ export default function ModulesPage() {
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [showArchived, setShowArchived] = useState(false);
+  const [selectedModIds, setSelectedModIds] = useState(() => new Set());
   const [editingMod, setEditingMod] = useState(null);
   const [modForm, setModForm] = useState(emptyModuleForm);
   const [modSaving, setModSaving] = useState(false);
@@ -430,6 +433,33 @@ export default function ModulesPage() {
 
   const visibleMods = showArchived ? mods : mods.filter((m) => m.active !== false);
 
+  const archivableMods = useMemo(
+    () => visibleMods.filter((m) => m.active !== false && !PROTECTED_MODULE_NAMES.has(m.name)),
+    [visibleMods]
+  );
+
+  const archivedVisibleMods = useMemo(
+    () => visibleMods.filter((m) => m.active === false),
+    [visibleMods]
+  );
+
+  const toggleModSelection = (id) => {
+    setSelectedModIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllArchivable = () => {
+    if (selectedModIds.size >= archivableMods.length) {
+      setSelectedModIds(new Set());
+    } else {
+      setSelectedModIds(new Set(archivableMods.map((m) => m.id)));
+    }
+  };
+
   const farmSectionLabel = (id) => {
     if (!id) return "—";
     return farmSections.find((s) => s.id === id)?.name || id;
@@ -475,9 +505,54 @@ export default function ModulesPage() {
   };
 
   const handleArchiveModule = async (m) => {
-    if (!window.confirm(`Архивировать модуль «${m.name}»? Материалы останутся в базе.`)) return;
+    if (PROTECTED_MODULE_NAMES.has(m.name)) {
+      alert(`Модуль «${m.name}» нельзя убрать — он нужен для сборки проекта.`);
+      return;
+    }
+    const n = m.materialCount || 0;
+    const extra =
+      n > 0
+        ? `\n\n${n} материал(ов) останутся в базе (раздел «Материалы»). Их можно перенести в другой модуль.`
+        : "\n\nМатериалы в базе не затронуты.";
+    if (!window.confirm(`Убрать модуль «${m.name}» из списка?${extra}`)) return;
     await api.archiveModule(m.id);
+    setSelectedModIds((prev) => {
+      const next = new Set(prev);
+      next.delete(m.id);
+      return next;
+    });
     if (editingMod?.id === m.id) setEditingMod(null);
+    await reload();
+    await actions.refresh();
+  };
+
+  const handleBulkArchive = async () => {
+    const picked = archivableMods.filter((m) => selectedModIds.has(m.id));
+    if (!picked.length) return;
+    const totalMats = picked.reduce((s, m) => s + (m.materialCount || 0), 0);
+    const names = picked.map((m) => `• ${m.name}`).join("\n");
+    const extra =
+      totalMats > 0
+        ? `\n\n${totalMats} материал(ов) останутся в базе — ищите их в «Материалы».`
+        : "";
+    if (
+      !window.confirm(
+        `Убрать из списка ${picked.length} модул(ей)?\n\n${names}${extra}\n\nМодуль не удаляется навсегда — можно вернуть через «Показать архив».`
+      )
+    )
+      return;
+    for (const m of picked) await api.archiveModule(m.id);
+    setSelectedModIds(new Set());
+    await reload();
+    await actions.refresh();
+  };
+
+  const handleBulkRestore = async () => {
+    const picked = archivedVisibleMods.filter((m) => selectedModIds.has(m.id));
+    if (!picked.length) return;
+    if (!window.confirm(`Вернуть ${picked.length} модул(ей) из архива?`)) return;
+    for (const m of picked) await api.restoreModule(m.id);
+    setSelectedModIds(new Set());
     await reload();
     await actions.refresh();
   };
@@ -781,26 +856,54 @@ export default function ModulesPage() {
 
       {tab === "catalog" && !editing && !editingSection && !editingMod && (
         <div className="content">
-          <div className="toolbar" style={{ marginBottom: 14 }}>
+          <div className="toolbar" style={{ marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
             <button type="button" className="btn btn-primary btn-sm" onClick={openNewModule}>
               ＋ Новый модуль
             </button>
+            {selectedModIds.size > 0 && archivableMods.some((m) => selectedModIds.has(m.id)) && (
+              <button type="button" className="btn btn-sm" onClick={handleBulkArchive}>
+                В архив ({archivableMods.filter((m) => selectedModIds.has(m.id)).length})
+              </button>
+            )}
+            {selectedModIds.size > 0 && archivedVisibleMods.some((m) => selectedModIds.has(m.id)) && (
+              <button type="button" className="btn btn-sm" onClick={handleBulkRestore}>
+                Вернуть из архива ({archivedVisibleMods.filter((m) => selectedModIds.has(m.id)).length})
+              </button>
+            )}
             <label className="row" style={{ gap: 6, marginLeft: "auto", fontSize: 13 }}>
               <input
                 type="checkbox"
                 checked={showArchived}
-                onChange={(e) => setShowArchived(e.target.checked)}
+                onChange={(e) => {
+                  setShowArchived(e.target.checked);
+                  setSelectedModIds(new Set());
+                }}
               />
               Показать архив
             </label>
           </div>
           <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
-            Модули — это «листы» базы материалов. Тип, технология и раздел фермы помогают при сборке проекта.
+            Модули — «листы» каталога при сборке проекта. <strong>В архив</strong> = убрать из списка при
+            создании проекта. <strong>Материалы не удаляются</strong> — остаются в «Материалы» с тем же названием
+            модуля; при необходимости перенесите их в другой модуль.
           </p>
           <div className="card" style={{ overflowX: "auto" }}>
             <table className="spec">
               <thead>
                 <tr>
+                  <th style={{ width: 36 }}>
+                    {archivableMods.length > 0 && (
+                      <input
+                        type="checkbox"
+                        title="Выбрать все"
+                        checked={
+                          archivableMods.length > 0 &&
+                          archivableMods.every((m) => selectedModIds.has(m.id))
+                        }
+                        onChange={toggleSelectAllArchivable}
+                      />
+                    )}
+                  </th>
                   <th style={{ width: 120 }}>Модуль</th>
                   <th>Тип</th>
                   <th>Технология</th>
@@ -812,6 +915,17 @@ export default function ModulesPage() {
               <tbody>
                 {visibleMods.map((m) => (
                   <tr key={m.id} style={m.active === false ? { opacity: 0.55 } : undefined}>
+                    <td className="center">
+                      {(m.active === false || !PROTECTED_MODULE_NAMES.has(m.name)) && (
+                        <input
+                          type="checkbox"
+                          checked={selectedModIds.has(m.id)}
+                          onChange={() => toggleModSelection(m.id)}
+                          title={PROTECTED_MODULE_NAMES.has(m.name) ? "Системный модуль" : "Выбрать"}
+                          disabled={PROTECTED_MODULE_NAMES.has(m.name)}
+                        />
+                      )}
+                    </td>
                     <td>
                       <ModuleBadge mod={m} />
                       {m.active === false && (
@@ -834,9 +948,11 @@ export default function ModulesPage() {
                           Восст.
                         </button>
                       ) : (
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleArchiveModule(m)}>
-                          Архив
-                        </button>
+                        !PROTECTED_MODULE_NAMES.has(m.name) && (
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleArchiveModule(m)}>
+                            В архив
+                          </button>
+                        )
                       )}
                     </td>
                   </tr>
@@ -943,11 +1059,20 @@ export default function ModulesPage() {
             <button type="button" className="btn" onClick={() => setEditingMod(null)}>
               Отмена
             </button>
+            {editingMod.id && editingMod.active !== false && !PROTECTED_MODULE_NAMES.has(editingMod.name) && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => handleArchiveModule(editingMod)}
+              >
+                В архив
+              </button>
+            )}
             {editingMod.id && editingMod.active !== false && (
               <button
                 type="button"
                 className="btn btn-ghost"
-                style={{ marginLeft: "auto" }}
+                style={{ marginLeft: editingMod.active !== false && !PROTECTED_MODULE_NAMES.has(editingMod.name) ? 0 : "auto" }}
                 onClick={() => handleDuplicateModule(editingMod)}
               >
                 Дублировать с материалами

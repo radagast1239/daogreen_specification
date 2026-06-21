@@ -15,16 +15,6 @@ import { profilePipeSubtitle } from "../../lib/materialDisplay.js";
 import ProfilePipeCutsEditor from "../../components/ProfilePipeCutsEditor.jsx";
 import { isProfilePipeName } from "../../../shared/profilePipeCuts.js";
 
-const ITEM_TYPES = [
-  ["material", "Материал"],
-  ["equipment", "Оборудование"],
-  ["consumable", "Расходник"],
-  ["work", "Работа"],
-  ["delivery", "Доставка"],
-];
-
-const TAG_PRESETS = []; // unused — see tagPresets prop
-
 const blank = {
   name: "",
   unit: "шт.",
@@ -59,7 +49,6 @@ const blank = {
 export default function MaterialsPage() {
   const { state, actions } = useStore();
   const ref = state.reference;
-  const tagPresets = ref.tags;
   const { confirm } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = ["import", "duplicates"].includes(searchParams.get("tab")) ? searchParams.get("tab") : "base";
@@ -327,14 +316,6 @@ export default function MaterialsPage() {
                 ))}
               </select>
             </div>
-            <div className="field">
-              <label>Тип</label>
-              <select value={editing.itemType} onChange={(e) => setEditing({ ...editing, itemType: e.target.value })}>
-                {ITEM_TYPES.map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
-                ))}
-              </select>
-            </div>
           </div>
           <div className="field">
             <label>Модуль / раздел</label>
@@ -452,7 +433,6 @@ export default function MaterialsPage() {
               <textarea rows={2} value={editing.clientNote} onChange={(e) => setEditing({ ...editing, clientNote: e.target.value })} />
             </div>
           )}
-          <TagsEditor editing={editing} setEditing={setEditing} tagPresets={tagPresets} />
           <div className="form-grid">
             <div className="field">
               <label>Мин. заказ</label>
@@ -492,55 +472,6 @@ export default function MaterialsPage() {
         </Modal>
       )}
     </>
-  );
-}
-
-function TagsEditor({ editing, setEditing, tagPresets = [] }) {
-  const [tagDraft, setTagDraft] = useState("");
-  const tags = Array.isArray(editing.tags) ? editing.tags : [];
-
-  const addTag = (raw) => {
-    const t = raw.trim().toLowerCase();
-    if (!t || tags.includes(t)) return;
-    setEditing({ ...editing, tags: [...tags, t] });
-    setTagDraft("");
-  };
-
-  return (
-    <div className="field">
-      <label>Теги</label>
-      <div className="row wrap" style={{ gap: 6, marginBottom: 8 }}>
-        {tags.map((t) => (
-          <span key={t} className="chip chip--neutral" style={{ gap: 4 }}>
-            {t}
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              style={{ padding: "0 4px", minHeight: 0 }}
-              onClick={() => setEditing({ ...editing, tags: tags.filter((x) => x !== t) })}
-            >
-              ✕
-            </button>
-          </span>
-        ))}
-      </div>
-      <div className="row wrap" style={{ gap: 6, marginBottom: 8 }}>
-        {tagPresets.filter((p) => !tags.includes(p)).map((p) => (
-          <button key={p} type="button" className="btn btn-sm btn-ghost" onClick={() => addTag(p)}>
-            + {p}
-          </button>
-        ))}
-      </div>
-      <div className="row" style={{ gap: 8 }}>
-        <input
-          value={tagDraft}
-          placeholder="свой тег"
-          onChange={(e) => setTagDraft(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTag(tagDraft))}
-        />
-        <button type="button" className="btn btn-sm" onClick={() => addTag(tagDraft)}>Добавить</button>
-      </div>
-    </div>
   );
 }
 
