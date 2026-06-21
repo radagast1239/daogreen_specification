@@ -13,6 +13,7 @@ import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import { downloadCSV } from "../../lib/export.js";
 import { profilePipeSubtitle } from "../../lib/materialDisplay.js";
 import ProfilePipeCutsEditor from "../../components/ProfilePipeCutsEditor.jsx";
+import PhotoUploadField from "../../components/PhotoUploadField.jsx";
 import { isProfilePipeName } from "../../../shared/profilePipeCuts.js";
 
 const blank = {
@@ -399,38 +400,12 @@ export default function MaterialsPage() {
             <label>Ссылка на товар</label>
             <input value={editing.link} onChange={(e) => setEditing({ ...editing, link: e.target.value })} />
           </div>
-          <div className="field">
-            <label>Фото</label>
-            <input
-              value={editing.imageUrl || editing.photoUrl || ""}
-              onChange={(e) => setEditing({ ...editing, imageUrl: e.target.value, photoUrl: e.target.value })}
-              placeholder="URL или загрузите файл"
-            />
-            <div className="row" style={{ marginTop: 8, gap: 8 }}>
-              <label className="btn btn-sm">
-                Загрузить файл
-                <input
-                  type="file"
-                  accept="image/*"
-                  hidden
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    const { url } = await api.uploadPhoto(file);
-                    setEditing((ed) => ({ ...ed, imageUrl: url, photoUrl: url }));
-                  }}
-                />
-              </label>
-            </div>
-            {(editing.imageUrl || editing.photoUrl) && (
-              <img
-                src={photoSrc(editing.imageUrl || editing.photoUrl)}
-                alt=""
-                className="thumb-img"
-                style={{ marginTop: 8 }}
-              />
-            )}
-          </div>
+          <PhotoUploadField
+            label="Фото"
+            value={editing.imageUrl || editing.photoUrl || ""}
+            pasteAnywhere
+            onChange={(url) => setEditing({ ...editing, imageUrl: url, photoUrl: url })}
+          />
           <div className="field">
             <label>НДС, %</label>
             <select value={editing.vatRate || 0} onChange={(e) => setEditing({ ...editing, vatRate: Number(e.target.value) })}>

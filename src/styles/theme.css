@@ -452,6 +452,11 @@ body.nav-open { overflow: hidden; }
   width: 56px; height: 56px; border-radius: var(--radius-sm); border: 1px dashed var(--line);
   display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 20px;
 }
+.photo-paste-target:focus {
+  outline: 2px solid var(--brand, #116355);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
 .stellage-list-row { align-items: center; }
 
 .material-picker-list { max-height: min(62vh, 520px); overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); }

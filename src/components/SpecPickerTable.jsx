@@ -16,6 +16,7 @@ import {
 import { photoSrc, api } from "../lib/api.js";
 import { linePhotoSrc, resolveLinePhoto } from "../lib/photoHelpers.js";
 import { Modal } from "./ui.jsx";
+import PhotoUploadField from "./PhotoUploadField.jsx";
 
 function materialUpdatedTs(m) {
   if (!m?.updatedAt) return 0;
@@ -389,36 +390,15 @@ export default function SpecPickerTable({
                       </td>
                     </tr>
                   )}
-                  {grpLines.map((ln) => {
-                    const src = linePhotoSrc(ln, materials);
-                    return (
+                  {grpLines.map((ln) => (
                     <tr key={ln.id} className={ln.included ? "" : "spec-row-off"}>
                       <td className="spec-photo">
-                        {src ? (
-                          <img src={src} alt="" className="thumb-img" />
-                        ) : (
-                          <div className="thumb" style={{ fontSize: 22 }}>
-                            {(ln.name || "?").trim().charAt(0).toUpperCase()}
-                          </div>
-                        )}
-                        <label className="btn btn-ghost btn-sm" style={{ marginTop: 4, fontSize: 11, padding: "2px 6px" }} title="Загрузить фото">
-                          📷
-                          <input
-                            type="file"
-                            accept="image/*"
-                            hidden
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              if (!file) return;
-                              try {
-                                const { url } = await api.uploadPhoto(file);
-                                emitLines(patchLine(lines, ln.id, { imageUrl: url, photoUrl: url }));
-                              } catch (err) {
-                                alert(err.message || "Ошибка загрузки");
-                              }
-                            }}
-                          />
-                        </label>
+                        <PhotoUploadField
+                          compact
+                          showUrlInput={false}
+                          value={ln.imageUrl || ln.photoUrl || ""}
+                          onChange={(url) => emitLines(patchLine(lines, ln.id, { imageUrl: url, photoUrl: url }))}
+                        />
                       </td>
                       <td className="center">
                         <input
@@ -593,8 +573,7 @@ export default function SpecPickerTable({
                         </button>
                       </td>
                     </tr>
-                    );
-                  })}
+                  ))}
                 </React.Fragment>
               ))}
             </tbody>
