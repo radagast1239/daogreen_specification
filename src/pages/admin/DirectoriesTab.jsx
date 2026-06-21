@@ -134,12 +134,6 @@ export default function DirectoriesTab({ settings, onSaved }) {
       </p>
 
       <div className="card" style={{ padding: 16, marginBottom: 14 }}>
-        <h3 style={{ marginTop: 0 }}>Теги материалов</h3>
-        <StringListEditor items={ref.tags} onChange={(tags) => patch("tags", tags)} placeholder="охлаждение, NFT…" />
-        <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => resetSection("tags")}>Сброс</button>
-      </div>
-
-      <div className="card" style={{ padding: 16, marginBottom: 14 }}>
         <h3 style={{ marginTop: 0 }}>Единицы измерения</h3>
         <StringListEditor items={ref.units} onChange={(units) => patch("units", units)} placeholder="шт., м, м²…" />
         <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => patch("units", [...DEFAULT_UNITS])}>Стандартный набор</button>
