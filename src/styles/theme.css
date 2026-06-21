@@ -645,6 +645,152 @@ body.nav-open { overflow: hidden; }
   border-radius: 0 0 var(--radius) var(--radius);
   box-shadow: var(--shadow-lg);
 }
+/* Компактная шапка клиента */
+.client-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: 0 0 16px;
+  padding: 14px 20px 16px;
+  background: linear-gradient(135deg, var(--topbar-brand, #116355) 0%, color-mix(in srgb, var(--topbar-brand, #116355) 82%, #000) 100%);
+  color: #fff;
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+.client-topbar__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.client-topbar__brand {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+.client-topbar__logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: contain;
+  background: rgba(255,255,255,.12);
+  flex-shrink: 0;
+}
+.client-topbar__mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.client-topbar__eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.72);
+}
+.client-topbar__title {
+  font-size: clamp(1.05rem, 3vw, 1.35rem);
+  font-weight: 800;
+  margin: 2px 0 0;
+  line-height: 1.2;
+}
+.client-topbar__sub {
+  font-size: 12.5px;
+  color: rgba(255,255,255,.78);
+  margin: 2px 0 0;
+}
+.client-topbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.btn-ghost-light {
+  background: rgba(255,255,255,.12);
+  border-color: rgba(255,255,255,.25);
+  color: #fff;
+}
+.btn-ghost-light:hover {
+  background: rgba(255,255,255,.22);
+  border-color: rgba(255,255,255,.4);
+  color: #fff;
+}
+.client-topbar__version {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,.1);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.client-topbar__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+.client-topbar__stat {
+  background: rgba(255,255,255,.08);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.client-topbar__stat .k {
+  display: block;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: rgba(255,255,255,.65);
+  font-weight: 700;
+}
+.client-topbar__stat .v {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.client-topbar__progress {
+  margin-top: 10px;
+}
+.client-topbar__trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: rgba(255,255,255,.75);
+}
+.client-topbar__trust span::before {
+  content: "✓ ";
+  color: var(--client-accent, #7fc9a8);
+  font-weight: 700;
+}
+.client-purchase-panel { margin-top: 4px; }
+.client-purchase-modes--sub {
+  padding-top: 4px;
+  border-top: 1px dashed var(--line);
+  margin-top: 2px;
+}
+.client-purchase-section { margin-bottom: 8px; }
+.client-purchase-section > .collapsible__head {
+  background: var(--brand-tint);
+  border-color: color-mix(in srgb, var(--client-brand, var(--brand)) 25%, var(--line));
+}
+.client-purchase-subsection { margin-left: 12px; }
+.client-purchase-subsection > .collapsible__head {
+  background: #fff;
+  font-size: 13px;
+}
+.client-purchase-subsection .collapsible__title { font-weight: 600; font-size: 13px; }
+.client-merged-sources { padding: 6px 8px; background: var(--surface); border-radius: var(--radius-sm); border-left: 3px solid var(--client-brand, var(--brand)); }
 .client-hero__eyebrow {
   font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: #9ecdb8;
 }
@@ -719,6 +865,9 @@ body.nav-open { overflow: hidden; }
   .main-inner { padding: 60px 14px 36px; max-width: none; }
   .page-head h1 { font-size: 19px; }
   .client-hero { margin-left: -16px; margin-right: -16px; padding: 24px 18px; }
+  .client-topbar { margin-left: -16px; margin-right: -16px; padding: 12px 14px 14px; border-radius: 0; }
+  .client-topbar__stats { grid-template-columns: repeat(2, 1fr); }
+  .client-topbar__actions { width: 100%; }
   .card-item { grid-template-columns: var(--thumb-w) 1fr; }
   .form-grid { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }

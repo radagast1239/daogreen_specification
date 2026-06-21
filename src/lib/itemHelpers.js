@@ -1,5 +1,12 @@
 import { DONE_STATUSES, SPECIALIST_MAP } from "../data/modules.js";
 import { DEFAULT_RESPONSIBLE_ROLES } from "./referenceData.js";
+import { num } from "../store/helpers.js";
+
+const DONE = new Set(DONE_STATUSES);
+
+export function isBoughtStatus(status) {
+  return DONE.has(status);
+}
 
 export const RESPONSIBLE_OPTIONS = DEFAULT_RESPONSIBLE_ROLES;
 
@@ -74,8 +81,6 @@ export function applyMergedPurchaseFilter(rows, filterId) {
   });
 }
 
-import { num } from "../store/helpers.js";
-
 export function mergeSourcesLabel(sources = []) {
   const mods = [...new Set(sources.map((s) => s.module).filter(Boolean))];
   const detail = sources.map((s) => `${s.module} (${num(s.qty)})`).join(" · ");
@@ -83,6 +88,34 @@ export function mergeSourcesLabel(sources = []) {
   const stellage = mods.every((m) => /^стеллаж/i.test(String(m).trim()));
   const noun = stellage ? "стеллажей" : "модулей";
   return `из ${mods.length} ${noun}: ${detail}`;
+}
+
+export function summarizeMergedStatus(sourceItems = []) {
+  if (!sourceItems.length) return { status: "not_bought", mixed: false };
+  const unique = [...new Set(sourceItems.map((i) => i.status))];
+  if (unique.length === 1) return { status: unique[0], mixed: false };
+  if (sourceItems.every((i) => isPurchaseDone(i))) return { status: sourceItems[0].status, mixed: false };
+  const open = sourceItems.find((i) => !isPurchaseDone(i));
+  return { status: open?.status || "not_bought", mixed: true };
+}
+
+export function buildMergedSourceText(row) {
+  const unit = row.unit || "шт.";
+  const sources = row.sources || [];
+  const mods = [...new Set(sources.map((s) => s.module).filter(Boolean))];
+  const detail = sources.map((s) => `${s.module || "Раздел"} — ${num(s.qty)} ${unit}`).join("; ");
+  if (mods.length <= 1) return detail;
+  const stellage = mods.every((m) => /^стеллаж/i.test(String(m).trim()));
+  const noun = stellage ? "стеллажей" : "модулей";
+  return `из ${mods.length} ${noun}: ${detail}`;
+}
+
+export function isDetailPurchaseMode(mode) {
+  return mode === "modules";
+}
+
+export function isMergedPurchaseMode(mode) {
+  return mode !== "modules";
 }
 
 export function splitPurchaseItems(items) {

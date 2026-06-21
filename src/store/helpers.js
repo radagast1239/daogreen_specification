@@ -1,5 +1,13 @@
 import { DONE_STATUSES } from "../data/modules.js";
-import { lineNet, lineVat, lineGross, clientVisibleItems } from "../lib/itemHelpers.js";
+import {
+  lineNet,
+  lineVat,
+  lineGross,
+  clientVisibleItems,
+  buildMergedSourceText,
+  summarizeMergedStatus,
+} from "../lib/itemHelpers.js";
+import { resolveClientSection } from "../../shared/clientSections.js";
 
 export const uid = (p = "id") =>
   p + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -66,6 +74,24 @@ export function groupBy(items, key) {
   return [...map.entries()];
 }
 
+function finalizeMergedRow(row) {
+  const rep = row.sourceItems?.[0];
+  const resolved = resolveClientSection(rep || {});
+  row.clientSection = resolved.section;
+  row.clientSubsection = resolved.subsection || row.clientSubsection || "";
+  row.clientSectionLabel = resolved.label;
+  row.sourceIds = row.sourceItems.map((i) => i.id);
+  row.sourceCount = row.sourceItems.length;
+  for (const s of row.sources) {
+    s.unit = row.unit;
+  }
+  row.sourceText = buildMergedSourceText(row);
+  row.statusSummary = summarizeMergedStatus(row.sourceItems);
+  row.status = row.statusSummary.status;
+  if (!row.clientNote && rep?.clientNote) row.clientNote = rep.clientNote;
+  return row;
+}
+
 export function mergedPurchaseRows(items) {
   const map = new Map();
   for (const it of items || []) {
@@ -96,12 +122,18 @@ export function mergedPurchaseRows(items) {
     row.qty += Number(it.qty) || 0;
     row.sum += lineNet(it);
     row.sumVat += lineGross(it);
-    row.sources.push({ id: it.id, module: it.module, qty: Number(it.qty) || 0 });
+    row.sources.push({ id: it.id, module: it.module, qty: Number(it.qty) || 0, unit: it.unit });
     row.sourceItems.push(it);
   }
-  return [...map.values()].sort((a, b) => b.sumVat - a.sumVat);
+  return [...map.values()].map(finalizeMergedRow).sort((a, b) => b.sumVat - a.sumVat);
+}
+
+/** Склеенные строки для клиентского UI / Excel / PDF */
+export function mergedItemsForClient(project, items) {
+  const pool = items ?? clientVisibleItems(project);
+  return mergedPurchaseRows(pool);
 }
 
 export function mergedPurchaseList(project) {
-  return mergedPurchaseRows(clientVisibleItems(project));
+  return mergedItemsForClient(project);
 }

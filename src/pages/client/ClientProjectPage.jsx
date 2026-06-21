@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
-import { projectTotals, mergedPurchaseList, money } from "../../store/helpers.js";
+import { projectTotals, money } from "../../store/helpers.js";
 import { PURCHASE_STATUSES } from "../../data/modules.js";
 import { clientVisibleItems, lineGross } from "../../lib/itemHelpers.js";
 import { Progress, Empty } from "../../components/ui.jsx";
@@ -15,7 +15,7 @@ import { downloadClientWorkbook } from "../../lib/clientExcelExport.js";
 import { ClientSchemesViewer } from "../../components/ClientSchemesEditor.jsx";
 import ClientOverviewPanel from "../../components/client/ClientOverviewPanel.jsx";
 import ClientPurchasePanel, { ClientMergedList } from "../../components/client/ClientPurchasePanel.jsx";
-import { isBoughtStatus } from "../../components/client/ClientItemCard.jsx";
+import { isBoughtStatus } from "../../lib/itemHelpers.js";
 import { STELLAGE_GROUPS } from "../../../shared/stellageComposition.js";
 
 function clientPageStyle(branding) {
@@ -30,17 +30,12 @@ function clientPageStyle(branding) {
   };
 }
 
-function heroGradient(branding) {
-  const brand = branding.brandColor || "#116355";
-  return `linear-gradient(135deg, ${brand} 0%, ${brand}cc 50%, ${brand}99 100%)`;
-}
-
 export default function ClientProjectPage() {
   const { token } = useParams();
   const { state, actions } = useStore();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("overview");
-  const [purchaseMode, setPurchaseMode] = useState("categories");
+  const [purchaseMode, setPurchaseMode] = useState("all");
   const [purchaseFilter, setPurchaseFilter] = useState("all");
   const [showBought, setShowBought] = useState(false);
   const purchaseStatuses = data?.purchaseStatuses || PURCHASE_STATUSES;
@@ -154,7 +149,7 @@ export default function ClientProjectPage() {
   const stellageGroups = state.reference?.stellageGroups?.length ? state.reference.stellageGroups : STELLAGE_GROUPS;
   const delta = versionInfo?.summary?.delta;
 
-  const openPurchase = (mode = "categories") => {
+  const openPurchase = (mode = "all") => {
     setPurchaseMode(mode);
     setTab("purchase");
   };
@@ -175,14 +170,14 @@ export default function ClientProjectPage() {
     setData(fresh);
   };
 
-  const exportPdf = () =>
+  const exportPdf = (mode = "client_full") =>
     generateClientPurchasePdf({
       project,
       items: visibleItems,
       branding,
       purchaseStatuses,
       pageUrl: typeof window !== "undefined" ? window.location.href : "",
-      mode: "client",
+      mode,
     });
 
   const exportExcel = () =>
@@ -202,33 +197,71 @@ export default function ClientProjectPage() {
         </p>
       </div>
 
-      <header className="client-hero no-print" style={{ background: heroGradient(branding) }}>
-        <div className="client-hero__eyebrow">{heroEyebrow(branding)}</div>
-        <h1 className="client-hero__title">{project.name}</h1>
-        <p className="client-hero__sub">
-          {project.client}
-          {project.city ? ` · ${project.city}` : ""}
-          {project.version > 1 ? ` · версия ${project.version}` : ""}
-        </p>
+      <header className="client-topbar no-print" style={{ "--topbar-brand": branding.brandColor || "#116355" }}>
+        <div className="client-topbar__row">
+          <div className="client-topbar__brand">
+            {branding.logoUrl ? (
+              <img src={branding.logoUrl} alt="" className="client-topbar__logo" />
+            ) : (
+              <div className="client-topbar__mark">{(branding.companyName || "D").charAt(0)}</div>
+            )}
+            <div className="client-topbar__titles">
+              <div className="client-topbar__eyebrow">{heroEyebrow(branding)}</div>
+              <h1 className="client-topbar__title">{project.name}</h1>
+              <p className="client-topbar__sub">
+                {project.client}
+                {project.city ? ` · ${project.city}` : ""}
+                {project.version > 1 ? ` · v${project.version}` : ""}
+              </p>
+            </div>
+          </div>
+          <div className="client-topbar__actions">
+            <button type="button" className="btn btn-sm btn-ghost-light" onClick={exportExcel}>
+              Excel
+            </button>
+            <button type="button" className="btn btn-sm btn-ghost-light" onClick={() => exportPdf("client_full")}>
+              PDF
+            </button>
+            <button type="button" className="btn btn-sm btn-ghost-light" onClick={() => setTab("merged")}>
+              Всё к покупке
+            </button>
+          </div>
+        </div>
+        {versionInfo && delta != null && delta !== 0 && (
+          <div className="client-topbar__version">
+            Обновлено v{versionInfo.versionNumber}: Δ {delta > 0 ? "+" : ""}
+            {money(delta, project.currency)}
+          </div>
+        )}
+        <div className="client-topbar__stats">
+          <div className="client-topbar__stat">
+            <span className="k">Всего</span>
+            <span className="v num">{money(totals.budget, project.currency)}</span>
+          </div>
+          <div className="client-topbar__stat">
+            <span className="k">Куплено</span>
+            <span className="v num">{money(totals.spent, project.currency)}</span>
+          </div>
+          <div className="client-topbar__stat">
+            <span className="k">Осталось</span>
+            <span className="v num">{money(totals.remaining, project.currency)}</span>
+          </div>
+          <div className="client-topbar__stat">
+            <span className="k">Готовность</span>
+            <span className="v num">{totals.progress}%</span>
+          </div>
+        </div>
+        <div className="client-topbar__progress">
+          <Progress value={totals.progress} />
+        </div>
         {trustLines.length > 0 && (
-          <div className="client-trust">
+          <div className="client-topbar__trust">
             {trustLines.map((line) => (
               <span key={line}>{line}</span>
             ))}
           </div>
         )}
       </header>
-
-      <BudgetBar
-        project={project}
-        branding={branding}
-        totals={totals}
-        versionInfo={versionInfo}
-        delta={delta}
-        onExport={exportExcel}
-        onPdf={exportPdf}
-        onMerged={() => setTab("merged")}
-      />
 
       <div className="client-wrap">
       <ClientSchemesViewer manualParams={project.manualParams} />
@@ -294,19 +327,12 @@ export default function ClientProjectPage() {
           project={project}
           documents={documents}
           qrUrl={qrUrl}
-          onExportAll={exportExcel}
-          onExportMerged={exportExcel}
-          onPdf={exportPdf}
-          onPdfPlumber={() =>
-            generateClientPurchasePdf({
-              project,
-              items: visibleItems,
-              branding,
-              purchaseStatuses,
-              pageUrl: typeof window !== "undefined" ? window.location.href : "",
-              mode: "plumber",
-            })
-          }
+          onExportExcel={exportExcel}
+          onPdfFull={() => exportPdf("client_full")}
+          onPdfMerged={() => exportPdf("merged")}
+          onPdfPlumber={() => exportPdf("plumber")}
+          onPdfElectric={() => exportPdf("electric")}
+          onPdfInstaller={() => exportPdf("installer")}
         />
       )}
 
@@ -322,7 +348,7 @@ export default function ClientProjectPage() {
               branding={branding}
               activity={activity}
               qrUrl={qrUrl}
-              onOpenPurchase={() => openPurchase("categories")}
+              onOpenPurchase={() => openPurchase("all")}
             />
           )}
           {activeTab === "purchase" && (
@@ -348,7 +374,7 @@ export default function ClientProjectPage() {
           {activeTab === "merged" && (
             <div style={{ marginTop: 8 }}>
               <div className="toolbar no-print" style={{ marginBottom: 10 }}>
-                <span className="muted">Объединённые позиции: имя + ед. + поставщик + ссылка</span>
+                <span className="muted">Сводный список — одинаковые позиции объединены</span>
                 <button type="button" className="btn btn-sm" style={{ marginLeft: "auto" }} onClick={exportExcel}>
                   Excel ↓
                 </button>
@@ -358,6 +384,7 @@ export default function ClientProjectPage() {
                 items={filterAndSortPurchase(purchaseItems)}
                 patch={patch}
                 purchaseStatuses={purchaseStatuses}
+                groupBySection
               />
             </div>
           )}
@@ -387,95 +414,53 @@ function ClientBrandFooter({ branding }) {
   );
 }
 
-function BudgetBar({ project, branding, totals, versionInfo, delta, onExport, onPdf, onMerged }) {
-  const company = branding?.companyName || "Daogreen";
-  return (
-    <div className="budget-bar" style={{ background: `linear-gradient(135deg, ${branding?.brandColor || "#062920"}, #083028)` }}>
-      <div className="eyebrow" style={{ color: "#9ecdb8" }}>
-        {company} · закупочный список
-      </div>
-      <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4 }}>{project.name}</div>
-      <div style={{ fontSize: 12.5, color: "#9ecdb8" }}>
-        {project.client}
-        {project.city ? " · " + project.city : ""}
-        {project.version > 1 ? ` · v${project.version}` : ""}
-      </div>
-      {versionInfo && delta != null && delta !== 0 && (
-        <div className="version-banner">
-          Обновлено v{versionInfo.versionNumber}: Δ {delta > 0 ? "+" : ""}
-          {money(delta, project.currency)}
-        </div>
-      )}
-      <div className="nums client-stat-grid--4" style={{ marginTop: 12 }}>
-        <div>
-          <div className="k">Всего</div>
-          <div className="v num">{money(totals.budget, project.currency)}</div>
-        </div>
-        <div>
-          <div className="k">Куплено</div>
-          <div className="v num">{money(totals.spent, project.currency)}</div>
-        </div>
-        <div>
-          <div className="k">Осталось</div>
-          <div className="v num">{money(totals.remaining, project.currency)}</div>
-        </div>
-        <div>
-          <div className="k">Готовность</div>
-          <div className="v num">{totals.progress}%</div>
-        </div>
-      </div>
-      <div style={{ marginTop: 10 }}>
-        <Progress value={totals.progress} />
-      </div>
-      <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap" }}>
-        <button type="button" className="btn btn-sm" onClick={onExport}>
-          Скачать Excel
-        </button>
-        {onPdf && (
-          <button type="button" className="btn btn-sm" onClick={onPdf}>
-            Скачать PDF
-          </button>
-        )}
-        {onMerged && (
-          <button type="button" className="btn btn-sm" onClick={onMerged}>
-            Общий список
-          </button>
-        )}
-        <button type="button" className="btn btn-sm" onClick={printPDF}>
-          Печать
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function DocsTab({ documents, qrUrl, onExportAll, onExportMerged, onPdf, onPdfPlumber }) {
+function DocsTab({ documents, qrUrl, onExportExcel, onPdfFull, onPdfMerged, onPdfPlumber, onPdfElectric, onPdfInstaller }) {
   return (
     <div className="card" style={{ padding: 22, marginTop: 16 }}>
       <h3>Документы</h3>
       <p className="muted" style={{ fontSize: 13 }}>
-        Книга закупки в Excel (несколько листов), PDF по разделам, списки для специалистов.
+        Книга закупки в Excel (11 листов со склеенными строками) и PDF по разделам / для специалистов.
       </p>
-      <div className="row wrap" style={{ gap: 8, marginTop: 14 }}>
-        <button type="button" className="btn" onClick={onExportAll}>
-          Excel — книга закупки
-        </button>
-        <button type="button" className="btn" onClick={onExportMerged}>
-          Excel — повтор
-        </button>
-        {onPdf && (
-          <button type="button" className="btn" onClick={onPdf}>
-            PDF — полный
+      <div style={{ marginTop: 14 }}>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>Excel</div>
+        <div className="row wrap" style={{ gap: 8 }}>
+          <button type="button" className="btn" onClick={onExportExcel}>
+            Скачать книгу закупки
           </button>
-        )}
-        {onPdfPlumber && (
-          <button type="button" className="btn" onClick={onPdfPlumber}>
-            PDF — сантехник
+        </div>
+      </div>
+      <div style={{ marginTop: 16 }}>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>PDF</div>
+        <div className="row wrap" style={{ gap: 8 }}>
+          {onPdfFull && (
+            <button type="button" className="btn" onClick={onPdfFull}>
+              PDF — полный
+            </button>
+          )}
+          {onPdfMerged && (
+            <button type="button" className="btn" onClick={onPdfMerged}>
+              PDF — всё к покупке
+            </button>
+          )}
+          {onPdfPlumber && (
+            <button type="button" className="btn" onClick={onPdfPlumber}>
+              PDF — сантехник
+            </button>
+          )}
+          {onPdfElectric && (
+            <button type="button" className="btn" onClick={onPdfElectric}>
+              PDF — электрик
+            </button>
+          )}
+          {onPdfInstaller && (
+            <button type="button" className="btn" onClick={onPdfInstaller}>
+              PDF — монтажник
+            </button>
+          )}
+          <button type="button" className="btn" onClick={printPDF}>
+            Печать
           </button>
-        )}
-        <button type="button" className="btn" onClick={printPDF}>
-          Печать
-        </button>
+        </div>
       </div>
       {documents?.length > 0 && (
         <ul style={{ marginTop: 16, paddingLeft: 18 }}>

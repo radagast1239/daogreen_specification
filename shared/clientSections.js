@@ -57,6 +57,8 @@ export function suggestClientSubsectionFromCategory(category) {
   return mapped?.subsection || "";
 }
 
+const BROAD_CATEGORIES = new Set(["Полив и сантехника", "Электрика и свет", "Прочее"]);
+
 export function resolveClientSection(item) {
   const explicit = (item?.clientSection || "").trim();
   if (explicit) {
@@ -66,15 +68,26 @@ export function resolveClientSection(item) {
       label: CLIENT_SECTION_LABEL[explicit] || explicit,
     };
   }
+
   const cat = (item?.category || "").trim();
+
+  if (BROAD_CATEGORIES.has(cat)) {
+    const inferred = inferFromName(item?.name);
+    if (inferred.section) {
+      return { ...inferred, label: CLIENT_SECTION_LABEL[inferred.section] || inferred.section };
+    }
+  }
+
   const mapped = CATEGORY_MAP[cat];
   if (mapped?.section) {
     return { ...mapped, label: CLIENT_SECTION_LABEL[mapped.section] || mapped.section };
   }
+
   const inferred = inferFromName(item?.name);
   if (inferred.section) {
     return { ...inferred, label: CLIENT_SECTION_LABEL[inferred.section] || inferred.section };
   }
+
   return { section: "", subsection: "", label: cat || "Без категории" };
 }
 

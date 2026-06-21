@@ -1,7 +1,7 @@
 export const CLIENT_TAB_OPTIONS = [
   { id: "overview", label: "Обзор" },
   { id: "purchase", label: "Закупка" },
-  { id: "merged", label: "Общий список" },
+  { id: "merged", label: "Всё к покупке" },
   { id: "docs", label: "Документы" },
   // legacy — для настроек бренда и миграции старых ссылок
   { id: "cooling", label: "Охлаждение", legacy: true },
@@ -16,17 +16,31 @@ export const CLIENT_TAB_OPTIONS = [
 
 export const DEFAULT_VISIBLE_TAB_IDS = ["overview", "purchase", "merged", "docs"];
 
-/** Режимы внутри вкладки «Закупка» */
-export const PURCHASE_MODES = [
+/** Основные режимы вкладки «Закупка» */
+export const PRIMARY_PURCHASE_MODES = [
+  { id: "all", label: "Все к закупке" },
   { id: "categories", label: "По категориям" },
-  { id: "modules", label: "По стеллажам" },
   { id: "suppliers", label: "По поставщикам" },
+  { id: "modules", label: "По стеллажам" },
+];
+
+/** Специалисты — вторая строка кнопок */
+export const SPECIALIST_PURCHASE_MODES = [
   { id: "plumber", label: "Сантехник" },
   { id: "electric", label: "Электрик" },
   { id: "installer", label: "Монтажник" },
   { id: "consumables", label: "Расходники" },
   { id: "install", label: "Монтаж" },
 ];
+
+/** @deprecated используйте PRIMARY + SPECIALIST */
+export const PURCHASE_MODES = [...PRIMARY_PURCHASE_MODES, ...SPECIALIST_PURCHASE_MODES];
+
+const SPECIALIST_MODE_IDS = new Set(SPECIALIST_PURCHASE_MODES.map((m) => m.id));
+
+export function isSpecialistPurchaseMode(mode) {
+  return SPECIALIST_MODE_IDS.has(mode);
+}
 
 const LEGACY_PURCHASE_TABS = new Set([
   "categories",
@@ -57,7 +71,7 @@ export function normalizeVisibleTabIds(raw) {
 export function legacyTabToPurchaseMode(tabId) {
   if (tabId === "modules") return "modules";
   if (LEGACY_PURCHASE_TABS.has(tabId) && tabId !== "cooling") return tabId;
-  return "categories";
+  return "all";
 }
 
 export const PDF_COLUMN_OPTIONS = [
