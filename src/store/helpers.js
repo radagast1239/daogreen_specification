@@ -66,32 +66,42 @@ export function groupBy(items, key) {
   return [...map.entries()];
 }
 
-export function mergedPurchaseList(project) {
+export function mergedPurchaseRows(items) {
   const map = new Map();
-  for (const it of clientVisibleItems(project)) {
+  for (const it of items || []) {
     const normName = (it.name || "").trim().toLowerCase().replace(/\s+/g, " ");
     const key = [normName, (it.unit || "").toLowerCase(), (it.supplier || "").trim(), (it.link || "").trim()].join("|");
     if (!map.has(key)) {
       map.set(key, {
+        mergeKey: key,
         name: it.name,
         unit: it.unit,
         category: it.category,
+        clientSection: it.clientSection,
+        clientSubsection: it.clientSubsection,
         supplier: it.supplier,
         link: it.link,
         imageUrl: it.imageUrl || it.photoUrl,
+        clientNote: it.clientNote,
         price: it.price,
         vatRate: it.vatRate,
         qty: 0,
         sum: 0,
         sumVat: 0,
         sources: [],
+        sourceItems: [],
       });
     }
     const row = map.get(key);
     row.qty += Number(it.qty) || 0;
     row.sum += lineNet(it);
     row.sumVat += lineGross(it);
-    row.sources.push({ module: it.module, qty: Number(it.qty) || 0 });
+    row.sources.push({ id: it.id, module: it.module, qty: Number(it.qty) || 0 });
+    row.sourceItems.push(it);
   }
   return [...map.values()].sort((a, b) => b.sumVat - a.sumVat);
+}
+
+export function mergedPurchaseList(project) {
+  return mergedPurchaseRows(clientVisibleItems(project));
 }

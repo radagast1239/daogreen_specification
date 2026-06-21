@@ -1,16 +1,22 @@
 import React, { useMemo } from "react";
-import { groupBy, mergedPurchaseList, money, num } from "../../store/helpers.js";
-import { lineGross, itemsByResponsible, splitPurchaseItems } from "../../lib/itemHelpers.js";
-import { groupByClientSection, clientSectionLabel } from "../../../shared/clientSections.js";
+import { groupBy, mergedPurchaseRows, money, num } from "../../store/helpers.js";
+import {
+  lineGross,
+  itemsByResponsible,
+  splitPurchaseItems,
+  splitMergedPurchaseRows,
+  applyMergedPurchaseFilter,
+  mergeSourcesLabel,
+} from "../../lib/itemHelpers.js";
+import { groupByClientSection, clientSectionLabel, CLIENT_SECTIONS, resolveClientSection } from "../../../shared/clientSections.js";
 import {
   compositionGroupLabel,
   groupItemsByComposition,
   isStellageModuleTitle,
   STELLAGE_GROUPS,
 } from "../../../shared/stellageComposition.js";
-import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
 import { Empty } from "../ui.jsx";
-import ClientItemCard, { isBoughtStatus } from "./ClientItemCard.jsx";
+import ClientItemCard, { ClientMergedItemCard, isBoughtStatus } from "./ClientItemCard.jsx";
 import { PURCHASE_MODES } from "../../lib/clientBrandConfig.js";
 
 const PURCHASE_FILTERS = [
@@ -36,6 +42,56 @@ function itemsForMode(items, mode) {
   if (mode === "consumables") return itemsByResponsible(items, "consumables");
   if (mode === "install") return items.filter((i) => i.itemRole === "installation" || i.category === "Работы и доставка");
   return items.filter((i) => i.itemRole !== "installation");
+}
+
+function groupMergedBySection(rows) {
+  const map = new Map();
+  for (const row of rows) {
+    const rep = row.sourceItems?.[0];
+    const { section, label } = resolveClientSection(rep || {});
+    const key = section || "__misc__";
+    const title = section ? label : "Уточнить категорию";
+    if (!map.has(key)) map.set(key, { title, rows: [] });
+    map.get(key).rows.push(row);
+  }
+  const order = [...CLIENT_SECTIONS.map((s) => s.id), "__misc__"];
+  return [...map.entries()]
+    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
+    .map(([, v]) => [v.title, v.rows]);
+}
+
+function ItemsByMergedGroup({ groups, currency, patch, bought, purchaseStatuses }) {
+  return groups.map(([title, rows]) => {
+    const sum = rows.reduce((s, r) => s + r.sumVat, 0);
+    return (
+      <section key={title}>
+        <div className="section-head">
+          <div className="spine" />
+          <h3>{title}</h3>
+          <span className="count num" style={{ marginLeft: "auto" }}>
+            {money(sum, currency)}
+          </span>
+        </div>
+        {rows.map((row) => (
+          <ClientMergedItemCard
+            key={row.mergeKey}
+            row={row}
+            currency={currency}
+            patch={patch}
+            bought={bought}
+            purchaseStatuses={purchaseStatuses}
+            sourcesLabel={
+              row.sources?.length > 1
+                ? mergeSourcesLabel(row.sources)
+                : row.sources?.length === 1
+                  ? `${row.sources[0].module} (${num(row.sources[0].qty)})`
+                  : ""
+            }
+          />
+        ))}
+      </section>
+    );
+  });
 }
 
 function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, materials, modules, stellageGroups }) {
@@ -73,29 +129,20 @@ function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, mater
   });
 }
 
-export function ClientMergedList({ project, items }) {
-  const rows = mergedPurchaseList({ ...project, items });
+export function ClientMergedList({ project, items, patch, purchaseStatuses }) {
+  const rows = mergedPurchaseRows(items);
   return (
     <div style={{ marginTop: 8 }}>
       <p className="muted" style={{ fontSize: 13 }}>{rows.length} уникальных позиций</p>
-      {rows.map((r, i) => (
-        <div key={i} className="card card-item">
-          {r.imageUrl ? (
-            <img src={absolutePhotoUrl(r.imageUrl)} alt="" className="thumb-img" />
-          ) : (
-            <div className="thumb" style={{ fontSize: 28 }}>{(r.name || "?").charAt(0)}</div>
-          )}
-          <div style={{ minWidth: 0 }}>
-            <strong>{r.name}</strong>
-            <div className="muted" style={{ fontSize: 12.5 }}>
-              <span className="num">{num(r.qty)}</span> {r.unit}
-              {r.supplier ? ` · ${r.supplier}` : ""} · <span className="num">{money(r.sumVat, project.currency)}</span>
-            </div>
-            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-              {r.sources.map((s) => `${s.module} (${num(s.qty)})`).join(" · ")}
-            </div>
-          </div>
-        </div>
+      {rows.map((row) => (
+        <ClientMergedItemCard
+          key={row.mergeKey}
+          row={row}
+          currency={project.currency}
+          patch={patch}
+          purchaseStatuses={purchaseStatuses}
+          sourcesLabel={mergeSourcesLabel(row.sources)}
+        />
       ))}
     </div>
   );
@@ -120,7 +167,37 @@ export default function ClientPurchasePanel({
   stellageGroups = STELLAGE_GROUPS,
 }) {
   const scoped = useMemo(() => itemsForMode(items, mode), [items, mode]);
+
+  const mergedRows = useMemo(() => {
+    if (mode !== "categories") return null;
+    let pool = scoped;
+    if (supplierFilter) pool = pool.filter((i) => i.supplier === supplierFilter);
+    const q = (purchaseQuery || "").trim().toLowerCase();
+    if (q) {
+      pool = pool.filter(
+        (i) => (i.name || "").toLowerCase().includes(q) || (i.supplier || "").toLowerCase().includes(q)
+      );
+    }
+    let rows = mergedPurchaseRows(pool);
+    rows = applyMergedPurchaseFilter(rows, filter);
+    rows.sort((a, b) => {
+      if (purchaseSort === "sum") return b.sumVat - a.sumVat;
+      if (purchaseSort === "status") {
+        const la = purchaseStatuses.find((s) => s.id === a.sourceItems?.[0]?.status)?.label || "";
+        const lb = purchaseStatuses.find((s) => s.id === b.sourceItems?.[0]?.status)?.label || "";
+        return la.localeCompare(lb, "ru");
+      }
+      if (purchaseSort === "category") {
+        const c = clientSectionLabel(a.sourceItems?.[0]).localeCompare(clientSectionLabel(b.sourceItems?.[0]), "ru");
+        if (c !== 0) return c;
+      }
+      return (a.name || "").localeCompare(b.name || "", "ru");
+    });
+    return rows;
+  }, [mode, scoped, supplierFilter, purchaseQuery, filter, purchaseSort, purchaseStatuses]);
+
   const filtered = useMemo(() => {
+    if (mode === "categories") return [];
     let out = scoped;
     if (supplierFilter) out = out.filter((i) => i.supplier === supplierFilter);
     const q = (purchaseQuery || "").trim().toLowerCase();
@@ -145,12 +222,26 @@ export default function ClientPurchasePanel({
       return (a.name || "").localeCompare(b.name || "", "ru");
     });
     return sorted;
-  }, [scoped, supplierFilter, purchaseQuery, filter, purchaseSort, purchaseStatuses]);
+  }, [mode, scoped, supplierFilter, purchaseQuery, filter, purchaseSort, purchaseStatuses]);
 
-  const { todo, bought } = splitPurchaseItems(filtered);
+  const { todo, bought } =
+    mode === "categories" && mergedRows
+      ? splitMergedPurchaseRows(mergedRows)
+      : splitPurchaseItems(filtered);
   const boughtCount = scoped.filter((i) => isBoughtStatus(i.status)).length;
 
   const renderList = (list, isBought) => {
+    if (mode === "categories" && Array.isArray(list) && list[0]?.mergeKey) {
+      return (
+        <ItemsByMergedGroup
+          groups={groupMergedBySection(list)}
+          currency={project.currency}
+          patch={patch}
+          bought={isBought}
+          purchaseStatuses={purchaseStatuses}
+        />
+      );
+    }
     if (mode === "modules") {
       return (
         <ItemsByGroup

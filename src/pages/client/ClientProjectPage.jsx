@@ -353,7 +353,12 @@ export default function ClientProjectPage() {
                   Excel ↓
                 </button>
               </div>
-              <ClientMergedList project={project} items={filterAndSortPurchase(purchaseItems)} />
+              <ClientMergedList
+                project={project}
+                items={filterAndSortPurchase(purchaseItems)}
+                patch={patch}
+                purchaseStatuses={purchaseStatuses}
+              />
             </div>
           )}
         </>
