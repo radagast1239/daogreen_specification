@@ -23,6 +23,8 @@ import { api } from "../../lib/api.js";
 import { downloadXlsx } from "../../lib/export.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
+import ProfilePipeCutsEditor from "../../components/ProfilePipeCutsEditor.jsx";
+import { isProfilePipeName } from "../../../shared/profilePipeCuts.js";
 import FloorPlanField from "../../components/FloorPlanField.jsx";
 import FloorPlanPin from "../../components/FloorPlanPin.jsx";
 import { defaultRooms, isFarmGeneralItem, roomLabel } from "../../lib/roomHelpers.js";
@@ -632,16 +634,25 @@ function SpecTab({
                         value={it.name}
                         onChange={(e) => patchItem(it.id, { name: e.target.value })}
                       />
-                      {it.comment && (
+                      {it.comment && !isProfilePipeName(it.name) && (
                         <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{it.comment}</div>
                       )}
-                      <input
-                        className="input-inline"
-                        placeholder="сообщение клиенту"
-                        style={{ marginTop: 4, fontSize: 11 }}
-                        value={it.clientNote || ""}
-                        onChange={(e) => patchItem(it.id, { clientNote: e.target.value })}
-                      />
+                      {isProfilePipeName(it.name) ? (
+                        <ProfilePipeCutsEditor
+                          compact
+                          name={it.name}
+                          value={it.pipeCuts}
+                          onChange={(patch) => patchItem(it.id, patch)}
+                        />
+                      ) : (
+                        <input
+                          className="input-inline"
+                          placeholder="сообщение клиенту"
+                          style={{ marginTop: 4, fontSize: 11 }}
+                          value={it.clientNote || ""}
+                          onChange={(e) => patchItem(it.id, { clientNote: e.target.value })}
+                        />
+                      )}
                     </td>
                     <td style={{ width: 70 }}>
                       <input className="input-inline" value={it.unit} onChange={(e) => patchItem(it.id, { unit: e.target.value })} />

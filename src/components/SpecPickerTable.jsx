@@ -2,6 +2,8 @@ import React, { useMemo, useState, useCallback } from "react";
 import { groupLabel, STELLAGE_GROUPS } from "../../shared/stellageComposition.js";
 import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
 import { profilePipeSubtitle } from "../lib/materialDisplay.js";
+import ProfilePipeCutsEditor from "./ProfilePipeCutsEditor.jsx";
+import { isProfilePipeName } from "../../shared/profilePipeCuts.js";
 import { CATEGORIES } from "../data/modules.js";
 import { isExhaustFanName, isSplitSystemName } from "../lib/materialSpecs.js";
 import { roomLabel } from "../lib/roomHelpers.js";
@@ -443,10 +445,20 @@ export default function SpecPickerTable({
                             не в базе
                           </span>
                         )}
-                        {profilePipeSubtitle(ln) && (
-                          <span className="muted" style={{ fontSize: 10, display: "block", marginTop: 2 }}>
-                            {profilePipeSubtitle(ln)}
-                          </span>
+                        {isProfilePipeName(ln.name) ? (
+                          <ProfilePipeCutsEditor
+                            compact
+                            name={ln.name}
+                            value={ln.pipeCuts}
+                            disabled={!ln.included}
+                            onChange={(patch) => emitLines(patchLine(lines, ln.id, patch))}
+                          />
+                        ) : (
+                          profilePipeSubtitle(ln) && (
+                            <span className="muted" style={{ fontSize: 10, display: "block", marginTop: 2 }}>
+                              {profilePipeSubtitle(ln)}
+                            </span>
+                          )
                         )}
                       </td>
                       <td>

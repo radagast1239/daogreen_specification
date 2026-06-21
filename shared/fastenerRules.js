@@ -68,32 +68,3 @@ export function syncFastenersFromCrabs(lines) {
   });
 }
 
-export function isProfilePipeName(name) {
-  return normFastenerName(name).includes("труба профиль");
-}
-
-/** Текст отрезков из comment / techNote / clientNote */
-export function profilePipeCutInfo(matOrLine) {
-  if (!isProfilePipeName(matOrLine?.name)) return "";
-  const text =
-    matOrLine.clientNote ||
-    matOrLine.techNote ||
-    matOrLine.comment ||
-    matOrLine.internalNote ||
-    "";
-  const m = text.match(/сегмент[ыа]?\s*:?\s*(.+)/i);
-  if (m) return m[1].trim();
-  const trimmed = text.trim();
-  if (trimmed && /\d+\s*мм/i.test(trimmed)) return trimmed;
-  return "";
-}
-
-export function profilePipeSubtitle(matOrLine) {
-  if (!isProfilePipeName(matOrLine?.name)) return "";
-  const cuts = profilePipeCutInfo(matOrLine);
-  const qty = Number(matOrLine.qty ?? matOrLine.defaultQty);
-  const unit = matOrLine.unit || "шт.";
-  if (cuts) return `Отрезки: ${cuts}`;
-  if (Number.isFinite(qty) && qty > 0) return `${qty} ${unit}`;
-  return "";
-}

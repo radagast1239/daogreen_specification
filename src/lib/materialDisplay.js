@@ -1,5 +1,6 @@
 export {
-  profilePipeCutInfo,
   profilePipeSubtitle,
   isProfilePipeName,
-} from "../../shared/fastenerRules.js";
+  resolvePipeCuts,
+  formatPipeCutsLabel,
+} from "../../shared/profilePipeCuts.js";

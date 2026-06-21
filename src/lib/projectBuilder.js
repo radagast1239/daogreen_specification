@@ -4,6 +4,7 @@ import { hydrateLinePhoto } from "./photoHelpers.js";
 import { groupLabel, materialCompositionGroup } from "../../shared/stellageComposition.js";
 import { projectStellageLinesFromCatalog, stellageModulePhoto, resolveStellagePhoto } from "./stellageCatalogConfig.js";
 import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
+import { resolvePipeCuts, normalizePipeCuts } from "../../shared/profilePipeCuts.js";
 
 export function blankLine(overrides = {}) {
   return {
@@ -23,6 +24,7 @@ export function blankLine(overrides = {}) {
     vatRate: 0,
     techNote: "",
     clientNote: "",
+    pipeCuts: [],
     coolingKw: 0,
     coolingBtu: 0,
     exhaustM3: 0,
@@ -47,6 +49,7 @@ export function lineToMaterialPayload(line, moduleName, farmSectionId = "") {
     vatRate: Number(line.vatRate) || 0,
     techNote: line.techNote || "",
     clientNote: line.clientNote || "",
+    pipeCuts: normalizePipeCuts(line.pipeCuts ?? resolvePipeCuts(line)),
     supplier: line.supplier || "",
     coolingKw: Number(line.coolingKw) || 0,
     coolingBtu: Number(line.coolingBtu) || 0,
@@ -74,6 +77,8 @@ export function syncLineFromMaterial(line, mat) {
     coolingKw: Number(mat.coolingKw) || 0,
     coolingBtu: Number(mat.coolingBtu) || 0,
     exhaustM3: Number(mat.exhaustM3) || 0,
+    pipeCuts: resolvePipeCuts(mat),
+    clientNote: mat.clientNote || mat.comment || "",
   };
 }
 
@@ -119,6 +124,7 @@ export function lineFromMaterial(mat, overrides = {}) {
     vatRate: [0, 5, 20].includes(Number(mat.vatRate)) ? Number(mat.vatRate) : 0,
     techNote: mat.techNote || "",
     clientNote: mat.clientNote || mat.comment || "",
+    pipeCuts: resolvePipeCuts(mat),
     coolingKw: Number(mat.coolingKw) || 0,
     coolingBtu: Number(mat.coolingBtu) || 0,
     exhaustM3: Number(mat.exhaustM3) || 0,
@@ -153,6 +159,7 @@ export function lineToProjectItem(line, section, sortOrder) {
     clientNote: line.clientNote || "",
     techNote: line.techNote || "",
     comment: line.clientNote || line.techNote || "",
+    pipeCuts: normalizePipeCuts(line.pipeCuts ?? resolvePipeCuts(line)),
     qty,
     price: Number(line.price) || 0,
     vatRate: Number(line.vatRate) || 0,

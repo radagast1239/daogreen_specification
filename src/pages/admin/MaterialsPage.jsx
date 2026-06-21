@@ -12,6 +12,8 @@ import ImportPanel from "../../components/ImportPanel.jsx";
 import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import { downloadCSV } from "../../lib/export.js";
 import { profilePipeSubtitle } from "../../lib/materialDisplay.js";
+import ProfilePipeCutsEditor from "../../components/ProfilePipeCutsEditor.jsx";
+import { isProfilePipeName } from "../../../shared/profilePipeCuts.js";
 
 const ITEM_TYPES = [
   ["material", "Материал"],
@@ -40,6 +42,7 @@ const blank = {
   vatRate: 0,
   vatIncluded: false,
   clientNote: "",
+  pipeCuts: [],
   techNote: "",
   status: "active",
   needsApproval: false,
@@ -437,10 +440,18 @@ export default function MaterialsPage() {
               <option value={20}>20%</option>
             </select>
           </div>
-          <div className="field">
-            <label>Пояснение клиенту</label>
-            <textarea rows={2} value={editing.clientNote} onChange={(e) => setEditing({ ...editing, clientNote: e.target.value })} />
-          </div>
+          {isProfilePipeName(editing.name) ? (
+            <ProfilePipeCutsEditor
+              name={editing.name}
+              value={editing.pipeCuts}
+              onChange={(patch) => setEditing({ ...editing, ...patch })}
+            />
+          ) : (
+            <div className="field">
+              <label>Пояснение клиенту</label>
+              <textarea rows={2} value={editing.clientNote} onChange={(e) => setEditing({ ...editing, clientNote: e.target.value })} />
+            </div>
+          )}
           <TagsEditor editing={editing} setEditing={setEditing} tagPresets={tagPresets} />
           <div className="form-grid">
             <div className="field">

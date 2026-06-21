@@ -29,4 +29,4 @@ conn
     console.error(e.message);
     process.exit(1);
   })
-  .connect({ host, port: 22, username: user, password, readyTimeout: 30000 });
+  .connect({ host, port: 22, username: user, password, readyTimeout: 120000, keepaliveInterval: 10000 });

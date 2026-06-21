@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { parsePipeCutsFromDb } from "../../shared/profilePipeCuts.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.DATABASE_PATH || path.join(__dirname, "../data/daogreen.db");
@@ -189,7 +190,8 @@ function migrateDb() {
   addCol("modules", "icon", "TEXT DEFAULT ''");
   addCol("modules", "color", "TEXT DEFAULT '#116355'");
   addCol("modules", "farm_section_id", "TEXT DEFAULT ''");
-  addCol("spec_presets", "params_json", "TEXT NOT NULL DEFAULT '{}'");
+  addCol("materials", "pipe_cuts", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("project_items", "pipe_cuts", "TEXT NOT NULL DEFAULT '[]'");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS material_price_history (
@@ -282,6 +284,7 @@ export function rowToMaterial(row) {
     orderStep: row.order_step || 1,
     defaultItemRole: row.default_item_role || "purchase",
     comment: row.client_note || row.tech_note,
+    pipeCuts: parsePipeCutsFromDb(row.pipe_cuts, row.client_note || row.tech_note),
     updatedAt: row.updated_at || "",
   };
 }
@@ -338,6 +341,7 @@ export function rowToItem(row) {
     internalNote: row.internal_note || "",
     deliveryDays: row.delivery_days || 0,
     itemRole: row.item_role || "purchase",
+    pipeCuts: parsePipeCutsFromDb(row.pipe_cuts, row.client_note || row.tech_note),
   };
 }
 

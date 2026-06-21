@@ -25,6 +25,12 @@ import {
 } from "../services/activityLog.js";
 import { clientPurchaseStatuses } from "../services/referenceData.js";
 import { loadClientBrand } from "../services/clientBrand.js";
+import {
+  isProfilePipeName,
+  normalizePipeCuts,
+  pipeCutsClientNote,
+  resolvePipeCuts,
+} from "../../../shared/profilePipeCuts.js";
 
 const router = Router();
 
@@ -54,13 +60,13 @@ const INSERT_ITEM = db.prepare(`
     supplier, link, link_alt, photo_url, client_note, tech_note,
     qty, price, vat_rate, visible, approved, enabled, needs_approval,
     status, actual_price, client_comment, sort_order, responsible,
-    cooling_kw, cooling_btu, exhaust_m3, room_id, internal_note, delivery_days, item_role
+    cooling_kw, cooling_btu, exhaust_m3, room_id, internal_note, delivery_days, item_role, pipe_cuts
   ) VALUES (
     @id, @project_id, @material_id, @module, @section, @name, @unit, @category,
     @supplier, @link, @link_alt, @photo_url, @client_note, @tech_note,
     @qty, @price, @vat_rate, @visible, @approved, @enabled, @needs_approval,
     @status, @actual_price, @client_comment, @sort_order, @responsible,
-    @cooling_kw, @cooling_btu, @exhaust_m3, @room_id, @internal_note, @delivery_days, @item_role
+    @cooling_kw, @cooling_btu, @exhaust_m3, @room_id, @internal_note, @delivery_days, @item_role, @pipe_cuts
   )
 `);
 
@@ -73,11 +79,17 @@ const UPDATE_ITEM = db.prepare(`
     visible=@visible, approved=@approved, enabled=@enabled, needs_approval=@needs_approval,
     status=@status, actual_price=@actual_price, client_comment=@client_comment,
     responsible=@responsible, cooling_kw=@cooling_kw, cooling_btu=@cooling_btu, exhaust_m3=@exhaust_m3,
-    room_id=@room_id, internal_note=@internal_note, delivery_days=@delivery_days, item_role=@item_role
+    room_id=@room_id, internal_note=@internal_note, delivery_days=@delivery_days, item_role=@item_role,
+    pipe_cuts=@pipe_cuts
   WHERE id=@id AND project_id=@project_id
 `);
 
 function itemToParams(it, projectId) {
+  const cuts = normalizePipeCuts(it.pipeCuts ?? resolvePipeCuts(it));
+  const clientNote =
+    isProfilePipeName(it.name) && cuts.length
+      ? pipeCutsClientNote(cuts)
+      : it.clientNote || it.comment || "";
   return {
     id: it.id,
     project_id: projectId,
@@ -91,7 +103,7 @@ function itemToParams(it, projectId) {
     link: it.link || "",
     link_alt: it.linkAlt || "",
     photo_url: it.imageUrl || it.photoUrl || "",
-    client_note: it.clientNote || it.comment || "",
+    client_note: clientNote,
     tech_note: it.techNote || "",
     qty: Number(it.qty) || 0,
     price: Number(it.price) || 0,
@@ -112,6 +124,7 @@ function itemToParams(it, projectId) {
     internal_note: it.internalNote || "",
     delivery_days: Number(it.deliveryDays) || 0,
     item_role: it.itemRole || "purchase",
+    pipe_cuts: JSON.stringify(cuts),
   };
 }
 
