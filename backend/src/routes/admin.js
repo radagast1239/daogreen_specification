@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { fileURLToPath } from "url";
 import { db, getDbPath } from "../db.js";
 import { listMaterials, listModulesAdmin, createModule, updateModule, archiveModule, restoreModule, duplicateModule } from "./materials.js";
+import { materialInModule } from "../../../shared/materialModules.js";
 import { loadProject, loadProjectItems, rowToProject } from "../db.js";
 import { projectTotals } from "../services/buildItems.js";
 import { getAnalytics } from "../services/analytics.js";
@@ -116,7 +117,7 @@ router.get("/modules", (_req, res) => {
   res.json(
     modules.map((m) => ({
       ...m,
-      materialCount: mats.filter((x) => x.module === m.name).length,
+      materialCount: mats.filter((x) => materialInModule(x, m.name)).length,
     }))
   );
 });
@@ -136,7 +137,7 @@ router.patch("/modules/:id", (req, res) => {
     const mod = updateModule(req.params.id, req.body);
     if (!mod) return res.status(404).json({ error: "Not found" });
     const mats = listMaterials();
-    res.json({ ...mod, materialCount: mats.filter((x) => x.module === mod.name).length });
+    res.json({ ...mod, materialCount: mats.filter((x) => materialInModule(x, mod.name)).length });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

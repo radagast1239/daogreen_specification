@@ -7,6 +7,13 @@ import {
   pipeCutsClientNote,
   resolvePipeCuts,
 } from "../../../shared/profilePipeCuts.js";
+import {
+  normalizeMaterialModules,
+  primaryMaterialModule,
+  materialInModule,
+  patchMaterialModules,
+  resolveMaterialModules,
+} from "../../../shared/materialModules.js";
 
 const INSERT_MAT = db.prepare(`
   INSERT INTO materials (
@@ -14,13 +21,13 @@ const INSERT_MAT = db.prepare(`
     supplier, link, link_alt, photo_url, vat_rate, vat_included,
     client_note, tech_note, internal_note, status,
     needs_approval, is_consumable, is_spare_part, client_visible_default, responsible,
-    cooling_kw, cooling_btu, exhaust_m3, tags, alternative_material_id, min_order_qty, order_step, default_item_role, pipe_cuts, updated_at
+    cooling_kw, cooling_btu, exhaust_m3, tags, alternative_material_id, min_order_qty, order_step, default_item_role, pipe_cuts, modules_json, updated_at
   ) VALUES (
     @id, @name, @unit, @base_price, @default_qty, @module, @category, @subcategory, @farm_section_id, @item_type,
     @supplier, @link, @link_alt, @photo_url, @vat_rate, @vat_included,
     @client_note, @tech_note, @internal_note, @status,
     @needs_approval, @is_consumable, @is_spare_part, @client_visible_default, @responsible,
-    @cooling_kw, @cooling_btu, @exhaust_m3, @tags, @alternative_material_id, @min_order_qty, @order_step, @default_item_role, @pipe_cuts, datetime('now')
+    @cooling_kw, @cooling_btu, @exhaust_m3, @tags, @alternative_material_id, @min_order_qty, @order_step, @default_item_role, @pipe_cuts, @modules_json, datetime('now')
   )
 `);
 
@@ -37,12 +44,14 @@ const UPDATE_MAT = db.prepare(`
     tags=@tags, alternative_material_id=@alternative_material_id, min_order_qty=@min_order_qty,
     order_step=@order_step, default_item_role=@default_item_role,
     pipe_cuts=@pipe_cuts,
+    modules_json=@modules_json,
     updated_at=datetime('now')
   WHERE id=@id
 `);
 
 function matToParams(m, id) {
   const cuts = normalizePipeCuts(m.pipeCuts ?? resolvePipeCuts(m));
+  const modules = normalizeMaterialModules(m.modules ?? resolveMaterialModules(m));
   const clientNote =
     isProfilePipeName(m.name) && cuts.length
       ? pipeCutsClientNote(cuts)
@@ -53,7 +62,7 @@ function matToParams(m, id) {
     unit: m.unit || "шт.",
     base_price: Number(m.basePrice) || 0,
     default_qty: Number(m.defaultQty) ?? 1,
-    module: m.module,
+    module: primaryMaterialModule({ ...m, modules }),
     category: m.category || "Прочее",
     subcategory: m.subcategory || "",
     farm_section_id: m.farmSectionId || "",
@@ -82,16 +91,13 @@ function matToParams(m, id) {
     order_step: Number(m.orderStep) || 1,
     default_item_role: m.defaultItemRole || "purchase",
     pipe_cuts: JSON.stringify(cuts),
+    modules_json: JSON.stringify(modules),
   };
 }
 
 export function listMaterials({ module, category, q } = {}) {
   let sql = "SELECT * FROM materials WHERE 1=1";
   const params = {};
-  if (module) {
-    sql += " AND module = @module";
-    params.module = module;
-  }
   if (category) {
     sql += " AND category = @category";
     params.category = category;
@@ -101,7 +107,9 @@ export function listMaterials({ module, category, q } = {}) {
     params.q = `%${q}%`;
   }
   sql += " ORDER BY module, name";
-  return db.prepare(sql).all(params).map(rowToMaterial);
+  let list = db.prepare(sql).all(params).map(rowToMaterial);
+  if (module) list = list.filter((m) => materialInModule(m, module));
+  return list;
 }
 
 export function getMaterial(id) {
@@ -219,10 +227,15 @@ export function updateModule(id, patch) {
   if (patch.name != null && name !== cur.name) {
     const dup = db.prepare("SELECT id FROM modules WHERE name = ? AND id != ? AND active = 1").get(name, id);
     if (dup) throw new Error("Модуль с таким названием уже есть");
-    db.prepare("UPDATE materials SET module = @newName WHERE module = @oldName").run({
-      newName: name,
-      oldName: cur.name,
-    });
+    for (const row of db.prepare("SELECT * FROM materials").all()) {
+      const mat = rowToMaterial(row);
+      if (!materialInModule(mat, cur.name)) continue;
+      const next = patchMaterialModules(
+        mat,
+        resolveMaterialModules(mat).map((n) => (n === cur.name ? name : n))
+      );
+      UPDATE_MAT.run(matToParams(next, mat.id));
+    }
   }
 
   const type = patch.type != null ? (MODULE_TYPES.has(patch.type) ? patch.type : cur.type) : cur.type;
@@ -283,7 +296,7 @@ export function duplicateModule(id) {
 
   const mats = listMaterials({ module: src.name });
   for (const m of mats) {
-    createMaterial({ ...m, id: undefined, module: copyName });
+    createMaterial({ ...m, id: undefined, modules: [copyName], module: copyName });
   }
 
   return { module: newMod, materialCount: mats.length };

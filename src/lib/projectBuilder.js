@@ -5,6 +5,7 @@ import { groupLabel, materialCompositionGroup } from "../../shared/stellageCompo
 import { projectStellageLinesFromCatalog, stellageModulePhoto, resolveStellagePhoto } from "./stellageCatalogConfig.js";
 import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
 import { resolvePipeCuts, normalizePipeCuts } from "../../shared/profilePipeCuts.js";
+import { patchMaterialModules, normalizeMaterialModules, primaryMaterialModule, materialInModule } from "../../shared/materialModules.js";
 
 export function blankLine(overrides = {}) {
   return {
@@ -39,6 +40,7 @@ export function lineToMaterialPayload(line, moduleName, farmSectionId = "") {
     name: line.name.trim(),
     unit: line.unit || "шт.",
     module: moduleName,
+    modules: normalizeMaterialModules([moduleName]),
     category: line.category || "Прочее",
     subcategory: line.subcategory || "",
     farmSectionId: farmSectionId || line.farmSectionId || "",
@@ -97,7 +99,7 @@ export function catalogLinesForFarmSection(materials, sectionId) {
 /** Строки каталога для сборки — все видны, по умолчанию не отмечены */
 export function catalogLinesForModule(materials, moduleName) {
   return materials
-    .filter((m) => m.module === moduleName && m.status === "active")
+    .filter((m) => materialInModule(m, moduleName) && m.status === "active")
     .map((m) => lineFromMaterial(m, { included: false }));
 }
 
@@ -135,7 +137,7 @@ export function lineFromMaterial(mat, overrides = {}) {
 /** Опциональный шаблон — только по кнопке, не по умолчанию */
 export function templateLinesForModule(materials, moduleName) {
   return materials
-    .filter((m) => m.module === moduleName && m.status === "active")
+    .filter((m) => materialInModule(m, moduleName) && m.status === "active")
     .map((m) => lineFromMaterial(m));
 }
 

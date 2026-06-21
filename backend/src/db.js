@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { parsePipeCutsFromDb } from "../../shared/profilePipeCuts.js";
+import { resolveMaterialModules } from "../../shared/materialModules.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.DATABASE_PATH || path.join(__dirname, "../data/daogreen.db");
@@ -191,6 +192,7 @@ function migrateDb() {
   addCol("modules", "color", "TEXT DEFAULT '#116355'");
   addCol("modules", "farm_section_id", "TEXT DEFAULT ''");
   addCol("materials", "pipe_cuts", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("materials", "modules_json", "TEXT NOT NULL DEFAULT '[]'");
   addCol("project_items", "pipe_cuts", "TEXT NOT NULL DEFAULT '[]'");
 
   db.exec(`
@@ -255,6 +257,7 @@ export function rowToMaterial(row) {
     basePrice: row.base_price,
     defaultQty: row.default_qty,
     module: row.module,
+    modules: resolveMaterialModules(row),
     category: row.category,
     subcategory: row.subcategory,
     farmSectionId: row.farm_section_id || "",

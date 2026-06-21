@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { listMaterials } from "../routes/materials.js";
 import { FARM_SECTIONS } from "../../../src/data/farmSections.js";
+import { materialInModule } from "../../../shared/materialModules.js";
 
 const FARM_MODULE = "Общая закупка на ферму";
 
@@ -66,7 +67,7 @@ export function ensureFarmSectionCatalogs() {
 
   for (const sec of sections) {
     const mats = materials.filter(
-      (m) => m.module === FARM_MODULE && m.farmSectionId === sec.id && m.status === "active"
+      (m) => materialInModule(m, FARM_MODULE) && m.farmSectionId === sec.id && m.status === "active"
     );
     if (!mats.length) continue;
     catalogs[sec.id] = mats.map(materialToCatalogLine);

@@ -1,3 +1,5 @@
+import { materialInModule, resolveMaterialModules } from "./materialModules.js";
+
 /** Группы состава стеллажа — узкая настройка при создании проекта */
 
 export const STELLAGE_GROUPS = [
@@ -83,7 +85,8 @@ export function inferCompositionGroup(mat) {
 
 export function materialCompositionGroup(mat) {
   if (mat.subcategory) return mat.subcategory;
-  if (!isStellageModuleName(mat.module)) return "";
+  const inStellage = resolveMaterialModules(mat).some((mod) => isStellageModuleName(mod));
+  if (!inStellage && !isStellageModuleName(mat.module)) return "";
   return inferCompositionGroup(mat);
 }
 
@@ -95,7 +98,7 @@ export function defaultStellageGroups(groupDefs = STELLAGE_GROUPS) {
 export function groupsForModule(materials, modName, groupDefs = STELLAGE_GROUPS) {
   const ids = new Set();
   for (const m of materials) {
-    if (m.module !== modName) continue;
+    if (!materialInModule(m, modName)) continue;
     const g = materialCompositionGroup(m);
     if (g) ids.add(g);
   }
@@ -106,7 +109,7 @@ export function materialsByGroup(materials, modName, groupDefs = STELLAGE_GROUPS
   const map = new Map();
   for (const g of groupDefs) map.set(g.id, []);
   for (const m of materials) {
-    if (m.module !== modName || m.status === "archived") continue;
+    if (!materialInModule(m, modName) || m.status === "archived") continue;
     const g = materialCompositionGroup(m);
     if (!g) continue;
     if (!map.has(g)) map.set(g, []);

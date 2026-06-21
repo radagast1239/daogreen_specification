@@ -13,8 +13,16 @@ import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import { downloadCSV } from "../../lib/export.js";
 import { profilePipeSubtitle } from "../../lib/materialDisplay.js";
 import ProfilePipeCutsEditor from "../../components/ProfilePipeCutsEditor.jsx";
+import MaterialModulesEditor from "../../components/MaterialModulesEditor.jsx";
 import PhotoUploadField from "../../components/PhotoUploadField.jsx";
 import { isProfilePipeName } from "../../../shared/profilePipeCuts.js";
+import {
+  formatMaterialModulesLabel,
+  materialInModule,
+  normalizeMaterialModules,
+  patchMaterialModules,
+  resolveMaterialModules,
+} from "../../../shared/materialModules.js";
 
 const blank = {
   name: "",
@@ -22,6 +30,7 @@ const blank = {
   basePrice: 0,
   defaultQty: 0,
   module: "Общая закупка на ферму",
+  modules: ["Общая закупка на ферму"],
   category: "Прочее",
   subcategory: "",
   itemType: "material",
@@ -84,18 +93,21 @@ export default function MaterialsPage() {
     return state.materials.filter(
       (m) =>
         (!ql || m.name.toLowerCase().includes(ql)) &&
-        (!modF || m.module === modF) &&
+        (!modF || materialInModule(m, modF)) &&
         (!catF || m.category === catF)
     );
   }, [state.materials, q, modF, catF]);
 
   const save = async () => {
     if (!editing.name?.trim()) return;
-    if (!editing.module || !activeModules.includes(editing.module)) {
-      alert("Выберите активный модуль из списка.");
+    const mods = normalizeMaterialModules(editing.modules ?? editing.module).filter((m) =>
+      activeModules.includes(m)
+    );
+    if (!mods.length) {
+      alert("Выберите хотя бы один активный модуль.");
       return;
     }
-    const payload = { ...editing, defaultQty: 0 };
+    const payload = patchMaterialModules({ ...editing, defaultQty: 0 }, mods);
     if (payload.id) await actions.materialUpdate(payload.id, payload);
     else await actions.materialAdd(payload);
     setEditing(null);
@@ -117,7 +129,7 @@ export default function MaterialsPage() {
         Наименование: m.name,
         Ед: m.unit,
         Цена: m.basePrice,
-        Модуль: m.module,
+        Модуль: formatMaterialModulesLabel(m),
         Категория: m.category,
         Поставщик: m.supplier,
         Ссылка: m.link,
@@ -228,7 +240,7 @@ export default function MaterialsPage() {
                         </div>
                       )}
                     </td>
-                    <td className="muted" style={{ fontSize: 12 }}>{m.module}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{formatMaterialModulesLabel(m)}</td>
                     <td>{m.unit}</td>
                     <td className="right">
                       <input
@@ -254,7 +266,10 @@ export default function MaterialsPage() {
                       )}
                     </td>
                     <td className="row" style={{ gap: 2 }}>
-                      <button className="btn btn-ghost btn-sm" onClick={() => setEditing({ ...m })}>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setEditing(patchMaterialModules({ ...m }, resolveMaterialModules(m)))}
+                      >
                         ✎
                       </button>
                       <button
@@ -325,25 +340,12 @@ export default function MaterialsPage() {
               </select>
             </div>
           </div>
-          <div className="field">
-            <label>Модуль / раздел</label>
-            {editing.module && !activeModules.includes(editing.module) && (
-              <p className="muted" style={{ fontSize: 12, margin: "0 0 6px" }}>
-                Сейчас в архиве: <strong>{editing.module}</strong> — выберите активный модуль.
-              </p>
-            )}
-            <select
-              value={activeModules.includes(editing.module) ? editing.module : ""}
-              onChange={(e) => setEditing({ ...editing, module: e.target.value })}
-            >
-              <option value="">— выберите модуль —</option>
-              {activeModules.map((modName) => (
-                <option key={modName} value={modName}>
-                  {modName}
-                </option>
-              ))}
-            </select>
-          </div>
+          <MaterialModulesEditor
+            value={editing.modules ?? editing.module}
+            activeModules={activeModules}
+            archivedModules={resolveMaterialModules(editing).filter((m) => !activeModules.includes(m))}
+            onChange={(modules) => setEditing(patchMaterialModules(editing, modules))}
+          />
           <div className="field">
             <label>Поставщик</label>
             <select value={editing.supplier || ""} onChange={(e) => setEditing({ ...editing, supplier: e.target.value })}>

@@ -1,6 +1,7 @@
 import { uid } from "../store/helpers.js";
 import { defaultResponsible } from "./itemHelpers.js";
 import { materialIncludedInSelection } from "../../shared/stellageComposition.js";
+import { materialInModule } from "../../shared/materialModules.js";
 
 export { uid };
 
@@ -46,7 +47,7 @@ export function buildItemsFromModules(materials, modules, selected) {
     const mod = modules.find((m) => m.id === sel.moduleId);
     if (!mod) continue;
     const count = mod.type === "stellage" ? Math.max(1, Number(sel.count) || 1) : 1;
-    const mats = materials.filter((m) => m.module === mod.name && m.status === "active");
+    const mats = materials.filter((m) => materialInModule(m, mod.name) && m.status === "active");
     for (const mat of mats) {
       if (!materialIncludedInSelection(mat, sel)) continue;
       const baseQty = Number(mat.defaultQty) || 0;

@@ -3,6 +3,7 @@ import path from "path";
 import JSZip from "jszip";
 import XLSX from "xlsx";
 import { parseExcelBuffer } from "./excelImport.js";
+import { materialInModule } from "../../../shared/materialModules.js";
 
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".emf", ".wmf"]);
 
@@ -122,7 +123,7 @@ function findImageForRow(images, sheetName, row) {
 }
 
 function findMaterialForRow(materials, row, moduleHint) {
-  const pool = moduleHint ? materials.filter((m) => m.module === moduleHint) : materials;
+  const pool = moduleHint ? materials.filter((m) => materialInModule(m, moduleHint)) : materials;
 
   let mat = pool.find((m) => namesMatch(m.name, row.name));
   if (mat) return mat;

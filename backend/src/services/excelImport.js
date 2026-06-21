@@ -89,6 +89,7 @@ export function parseExcelBuffer(buffer, moduleName = "Импорт") {
         basePrice: ci.price >= 0 ? Number(String(row[ci.price]).replace(",", ".")) || 0 : 0,
         defaultQty: 0,
         module: mod,
+        modules: mod ? [mod] : [],
         category: ci.category >= 0 ? cellStr(row[ci.category]) || "Прочее" : "Прочее",
         subcategory: "",
         itemType: "material",

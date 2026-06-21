@@ -2,6 +2,7 @@ import { cloneBuilderLines } from "./presetHelpers.js";
 import { catalogLinesForModule, lineFromMaterial } from "./projectBuilder.js";
 import { parseJson, stripLineIds } from "./farmSectionsConfig.js";
 import { materialCompositionGroup } from "../../shared/stellageComposition.js";
+import { materialInModule } from "../../shared/materialModules.js";
 
 export function parseStellageModuleCatalogs(raw) {
   return parseJson(raw, {});
@@ -36,7 +37,7 @@ function lineQtyFromCatalog(ln) {
 /** Строки из базы материалов — qty и галочки по defaultQty */
 export function stellageLinesFromMaterials(materials, moduleName) {
   return materials
-    .filter((m) => m.module === moduleName && m.status === "active")
+    .filter((m) => materialInModule(m, moduleName) && m.status === "active")
     .map((m) => {
       const qty = Number(m.defaultQty) || 0;
       return lineFromMaterial(m, {

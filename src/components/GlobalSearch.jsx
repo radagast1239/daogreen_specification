@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore } from "../store/StoreContext.jsx";
 import { api } from "../lib/api.js";
+import { formatMaterialModulesLabel } from "../../shared/materialModules.js";
 
 export default function GlobalSearch() {
   const { state } = useStore();
@@ -40,9 +41,9 @@ export default function GlobalSearch() {
       }
     }
     for (const m of state.materials) {
-      const hay = `${m.name} ${m.module || ""} ${m.supplier || ""}`.toLowerCase();
+      const hay = `${m.name} ${formatMaterialModulesLabel(m)} ${m.supplier || ""}`.toLowerCase();
       if (hay.includes(ql)) {
-        out.push({ kind: "material", id: m.id, label: m.name, sub: m.module, to: "/materials" });
+        out.push({ kind: "material", id: m.id, label: m.name, sub: formatMaterialModulesLabel(m), to: "/materials" });
         if (out.length >= 14) break;
       }
     }

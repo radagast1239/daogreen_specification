@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useCallback } from "react";
 import { groupLabel, STELLAGE_GROUPS } from "../../shared/stellageComposition.js";
 import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
+import { formatMaterialModulesLabel } from "../../shared/materialModules.js";
 import { profilePipeSubtitle } from "../lib/materialDisplay.js";
 import ProfilePipeCutsEditor from "./ProfilePipeCutsEditor.jsx";
 import { isProfilePipeName } from "../../shared/profilePipeCuts.js";
@@ -162,7 +163,7 @@ export default function SpecPickerTable({
     return materials.filter((m) => {
       if (m.status !== "active") return false;
       if (!ql) return true;
-      const hay = `${m.name} ${m.module || ""} ${m.category || ""} ${m.supplier || ""}`.toLowerCase();
+      const hay = `${m.name} ${formatMaterialModulesLabel(m)} ${m.category || ""} ${m.supplier || ""}`.toLowerCase();
       return hay.includes(ql);
     });
   }, [materials, q]);
@@ -738,7 +739,7 @@ export default function SpecPickerTable({
                             <td>
                               <strong style={{ fontSize: 13 }}>{m.name}</strong>
                               <div className="muted" style={{ fontSize: 11 }}>
-                                {m.module || "—"}
+                                {formatMaterialModulesLabel(m) || "—"}
                                 {m.supplier ? ` · ${m.supplier}` : ""}
                               </div>
                               {profilePipeSubtitle(m) && (

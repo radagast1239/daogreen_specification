@@ -4,7 +4,7 @@ import { useStore } from "../../store/StoreContext.jsx";
 import { buildItemsFromModules } from "../../lib/apiHelpers.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
 import { defaultStellageGroupIds } from "../../lib/referenceData.js";
-import { selectionToApi } from "../../../shared/stellageComposition.js";
+import { materialInModule } from "../../../shared/materialModules.js";
 import StellageModulePicker from "../../components/StellageModulePicker.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
 
@@ -62,7 +62,7 @@ export default function NewProjectPage() {
     setSelected((s) => ({ ...s, [modId]: value }));
   };
 
-  const matCount = (modName) => state.materials.filter((m) => m.module === modName).length;
+  const matCount = (modName) => state.materials.filter((m) => materialInModule(m, modName)).length;
 
   const create = async () => {
     setSaving(true);
