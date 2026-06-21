@@ -24,6 +24,7 @@ import { parseStellageModuleCatalogs, parseStellageModuleMeta, projectStellageLi
 import StellagePhotoField, { StellagePhotoThumb } from "../../components/StellagePhotoField.jsx";
 import {
   draftFromStellagePreset,
+  duplicateStellageInstance,
   emptyFarmSectionsState,
   presetPayloadFromDraft,
 } from "../../lib/presetHelpers.js";
@@ -194,6 +195,13 @@ export default function ProjectBuilderPage() {
   const removeStellage = async (id) => {
     if (!(await confirm({ title: "Удалить готовый стеллаж?" }))) return;
     setStellages((list) => list.filter((s) => s.id !== id));
+  };
+
+  const duplicateStellage = (id) => {
+    const st = stellages.find((s) => s.id === id);
+    if (!st) return;
+    setStellages((list) => [...list, duplicateStellageInstance(st)]);
+    success("Стеллаж скопирован — при необходимости измените название и кол-во.");
   };
 
   const saveMaterial = async (payload) => {
@@ -379,6 +387,7 @@ export default function ProjectBuilderPage() {
                   </span>
                   <span className="row" style={{ gap: 6 }}>
                     <button type="button" className="btn btn-sm" onClick={() => editStellage(st.id)}>Изменить</button>
+                    <button type="button" className="btn btn-sm" onClick={() => duplicateStellage(st.id)}>Копия</button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeStellage(st.id)}>✕</button>
                   </span>
                 </div>

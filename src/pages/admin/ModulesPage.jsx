@@ -15,6 +15,7 @@ import {
   parseSectionImport,
   patchSection,
   patchSectionName,
+  normalizeSection,
   removeSection,
   resolveFarmSections,
   stripLineIds,
@@ -39,8 +40,10 @@ import {
   patchStellageModulePhoto,
   resolveStellagePhoto,
   stellageModulePhoto,
+  copyStellageCatalogEntry,
   stellageCatalogCount,
   stellageCatalogEditorLines,
+  stellageCatalogLinesCopiedFrom,
   stripStellageCatalogLines,
 } from "../../lib/stellageCatalogConfig.js";
 
@@ -312,6 +315,29 @@ export default function ModulesPage() {
     await persistFarm(sections, catalogs, versions);
   };
 
+  const duplicateFarmSection = async (sec) => {
+    const name = window.prompt("Название копии раздела:", `${sec.name} (копия)`);
+    if (!name?.trim()) return;
+    const copySec = normalizeSection({
+      ...newFarmSection(name),
+      group: sec.group,
+      icon: sec.icon,
+      color: sec.color,
+      defaultResponsible: sec.defaultResponsible,
+      hiddenForFarmTypes: [...(sec.hiddenForFarmTypes || [])],
+    });
+    const sourceCatalog = farmCatalogs[sec.id] || [];
+    const catalogs = {
+      ...farmCatalogs,
+      [copySec.id]: sourceCatalog.length ? stripLineIds(cloneBuilderLines(sourceCatalog)) : [],
+    };
+    const sections = [...farmSections, copySec];
+    setFarmSections(sections);
+    setFarmCatalogs(catalogs);
+    await persistFarm(sections, catalogs);
+    openSectionEditor(copySec);
+  };
+
   const saveSectionCatalog = async () => {
     if (!editingSection) return;
     setSaving(true);
@@ -427,6 +453,90 @@ export default function ModulesPage() {
     if (!window.confirm("Удалить пресет?")) return;
     await api.deletePreset(id);
     await reload();
+  };
+
+  const duplicateStellagePreset = async (p) => {
+    const name = window.prompt("Название копии пресета:", `${p.name} (копия)`);
+    if (!name?.trim()) return;
+    setSaving(true);
+    try {
+      await api.createPreset({
+        name: name.trim(),
+        presetType: "stellage",
+        moduleId: p.moduleId,
+        moduleName: p.moduleName,
+        sectionId: p.sectionId || "",
+        params: normalizeStellageParams(p.params),
+        items: (p.items || []).map(({ id, ...rest }) => rest),
+        note: p.note || "",
+        sortOrder: stellagePresets.length,
+      });
+      await reload();
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const pickStellageModuleTarget = (sourceMod, title) => {
+    const others = stellageMods.filter((m) => m.id !== sourceMod.id);
+    if (!others.length) {
+      alert("Нет других типов стеллажей.");
+      return null;
+    }
+    const list = others.map((m, i) => `${i + 1}. ${m.name}`).join("\n");
+    const pick = window.prompt(`${title}\n\n${list}\n\nВведите номер:`);
+    const idx = Number(pick) - 1;
+    if (!Number.isInteger(idx) || idx < 0 || idx >= others.length) return null;
+    return others[idx];
+  };
+
+  const copyStellageCatalogToModule = async (sourceMod) => {
+    if (!stellageCatalogCount(stellageCatalogs, sourceMod.id)) {
+      alert(`У «${sourceMod.name}» пустой шаблон — нечего копировать.`);
+      return;
+    }
+    const target = pickStellageModuleTarget(sourceMod, `Скопировать состав «${sourceMod.name}» в:`);
+    if (!target) return;
+    const existing = stellageCatalogCount(stellageCatalogs, target.id);
+    if (existing > 0 && !window.confirm(`У «${target.name}» уже ${existing} поз. Перезаписать?`)) return;
+    setSaving(true);
+    try {
+      const catalogs = copyStellageCatalogEntry(stellageCatalogs, sourceMod.id, target.id);
+      await api.saveSettings({
+        stellageModuleCatalogs: JSON.stringify(catalogs),
+        stellageModuleMeta: JSON.stringify(stellageModuleMeta),
+        ...referenceToSettings(ref),
+      });
+      setStellageCatalogs(catalogs);
+      await reload();
+      await actions.refresh();
+      alert(`Состав скопирован в «${target.name}».`);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const applyStellageCatalogFromModule = (sourceModuleId) => {
+    if (!editingStellageMod || !sourceModuleId || sourceModuleId === editingStellageMod.id) return;
+    const srcMod = stellageMods.find((m) => m.id === sourceModuleId);
+    if (!srcMod) return;
+    if (!window.confirm(`Подставить состав из «${srcMod.name}»? Несохранённые изменения будут заменены.`)) return;
+    const lines = stellageCatalogLinesCopiedFrom(
+      stellageCatalogs,
+      sourceModuleId,
+      editingStellageMod.id,
+      state.materials,
+      editingStellageMod.name
+    );
+    if (!lines) {
+      alert(`У «${srcMod.name}» пустой шаблон.`);
+      return;
+    }
+    setEditLines(lines);
   };
 
   const catalogCount = (sectionId) => (farmCatalogs[sectionId] || []).length;
@@ -677,6 +787,9 @@ export default function ModulesPage() {
                       <button type="button" className="btn btn-sm" onClick={() => openStellagePreset(p)}>
                         Редактировать
                       </button>
+                      <button type="button" className="btn btn-sm" onClick={() => duplicateStellagePreset(p)}>
+                        Копия
+                      </button>
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => deletePreset(p.id)}>
                         ✕
                       </button>
@@ -715,7 +828,7 @@ export default function ModulesPage() {
                     <th>Тип стеллажа</th>
                     <th>Технология</th>
                     <th className="right" style={{ width: 90 }}>В шаблоне</th>
-                    <th className="right" style={{ width: 140 }} />
+                    <th className="right" style={{ width: 220 }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -732,6 +845,14 @@ export default function ModulesPage() {
                       <td className="right">
                         <button type="button" className="btn btn-sm" onClick={() => openStellageModuleEditor(mod)}>
                           Настроить
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          title="Скопировать состав в другой тип"
+                          onClick={() => copyStellageCatalogToModule(mod)}
+                        >
+                          Копия
                         </button>
                       </td>
                     </tr>
@@ -763,7 +884,7 @@ export default function ModulesPage() {
                   <th>Группа</th>
                   <th>Ответств.</th>
                   <th className="right" style={{ width: 90 }}>В составе</th>
-                  <th className="right" style={{ width: 280 }} />
+                  <th className="right" style={{ width: 340 }} />
                 </tr>
               </thead>
               <tbody>
@@ -802,6 +923,9 @@ export default function ModulesPage() {
                     <td className="right">
                       <button type="button" className="btn btn-sm" onClick={() => openSectionEditor(sec)}>
                         Настроить
+                      </button>
+                      <button type="button" className="btn btn-sm" onClick={() => duplicateFarmSection(sec)}>
+                        Копия
                       </button>
                       <button type="button" className="btn btn-ghost btn-sm" title="Экспорт JSON" onClick={() => exportSectionJson(sec)}>
                         ↓
@@ -1301,6 +1425,28 @@ export default function ModulesPage() {
             <button type="button" className="btn" onClick={() => setEditingStellageMod(null)}>
               Отмена
             </button>
+            {stellageMods.length > 1 && (
+              <label className="row" style={{ gap: 6, fontSize: 13 }}>
+                Скопировать из
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    e.target.value = "";
+                    if (id) applyStellageCatalogFromModule(id);
+                  }}
+                >
+                  <option value="">— тип стеллажа —</option>
+                  {stellageMods
+                    .filter((m) => m.id !== editingStellageMod.id)
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} ({stellageCatalogCount(stellageCatalogs, m.id)} поз.)
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
             <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>
               {countIncluded(editLines)} поз. в шаблоне
             </span>

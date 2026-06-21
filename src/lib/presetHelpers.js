@@ -7,6 +7,16 @@ export function cloneBuilderLines(items) {
   return (items || []).map((ln) => ({ ...ln, id: uid("ln") }));
 }
 
+export function duplicateStellageInstance(st) {
+  return {
+    ...st,
+    id: uid("st"),
+    name: `${st.name} (копия)`,
+    params: st.params ? { ...st.params } : {},
+    items: cloneBuilderLines(st.items),
+  };
+}
+
 export function presetPayloadFromDraft(draft, name) {
   return {
     name: name.trim(),

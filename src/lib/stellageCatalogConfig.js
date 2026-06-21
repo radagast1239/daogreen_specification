@@ -121,3 +121,20 @@ export function stripStellageCatalogLines(lines) {
 export function stellageCatalogCount(catalogs, moduleId) {
   return (catalogs[moduleId] || []).length;
 }
+
+/** Строки редактора: шаблон источника, подставленный под тип стеллажа назначения */
+export function stellageCatalogLinesCopiedFrom(catalogs, fromModuleId, toModuleId, materials, toModuleName) {
+  const source = catalogs[fromModuleId];
+  if (!source?.length) return null;
+  return stellageCatalogEditorLines({ ...catalogs, [toModuleId]: source }, toModuleId, materials, toModuleName);
+}
+
+/** Копия сохранённого шаблона между типами стеллажей */
+export function copyStellageCatalogEntry(catalogs, fromModuleId, toModuleId) {
+  const source = catalogs[fromModuleId];
+  if (!source?.length) return catalogs;
+  return {
+    ...catalogs,
+    [toModuleId]: stripLineIds(cloneBuilderLines(source)),
+  };
+}
