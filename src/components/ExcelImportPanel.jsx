@@ -1,17 +1,7 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useStore } from "../store/StoreContext.jsx";
 import { api } from "../lib/api.js";
-import { seedModules } from "../data/modules.js";
 import { useToast } from "./Toast.jsx";
-
-const MODULE_PRESETS = [
-  { label: "— авто по имени файла —", value: "" },
-  { label: "Общая закупка на ферму", value: "Общая закупка на ферму" },
-  { label: "Стеллаж подтопление", value: "Стеллаж подтопление" },
-  { label: "Стеллаж проточка", value: "Стеллаж проточка" },
-  { label: "Стеллаж аэропоника", value: "Стеллаж аэропоника" },
-  ...seedModules.map((m) => ({ label: m.name, value: m.name })),
-].filter((v, i, a) => a.findIndex((x) => x.value === v.value) === i);
 
 const MODES = [
   {
@@ -36,7 +26,7 @@ function StatCard({ label, value, tone = "default" }) {
 }
 
 export default function ExcelImportPanel() {
-  const { actions } = useStore();
+  const { state, actions } = useStore();
   const { success, error } = useToast();
   const [mode, setMode] = useState("full");
   const [file, setFile] = useState(null);
@@ -44,6 +34,16 @@ export default function ExcelImportPanel() {
   const [mergeMode, setMergeMode] = useState("merge");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const modulePresets = useMemo(
+    () => [
+      { label: "— авто по имени файла —", value: "" },
+      ...state.modules
+        .filter((mod) => mod.active !== false)
+        .map((mod) => ({ label: mod.name, value: mod.name })),
+    ],
+    [state.modules]
+  );
 
   const run = async () => {
     if (!file) return;
@@ -107,7 +107,7 @@ export default function ExcelImportPanel() {
             <div className="field" style={{ flex: 1, margin: 0 }}>
               <label>Модуль материалов</label>
               <select value={module} onChange={(e) => setModule(e.target.value)}>
-                {MODULE_PRESETS.map((m) => (
+                {modulePresets.map((m) => (
                   <option key={m.value || "auto"} value={m.value}>
                     {m.label}
                   </option>

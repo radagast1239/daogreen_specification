@@ -68,12 +68,15 @@ export default function MaterialsPage() {
     });
   }, []);
 
-  const modules = useMemo(() => {
-    const names = new Set();
-    for (const mod of state.modules) names.add(mod.name);
-    for (const m of state.materials) if (m.module) names.add(m.module);
-    return [...names].sort((a, b) => a.localeCompare(b, "ru"));
-  }, [state.modules, state.materials]);
+  const activeModules = useMemo(
+    () =>
+      state.modules
+        .filter((mod) => mod.active !== false)
+        .map((mod) => mod.name)
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b, "ru")),
+    [state.modules]
+  );
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
@@ -87,6 +90,10 @@ export default function MaterialsPage() {
 
   const save = async () => {
     if (!editing.name?.trim()) return;
+    if (!editing.module || !activeModules.includes(editing.module)) {
+      alert("Выберите активный модуль из списка.");
+      return;
+    }
     const payload = { ...editing, defaultQty: 0 };
     if (payload.id) await actions.materialUpdate(payload.id, payload);
     else await actions.materialAdd(payload);
@@ -171,7 +178,7 @@ export default function MaterialsPage() {
           <input placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />
           <select value={modF} onChange={(e) => setModF(e.target.value)} style={{ width: "auto" }}>
             <option value="">Все модули</option>
-            {modules.map((m) => (
+            {activeModules.map((m) => (
               <option key={m}>{m}</option>
             ))}
           </select>
@@ -319,9 +326,20 @@ export default function MaterialsPage() {
           </div>
           <div className="field">
             <label>Модуль / раздел</label>
-            <select value={editing.module} onChange={(e) => setEditing({ ...editing, module: e.target.value })}>
-              {modules.map((modName) => (
-                <option key={modName} value={modName}>{modName}</option>
+            {editing.module && !activeModules.includes(editing.module) && (
+              <p className="muted" style={{ fontSize: 12, margin: "0 0 6px" }}>
+                Сейчас в архиве: <strong>{editing.module}</strong> — выберите активный модуль.
+              </p>
+            )}
+            <select
+              value={activeModules.includes(editing.module) ? editing.module : ""}
+              onChange={(e) => setEditing({ ...editing, module: e.target.value })}
+            >
+              <option value="">— выберите модуль —</option>
+              {activeModules.map((modName) => (
+                <option key={modName} value={modName}>
+                  {modName}
+                </option>
               ))}
             </select>
           </div>
