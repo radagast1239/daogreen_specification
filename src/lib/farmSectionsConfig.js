@@ -3,7 +3,7 @@ import { uid } from "../store/helpers.js";
 import { catalogLinesForFarmSection, lineFromMaterial } from "./projectBuilder.js";
 import { cloneBuilderLines } from "./presetHelpers.js";
 
-export const FARM_SECTION_GROUPS = [
+export const DEFAULT_FARM_SECTION_GROUPS = [
   { id: "irrigation", label: "Полив", icon: "💧", color: "#0d7ea8" },
   { id: "climate", label: "Климат", icon: "🌡️", color: "#6b5b95" },
   { id: "electrics", label: "Электрика", icon: "⚡", color: "#c9a227" },
@@ -11,7 +11,32 @@ export const FARM_SECTION_GROUPS = [
   { id: "other", label: "Прочее", icon: "📋", color: "#116355" },
 ];
 
-export const GROUP_LABEL = Object.fromEntries(FARM_SECTION_GROUPS.map((g) => [g.id, g.label]));
+/** @deprecated используйте resolveFarmSectionGroups() */
+export const FARM_SECTION_GROUPS = DEFAULT_FARM_SECTION_GROUPS;
+
+export function resolveFarmSectionGroups(settings = {}) {
+  const list = parseJson(settings.refFarmSectionGroups, null);
+  if (Array.isArray(list) && list.length) {
+    return list
+      .filter((g) => g?.id && g?.label)
+      .map((g, i) => ({
+        id: String(g.id),
+        label: String(g.label),
+        icon: g.icon || "📋",
+        color: g.color || "#116355",
+        order: g.order ?? i,
+      }))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }
+  return DEFAULT_FARM_SECTION_GROUPS.map((g, i) => ({ ...g, order: i }));
+}
+
+export function groupLabelMap(groups = DEFAULT_FARM_SECTION_GROUPS) {
+  return Object.fromEntries(groups.map((g) => [g.id, g.label]));
+}
+
+/** @deprecated */
+export const GROUP_LABEL = groupLabelMap(DEFAULT_FARM_SECTION_GROUPS);
 
 export function parseJson(raw, fallback) {
   try {
@@ -30,8 +55,8 @@ function inferGroupFromName(name) {
   return "other";
 }
 
-function defaultGroupMeta(groupId) {
-  return FARM_SECTION_GROUPS.find((g) => g.id === groupId) || FARM_SECTION_GROUPS[FARM_SECTION_GROUPS.length - 1];
+function defaultGroupMeta(groupId, groups = DEFAULT_FARM_SECTION_GROUPS) {
+  return groups.find((g) => g.id === groupId) || groups[groups.length - 1] || DEFAULT_FARM_SECTION_GROUPS[DEFAULT_FARM_SECTION_GROUPS.length - 1];
 }
 
 /** Полная нормализация раздела (миграция старых { id, name }) */

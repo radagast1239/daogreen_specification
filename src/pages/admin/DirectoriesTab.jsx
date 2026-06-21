@@ -42,6 +42,7 @@ export default function DirectoriesTab({ settings, onSaved }) {
   const [newStatus, setNewStatus] = useState({ label: "", chip: "neutral", clientVisible: true });
   const [newRole, setNewRole] = useState({ label: "" });
   const [newGroup, setNewGroup] = useState({ label: "" });
+  const [newFarmGroup, setNewFarmGroup] = useState({ label: "", icon: "📋" });
 
   useEffect(() => {
     setRef(buildReferenceData(settings));
@@ -103,6 +104,27 @@ export default function DirectoriesTab({ settings, onSaved }) {
     if (i < 0 || j < 0 || j >= list.length) return;
     [list[i], list[j]] = [list[j], list[i]];
     patch("stellageGroups", list.map((g, idx) => ({ ...g, order: idx + 1 })));
+  };
+
+  const addFarmSectionGroup = () => {
+    const label = newFarmGroup.label.trim();
+    if (!label) return;
+    const id = slugId(label);
+    if (ref.farmSectionGroups.some((g) => g.id === id)) return;
+    patch("farmSectionGroups", [
+      ...ref.farmSectionGroups,
+      { id, label, icon: newFarmGroup.icon || "📋", color: "#116355", order: ref.farmSectionGroups.length },
+    ]);
+    setNewFarmGroup({ label: "", icon: "📋" });
+  };
+
+  const moveFarmSectionGroup = (id, dir) => {
+    const list = [...ref.farmSectionGroups];
+    const i = list.findIndex((g) => g.id === id);
+    const j = dir === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    patch("farmSectionGroups", list.map((g, idx) => ({ ...g, order: idx })));
   };
 
   return (
@@ -250,6 +272,96 @@ export default function DirectoriesTab({ settings, onSaved }) {
       <div className="card" style={{ padding: 16, marginBottom: 14 }}>
         <h3 style={{ marginTop: 0 }}>Типы фермы</h3>
         <StringListEditor items={ref.farmTypes} onChange={(farmTypes) => patch("farmTypes", farmTypes)} placeholder="NFT, микрозелень…" />
+      </div>
+
+      <div className="card" style={{ padding: 16, marginBottom: 14 }}>
+        <h3 style={{ marginTop: 0 }}>Группы разделов фермы</h3>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          Колонка «Группа» на вкладке «Разделы фермы» (Полив, Климат, Электрика…). Код группы менять не нужно — только название и иконку.
+        </p>
+        <table className="spec" style={{ marginBottom: 12 }}>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th style={{ width: 48 }}>Иконка</th>
+              <th>Название</th>
+              <th>Код</th>
+              <th className="right" style={{ width: 100 }} />
+            </tr>
+          </thead>
+          <tbody>
+            {ref.farmSectionGroups.map((g, i) => (
+              <tr key={g.id}>
+                <td className="muted num">{i + 1}</td>
+                <td>
+                  <input
+                    className="spec-cell-input"
+                    style={{ width: 40, textAlign: "center" }}
+                    value={g.icon || ""}
+                    onChange={(e) =>
+                      patch(
+                        "farmSectionGroups",
+                        ref.farmSectionGroups.map((x) => (x.id === g.id ? { ...x, icon: e.target.value } : x))
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="spec-cell-input"
+                    value={g.label}
+                    onChange={(e) =>
+                      patch(
+                        "farmSectionGroups",
+                        ref.farmSectionGroups.map((x) => (x.id === g.id ? { ...x, label: e.target.value } : x))
+                      )
+                    }
+                  />
+                </td>
+                <td className="muted" style={{ fontSize: 11 }}>
+                  <code>{g.id}</code>
+                </td>
+                <td className="right">
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={i === 0} onClick={() => moveFarmSectionGroup(g.id, "up")}>
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={i === ref.farmSectionGroups.length - 1}
+                    onClick={() => moveFarmSectionGroup(g.id, "down")}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => patch("farmSectionGroups", ref.farmSectionGroups.filter((x) => x.id !== g.id))}
+                  >
+                    ✕
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="row" style={{ gap: 8 }}>
+          <input
+            placeholder="Иконка"
+            value={newFarmGroup.icon}
+            onChange={(e) => setNewFarmGroup({ ...newFarmGroup, icon: e.target.value })}
+            style={{ width: 56 }}
+          />
+          <input
+            placeholder="Новая группа"
+            value={newFarmGroup.label}
+            onChange={(e) => setNewFarmGroup({ ...newFarmGroup, label: e.target.value })}
+            style={{ flex: 1 }}
+          />
+          <button type="button" className="btn btn-sm" onClick={addFarmSectionGroup}>
+            ＋
+          </button>
+        </div>
       </div>
 
       <div className="card" style={{ padding: 16, marginBottom: 14 }}>

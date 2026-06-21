@@ -6,8 +6,6 @@ import {
   appendSectionVersion,
   catalogEditorLines,
   exportSectionBundle,
-  FARM_SECTION_GROUPS,
-  GROUP_LABEL,
   moveSection,
   newFarmSection,
   parseFarmSectionCatalogs,
@@ -18,6 +16,7 @@ import {
   normalizeSection,
   removeSection,
   resolveFarmSections,
+  resolveFarmSectionGroups,
   stripLineIds,
 } from "../../lib/farmSectionsConfig.js";
 import { resolveCategories } from "../../lib/categories.js";
@@ -137,6 +136,17 @@ export default function ModulesPage() {
       ),
     [presets]
   );
+
+  const farmSectionGroups = useMemo(() => {
+    const base = resolveFarmSectionGroups(appSettings);
+    const known = new Set(base.map((g) => g.id));
+    const extras = farmSections
+      .map((s) => s.group)
+      .filter((id) => id && !known.has(id))
+      .filter((id, i, arr) => arr.indexOf(id) === i)
+      .map((id) => ({ id, label: id, icon: "📋", color: "#888" }));
+    return [...base, ...extras];
+  }, [appSettings, farmSections]);
 
   const persistFarm = async (sections, catalogs, versions = farmSectionVersions) => {
     await api.saveSettings({
@@ -911,7 +921,7 @@ export default function ModulesPage() {
                         value={sec.group || "other"}
                         onChange={(e) => saveSectionMeta(sec.id, { group: e.target.value })}
                       >
-                        {FARM_SECTION_GROUPS.map((g) => (
+                        {farmSectionGroups.map((g) => (
                           <option key={g.id} value={g.id}>{g.label}</option>
                         ))}
                       </select>
@@ -1230,7 +1240,7 @@ export default function ModulesPage() {
                   value={editingSection.group || "other"}
                   onChange={(e) => {
                     const group = e.target.value;
-                    const meta = FARM_SECTION_GROUPS.find((g) => g.id === group);
+                    const meta = farmSectionGroups.find((g) => g.id === group);
                     setEditingSection({
                       ...editingSection,
                       group,
@@ -1239,7 +1249,7 @@ export default function ModulesPage() {
                     });
                   }}
                 >
-                  {FARM_SECTION_GROUPS.map((g) => (
+                  {farmSectionGroups.map((g) => (
                     <option key={g.id} value={g.id}>{g.label}</option>
                   ))}
                 </select>

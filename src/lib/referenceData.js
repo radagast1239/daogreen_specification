@@ -3,6 +3,7 @@ import { MATERIAL_TAGS } from "./materialTags.js";
 import { STELLAGE_GROUPS } from "../../shared/stellageComposition.js";
 import { parseCategoriesJson } from "./categories.js";
 import { parseClientSectionsJson } from "../../shared/clientSections.js";
+import { resolveFarmSectionGroups } from "./farmSectionsConfig.js";
 
 export const DEFAULT_RESPONSIBLE_ROLES = [
   { id: "plumber", label: "Сантехник" },
@@ -122,6 +123,7 @@ export function buildReferenceData(settings = {}) {
     stellageGroups: resolveStellageGroups(settings),
     categories: parseCategoriesJson(settings.materialCategories),
     clientSections: resolveClientSections(settings),
+    farmSectionGroups: resolveFarmSectionGroups(settings),
   };
 }
 
@@ -140,6 +142,15 @@ export function referenceToSettings(ref) {
         label: s.label,
         subsections: s.subsections || [],
         hidden: s.hidden === true,
+        order: i,
+      }))
+    ),
+    refFarmSectionGroups: JSON.stringify(
+      (ref.farmSectionGroups || []).map((g, i) => ({
+        id: g.id,
+        label: g.label,
+        icon: g.icon || "📋",
+        color: g.color || "#116355",
         order: i,
       }))
     ),
