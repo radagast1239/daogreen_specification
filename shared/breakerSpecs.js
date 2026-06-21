@@ -13,6 +13,15 @@ export function blankBreakerSpec() {
   return { amps: "", qty: "" };
 }
 
+/** Строки редактора — пустые не отфильтровываем */
+export function draftBreakerSpecs(raw) {
+  if (!Array.isArray(raw) || !raw.length) return [blankBreakerSpec()];
+  return raw.map((s) => ({
+    amps: s?.amps === "" || s?.amps == null ? "" : s.amps,
+    qty: s?.qty === "" || s?.qty == null ? "" : s.qty,
+  }));
+}
+
 export function normalizeBreakerSpecs(raw) {
   if (!raw) return [];
   const list = Array.isArray(raw) ? raw : [];

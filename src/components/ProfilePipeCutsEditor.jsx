@@ -1,6 +1,7 @@
 import React from "react";
 import {
   blankPipeCut,
+  draftPipeCuts,
   formatPipeCutsLabel,
   isProfilePipeName,
   normalizePipeCuts,
@@ -18,13 +19,13 @@ export default function ProfilePipeCutsEditor({
   if (!isProfilePipeName(name)) return null;
 
   const cuts = normalizePipeCuts(value);
-  const rows = cuts.length ? cuts : [blankPipeCut()];
+  const rows = draftPipeCuts(value);
 
   const emit = (next) => {
-    const normalized = normalizePipeCuts(next);
+    const draft = draftPipeCuts(next);
     onChange({
-      pipeCuts: normalized,
-      clientNote: pipeCutsClientNote(normalized),
+      pipeCuts: draft,
+      clientNote: pipeCutsClientNote(draft),
     });
   };
 

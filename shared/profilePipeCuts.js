@@ -11,6 +11,15 @@ export function blankPipeCut() {
   return { lengthMm: "", qty: "" };
 }
 
+/** Строки редактора — пустые не отфильтровываем */
+export function draftPipeCuts(raw) {
+  if (!Array.isArray(raw) || !raw.length) return [blankPipeCut()];
+  return raw.map((c) => ({
+    lengthMm: c?.lengthMm === "" || c?.lengthMm == null ? "" : c.lengthMm,
+    qty: c?.qty === "" || c?.qty == null ? "" : c.qty,
+  }));
+}
+
 export function normalizePipeCuts(raw) {
   if (!raw) return [];
   const list = Array.isArray(raw) ? raw : [];

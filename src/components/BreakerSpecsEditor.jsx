@@ -1,6 +1,7 @@
 import React from "react";
 import {
   blankBreakerSpec,
+  draftBreakerSpecs,
   formatBreakerSpecsLabel,
   isBreakerName,
   normalizeBreakerSpecs,
@@ -18,13 +19,13 @@ export default function BreakerSpecsEditor({
   if (!isBreakerName(name)) return null;
 
   const specs = normalizeBreakerSpecs(value);
-  const rows = specs.length ? specs : [blankBreakerSpec()];
+  const rows = draftBreakerSpecs(value);
 
   const emit = (next) => {
-    const normalized = normalizeBreakerSpecs(next);
+    const draft = draftBreakerSpecs(next);
     onChange({
-      breakerSpecs: normalized,
-      clientNote: breakerSpecsClientNote(normalized),
+      breakerSpecs: draft,
+      clientNote: breakerSpecsClientNote(draft),
     });
   };
 
