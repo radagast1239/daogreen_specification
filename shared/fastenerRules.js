@@ -64,6 +64,7 @@ export function syncFastenersFromCrabs(lines) {
       ...ln,
       included: true,
       qty: total,
+      defaultQty: total,
     };
   });
 }

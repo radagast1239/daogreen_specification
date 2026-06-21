@@ -145,7 +145,8 @@ export function stripLineIds(lines) {
     .map(({ id, qty, defaultQty, ...rest }) => ({
       ...rest,
       included: true,
-      defaultQty: Number(defaultQty ?? qty) || 0,
+      // qty — то, что пользователь правит в редакторе; defaultQty может остаться от загрузки материала
+      defaultQty: Number(qty ?? defaultQty) || 0,
     }));
 }
 

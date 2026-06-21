@@ -158,7 +158,10 @@ export default function SpecPickerTable({
 
   const toggleLine = (ln, included) => {
     const patch = { included };
-    if (showQty && included && !ln.qty) patch.qty = 1;
+    if (showQty && included && !ln.qty) {
+      patch.qty = 1;
+      patch.defaultQty = 1;
+    }
     if (included && !ln.imageUrl && !ln.photoUrl && ln.materialId) {
       const img = resolveLinePhoto(ln, materials);
       if (img) {
@@ -257,7 +260,7 @@ export default function SpecPickerTable({
         lineFromMaterial(mat, {
           included: true,
           price: newForm.price,
-          ...(showQty ? { qty: 1 } : {}),
+          ...(showQty ? { qty: 1, defaultQty: 1 } : {}),
         }),
       ]);
       setNewOpen(false);
@@ -463,7 +466,10 @@ export default function SpecPickerTable({
                           step="any"
                           value={ln.qty}
                           disabled={!ln.included}
-                          onChange={(e) => emitLines(patchLine(lines, ln.id, { qty: Number(e.target.value) || 0 }))}
+                          onChange={(e) => {
+                            const qty = Number(e.target.value) || 0;
+                            emitLines(patchLine(lines, ln.id, { qty, defaultQty: qty }));
+                          }}
                         />
                       </td>
                       )}
