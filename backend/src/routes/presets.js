@@ -35,7 +35,7 @@ const INSERT = db.prepare(`
 `);
 const UPDATE = db.prepare(`
   UPDATE spec_presets SET
-    name=@name, module_id=@module_id, module_name=@module_name, section_id=@section_id,
+    name=@name, preset_type=@preset_type, module_id=@module_id, module_name=@module_name, section_id=@section_id,
     sort_order=@sort_order, items_json=@items_json, params_json=@params_json, note=@note, updated_at=datetime('now')
   WHERE id=@id
 `);
