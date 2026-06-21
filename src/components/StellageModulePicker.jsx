@@ -92,7 +92,7 @@ export default function StellageModulePicker({ mod, materials, value, onChange, 
               }}
             >
               <input type="checkbox" checked={on} onChange={() => toggleGroup(g.id)} />
-              <span style={{ fontSize: 12 }}>{g.label}</span>
+              <span className="stellage-group-head" style={{ fontSize: 15 }}>{g.label}</span>
               <span className="muted num" style={{ marginLeft: "auto", fontSize: 11 }}>
                 {cnt}
               </span>

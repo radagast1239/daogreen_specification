@@ -264,7 +264,7 @@ export default function DirectoriesTab({ settings, onSaved }) {
                 <td className="muted num">{i + 1}</td>
                 <td>
                   <input
-                    className="spec-cell-input"
+                    className="spec-cell-input stellage-group-name-input"
                     value={g.label}
                     onChange={(e) =>
                       patch(

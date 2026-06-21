@@ -19,6 +19,38 @@ export function groupLabel(id) {
   return GROUP_BY_ID[id]?.label || id;
 }
 
+export function compositionGroupLabel(id, groupDefs = STELLAGE_GROUPS) {
+  return groupDefs.find((g) => g.id === id)?.label || groupLabel(id);
+}
+
+export function isStellageModuleTitle(moduleName, modules = []) {
+  if (modules.some((m) => m.name === moduleName && m.type === "stellage")) return true;
+  return isStellageModuleName(moduleName);
+}
+
+export function resolveItemCompositionGroup(item, materials = []) {
+  if (item?.subcategory) return item.subcategory;
+  const mat = materials.find((m) => m.id === item?.materialId);
+  if (mat?.subcategory) return mat.subcategory;
+  return materialCompositionGroup(mat || item) || "other";
+}
+
+/** Позиции спецификации по группам состава стеллажа */
+export function groupItemsByComposition(items, materials = [], groupDefs = STELLAGE_GROUPS) {
+  const order = new Map(groupDefs.map((g, i) => [g.id, g.order ?? i + 1]));
+  const buckets = new Map();
+  for (const it of items || []) {
+    const gid = resolveItemCompositionGroup(it, materials);
+    if (!buckets.has(gid)) buckets.set(gid, []);
+    buckets.get(gid).push(it);
+  }
+  return [...buckets.entries()].sort((a, b) => {
+    const oa = order.has(a[0]) ? order.get(a[0]) : 999;
+    const ob = order.has(b[0]) ? order.get(b[0]) : 999;
+    return oa - ob || String(a[0]).localeCompare(String(b[0]), "ru");
+  });
+}
+
 export function isStellageModule(mod) {
   return mod?.type === "stellage";
 }

@@ -33,6 +33,12 @@ import ActivityFeed from "../../components/ActivityFeed.jsx";
 import PublishChecklist, { PublishGateModal } from "../../components/PublishChecklist.jsx";
 import ClientSchemesEditor from "../../components/ClientSchemesEditor.jsx";
 import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
+import {
+  compositionGroupLabel,
+  groupItemsByComposition,
+  isStellageModuleTitle,
+  STELLAGE_GROUPS,
+} from "../../../shared/stellageComposition.js";
 
 const TAB_LABELS = {
   spec: "Спецификация",
@@ -468,6 +474,12 @@ function SpecTab({
   highlightItemId,
 }) {
   const { confirm } = useToast();
+  const { state } = useStore();
+  const materials = state.materials;
+  const modules = state.modules;
+  const stellageGroups = state.reference?.stellageGroups?.length
+    ? state.reference.stellageGroups
+    : STELLAGE_GROUPS;
   const groups = useMemo(() => groupBy(project.items, "module"), [project.items]);
   const rooms = project.rooms?.length ? project.rooms : defaultRooms();
   const hasFarmItems = project.items.some((it) => isFarmGeneralItem(project, it));
@@ -573,43 +585,8 @@ function SpecTab({
         const visibleItems = items.filter(passesFilter);
         if (!visibleItems.length) return null;
         const modSum = visibleItems.reduce((s, i) => s + lineGross(i), 0);
-        return (
-        <Collapsible
-          key={module}
-          title={module}
-          subtitle={`${visibleItems.length} поз. · ${money(modSum, project.currency)}`}
-          defaultOpen={groups.length <= 4}
-          actions={
-            <button className="btn btn-sm btn-ghost" onClick={() => addItem(module)}>
-              ＋ позиция
-            </button>
-          }
-        >
-          <div className="card" style={{ overflowX: "auto" }}>
-            <table className="spec">
-              <thead>
-                <tr>
-                  <th style={{ width: 48 }}>Фото</th>
-                  <th>Наименование</th>
-                  <th>Ед</th>
-                  <th className="right">Кол-во</th>
-                  <th className="right">Цена</th>
-                  <th>НДС</th>
-                  <th>Поставщик</th>
-                  {hasFarmItems && <th style={{ width: 130 }}>Комната</th>}
-                  <th className="right">Сумма</th>
-                  <th>Ссылка</th>
-                  <th title="Внутренний комментарий">Заметка</th>
-                  <th title="Комментарий клиента">Клиент</th>
-                  <th title="Срок поставки, дней">Дней</th>
-                  <th>Клиенту</th>
-                  <th>Утв.</th>
-                  <th>Вкл.</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleItems.map((it) => (
+        const specColSpan = hasFarmItems ? 17 : 16;
+        const renderItemRow = (it) => (
                   <tr
                     key={it.id}
                     id={`spec-item-${it.id}`}
@@ -795,7 +772,56 @@ function SpecTab({
                       </button>
                     </td>
                   </tr>
-                ))}
+        );
+        const bodyRows = isStellageModuleTitle(module, modules)
+          ? groupItemsByComposition(visibleItems, materials, stellageGroups).flatMap(([gId, gItems]) => [
+              gId !== "other" ? (
+                <tr key={`${module}-g-${gId}`}>
+                  <td colSpan={specColSpan} className="spec-group-head">
+                    {compositionGroupLabel(gId, stellageGroups)}
+                  </td>
+                </tr>
+              ) : null,
+              ...gItems.map(renderItemRow),
+            ]).filter(Boolean)
+          : visibleItems.map(renderItemRow);
+        return (
+        <Collapsible
+          key={module}
+          title={module}
+          subtitle={`${visibleItems.length} поз. · ${money(modSum, project.currency)}`}
+          defaultOpen={groups.length <= 4}
+          actions={
+            <button className="btn btn-sm btn-ghost" onClick={() => addItem(module)}>
+              ＋ позиция
+            </button>
+          }
+        >
+          <div className="card" style={{ overflowX: "auto" }}>
+            <table className="spec">
+              <thead>
+                <tr>
+                  <th style={{ width: 48 }}>Фото</th>
+                  <th>Наименование</th>
+                  <th>Ед</th>
+                  <th className="right">Кол-во</th>
+                  <th className="right">Цена</th>
+                  <th>НДС</th>
+                  <th>Поставщик</th>
+                  {hasFarmItems && <th style={{ width: 130 }}>Комната</th>}
+                  <th className="right">Сумма</th>
+                  <th>Ссылка</th>
+                  <th title="Внутренний комментарий">Заметка</th>
+                  <th title="Комментарий клиента">Клиент</th>
+                  <th title="Срок поставки, дней">Дней</th>
+                  <th>Клиенту</th>
+                  <th>Утв.</th>
+                  <th>Вкл.</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {bodyRows}
               </tbody>
             </table>
           </div>

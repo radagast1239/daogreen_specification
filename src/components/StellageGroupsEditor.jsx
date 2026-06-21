@@ -49,7 +49,7 @@ export default function StellageGroupsEditor({ groups, onChange, compact = false
               <td className="muted num">{i + 1}</td>
               <td>
                 <input
-                  className="spec-cell-input"
+                  className="spec-cell-input stellage-group-name-input"
                   value={g.label}
                   onChange={(e) =>
                     onChange(groups.map((x) => (x.id === g.id ? { ...x, label: e.target.value } : x)))

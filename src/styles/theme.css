@@ -808,7 +808,25 @@ body.nav-open { overflow: hidden; }
 .spec-picker-wrap { border: 1px solid var(--border); }
 .spec-picker td, .spec-picker th { vertical-align: middle; }
 .spec-picker .center { text-align: center; }
-.spec-group-head { font-size: 11px; font-weight: 600; background: var(--paper); color: var(--muted); padding: 6px 10px !important; }
+.spec-group-head,
+.stellage-group-head {
+  font-size: 15px;
+  font-weight: 700;
+  background: var(--paper);
+  color: #111;
+  padding: 8px 12px !important;
+  letter-spacing: 0.01em;
+}
+.stellage-group-head--block {
+  margin: 12px 0 6px;
+  padding: 6px 2px !important;
+  background: transparent;
+}
+.stellage-group-name-input {
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  color: #111 !important;
+}
 .spec-row-off { opacity: .42; }
 .spec-row-off .spec-cell-input:not(:disabled) { opacity: 1; }
 .spec-cell-input {

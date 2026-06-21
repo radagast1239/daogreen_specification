@@ -24,6 +24,12 @@ import { clientTabDefs, heroEyebrow } from "../../lib/clientBrandConfig.js";
 import QRCode from "qrcode";
 import { downloadXlsx, printPDF } from "../../lib/export.js";
 import { ClientSchemesViewer } from "../../components/ClientSchemesEditor.jsx";
+import {
+  compositionGroupLabel,
+  groupItemsByComposition,
+  isStellageModuleTitle,
+  STELLAGE_GROUPS,
+} from "../../../shared/stellageComposition.js";
 
 const QUICK_STATUS_IDS = [
   "not_bought", "searching", "ordered", "bought", "delivered", "have", "need_help", "not_fit", "replacement_check",
@@ -48,7 +54,7 @@ function heroGradient(branding) {
 
 export default function ClientProjectPage() {
   const { token } = useParams();
-  const { actions } = useStore();
+  const { state, actions } = useStore();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("overview");
   const purchaseStatuses = data?.purchaseStatuses || PURCHASE_STATUSES;
@@ -379,10 +385,29 @@ export default function ClientProjectPage() {
               purchaseStatuses={purchaseStatuses}
               quickStatuses={quickStatuses}
               render={(todo) => (
-                <ItemsByGroup groups={groupBy(todo, "module")} currency={project.currency} patch={patch} purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />
+                <ItemsByGroup
+                  groups={groupBy(todo, "module")}
+                  currency={project.currency}
+                  patch={patch}
+                  purchaseStatuses={purchaseStatuses}
+                  quickStatuses={quickStatuses}
+                  materials={state.materials}
+                  modules={state.modules}
+                  stellageGroups={state.reference?.stellageGroups?.length ? state.reference.stellageGroups : STELLAGE_GROUPS}
+                />
               )}
               renderBought={(bought) => (
-                <ItemsByGroup groups={groupBy(bought, "module")} currency={project.currency} patch={patch} bought purchaseStatuses={purchaseStatuses} quickStatuses={quickStatuses} />
+                <ItemsByGroup
+                  groups={groupBy(bought, "module")}
+                  currency={project.currency}
+                  patch={patch}
+                  bought
+                  purchaseStatuses={purchaseStatuses}
+                  quickStatuses={quickStatuses}
+                  materials={state.materials}
+                  modules={state.modules}
+                  stellageGroups={state.reference?.stellageGroups?.length ? state.reference.stellageGroups : STELLAGE_GROUPS}
+                />
               )}
             />
           )}
@@ -618,11 +643,25 @@ function OverviewTab({ project, totals, items, supplierFilter, qrUrl, branding, 
   );
 }
 
-function ItemsByGroup({ groups, currency, patch, bought = false, purchaseStatuses, quickStatuses }) {
+function ItemsByGroup({
+  groups,
+  currency,
+  patch,
+  bought = false,
+  purchaseStatuses,
+  quickStatuses,
+  materials = [],
+  modules = [],
+  stellageGroups = STELLAGE_GROUPS,
+}) {
   return (
     <>
       {groups.map(([title, items]) => {
         const sum = items.reduce((s, i) => s + lineGross(i), 0);
+        const stellageModule = isStellageModuleTitle(title, modules);
+        const compositionGroups = stellageModule
+          ? groupItemsByComposition(items, materials, stellageGroups)
+          : null;
         return (
           <section key={title}>
             <div className="section-head">
@@ -632,17 +671,38 @@ function ItemsByGroup({ groups, currency, patch, bought = false, purchaseStatuse
                 {money(sum, currency)}
               </span>
             </div>
-            {items.map((it) => (
-              <ItemCard
-                key={it.id}
-                it={it}
-                currency={currency}
-                patch={patch}
-                bought={bought}
-                purchaseStatuses={purchaseStatuses}
-                quickStatuses={quickStatuses}
-              />
-            ))}
+            {compositionGroups
+              ? compositionGroups.map(([gId, gItems]) => (
+                  <React.Fragment key={gId}>
+                    {gId !== "other" && (
+                      <div className="stellage-group-head stellage-group-head--block">
+                        {compositionGroupLabel(gId, stellageGroups)}
+                      </div>
+                    )}
+                    {gItems.map((it) => (
+                      <ItemCard
+                        key={it.id}
+                        it={it}
+                        currency={currency}
+                        patch={patch}
+                        bought={bought}
+                        purchaseStatuses={purchaseStatuses}
+                        quickStatuses={quickStatuses}
+                      />
+                    ))}
+                  </React.Fragment>
+                ))
+              : items.map((it) => (
+                  <ItemCard
+                    key={it.id}
+                    it={it}
+                    currency={currency}
+                    patch={patch}
+                    bought={bought}
+                    purchaseStatuses={purchaseStatuses}
+                    quickStatuses={quickStatuses}
+                  />
+                ))}
           </section>
         );
       })}
