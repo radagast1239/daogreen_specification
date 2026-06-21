@@ -4,6 +4,12 @@ import { resolveCategories } from "../../lib/categories.js";
 import { CATEGORIES } from "../../data/modules.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { useToast } from "../../components/Toast.jsx";
+import ClientSectionsEditor from "../../components/admin/ClientSectionsEditor.jsx";
+import {
+  resolveClientSections,
+  clientSectionsToSettings,
+  applyClientSectionsFromSettings,
+} from "../../lib/clientSectionsConfig.js";
 
 export default function SettingsPage() {
   const { confirm, success } = useToast();
@@ -20,12 +26,15 @@ export default function SettingsPage() {
   const [adminUsers, setAdminUsers] = useState([]);
   const [newUser, setNewUser] = useState({ name: "", apiKey: "" });
   const [categories, setCategories] = useState([...CATEGORIES]);
+  const [clientSections, setClientSections] = useState([]);
   const [newCat, setNewCat] = useState("");
 
   useEffect(() => {
     api.getSettings().then((s) => {
       setForm(s);
       setCategories(resolveCategories(s));
+      setClientSections(resolveClientSections(s));
+      applyClientSectionsFromSettings(s);
     });
     api.getAdminUsers().then(setAdminUsers).catch(() => {});
   }, []);
@@ -46,16 +55,18 @@ export default function SettingsPage() {
     const payload = {
       ...form,
       materialCategories: JSON.stringify(categories),
+      ...clientSectionsToSettings(clientSections),
     };
     await api.saveSettings(payload);
     setForm(payload);
+    applyClientSectionsFromSettings(payload);
     success("Настройки сохранены");
   };
 
   return (
     <>
-      <PageHeader title="Настройки" sub="Ключи, срок ссылки, категории. Бренд клиента — в «Модули / разделы → Клиент и бренд»." back={{ to: "/", label: "Проекты" }} />
-      <div className="content" style={{ maxWidth: 560 }}>
+      <PageHeader title="Настройки" sub="Ключи, срок ссылки, категории и разделы закупки для клиента." back={{ to: "/", label: "Проекты" }} />
+      <div className="content" style={{ maxWidth: 720 }}>
         <div className="card" style={{ padding: 22, marginBottom: 20 }}>
           <h3 style={{ marginTop: 0 }}>Компания</h3>
           {[
@@ -105,6 +116,11 @@ export default function SettingsPage() {
               Добавить
             </button>
           </div>
+        </div>
+
+        <div className="card" style={{ padding: 22, marginTop: 20 }}>
+          <h3 style={{ marginTop: 0 }}>Разделы закупки для клиента</h3>
+          <ClientSectionsEditor sections={clientSections} onChange={setClientSections} />
         </div>
 
         <div className="row wrap" style={{ marginTop: 18, gap: 10 }}>

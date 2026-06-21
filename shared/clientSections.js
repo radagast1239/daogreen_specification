@@ -1,20 +1,199 @@
 /** Клиентские разделы закупки (отдельно от внутренних category в базе) */
 
-export const CLIENT_SECTIONS = [
-  { id: "stellage", label: "Стеллажи и каркас" },
-  { id: "irrigation", label: "Полив" },
-  { id: "drainage", label: "Дренаж и слив" },
-  { id: "tanks", label: "Ёмкости и баки" },
-  { id: "electrics", label: "Электрика" },
-  { id: "lighting", label: "Освещение" },
-  { id: "climate", label: "Климат и вентиляция" },
-  { id: "water_prep", label: "Водоподготовка" },
-  { id: "automation", label: "Автоматика и датчики" },
-  { id: "consumables", label: "Расходники и запуск" },
-  { id: "works", label: "Работы и доставка" },
+export const DEFAULT_CLIENT_SECTIONS = [
+  {
+    id: "stellage",
+    label: "Стеллажи и каркас",
+    subsections: ["Каркас", "Крепёж", "Полки и лотки", "Поддоны"],
+  },
+  {
+    id: "irrigation",
+    label: "Полив",
+    subsections: ["Насосы", "Магистраль подачи", "Фитинги", "Краны и клапаны", "Капельная лента"],
+  },
+  {
+    id: "drainage",
+    label: "Дренаж и слив",
+    subsections: ["Трубы слива", "Дренажные насосы", "Канализация"],
+  },
+  {
+    id: "tanks",
+    label: "Ёмкости и баки",
+    subsections: ["Баки", "Уровнемеры"],
+  },
+  {
+    id: "electrics",
+    label: "Электрика",
+    subsections: ["Кабель", "Автоматы и УЗО", "Розетки и клеммы", "Щит"],
+  },
+  {
+    id: "lighting",
+    label: "Освещение",
+    subsections: ["Светильники", "Блоки питания", "Подвесы и крепления"],
+  },
+  {
+    id: "climate",
+    label: "Климат и вентиляция",
+    subsections: ["Вентиляция", "Кондиционирование", "Увлажнение"],
+  },
+  {
+    id: "water_prep",
+    label: "Водоподготовка",
+    subsections: ["Фильтры", "Осмос", "Дозирование"],
+  },
+  {
+    id: "automation",
+    label: "Автоматика и датчики",
+    subsections: ["Контроллеры", "Датчики", "Таймеры"],
+  },
+  {
+    id: "consumables",
+    label: "Расходники и запуск",
+    subsections: ["Семена и субстрат", "Удобрения", "Запуск фермы"],
+  },
+  {
+    id: "works",
+    label: "Работы и доставка",
+    subsections: ["Монтаж", "Доставка", "Пусконаладка"],
+  },
 ];
 
-export const CLIENT_SECTION_LABEL = Object.fromEntries(CLIENT_SECTIONS.map((s) => [s.id, s.label]));
+/** @deprecated используйте getClientSections() */
+export const CLIENT_SECTIONS = DEFAULT_CLIENT_SECTIONS;
+
+function normalizeSection(raw, index = 0) {
+  if (!raw || typeof raw !== "object") return null;
+  const id = String(raw.id || "").trim();
+  const label = String(raw.label || "").trim();
+  if (!id || !label) return null;
+  const subsections = Array.isArray(raw.subsections)
+    ? [...new Set(raw.subsections.map((s) => String(s).trim()).filter(Boolean))]
+    : [];
+  return {
+    id,
+    label,
+    subsections,
+    hidden: raw.hidden === true,
+    order: Number.isFinite(raw.order) ? raw.order : index,
+  };
+}
+
+export function parseClientSectionsJson(raw) {
+  try {
+    const list = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(list) && list.length) {
+      const out = list.map((item, i) => normalizeSection(item, i)).filter(Boolean);
+      if (out.length) {
+        return out.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_CLIENT_SECTIONS.map((s, i) => ({ ...s, hidden: false, order: i }));
+}
+
+export function slugClientSectionId(label, existingIds = new Set()) {
+  const base =
+    String(label || "")
+      .trim()
+      .toLowerCase()
+      .replace(/ё/g, "е")
+      .replace(/[^a-z0-9а-я]+/gi, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 28) || "section";
+  let id = base;
+  let n = 2;
+  while (existingIds.has(id)) {
+    id = `${base}_${n++}`;
+  }
+  return id;
+}
+
+function createRuntime(sections) {
+  const list = (sections || DEFAULT_CLIENT_SECTIONS).map((s, i) => ({
+    ...s,
+    order: s.order ?? i,
+  }));
+  const labelMap = Object.fromEntries(list.map((s) => [s.id, s.label]));
+  const order = [...list.map((s) => s.id), "__misc__"];
+
+  function resolveClientSection(item) {
+    const explicit = (item?.clientSection || "").trim();
+    if (explicit) {
+      return {
+        section: explicit,
+        subsection: (item?.clientSubsection || "").trim(),
+        label: labelMap[explicit] || explicit,
+      };
+    }
+
+    const cat = (item?.category || "").trim();
+
+    if (BROAD_CATEGORIES.has(cat)) {
+      const inferred = inferFromName(item?.name);
+      if (inferred.section) {
+        return { ...inferred, label: labelMap[inferred.section] || inferred.section };
+      }
+    }
+
+    const mapped = CATEGORY_MAP[cat];
+    if (mapped?.section) {
+      return { ...mapped, label: labelMap[mapped.section] || mapped.section };
+    }
+
+    const inferred = inferFromName(item?.name);
+    if (inferred.section) {
+      return { ...inferred, label: labelMap[inferred.section] || inferred.section };
+    }
+
+    return { section: "", subsection: "", label: cat || "Без категории" };
+  }
+
+  function groupByClientSection(items) {
+    const map = new Map();
+    for (const it of items || []) {
+      const { section, label } = resolveClientSection(it);
+      const key = section || "__misc__";
+      const title = section ? label : "Уточнить категорию";
+      if (!map.has(key)) map.set(key, { title, items: [] });
+      map.get(key).items.push(it);
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => {
+        const ia = order.indexOf(a);
+        const ib = order.indexOf(b);
+        return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+      })
+      .map(([, v]) => [v.title, v.items]);
+  }
+
+  return {
+    sections: list,
+    labelMap,
+    order,
+    resolveClientSection,
+    groupByClientSection,
+  };
+}
+
+let activeRuntime = createRuntime(DEFAULT_CLIENT_SECTIONS);
+
+export function configureClientSections(sections) {
+  activeRuntime = createRuntime(sections);
+}
+
+export function getClientSections({ includeHidden = false } = {}) {
+  const list = activeRuntime.sections;
+  return includeHidden ? [...list] : list.filter((s) => !s.hidden);
+}
+
+export function getClientSectionLabelMap() {
+  return { ...activeRuntime.labelMap };
+}
+
+/** @deprecated используйте getClientSectionLabelMap() */
+export const CLIENT_SECTION_LABEL = Object.fromEntries(DEFAULT_CLIENT_SECTIONS.map((s) => [s.id, s.label]));
 
 const CATEGORY_MAP = {
   "Каркас и крепёж": { section: "stellage", subsection: "Каркас" },
@@ -46,7 +225,8 @@ function inferFromName(name = "") {
   return { section: "", subsection: "" };
 }
 
-/** Подсказка раздела при выборе внутренней категории */
+const BROAD_CATEGORIES = new Set(["Полив и сантехника", "Электрика и свет", "Прочее"]);
+
 export function suggestClientSectionFromCategory(category) {
   const mapped = CATEGORY_MAP[(category || "").trim()];
   return mapped?.section || "";
@@ -57,38 +237,8 @@ export function suggestClientSubsectionFromCategory(category) {
   return mapped?.subsection || "";
 }
 
-const BROAD_CATEGORIES = new Set(["Полив и сантехника", "Электрика и свет", "Прочее"]);
-
 export function resolveClientSection(item) {
-  const explicit = (item?.clientSection || "").trim();
-  if (explicit) {
-    return {
-      section: explicit,
-      subsection: (item?.clientSubsection || "").trim(),
-      label: CLIENT_SECTION_LABEL[explicit] || explicit,
-    };
-  }
-
-  const cat = (item?.category || "").trim();
-
-  if (BROAD_CATEGORIES.has(cat)) {
-    const inferred = inferFromName(item?.name);
-    if (inferred.section) {
-      return { ...inferred, label: CLIENT_SECTION_LABEL[inferred.section] || inferred.section };
-    }
-  }
-
-  const mapped = CATEGORY_MAP[cat];
-  if (mapped?.section) {
-    return { ...mapped, label: CLIENT_SECTION_LABEL[mapped.section] || mapped.section };
-  }
-
-  const inferred = inferFromName(item?.name);
-  if (inferred.section) {
-    return { ...inferred, label: CLIENT_SECTION_LABEL[inferred.section] || inferred.section };
-  }
-
-  return { section: "", subsection: "", label: cat || "Без категории" };
+  return activeRuntime.resolveClientSection(item);
 }
 
 export function clientSectionLabel(item) {
@@ -96,22 +246,16 @@ export function clientSectionLabel(item) {
 }
 
 export function groupByClientSection(items) {
-  const map = new Map();
-  for (const it of items || []) {
-    const { section, label } = resolveClientSection(it);
-    const key = section || "__misc__";
-    const title = section ? label : "Уточнить категорию";
-    if (!map.has(key)) map.set(key, { title, items: [] });
-    map.get(key).items.push(it);
-  }
-  const order = [...CLIENT_SECTIONS.map((s) => s.id), "__misc__"];
-  return [...map.entries()]
-    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
-    .map(([, v]) => [v.title, v.items]);
+  return activeRuntime.groupByClientSection(items);
 }
 
 export function isMiscCategory(item) {
   const cat = (item?.category || "").trim();
   const { section } = resolveClientSection(item);
   return cat === "Прочее" && !section;
+}
+
+export function subsectionsForSection(sectionId) {
+  const sec = activeRuntime.sections.find((s) => s.id === sectionId);
+  return sec?.subsections || [];
 }

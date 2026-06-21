@@ -2,6 +2,7 @@ import { CATEGORIES, FARM_TYPES, PURCHASE_STATUSES } from "../data/modules.js";
 import { MATERIAL_TAGS } from "./materialTags.js";
 import { STELLAGE_GROUPS } from "../../shared/stellageComposition.js";
 import { parseCategoriesJson } from "./categories.js";
+import { parseClientSectionsJson } from "../../shared/clientSections.js";
 
 export const DEFAULT_RESPONSIBLE_ROLES = [
   { id: "plumber", label: "Сантехник" },
@@ -107,6 +108,10 @@ export function defaultStellageGroupIds(groups) {
   return list.filter((g) => g.id !== "opcii").map((g) => g.id);
 }
 
+export function resolveClientSections(settings = {}) {
+  return parseClientSectionsJson(settings.clientSectionsJson);
+}
+
 export function buildReferenceData(settings = {}) {
   return {
     tags: resolveTags(settings),
@@ -116,6 +121,7 @@ export function buildReferenceData(settings = {}) {
     farmTypes: resolveFarmTypes(settings),
     stellageGroups: resolveStellageGroups(settings),
     categories: parseCategoriesJson(settings.materialCategories),
+    clientSections: resolveClientSections(settings),
   };
 }
 
@@ -128,6 +134,15 @@ export function referenceToSettings(ref) {
     refFarmTypes: JSON.stringify(ref.farmTypes || []),
     refStellageGroups: JSON.stringify(ref.stellageGroups || []),
     materialCategories: JSON.stringify(ref.categories || []),
+    clientSectionsJson: JSON.stringify(
+      (ref.clientSections || []).map((s, i) => ({
+        id: s.id,
+        label: s.label,
+        subsections: s.subsections || [],
+        hidden: s.hidden === true,
+        order: i,
+      }))
+    ),
   };
 }
 

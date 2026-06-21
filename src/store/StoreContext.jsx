@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState } from "react";
 import { buildReferenceData } from "../lib/referenceData.js";
+import { applyClientSectionsFromSettings } from "../lib/clientSectionsConfig.js";
 import { buildItemsFromModules } from "../lib/apiHelpers.js";
 import { api as apiClient } from "../lib/api.js";
 
@@ -61,6 +62,7 @@ export function StoreProvider({ children }) {
         apiClient.getSettings(),
       ]);
       const reference = buildReferenceData(settings);
+      applyClientSectionsFromSettings(settings);
       dispatch({
         type: "HYDRATE",
         payload: { materials, modules, projects, dashboard, settings, reference, loading: false },

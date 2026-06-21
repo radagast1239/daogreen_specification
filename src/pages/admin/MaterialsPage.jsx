@@ -23,11 +23,12 @@ import {
   resolveMaterialModules,
 } from "../../../shared/materialModules.js";
 import {
-  CLIENT_SECTIONS,
   clientSectionLabel,
   suggestClientSectionFromCategory,
   suggestClientSubsectionFromCategory,
   isMiscCategory,
+  getClientSections,
+  subsectionsForSection,
 } from "../../../shared/clientSections.js";
 
 const blank = {
@@ -98,6 +99,20 @@ export default function MaterialsPage() {
         .sort((a, b) => a.localeCompare(b, "ru")),
     [state.modules]
   );
+
+  const clientSectionOptions = useMemo(() => {
+    const fromRef = state.reference?.clientSections?.filter((s) => !s.hidden);
+    if (fromRef?.length) return fromRef;
+    return getClientSections();
+  }, [state.reference?.clientSections]);
+
+  const subsectionHints = useMemo(() => {
+    const sectionId = editing?.clientSection;
+    if (!sectionId) return [];
+    const fromRef = state.reference?.clientSections?.find((s) => s.id === sectionId);
+    if (fromRef?.subsections?.length) return fromRef.subsections;
+    return subsectionsForSection(sectionId);
+  }, [editing?.clientSection, state.reference?.clientSections]);
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
@@ -370,20 +385,29 @@ export default function MaterialsPage() {
                 onChange={(e) => setEditing({ ...editing, clientSection: e.target.value })}
               >
                 <option value="">— авто (из категории / названия) —</option>
-                {CLIENT_SECTIONS.map((s) => (
+                {clientSectionOptions.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.label}
                   </option>
                 ))}
               </select>
+              <p className="muted" style={{ fontSize: 11, margin: "4px 0 0" }}>
+                Список разделов — в <a href="/settings">Настройках</a>
+              </p>
             </div>
             <div className="field">
               <label>Подраздел для клиента</label>
               <input
+                list="client-subsection-hints"
                 value={editing.clientSubsection || ""}
                 placeholder="Каркас, Фитинги, Насосы…"
                 onChange={(e) => setEditing({ ...editing, clientSubsection: e.target.value })}
               />
+              <datalist id="client-subsection-hints">
+                {subsectionHints.map((sub) => (
+                  <option key={sub} value={sub} />
+                ))}
+              </datalist>
             </div>
           </div>
           <p className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>

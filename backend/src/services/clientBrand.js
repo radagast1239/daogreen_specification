@@ -71,6 +71,7 @@ export function buildClientBrandFromSettings(obj = {}) {
         : [...DEFAULT_PDF_COLUMNS],
     pdfFooter: obj.clientPdfFooter || "",
     pdfShowQr: obj.clientPdfShowQr !== "false",
+    clientSectionsJson: obj.clientSectionsJson || "",
   };
 }
 
@@ -90,5 +91,6 @@ export function brandSettingsResponse(obj = {}) {
     clientPdfColumns: obj.clientPdfColumns || "",
     clientPdfFooter: obj.clientPdfFooter || "",
     clientPdfShowQr: obj.clientPdfShowQr || "true",
+    clientSectionsJson: obj.clientSectionsJson || "",
   };
 }

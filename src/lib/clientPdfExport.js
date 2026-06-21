@@ -3,7 +3,7 @@ import autoTable from "jspdf-autotable";
 import QRCode from "qrcode";
 import { money, num, mergedPurchaseRows } from "../store/helpers.js";
 import { lineGross, resolveResponsible, isBoughtStatus } from "./itemHelpers.js";
-import { groupByClientSection, CLIENT_SECTION_LABEL } from "../../shared/clientSections.js";
+import { groupByClientSection, getClientSectionLabelMap } from "../../shared/clientSections.js";
 import { generateProjectPdf } from "./pdfExport.js";
 
 function hexToRgb(hex) {
@@ -259,7 +259,8 @@ function renderSpecialistPdf(doc, project, items, branding, brandRgb, purchaseSt
   if (sectionIds && source.length) {
     const groups = new Map();
     for (const row of source) {
-      const label = CLIENT_SECTION_LABEL[row.clientSection] || row.clientSectionLabel || "Прочее";
+      const labelMap = getClientSectionLabelMap();
+      const label = labelMap[row.clientSection] || row.clientSectionLabel || "Прочее";
       if (!groups.has(label)) groups.set(label, []);
       groups.get(label).push(row);
     }

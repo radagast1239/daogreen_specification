@@ -1,8 +1,8 @@
-import { CLIENT_SECTIONS, resolveClientSection } from "../../shared/clientSections.js";
+import { getClientSections, resolveClientSection } from "../../shared/clientSections.js";
 import { money } from "../store/helpers.js";
 
 function sectionOrderKey(sectionId) {
-  const order = [...CLIENT_SECTIONS.map((s) => s.id), "__misc__"];
+  const order = [...getClientSections().map((s) => s.id), "__misc__"];
   return order.indexOf(sectionId);
 }
 

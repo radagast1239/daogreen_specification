@@ -16,6 +16,7 @@ import { ClientSchemesViewer } from "../../components/ClientSchemesEditor.jsx";
 import ClientOverviewPanel from "../../components/client/ClientOverviewPanel.jsx";
 import ClientPurchasePanel, { ClientMergedList } from "../../components/client/ClientPurchasePanel.jsx";
 import { isBoughtStatus } from "../../lib/itemHelpers.js";
+import { applyClientSectionsFromSettings } from "../../lib/clientSectionsConfig.js";
 import { STELLAGE_GROUPS } from "../../../shared/stellageComposition.js";
 
 function clientPageStyle(branding) {
@@ -60,7 +61,10 @@ export default function ClientProjectPage() {
     setErr("");
     actions
       .loadClientProject(decodeURIComponent(token || ""))
-      .then(setData)
+      .then((fresh) => {
+        applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
+        setData(fresh);
+      })
       .catch((e) => {
         if (e.status === 410) setErr("expired");
         else setErr(e.message || "notfound");
@@ -167,6 +171,7 @@ export default function ClientProjectPage() {
   const patch = async (itemId, p) => {
     await actions.clientPatchItem(token, itemId, p);
     const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
+    applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
     setData(fresh);
   };
 
