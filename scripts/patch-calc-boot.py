@@ -69,10 +69,15 @@ LOADER_NEW = """  function loadSeq(list, index) {
       global.dispatchEvent(new CustomEvent('daogreen-calc-bundle-ready'));
       return Promise.resolve();
     }
-    var batch = list.slice(index, index + 6);
-    return Promise.all(batch.map(loadOne)).then(function () {
-      return loadSeq(list, index + batch.length);
+    return loadOne(list[index]).then(function () {
+      return loadSeq(list, index + 1);
     });
+  }
+
+  function clearBooting() {
+    try {
+      document.documentElement.classList.remove('calc-booting');
+    } catch (_) {}
   }"""
 
 LOADER = Path("/var/www/daogreen-calc/js/calc-bundle-loader.js")
