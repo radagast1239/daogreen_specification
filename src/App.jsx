@@ -18,6 +18,8 @@ const ReportsPage = lazy(() => import("./pages/admin/ReportsPage.jsx"));
 const ArchivePage = lazy(() => import("./pages/admin/ArchivePage.jsx"));
 const SettingsPage = lazy(() => import("./pages/admin/SettingsPage.jsx"));
 const PhotosPage = lazy(() => import("./pages/admin/PhotosPage.jsx"));
+const PlanPage = lazy(() => import("./pages/admin/PlanPage.jsx"));
+const PlannerHubPage = lazy(() => import("./pages/admin/PlannerHubPage.jsx"));
 const ClientProjectPage = lazy(() => import("./pages/client/ClientProjectPage.jsx"));
 
 function RouteFallback() {
@@ -75,6 +77,8 @@ export default function App() {
           <Route path="/new" element={<Lazy><ProjectBuilderPage /></Lazy>} />
           <Route path="/new/template" element={<Navigate to="/new" replace />} />
           <Route path="/project/:id" element={<Lazy><SpecEditorPage /></Lazy>} />
+          <Route path="/project/:id/plan" element={<Lazy><PlanPage /></Lazy>} />
+          <Route path="/planner" element={<Lazy><PlannerHubPage /></Lazy>} />
         </Route>
       </Route>
 

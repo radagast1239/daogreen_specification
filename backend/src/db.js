@@ -269,6 +269,12 @@ function migrateDb() {
   addCol("project_items", "replacement_price", "REAL");
   addCol("project_items", "replacement_comment", "TEXT DEFAULT ''");
   addCol("project_items", "replacement_proposed_at", "TEXT DEFAULT ''");
+  addCol("project_items", "source", "TEXT DEFAULT ''");
+  addCol("project_items", "source_type", "TEXT DEFAULT ''");
+  addCol("project_items", "source_key", "TEXT DEFAULT ''");
+  addCol("project_items", "source_object_ids", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("projects", "planner_plan", "TEXT NOT NULL DEFAULT '{}'");
+  addCol("projects", "planner_sync_at", "TEXT DEFAULT ''");
   addCol("material_price_history", "changed_by", "TEXT DEFAULT ''");
 
   const needsItemFlagBackfill = db
@@ -464,6 +470,10 @@ export function rowToItem(row) {
     replacementPrice: row.replacement_price,
     replacementComment: row.replacement_comment || "",
     replacementProposedAt: row.replacement_proposed_at || "",
+    source: row.source || "",
+    sourceType: row.source_type || "",
+    sourceKey: row.source_key || "",
+    sourceObjectIds: (() => { try { return JSON.parse(row.source_object_ids || "[]"); } catch { return []; } })(),
     pipeCuts: parsePipeCutsFromDb(row.pipe_cuts, row.client_note || row.tech_note),
     breakerSpecs: parseBreakerSpecsFromDb(row.breaker_specs, row.client_note || row.tech_note),
     flowSpecs: parseFlowSpecsFromDb(row.flow_specs, row.client_note || row.tech_note, row.link),
@@ -473,6 +483,11 @@ export function rowToItem(row) {
 
 export function rowToProject(row, items = []) {
   if (!row) return null;
+  const mpRaw = JSON.parse(row.manual_params || "{}");
+  const { floorPlan, ...manualParams } = mpRaw;
+  let plan = {};
+  try { plan = JSON.parse(row.planner_plan || "{}"); } catch { plan = {}; }
+  if ((!plan || !Object.keys(plan).length) && floorPlan) plan = floorPlan;
   return {
     id: row.id,
     name: row.name,
@@ -490,7 +505,9 @@ export function rowToProject(row, items = []) {
     selectedModules: JSON.parse(row.selected_modules || "[]"),
     zones: JSON.parse(row.zones || "[]"),
     stellageConfigs: JSON.parse(row.stellage_configs || "[]"),
-    manualParams: JSON.parse(row.manual_params || "{}"),
+    manualParams,
+    plan: Object.keys(plan).length ? plan : null,
+    plannerSyncAt: row.planner_sync_at || mpRaw.plannerSyncAt || "",
     rooms: JSON.parse(row.rooms || "[]"),
     version: row.version,
     lastClientActivityAt: row.last_client_activity_at,

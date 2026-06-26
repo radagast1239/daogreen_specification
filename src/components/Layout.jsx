@@ -42,6 +42,16 @@ function SidebarNav({ compact, onToggleCompact, onNavigate }) {
           {n.label}
         </NavLink>
       ))}
+      <div className="sidebar__sep">Планировщик</div>
+      <NavLink
+        to="/planner"
+        className={({ isActive }) => "navlink" + (isActive ? " active" : "")}
+        onClick={onNavigate}
+      >
+        <NavIcon name="planner" />
+        Планировщик
+      </NavLink>
+
       <div className="sidebar__sep">Калькуляторы</div>
       {CALC_LINKS.map((n) => (
         <a
@@ -73,11 +83,12 @@ export default function Layout() {
   const { actions } = useStore();
   const { pathname } = useLocation();
 
-  const wideLayout = /^\/(materials|project\/|modules|reports)/.test(pathname);
+  const wideLayout = /^\/(materials|project\/|modules|reports|planner)/.test(pathname);
+  const plannerFocus = /\/project\/[^/]+\/plan$/.test(pathname);
 
   useEffect(() => {
-    const needMats = /^\/(materials|modules|new|project\/)/.test(pathname);
-    const needMods = /^\/(modules|new|project\/)/.test(pathname);
+    const needMats = /^\/(materials|modules|new|project\/|planner)/.test(pathname);
+    const needMods = /^\/(modules|new|project\/|planner)/.test(pathname);
     if (needMats) actions.ensureMaterials();
     if (needMods) actions.ensureModules();
   }, [pathname, actions]);
@@ -110,8 +121,8 @@ export default function Layout() {
         <SidebarNav compact={compact} onToggleCompact={toggleCompact} onNavigate={closeMenu} />
       </aside>
       <div className="main">
-        <GlobalSearch />
-        <div className={"main-inner" + (wideLayout ? " main-inner--wide" : "")}>
+        {!plannerFocus && <GlobalSearch />}
+        <div className={"main-inner" + (wideLayout ? " main-inner--wide" : "") + (plannerFocus ? " main-inner--planner" : "")}>
           <Outlet />
         </div>
       </div>

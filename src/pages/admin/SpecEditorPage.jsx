@@ -251,6 +251,7 @@ export default function SpecEditorPage() {
       Ссылка: it.link,
       Видно: it.visible ? "да" : "нет",
       Утверждено: it.approved ? "да" : "нет",
+      Источник: it.source === "planner" ? `план: ${it.sourceType || ""}` : "ручная/модуль",
     }));
     downloadXlsx(`${project.name}_спецификация`, rows);
   };
@@ -379,6 +380,7 @@ export default function SpecEditorPage() {
         } · ${project.type}`}
         actions={
           <>
+            <Link className="btn" to={`/project/${project.id}/plan`}>▦ План</Link>
             <button className="btn" onClick={exportSpec}>Excel ↓</button>
             <button className="btn" onClick={() => setImportOpen(true)}>Из прошлого</button>
             <button className="btn" onClick={() => setCompareOpen(true)}>Сравнить</button>
@@ -1075,6 +1077,11 @@ function SpecTab({
                       />
                       {it.comment && !hasStructuredSpecEditor(it.name) && (
                         <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{it.comment}</div>
+                      )}
+                      {it.source === "planner" && (
+                        <div className="chip" style={{ fontSize: 10, marginTop: 4 }}>
+                          из плана · {it.sourceType || "object"}
+                        </div>
                       )}
                       {hasStructuredSpecEditor(it.name) ? (
                         <StructuredSpecEditor

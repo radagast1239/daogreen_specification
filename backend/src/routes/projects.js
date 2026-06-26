@@ -65,10 +65,12 @@ const router = Router();
 const INSERT_PROJECT = db.prepare(`
   INSERT INTO projects (
     id, name, client, city, area, height, sowing_area, type, currency, vat, comment,
-    status, client_token, selected_modules, zones, stellage_configs, manual_params, rooms, version
+    status, client_token, selected_modules, zones, stellage_configs, manual_params, rooms, version,
+    planner_plan, planner_sync_at
   ) VALUES (
     @id, @name, @client, @city, @area, @height, @sowing_area, @type, @currency, @vat, @comment,
-    @status, @client_token, @selected_modules, @zones, @stellage_configs, @manual_params, @rooms, @version
+    @status, @client_token, @selected_modules, @zones, @stellage_configs, @manual_params, @rooms, @version,
+    @planner_plan, @planner_sync_at
   )
 `);
 
@@ -78,6 +80,7 @@ const UPDATE_PROJECT = db.prepare(`
     sowing_area=@sowing_area, type=@type, currency=@currency, vat=@vat, comment=@comment,
     status=@status, selected_modules=@selected_modules, zones=@zones,
     stellage_configs=@stellage_configs, manual_params=@manual_params, rooms=@rooms, version=@version,
+    planner_plan=@planner_plan, planner_sync_at=@planner_sync_at,
     last_client_activity_at=@last_client_activity_at, updated_at=datetime('now')
   WHERE id=@id
 `);
@@ -91,7 +94,7 @@ const INSERT_ITEM = db.prepare(`
     cooling_kw, cooling_btu, exhaust_m3, room_id, internal_note, delivery_days, item_role, pipe_cuts, breaker_specs, flow_specs, split_specs,     client_section, client_subsection,
     included_in_project, visible_to_client, item_type, subcategory, purchase_key,
     purchase_priority, replacement_link, replacement_photo_url, replacement_price,
-    replacement_comment, replacement_proposed_at
+    replacement_comment, replacement_proposed_at, source, source_type, source_key, source_object_ids
   ) VALUES (
     @id, @project_id, @material_id, @module, @section, @name, @unit, @category,
     @supplier, @link, @link_alt, @photo_url, @client_note, @tech_note,
@@ -100,7 +103,7 @@ const INSERT_ITEM = db.prepare(`
     @cooling_kw, @cooling_btu, @exhaust_m3, @room_id, @internal_note, @delivery_days, @item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs,     @client_section, @client_subsection,
     @included_in_project, @visible_to_client, @item_type, @subcategory, @purchase_key,
     @purchase_priority, @replacement_link, @replacement_photo_url, @replacement_price,
-    @replacement_comment, @replacement_proposed_at
+    @replacement_comment, @replacement_proposed_at, @source, @source_type, @source_key, @source_object_ids
   )
 `);
 
@@ -120,7 +123,8 @@ const UPDATE_ITEM = db.prepare(`
     subcategory=@subcategory, purchase_key=@purchase_key,
     purchase_priority=@purchase_priority, replacement_link=@replacement_link,
     replacement_photo_url=@replacement_photo_url, replacement_price=@replacement_price,
-    replacement_comment=@replacement_comment, replacement_proposed_at=@replacement_proposed_at
+    replacement_comment=@replacement_comment, replacement_proposed_at=@replacement_proposed_at,
+    source=@source, source_type=@source_type, source_key=@source_key, source_object_ids=@source_object_ids
   WHERE id=@id AND project_id=@project_id
 `);
 
@@ -197,6 +201,10 @@ function itemToParams(it, projectId) {
         : null,
     replacement_comment: normalized.replacementComment || "",
     replacement_proposed_at: normalized.replacementProposedAt || "",
+    source: normalized.source || "",
+    source_type: normalized.sourceType || "",
+    source_key: normalized.sourceKey || "",
+    source_object_ids: JSON.stringify(normalized.sourceObjectIds || []),
   };
 }
 
@@ -241,6 +249,8 @@ function projectRow(p) {
     manual_params: JSON.stringify(p.manualParams || {}),
     rooms: JSON.stringify(p.rooms || []),
     version: p.version || 1,
+    planner_plan: JSON.stringify(p.plan || {}),
+    planner_sync_at: p.plannerSyncAt || "",
     last_client_activity_at: p.lastClientActivityAt || null,
   };
 }
