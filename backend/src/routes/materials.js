@@ -24,6 +24,16 @@ import {
   patchMaterialModules,
   resolveMaterialModules,
 } from "../../../shared/materialModules.js";
+import {
+  normalizeMaterialFarmSections,
+  primaryMaterialFarmSection,
+  resolveMaterialFarmSections,
+  patchMaterialFarmSections,
+} from "../../../shared/materialFarmSections.js";
+import {
+  syncMaterialFarmSectionCatalog,
+  removeMaterialFromFarmSectionCatalogs,
+} from "../services/syncMaterialFarmSectionCatalog.js";
 
 const INSERT_MAT = db.prepare(`
   INSERT INTO materials (
@@ -31,13 +41,13 @@ const INSERT_MAT = db.prepare(`
     supplier, link, link_alt, photo_url, vat_rate, vat_included,
     client_note, tech_note, internal_note, status,
     needs_approval, is_consumable, is_spare_part, client_visible_default, responsible,
-    cooling_kw, cooling_btu, exhaust_m3, tags, alternative_material_id, min_order_qty, order_step, default_item_role, pipe_cuts, breaker_specs, flow_specs, split_specs, modules_json, client_section, client_subsection, updated_at
+    cooling_kw, cooling_btu, exhaust_m3, tags, alternative_material_id, min_order_qty, order_step, default_item_role, pipe_cuts, breaker_specs, flow_specs, split_specs, modules_json, farm_sections_json, client_section, client_subsection, updated_at
   ) VALUES (
     @id, @name, @unit, @base_price, @default_qty, @module, @category, @subcategory, @farm_section_id, @item_type,
     @supplier, @link, @link_alt, @photo_url, @vat_rate, @vat_included,
     @client_note, @tech_note, @internal_note, @status,
     @needs_approval, @is_consumable, @is_spare_part, @client_visible_default, @responsible,
-    @cooling_kw, @cooling_btu, @exhaust_m3, @tags, @alternative_material_id, @min_order_qty, @order_step, @default_item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs, @modules_json, @client_section, @client_subsection, datetime('now')
+    @cooling_kw, @cooling_btu, @exhaust_m3, @tags, @alternative_material_id, @min_order_qty, @order_step, @default_item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs, @modules_json, @farm_sections_json, @client_section, @client_subsection, datetime('now')
   )
 `);
 
@@ -58,6 +68,7 @@ const UPDATE_MAT = db.prepare(`
     flow_specs=@flow_specs,
     split_specs=@split_specs,
     modules_json=@modules_json,
+    farm_sections_json=@farm_sections_json,
     client_section=@client_section,
     client_subsection=@client_subsection,
     updated_at=datetime('now')
@@ -70,6 +81,7 @@ function matToParams(m, id) {
   const flowSpecs = normalizeFlowSpecs(m.flowSpecs ?? resolveFlowSpecs(m));
   const splitSpecs = normalizeSplitSpecs(m.splitSpecs ?? resolveSplitSpecs(m));
   const modules = normalizeMaterialModules(m.modules ?? resolveMaterialModules(m));
+  const farmSections = normalizeMaterialFarmSections(m.farmSections ?? resolveMaterialFarmSections(m));
   const enriched = { ...m, pipeCuts: cuts, breakerSpecs, flowSpecs, splitSpecs };
   const clientNote = structuredClientNote(enriched);
   let link = m.link || "";
@@ -91,7 +103,7 @@ function matToParams(m, id) {
     module: primaryMaterialModule({ ...m, modules }),
     category: m.category || "Прочее",
     subcategory: m.subcategory || "",
-    farm_section_id: m.farmSectionId || "",
+    farm_section_id: primaryMaterialFarmSection({ farmSections, farmSectionId: m.farmSectionId }) || "",
     item_type: m.itemType || "material",
     supplier: m.supplier || "",
     link,
@@ -121,6 +133,7 @@ function matToParams(m, id) {
     flow_specs: JSON.stringify(flowSpecs),
     split_specs: JSON.stringify(splitSpecs),
     modules_json: JSON.stringify(modules),
+    farm_sections_json: JSON.stringify(farmSections),
     client_section: m.clientSection || "",
     client_subsection: m.clientSubsection || "",
   };
@@ -150,21 +163,32 @@ export function getMaterial(id) {
 export function createMaterial(data) {
   const p = matToParams(data);
   INSERT_MAT.run(p);
-  return getMaterial(p.id);
+  const m = getMaterial(p.id);
+  syncMaterialFarmSectionCatalog(m);
+  return m;
 }
 
-export function updateMaterial(id, patch) {
+export function updateMaterial(id, patch, { changedBy = "admin" } = {}) {
   const cur = getMaterial(id);
   if (!cur) return null;
   const merged = { ...cur, ...patch, id };
   if (patch.basePrice != null && patch.basePrice !== cur.basePrice) {
-    logPriceChange(id, cur.basePrice, Number(patch.basePrice) || 0, patch.priceSource || "manual");
+    logPriceChange(
+      id,
+      cur.basePrice,
+      Number(patch.basePrice) || 0,
+      patch.priceSource || "manual",
+      changedBy
+    );
   }
   UPDATE_MAT.run(matToParams(merged, id));
-  return getMaterial(id);
+  const m = getMaterial(id);
+  syncMaterialFarmSectionCatalog(m, cur);
+  return m;
 }
 
 export function deleteMaterial(id) {
+  removeMaterialFromFarmSectionCatalogs(id);
   db.prepare("DELETE FROM materials WHERE id = ?").run(id);
 }
 

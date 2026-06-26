@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { nanoid } from "nanoid";
 import { listMaterials, updateMaterial } from "../routes/materials.js";
+import { localUploadDir, saveFile, storageDriver } from "../storage/index.js";
 
 const IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
 
@@ -35,12 +36,18 @@ export function matchMaterialByFile(materials, filename) {
   return null;
 }
 
+function resolveUploadDir(uploadDir) {
+  return uploadDir || localUploadDir();
+}
+
 export function importPhotosFromDir(sourceDir, uploadDir, { copy = true } = {}) {
   if (!fs.existsSync(sourceDir)) {
     return { matched: [], unmatched: [], error: `Папка не найдена: ${sourceDir}` };
   }
 
-  fs.mkdirSync(uploadDir, { recursive: true });
+  const destDir = resolveUploadDir(uploadDir);
+  if (storageDriver() === "local") fs.mkdirSync(destDir, { recursive: true });
+
   const materials = listMaterials();
   const matched = [];
   const unmatched = [];
@@ -56,30 +63,39 @@ export function importPhotosFromDir(sourceDir, uploadDir, { copy = true } = {}) 
 
     const ext = path.extname(file).toLowerCase();
     const destName = `${mat.id}${ext}`;
-    const destPath = path.join(uploadDir, destName);
     const srcPath = path.join(sourceDir, file);
 
-    if (copy) fs.copyFileSync(srcPath, destPath);
-    else fs.renameSync(srcPath, destPath);
+    if (storageDriver() === "local") {
+      const destPath = path.join(destDir, destName);
+      if (copy) fs.copyFileSync(srcPath, destPath);
+      else fs.renameSync(srcPath, destPath);
+      const url = `/uploads/${destName}`;
+      updateMaterial(mat.id, { imageUrl: url, photoUrl: url });
+      matched.push({ file, materialId: mat.id, name: mat.name, url });
+    } else {
+      unmatched.push(file);
+    }
+  }
 
-    const url = `/uploads/${destName}`;
-    updateMaterial(mat.id, { imageUrl: url, photoUrl: url });
-    matched.push({ file, materialId: mat.id, name: mat.name, url });
+  if (storageDriver() === "s3" && files.length) {
+    return {
+      matched,
+      unmatched: files,
+      total: files.length,
+      error: "Импорт из папки при STORAGE_DRIVER=s3 — загрузите файлы через bulk-photos",
+    };
   }
 
   return { matched, unmatched, total: files.length };
 }
 
-export function saveUploadedPhoto(file, uploadDir) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+export async function saveUploadedPhoto(file, uploadDir) {
   const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
   const destName = `${nanoid(12)}${ext}`;
-  const destPath = path.join(uploadDir, destName);
-  fs.writeFileSync(destPath, file.buffer);
-  return `/uploads/${destName}`;
+  return saveFile(file.buffer, destName);
 }
 
-export function bulkMatchUploads(files, uploadDir) {
+export async function bulkMatchUploads(files, uploadDir) {
   const materials = listMaterials();
   const matched = [];
   const unmatched = [];
@@ -93,10 +109,8 @@ export function bulkMatchUploads(files, uploadDir) {
 
     const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
     const destName = `${mat.id}${ext}`;
-    const destPath = path.join(uploadDir, destName);
-    fs.writeFileSync(destPath, file.buffer);
+    const url = await saveFile(file.buffer, destName);
 
-    const url = `/uploads/${destName}`;
     updateMaterial(mat.id, { imageUrl: url, photoUrl: url });
     matched.push({ file: file.originalname, materialId: mat.id, name: mat.name, url });
   }

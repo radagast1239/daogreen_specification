@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import crypto from "crypto";
 import { materialIncludedInSelection } from "../../../shared/stellageComposition.js";
 import { materialInModule } from "../../../shared/materialModules.js";
+import { lineContributesToSum, lineVisibleToClient, resolveItemType } from "../../../shared/itemTypes.js";
 
 export const uid = (prefix = "id") => `${prefix}_${nanoid(10)}`;
 
@@ -35,6 +36,7 @@ function itemFromMaterial(mat, mod, qty, order) {
     name: mat.name,
     unit: mat.unit,
     category: mat.category,
+    purchaseKey: mat.purchaseKey || "",
     clientSection: mat.clientSection || "",
     clientSubsection: mat.clientSubsection || "",
     supplier: mat.supplier || "",
@@ -48,8 +50,12 @@ function itemFromMaterial(mat, mod, qty, order) {
     qty,
     price: Number(mat.basePrice) || 0,
     vatRate: [0, 5, 20].includes(Number(mat.vatRate)) ? Number(mat.vatRate) : 0,
+    subcategory: mat.subcategory || "",
+    itemType: resolveItemType({ itemType: mat.itemType }),
+    includedInProject: !isZero,
+    visibleToClient: !isZero && mat.clientVisibleDefault !== false,
     visible: isZero ? false : mat.clientVisibleDefault !== false,
-    approved: false,
+    approved: !isZero && mat.clientVisibleDefault !== false,
     enabled: !isZero,
     needsApproval: !!mat.needsApproval,
     isConsumable: !!mat.isConsumable,
@@ -97,15 +103,16 @@ const factSum = (it) =>
   (Number(it.qty) || 0) * (it.actualPrice != null ? Number(it.actualPrice) : Number(it.price) || 0);
 
 export function projectTotals(items) {
-  const visible = items.filter((i) => i.approved && i.visible && i.enabled);
-  const budgetNet = visible.reduce((s, i) => s + lineNet(i), 0);
-  const vatAmount = visible.reduce((s, i) => s + lineVat(i), 0);
+  const budgetItems = items.filter(lineContributesToSum);
+  const budgetNet = budgetItems.reduce((s, i) => s + lineNet(i), 0);
+  const vatAmount = budgetItems.reduce((s, i) => s + lineVat(i), 0);
   const budget = budgetNet + vatAmount;
-  const spent = visible
-    .filter((i) => DONE.includes(i.status))
+  const clientItems = items.filter(lineVisibleToClient);
+  const spent = clientItems
+    .filter((i) => DONE.includes(i.status) && lineContributesToSum(i))
     .reduce((s, i) => s + factSum(i), 0);
-  const doneCount = visible.filter((i) => DONE.includes(i.status)).length;
-  const total = visible.length;
+  const doneCount = clientItems.filter((i) => DONE.includes(i.status) && lineContributesToSum(i)).length;
+  const total = clientItems.filter(lineContributesToSum).length;
   const progress = total ? Math.round((doneCount / total) * 100) : 0;
   return { budgetNet, vatAmount, budget, spent, remaining: Math.max(budget - spent, 0), progress, total, doneCount };
 }

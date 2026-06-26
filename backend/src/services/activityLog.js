@@ -1,5 +1,6 @@
 import { db } from "../db.js";
 import { uid } from "./buildItems.js";
+import { lineVisibleToClient } from "../../../shared/itemTypes.js";
 
 const STATUS_LABELS = {
   not_bought: "Не куплено",
@@ -22,11 +23,24 @@ const FIELD_META = {
   clientNote: { label: "Сообщение Daogreen", clientVisible: true },
   link: { label: "Ссылка", clientVisible: true },
   name: { label: "Название", clientVisible: true },
-  visible: { label: "Видимость", clientVisible: true, format: (v) => (v ? "показано" : "скрыто") },
-  approved: { label: "Утверждение", clientVisible: false },
+  supplier: { label: "Поставщик", clientVisible: true },
+  category: { label: "Клиентский раздел", clientVisible: true },
+  clientSection: { label: "Клиентский раздел", clientVisible: true },
+  module: { label: "Раздел фермы", clientVisible: false },
+  subcategory: { label: "Подраздел фермы", clientVisible: false },
+  itemType: { label: "Тип строки", clientVisible: false },
+  roomId: { label: "Помещение", clientVisible: true },
+  vatRate: { label: "НДС", clientVisible: true, format: (v) => `${v}%` },
+  comment: { label: "Комментарий", clientVisible: false },
+  visible: { label: "Видимость клиенту", clientVisible: true, format: (v) => (v ? "показано" : "скрыто") },
+  visibleToClient: { label: "Видимость клиенту", clientVisible: true, format: (v) => (v ? "показано" : "скрыто") },
+  includedInProject: { label: "В проекте", clientVisible: false, format: (v) => (v ? "да" : "нет") },
   internalNote: { label: "Внутр. заметка", clientVisible: false },
   deliveryDays: { label: "Срок поставки", clientVisible: true, format: (v) => `${v} дн.` },
   safetyFactor: { label: "Запасной коэфф.", clientVisible: true },
+  unit: { label: "Ед. изм.", clientVisible: true },
+  imageUrl: { label: "Фото", clientVisible: true, format: (v) => (v ? "обновлено" : "удалено") },
+  photoUrl: { label: "Фото", clientVisible: true, format: (v) => (v ? "обновлено" : "удалено") },
 };
 
 export function initActivityLog() {
@@ -100,7 +114,7 @@ export function sanitizeItemForClient(it) {
 
 export function sanitizeProjectForClient(project) {
   const items = (project.items || [])
-    .filter((it) => it.visible && it.approved && it.enabled !== false)
+    .filter((it) => lineVisibleToClient(it))
     .map(sanitizeItemForClient);
   const {
     clientToken,

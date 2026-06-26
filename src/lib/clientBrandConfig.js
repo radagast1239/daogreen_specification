@@ -1,8 +1,9 @@
 export const CLIENT_TAB_OPTIONS = [
-  { id: "overview", label: "Обзор" },
-  { id: "purchase", label: "Закупка" },
-  { id: "merged", label: "Всё к покупке" },
+  { id: "purchase", label: "Список закупки" },
   { id: "docs", label: "Документы" },
+  { id: "overview", label: "Обзор" },
+  // legacy — скрыты от клиента по умолчанию
+  { id: "merged", label: "Всё к покупке", legacy: true },
   // legacy — для настроек бренда и миграции старых ссылок
   { id: "cooling", label: "Охлаждение", legacy: true },
   { id: "categories", label: "По категориям", legacy: true },
@@ -14,7 +15,18 @@ export const CLIENT_TAB_OPTIONS = [
   { id: "consumables", label: "Расходники", legacy: true },
 ];
 
-export const DEFAULT_VISIBLE_TAB_IDS = ["overview", "purchase", "merged", "docs"];
+export const DEFAULT_VISIBLE_TAB_IDS = ["purchase", "docs"];
+
+/** Режимы закупки для клиента */
+export const CLIENT_SIMPLE_PURCHASE_MODES = [
+  { id: "categories", label: "По разделам" },
+  { id: "list", label: "Списком" },
+  { id: "suppliers", label: "По поставщикам" },
+  { id: "plumber", label: "Сантехник" },
+  { id: "with_link", label: "С ссылкой" },
+  { id: "without_link", label: "Без ссылки" },
+  { id: "ordered", label: "Заказано" },
+];
 
 /** Основные режимы вкладки «Закупка» */
 export const PRIMARY_PURCHASE_MODES = [
@@ -36,10 +48,14 @@ export const SPECIALIST_PURCHASE_MODES = [
 /** @deprecated используйте PRIMARY + SPECIALIST */
 export const PURCHASE_MODES = [...PRIMARY_PURCHASE_MODES, ...SPECIALIST_PURCHASE_MODES];
 
-const SPECIALIST_MODE_IDS = new Set(SPECIALIST_PURCHASE_MODES.map((m) => m.id));
+const SIMPLE_PURCHASE_MODE_IDS = new Set(CLIENT_SIMPLE_PURCHASE_MODES.map((m) => m.id));
 
 export function isSpecialistPurchaseMode(mode) {
-  return SPECIALIST_MODE_IDS.has(mode);
+  return SPECIALIST_PURCHASE_MODES.some((m) => m.id === mode);
+}
+
+export function isSimplePurchaseMode(mode) {
+  return SIMPLE_PURCHASE_MODE_IDS.has(mode);
 }
 
 const LEGACY_PURCHASE_TABS = new Set([
@@ -55,16 +71,18 @@ const LEGACY_PURCHASE_TABS = new Set([
 
 const ALL_TAB_IDS = new Set(CLIENT_TAB_OPTIONS.map((t) => t.id));
 
-/** Нормализация старых настроек вкладок → 4 основные */
+/** Нормализация вкладок: одна закупка, без дублирующего «Всё к покупке» */
 export function normalizeVisibleTabIds(raw) {
-  const out = new Set();
-  for (const id of raw || []) {
-    if (!ALL_TAB_IDS.has(id)) continue;
-    if (LEGACY_PURCHASE_TABS.has(id)) out.add("purchase");
-    else out.add(id);
-  }
-  if (!out.size) return [...DEFAULT_VISIBLE_TAB_IDS];
-  return DEFAULT_VISIBLE_TAB_IDS.filter((id) => out.has(id));
+  const incoming = Array.isArray(raw) && raw.length ? raw : [...DEFAULT_VISIBLE_TAB_IDS];
+  const wantsPurchase = incoming.some(
+    (id) => id === "purchase" || id === "merged" || LEGACY_PURCHASE_TABS.has(id)
+  );
+  const out = [];
+  if (wantsPurchase) out.push("purchase");
+  if (incoming.includes("docs")) out.push("docs");
+  if (incoming.includes("overview")) out.push("overview");
+  if (!out.length) return [...DEFAULT_VISIBLE_TAB_IDS];
+  return out;
 }
 
 /** Старую вкладку → режим закупки */
@@ -173,7 +191,12 @@ export function clientBrandToSettings(brand) {
 
 export function clientTabDefs(brand) {
   const visible = new Set(normalizeVisibleTabIds(brand?.clientVisibleTabs || DEFAULT_VISIBLE_TAB_IDS));
-  return CLIENT_TAB_OPTIONS.filter((t) => !t.legacy && visible.has(t.id)).map((t) => [t.id, t.label]);
+  const tabs = CLIENT_TAB_OPTIONS.filter((t) => !t.legacy && visible.has(t.id)).map((t) => [t.id, t.label]);
+  if (tabs.length) return tabs;
+  return [
+    ["purchase", "Список закупки"],
+    ["docs", "Документы"],
+  ];
 }
 
 export function heroEyebrow(brand) {

@@ -11,6 +11,7 @@ import { CLIENT_STATUSES, clientStatusMeta } from "../../data/clientStatuses.js"
 import { getPinnedIds, isPinned, sortWithPinned, togglePinned } from "../../lib/pinnedProjects.js";
 import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
 import HomeDashboard from "../../components/HomeDashboard.jsx";
+import DuplicateProjectModal from "../../components/DuplicateProjectModal.jsx";
 
 function clientKey(name) {
   return (name || "Без имени").trim().toLowerCase().replace(/\s+/g, " ");
@@ -23,6 +24,7 @@ export default function ProjectsPage() {
   const projects = state.projects;
   const dash = state.dashboard;
   const [linkModal, setLinkModal] = useState(null);
+  const [dupSource, setDupSource] = useState(null);
   const [pinned, setPinned] = useState(getPinnedIds);
   const [clientMap, setClientMap] = useState({});
   const [companyName, setCompanyName] = useState("Daogreen");
@@ -33,6 +35,15 @@ export default function ProjectsPage() {
   const [statusF, setStatusF] = useState("");
   const [dateF, setDateF] = useState("");
   const [problemsOnly, setProblemsOnly] = useState(false);
+  const [matCount, setMatCount] = useState(null);
+
+  useEffect(() => {
+    api.health().then((h) => setMatCount(h.materials)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    actions.refreshDashboard();
+  }, [actions]);
 
   useEffect(() => {
     api.getClients().then((list) => {
@@ -116,6 +127,18 @@ export default function ProjectsPage() {
 
   return (
     <>
+      {dupSource && (
+        <DuplicateProjectModal
+          sourceProject={dupSource}
+          onClose={() => setDupSource(null)}
+          onSubmit={async (body) => {
+            const p = await actions.projectDuplicate(dupSource.id, body);
+            setDupSource(null);
+            success(`Создан проект «${p.name}»`);
+            nav(`/project/${p.id}`);
+          }}
+        />
+      )}
       {linkModal && (
         <ClientLinkModal
           url={linkModal.url || linkModal}
@@ -128,7 +151,7 @@ export default function ProjectsPage() {
       )}
       <PageHeader
         title="Проекты"
-        sub={`${projects.length} проект(ов) · база: ${state.materials.length} материалов`}
+        sub={`${projects.length} проект(ов)${matCount != null ? ` · база: ${matCount} материалов` : ""}`}
         actions={
           <button className="btn btn-primary" onClick={() => nav("/new")}>
             ＋ Новый проект
@@ -180,7 +203,7 @@ export default function ProjectsPage() {
         ) : filtered.length === 0 ? (
           <Empty title="Нет проектов по фильтрам" hint="Сбросьте фильтры." />
         ) : (
-          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
+          <div className="grid projects-grid">
             {filtered.map((p) => {
               const t = p.totals || projectTotals(p);
               const link = p.clientToken ? clientLink(p.clientToken) : "";
@@ -263,8 +286,11 @@ export default function ProjectsPage() {
                         </a>
                       </>
                     )}
-                    <button className="btn btn-sm" onClick={() => actions.projectDuplicate(p.id)}>
-                      Дублировать
+                    <button className="btn btn-sm" onClick={() => setDupSource(p)}>
+                      На основе прошлого
+                    </button>
+                    <button className="btn btn-sm btn-ghost" onClick={() => actions.projectDuplicate(p.id, { name: `${p.name} (копия)` })}>
+                      Быстрая копия
                     </button>
                     <button className="btn btn-sm btn-ghost" onClick={() => archive(p)}>
                       Архив

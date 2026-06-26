@@ -1,9 +1,8 @@
 import { db } from "../db.js";
 import { listMaterials } from "../routes/materials.js";
 import { FARM_SECTIONS } from "../../../src/data/farmSections.js";
-import { materialInModule } from "../../../shared/materialModules.js";
-
-const FARM_MODULE = "Общая закупка на ферму";
+import { materialInFarmSection } from "../../../shared/materialFarmSections.js";
+import { slimCatalogEntryFromMaterial } from "../../../shared/catalogLine.js";
 
 function parseJson(raw, fallback) {
   try {
@@ -31,24 +30,7 @@ function resolveSections(settings) {
 }
 
 function materialToCatalogLine(m) {
-  return {
-    materialId: m.id,
-    name: m.name,
-    unit: m.unit,
-    category: m.category,
-    subcategory: m.subcategory || "",
-    supplier: m.supplier || "",
-    link: m.link || "",
-    linkAlt: m.linkAlt || "",
-    imageUrl: m.imageUrl || m.photoUrl || "",
-    photoUrl: m.photoUrl || m.imageUrl || "",
-    qty: Number(m.defaultQty) || 0,
-    price: Number(m.basePrice) || 0,
-    vatRate: Number(m.vatRate) || 0,
-    techNote: m.techNote || "",
-    clientNote: m.clientNote || "",
-    included: true,
-  };
+  return slimCatalogEntryFromMaterial(m, {});
 }
 
 /** Первичное заполнение шаблонов разделов из farm_section_id (после импорта Excel) */
@@ -66,9 +48,7 @@ export function ensureFarmSectionCatalogs() {
   let filled = 0;
 
   for (const sec of sections) {
-    const mats = materials.filter(
-      (m) => materialInModule(m, FARM_MODULE) && m.farmSectionId === sec.id && m.status === "active"
-    );
+    const mats = materials.filter((m) => materialInFarmSection(m, sec.id) && m.status === "active");
     if (!mats.length) continue;
     catalogs[sec.id] = mats.map(materialToCatalogLine);
     filled += mats.length;

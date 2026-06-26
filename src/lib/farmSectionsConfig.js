@@ -1,35 +1,17 @@
 import { FARM_SECTIONS } from "../data/farmSections.js";
-import { uid } from "../store/helpers.js";
+import { uid } from "./ids.js";
 import { catalogLinesForFarmSection, lineFromMaterial } from "./projectBuilder.js";
-import { cloneBuilderLines } from "./presetHelpers.js";
+import { cloneBuilderLines } from "./builderLines.js";
+import { hydrateCatalogEditorLine } from "./specLineCore.js";
+import { normalizeStoredCatalog } from "../../shared/catalogLine.js";
+import { parseJson } from "./jsonUtils.js";
+import { DEFAULT_FARM_SECTION_GROUPS, resolveFarmSectionGroups } from "./farmSectionGroupsRef.js";
 
-export const DEFAULT_FARM_SECTION_GROUPS = [
-  { id: "irrigation", label: "Полив", icon: "💧", color: "#0d7ea8" },
-  { id: "climate", label: "Климат", icon: "🌡️", color: "#6b5b95" },
-  { id: "electrics", label: "Электрика", icon: "⚡", color: "#c9a227" },
-  { id: "storage", label: "Склад", icon: "📦", color: "#5a6b5c" },
-  { id: "other", label: "Прочее", icon: "📋", color: "#116355" },
-];
+export { DEFAULT_FARM_SECTION_GROUPS, resolveFarmSectionGroups, parseJson };
+export { stripLineIds } from "./builderLines.js";
 
 /** @deprecated используйте resolveFarmSectionGroups() */
 export const FARM_SECTION_GROUPS = DEFAULT_FARM_SECTION_GROUPS;
-
-export function resolveFarmSectionGroups(settings = {}) {
-  const list = parseJson(settings.refFarmSectionGroups, null);
-  if (Array.isArray(list) && list.length) {
-    return list
-      .filter((g) => g?.id && g?.label)
-      .map((g, i) => ({
-        id: String(g.id),
-        label: String(g.label),
-        icon: g.icon || "📋",
-        color: g.color || "#116355",
-        order: g.order ?? i,
-      }))
-      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  }
-  return DEFAULT_FARM_SECTION_GROUPS.map((g, i) => ({ ...g, order: i }));
-}
 
 export function groupLabelMap(groups = DEFAULT_FARM_SECTION_GROUPS) {
   return Object.fromEntries(groups.map((g) => [g.id, g.label]));
@@ -37,14 +19,6 @@ export function groupLabelMap(groups = DEFAULT_FARM_SECTION_GROUPS) {
 
 /** @deprecated */
 export const GROUP_LABEL = groupLabelMap(DEFAULT_FARM_SECTION_GROUPS);
-
-export function parseJson(raw, fallback) {
-  try {
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 function inferGroupFromName(name) {
   const n = (name || "").toLowerCase();
@@ -115,7 +89,12 @@ export function filterSectionsForFarmType(sections, farmType) {
 
 export function parseFarmSectionCatalogs(raw) {
   const obj = parseJson(raw, {});
-  return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : {};
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    out[k] = Array.isArray(v) ? normalizeStoredCatalog(v) : v;
+  }
+  return out;
 }
 
 export function parseFarmSectionVersions(raw) {
@@ -163,30 +142,11 @@ function lineQtyFromCatalog(ln) {
   return Number(ln.defaultQty ?? ln.qty) || 0;
 }
 
-/** Сохранение шаблона раздела — с кол-вом по умолчанию */
-export function stripLineIds(lines) {
-  return (lines || [])
-    .filter((ln) => ln.name?.trim() && ln.included !== false)
-    .map(({ id, qty, defaultQty, ...rest }) => ({
-      ...rest,
-      included: true,
-      // qty — то, что пользователь правит в редакторе; defaultQty может остаться от загрузки материала
-      defaultQty: Number(qty ?? defaultQty) || 0,
-    }));
-}
-
 /** Состав раздела для редактора в пресетах */
 export function catalogEditorLines(catalogs, sectionId, materials) {
   const saved = catalogs[sectionId];
   if (saved?.length) {
-    return cloneBuilderLines(saved).map((ln) => {
-      const qty = lineQtyFromCatalog(ln);
-      if (!ln.materialId) return { ...ln, included: true, qty, defaultQty: qty };
-      const mat = materials.find((m) => m.id === ln.materialId);
-      return mat
-        ? { ...lineFromMaterial(mat, { ...ln, included: true, qty, defaultQty: qty }), id: ln.id }
-        : { ...ln, included: true, qty, defaultQty: qty };
-    });
+    return cloneBuilderLines(saved).map((ln) => hydrateCatalogEditorLine(ln, materials));
   }
   return catalogLinesForFarmSection(materials, sectionId).map((ln) => {
     const qty = lineQtyFromCatalog(ln);
@@ -206,13 +166,29 @@ export function projectLinesFromCatalog(catalogs, sectionId, materials, sectionM
   if (saved?.length) {
     return cloneBuilderLines(saved).map((ln) => {
       const defaultQty = lineQtyFromCatalog(ln);
-      const base = { ...ln, included: false, qty: defaultQty, defaultQty: defaultQty };
-      if (!ln.materialId) return withMeta(base);
+      const sub = ln.subcategory || ln.farmGroup || "";
+      if (!ln.materialId) {
+        return withMeta({
+          ...hydrateCatalogEditorLine(ln, materials),
+          included: false,
+          qty: defaultQty,
+          defaultQty,
+        });
+      }
       const mat = materials.find((m) => m.id === ln.materialId);
       return withMeta(
         mat
-          ? { ...lineFromMaterial(mat, { ...base, included: false }), id: ln.id }
-          : base
+          ? {
+              ...lineFromMaterial(mat, {
+                included: false,
+                qty: defaultQty,
+                defaultQty,
+                subcategory: sub,
+                farmGroup: sub,
+              }),
+              id: ln.id,
+            }
+          : hydrateCatalogEditorLine({ ...ln, included: false, qty: defaultQty, defaultQty }, materials)
       );
     });
   }

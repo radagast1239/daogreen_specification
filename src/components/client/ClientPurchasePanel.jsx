@@ -7,6 +7,7 @@ import {
   splitMergedPurchaseRows,
   applyMergedPurchaseFilter,
   isMergedPurchaseMode,
+  isClosedPurchaseStatus,
   isBoughtStatus,
 } from "../../lib/itemHelpers.js";
 import { clientSectionLabel } from "../../../shared/clientSections.js";
@@ -20,6 +21,8 @@ import {
   groupMergedBySectionHierarchy,
   groupMergedBySupplier,
   groupMergedFlat,
+  flattenMergedBySectionOrder,
+  groupMergedByListCategories,
 } from "../../lib/clientPurchaseGroups.js";
 import Collapsible from "../Collapsible.jsx";
 import { Empty } from "../ui.jsx";
@@ -28,8 +31,20 @@ import ClientMergedItemCard from "./ClientMergedItemCard.jsx";
 import {
   PRIMARY_PURCHASE_MODES,
   SPECIALIST_PURCHASE_MODES,
+  CLIENT_SIMPLE_PURCHASE_MODES,
   isSpecialistPurchaseMode,
+  isSimplePurchaseMode,
 } from "../../lib/clientBrandConfig.js";
+import { isTodayPriority } from "../../../shared/purchasePriority.js";
+import ClientPurchaseDashboard from "./ClientPurchaseDashboard.jsx";
+import ClientPurchaseTable from "./ClientPurchaseTable.jsx";
+
+const STATUS_PURCHASE_MODES = [
+  { id: "today", label: "Список на сегодня" },
+  { id: "bought", label: "Уже куплено" },
+  { id: "need_help", label: "Нужна помощь" },
+  { id: "replacement_check", label: "Замены на проверке" },
+];
 
 const PURCHASE_FILTERS = [
   { id: "all", label: "Все" },
@@ -47,7 +62,18 @@ function applyPurchaseFilter(items, filterId) {
   return items.filter((i) => i.status === filterId);
 }
 
+function hasProductLink(it) {
+  return !!(it.link || "").trim();
+}
+
 function itemsForMode(items, mode) {
+  if (mode === "today") return items.filter((i) => isTodayPriority(i.purchasePriority));
+  if (mode === "bought") return items.filter((i) => isBoughtStatus(i.status));
+  if (mode === "need_help") return items.filter((i) => i.status === "need_help");
+  if (mode === "replacement_check") return items.filter((i) => i.status === "replacement_check");
+  if (mode === "with_link") return items.filter(hasProductLink);
+  if (mode === "without_link") return items.filter((i) => !hasProductLink(i));
+  if (mode === "ordered") return items.filter((i) => i.status === "ordered");
   if (mode === "plumber") return itemsByResponsible(items, "plumber");
   if (mode === "electric") return itemsByResponsible(items, "electrician");
   if (mode === "installer") return itemsByResponsible(items, "installer");
@@ -68,45 +94,60 @@ function filterItemPool(pool, { supplierFilter, purchaseQuery }) {
   return out;
 }
 
-function sortMergedRows(rows, purchaseSort, purchaseStatuses) {
-  const sorted = [...rows];
-  sorted.sort((a, b) => {
-    if (purchaseSort === "sum") return b.sumVat - a.sumVat;
-    if (purchaseSort === "status") {
-      const la = purchaseStatuses.find((s) => s.id === a.status)?.label || "";
-      const lb = purchaseStatuses.find((s) => s.id === b.status)?.label || "";
-      return la.localeCompare(lb, "ru");
-    }
-    if (purchaseSort === "category") {
-      const c = (a.clientSectionLabel || "").localeCompare(b.clientSectionLabel || "", "ru");
-      if (c !== 0) return c;
-    }
-    return (a.name || "").localeCompare(b.name || "", "ru");
-  });
-  return sorted;
+function sortMergedRows(rows, currency) {
+  return flattenMergedBySectionOrder(rows, currency);
 }
 
-function MergedRowsList({ rows, currency, patch, bought, purchaseStatuses }) {
+function MergedRowsList({ rows, layout, currency, patch, patchBulk, bought, purchaseStatuses, onProposeReplacement, compact }) {
+  if (layout === "table") {
+    return (
+      <ClientPurchaseTable
+        rows={rows}
+        currency={currency}
+        patch={patch}
+        patchBulk={patchBulk}
+        bought={bought}
+        purchaseStatuses={purchaseStatuses}
+        onProposeReplacement={onProposeReplacement}
+        compact={compact}
+      />
+    );
+  }
   return rows.map((row) => (
     <ClientMergedItemCard
-      key={row.mergeKey}
+      key={`${row.mergeKey}-${(row.sourceIds || []).join(",")}`}
       row={row}
       currency={currency}
       patch={patch}
+      patchBulk={patchBulk}
       bought={bought}
       purchaseStatuses={purchaseStatuses}
+      onProposeReplacement={onProposeReplacement}
+      compact={compact}
     />
   ));
 }
 
-function MergedSectionGroups({ groups, currency, patch, bought, purchaseStatuses, withSubsections = false }) {
-  return groups.map((section) => (
+function MergedSectionGroups({
+  groups,
+  currency,
+  patch,
+  patchBulk,
+  bought,
+  purchaseStatuses,
+  withSubsections = false,
+  onProposeReplacement,
+  defaultOpenFirst = false,
+  layout = "cards",
+  compact = false,
+}) {
+  return groups.map((section, sectionIndex) => (
     <Collapsible
       key={section.sectionId || section.title}
       className="client-purchase-section"
       title={section.title}
-      subtitle={`${section.count} поз. · ${section.sumLabel}`}
-      defaultOpen={false}
+      subtitle={`${section.count} поз. · ${section.sumLabel}${section.hint ? ` · ${section.hint}` : ""}`}
+      defaultOpen={defaultOpenFirst && sectionIndex === 0}
     >
       {withSubsections
         ? section.subsections.map((sub) =>
@@ -118,20 +159,20 @@ function MergedSectionGroups({ groups, currency, patch, bought, purchaseStatuses
                 subtitle={`${sub.count} поз. · ${sub.sumLabel}`}
                 defaultOpen={false}
               >
-                <MergedRowsList rows={sub.rows} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} />
+                <MergedRowsList rows={sub.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} />
               </Collapsible>
             ) : (
-              <MergedRowsList key={`${section.title}-default`} rows={sub.rows} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} />
+              <MergedRowsList key={`${section.title}-default`} rows={sub.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} />
             )
           )
         : section.rows && (
-            <MergedRowsList rows={section.rows} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} />
+            <MergedRowsList rows={section.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} />
           )}
     </Collapsible>
   ));
 }
 
-function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, materials, modules, stellageGroups }) {
+function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, materials, modules, stellageGroups, onProposeReplacement, compact = false }) {
   return groups.map(([title, list]) => {
     const sum = list.reduce((s, i) => s + lineGross(i), 0);
     const stellageModule = isStellageModuleTitle(title, modules);
@@ -153,19 +194,19 @@ function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, mater
                   </div>
                 )}
                 {gItems.map((it) => (
-                  <ClientItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} />
+                  <ClientItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} />
                 ))}
               </React.Fragment>
             ))
           : list.map((it) => (
-              <ClientItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} />
+              <ClientItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} />
             ))}
       </Collapsible>
     );
   });
 }
 
-export function ClientMergedList({ project, items, patch, purchaseStatuses, groupBySection = false }) {
+export function ClientMergedList({ project, items, patch, purchaseStatuses, groupBySection = false, layout = "cards" }) {
   const rows = mergedPurchaseRows(items);
   if (groupBySection) {
     const groups = groupMergedBySectionHierarchy(rows, project.currency);
@@ -179,6 +220,7 @@ export function ClientMergedList({ project, items, patch, purchaseStatuses, grou
           bought={false}
           purchaseStatuses={purchaseStatuses}
           withSubsections
+          layout={layout}
         />
       </div>
     );
@@ -186,7 +228,7 @@ export function ClientMergedList({ project, items, patch, purchaseStatuses, grou
   return (
     <div style={{ marginTop: 8 }}>
       <p className="muted" style={{ fontSize: 13 }}>{rows.length} уникальных позиций</p>
-      <MergedRowsList rows={rows} currency={project.currency} patch={patch} bought={false} purchaseStatuses={purchaseStatuses} />
+      <MergedRowsList rows={rows} layout={layout} currency={project.currency} patch={patch} bought={false} purchaseStatuses={purchaseStatuses} />
     </div>
   );
 }
@@ -202,80 +244,140 @@ export default function ClientPurchasePanel({
   onShowBoughtChange,
   supplierFilter,
   purchaseQuery,
-  purchaseSort,
   patch,
+  patchBulk,
   purchaseStatuses,
   materials,
   modules,
   stellageGroups = STELLAGE_GROUPS,
+  onProposeReplacement,
+  simple = true,
+  layout = "cards",
+  compact = false,
 }) {
-  const scoped = useMemo(() => itemsForMode(items, mode === "all" ? "all" : mode), [items, mode]);
-  const effectiveMode = mode === "all" ? "all" : mode;
+  const normalizedMode = useMemo(() => {
+    if (!simple) return mode === "all" ? "all" : mode;
+    if (isSimplePurchaseMode(mode)) return mode;
+    return "categories";
+  }, [simple, mode]);
+
+  const effectiveFilter = simple ? "all" : filter;
+
+  const effectiveMode = normalizedMode;
+  const isStatusMode = STATUS_PURCHASE_MODES.some((m) => m.id === effectiveMode);
+  const isOrderedMode = effectiveMode === "ordered";
+
+  const scoped = useMemo(() => itemsForMode(items, normalizedMode === "all" ? "all" : normalizedMode), [items, normalizedMode]);
+
+  const mergeFilter = isOrderedMode || isStatusMode ? "all" : effectiveFilter;
 
   const mergedRows = useMemo(() => {
-    if (!isMergedPurchaseMode(effectiveMode)) return null;
+    if (isStatusMode || !isMergedPurchaseMode(effectiveMode)) return null;
     const pool = filterItemPool(scoped, { supplierFilter, purchaseQuery });
     let rows = mergedPurchaseRows(pool);
-    rows = applyMergedPurchaseFilter(rows, filter);
-    return sortMergedRows(rows, purchaseSort, purchaseStatuses);
-  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, filter, purchaseSort, purchaseStatuses]);
+    if (!isOrderedMode) rows = applyMergedPurchaseFilter(rows, mergeFilter);
+    return sortMergedRows(rows, project.currency);
+  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, mergeFilter, project.currency, isStatusMode, isOrderedMode]);
 
   const filtered = useMemo(() => {
-    if (isMergedPurchaseMode(effectiveMode)) return [];
+    if (!isStatusMode && isMergedPurchaseMode(effectiveMode)) return [];
     let out = filterItemPool(scoped, { supplierFilter, purchaseQuery });
-    out = applyPurchaseFilter(out, filter);
-    const sorted = [...out];
-    sorted.sort((a, b) => {
-      if (purchaseSort === "sum") return lineGross(b) - lineGross(a);
-      if (purchaseSort === "status") {
-        const la = purchaseStatuses.find((s) => s.id === a.status)?.label || "";
-        const lb = purchaseStatuses.find((s) => s.id === b.status)?.label || "";
-        return la.localeCompare(lb, "ru");
-      }
-      if (purchaseSort === "category") {
-        const c = clientSectionLabel(a).localeCompare(clientSectionLabel(b), "ru");
-        if (c !== 0) return c;
-      }
+    out = applyPurchaseFilter(out, effectiveFilter);
+    return [...out].sort((a, b) => {
+      const ao = a.sortOrder ?? 99999;
+      const bo = b.sortOrder ?? 99999;
+      if (ao !== bo) return ao - bo;
       return (a.name || "").localeCompare(b.name || "", "ru");
     });
-    return sorted;
-  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, filter, purchaseSort, purchaseStatuses]);
+  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, effectiveFilter, isStatusMode]);
 
-  const { todo, bought } =
-    mergedRows != null ? splitMergedPurchaseRows(mergedRows) : splitPurchaseItems(filtered);
-  const boughtCount = scoped.filter((i) => isBoughtStatus(i.status)).length;
+  const statusFlatList = useMemo(() => {
+    if (!isStatusMode) return [];
+    let out = filterItemPool(scoped, { supplierFilter, purchaseQuery });
+    return [...out].sort((a, b) => (a.name || "").localeCompare(b.name || "", "ru"));
+  }, [isStatusMode, scoped, supplierFilter, purchaseQuery]);
+
+  const { todo, bought } = isOrderedMode || (isStatusMode && effectiveMode !== "bought")
+    ? { todo: mergedRows ?? filtered, bought: [] }
+    : isStatusMode
+      ? effectiveMode === "bought"
+        ? { todo: [], bought: statusFlatList }
+        : { todo: statusFlatList, bought: [] }
+      : mergedRows != null
+        ? splitMergedPurchaseRows(mergedRows)
+        : splitPurchaseItems(filtered);
+  const boughtCount = scoped.filter((i) => isClosedPurchaseStatus(i.status)).length;
 
   const renderMergedList = (list, isBought) => {
-    if (effectiveMode === "categories") {
+    const pass = { onProposeReplacement, layout, compact, patchBulk };
+    const openFirst = simple && !isBought && effectiveMode === "categories";
+    if (effectiveMode === "categories" || effectiveMode === "plumber" || effectiveMode === "with_link" || effectiveMode === "without_link") {
       return (
         <MergedSectionGroups
+          key={`sections-${effectiveMode}-${isBought}`}
           groups={groupMergedBySectionHierarchy(list, project.currency)}
           currency={project.currency}
           patch={patch}
           bought={isBought}
           purchaseStatuses={purchaseStatuses}
           withSubsections
+          defaultOpenFirst={openFirst}
+          {...pass}
+        />
+      );
+    }
+    if (effectiveMode === "list") {
+      return (
+        <MergedSectionGroups
+          key={`list-categories-${isBought}`}
+          groups={groupMergedByListCategories(list, project.currency)}
+          currency={project.currency}
+          patch={patch}
+          bought={isBought}
+          purchaseStatuses={purchaseStatuses}
+          defaultOpenFirst={false}
+          {...pass}
+        />
+      );
+    }
+    if (effectiveMode === "all") {
+      return (
+        <MergedRowsList
+          rows={list}
+          currency={project.currency}
+          patch={patch}
+          patchBulk={patchBulk}
+          bought={isBought}
+          purchaseStatuses={purchaseStatuses}
+          onProposeReplacement={onProposeReplacement}
+          compact={compact}
+          layout={layout}
         />
       );
     }
     if (effectiveMode === "suppliers") {
       return (
         <MergedSectionGroups
+          key={`suppliers-${isBought}`}
           groups={groupMergedBySupplier(list, project.currency)}
           currency={project.currency}
           patch={patch}
           bought={isBought}
           purchaseStatuses={purchaseStatuses}
+          defaultOpenFirst={false}
+          {...pass}
         />
       );
     }
     return (
       <MergedSectionGroups
+        key={`flat-${isBought}`}
         groups={groupMergedFlat(list, project.currency)}
         currency={project.currency}
         patch={patch}
         bought={isBought}
         purchaseStatuses={purchaseStatuses}
+        {...pass}
       />
     );
   };
@@ -292,18 +394,50 @@ export default function ClientPurchasePanel({
           materials={materials}
           modules={modules}
           stellageGroups={stellageGroups}
+          onProposeReplacement={onProposeReplacement}
+          compact={compact}
         />
       );
+    }
+    if (isStatusMode) {
+      if (layout === "table") {
+        return (
+          <ClientPurchaseTable
+            items={list}
+            currency={project.currency}
+            patch={patch}
+            bought={effectiveMode === "bought"}
+            purchaseStatuses={purchaseStatuses}
+            onProposeReplacement={onProposeReplacement}
+            compact={compact}
+          />
+        );
+      }
+      return list.map((it) => (
+        <ClientItemCard
+          key={it.id}
+          it={it}
+          currency={project.currency}
+          patch={patch}
+          bought={effectiveMode === "bought"}
+          purchaseStatuses={purchaseStatuses}
+          onProposeReplacement={onProposeReplacement}
+          compact={compact}
+        />
+      ));
     }
     return null;
   };
 
   const renderList = (list, isBought) => {
+    if (isStatusMode) return renderDetailList(list, isBought);
     if (list[0]?.mergeKey) return renderMergedList(list, isBought);
     return renderDetailList(list, isBought);
   };
 
   const specialistActive = isSpecialistPurchaseMode(effectiveMode);
+
+  const modeButtons = simple ? CLIENT_SIMPLE_PURCHASE_MODES : PRIMARY_PURCHASE_MODES;
 
   if (!todo.length && !bought.length) {
     return <Empty title="Нет позиций по фильтру" />;
@@ -311,8 +445,23 @@ export default function ClientPurchasePanel({
 
   return (
     <div className="client-purchase-panel">
+      {!simple && (
+        <ClientPurchaseDashboard
+          items={items}
+          currency={project.currency}
+          onModeSelect={(key) => {
+            const map = {
+              ordered: () => onFilterChange("ordered"),
+              need_help: () => onModeChange("need_help"),
+              replacement_check: () => onModeChange("replacement_check"),
+              bought: () => onModeChange("bought"),
+            };
+            if (map[key]) map[key]();
+          }}
+        />
+      )}
       <div className="client-purchase-modes no-print">
-        {PRIMARY_PURCHASE_MODES.map((m) => (
+        {modeButtons.map((m) => (
           <button
             key={m.id}
             type="button"
@@ -323,53 +472,109 @@ export default function ClientPurchasePanel({
           </button>
         ))}
       </div>
-      <div className="client-purchase-modes client-purchase-modes--sub no-print">
-        <span className="muted" style={{ fontSize: 12, alignSelf: "center", marginRight: 4 }}>
-          Специалисты:
-        </span>
-        {SPECIALIST_PURCHASE_MODES.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            className={"btn btn-sm" + (effectiveMode === m.id ? " btn-primary" : "")}
-            onClick={() => onModeChange(m.id)}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
+      {!simple && (
+        <>
+          <div className="client-purchase-modes client-purchase-modes--sub no-print">
+            {STATUS_PURCHASE_MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className={"btn btn-sm" + (effectiveMode === m.id ? " btn-primary" : "")}
+                onClick={() => onModeChange(m.id)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <div className="client-purchase-modes client-purchase-modes--sub no-print">
+            <span className="muted" style={{ fontSize: 12, alignSelf: "center", marginRight: 4 }}>
+              Специалисты:
+            </span>
+            {SPECIALIST_PURCHASE_MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className={"btn btn-sm" + (effectiveMode === m.id ? " btn-primary" : "")}
+                onClick={() => onModeChange(m.id)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
       <div className="client-purchase-filters no-print">
-        {PURCHASE_FILTERS.map((f) => (
-          <button
-            key={f.id}
-            type="button"
-            className={"btn btn-sm" + (filter === f.id ? " btn-primary" : "")}
-            onClick={() => onFilterChange(f.id)}
-          >
-            {f.label}
-          </button>
-        ))}
+        {!simple &&
+          PURCHASE_FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              className={"btn btn-sm" + (filter === f.id ? " btn-primary" : "")}
+              onClick={() => onFilterChange(f.id)}
+            >
+              {f.label}
+            </button>
+          ))}
+        {simple && !isOrderedMode && (
+          <span className="muted" style={{ fontSize: 13 }}>
+            {todo.length} к покупке
+            {boughtCount > 0 ? ` · ${boughtCount} уже куплено` : ""}
+          </span>
+        )}
+        {simple && isOrderedMode && (
+          <span className="muted" style={{ fontSize: 13 }}>
+            {todo.length} заказано
+          </span>
+        )}
         <label className="row" style={{ marginLeft: "auto", fontSize: 13, gap: 6 }}>
-          <input type="checkbox" checked={showBought} onChange={(e) => onShowBoughtChange(e.target.checked)} />
-          Показывать купленные ({boughtCount})
+          {!isOrderedMode && (
+            <>
+              <input type="checkbox" checked={showBought} onChange={(e) => onShowBoughtChange(e.target.checked)} />
+              Показать заказанные и купленные{boughtCount > 0 ? ` (${boughtCount})` : ""}
+            </>
+          )}
         </label>
       </div>
-      {specialistActive && (
+      {effectiveMode === "ordered" && (
+        <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+          Позиции со статусом «Заказано» — ожидают доставки. После получения отметьте «Куплено» или «Доставлено».
+        </p>
+      )}
+      {effectiveMode === "list" && (
+        <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+          Крупные категории без дублирования. Позиции стеллажей смотрите в режиме «По разделам».
+        </p>
+      )}
+      {effectiveMode === "suppliers" && (
+        <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+          Все поставщики свёрнуты — нажмите на название, чтобы развернуть список позиций.
+        </p>
+      )}
+      {effectiveMode === "plumber" && (
+        <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+          Список для сантехника по разделам — можно передать ссылку или PDF из вкладки «Документы».
+        </p>
+      )}
+      {specialistActive && effectiveMode !== "plumber" && (
         <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
           Склеенный список для передачи специалисту — с расшифровкой, из каких модулей взялось количество.
         </p>
       )}
       {todo.length > 0 ? (
         <>
-          <h3 className="purchase-section-title">К закупке · {todo.length}</h3>
-          {renderList(todo, false)}
+          <h3 className="purchase-section-title">
+            {isOrderedMode ? `Заказано · ${todo.length}` : `К закупке · ${todo.length}`}
+          </h3>
+          {renderList(todo, isOrderedMode)}
         </>
       ) : (
-        <p className="muted" style={{ fontSize: 14, margin: "16px 0" }}>Всё из фильтра уже куплено.</p>
+        <p className="muted" style={{ fontSize: 14, margin: "16px 0" }}>
+          {isOrderedMode ? "Пока нет позиций со статусом «Заказано»." : "Всё из фильтра уже куплено."}
+        </p>
       )}
       {showBought && bought.length > 0 && (
         <div className="purchase-bought-block">
-          <h3 className="purchase-section-title purchase-section-title--done">Куплено · {bought.length}</h3>
+          <h3 className="purchase-section-title purchase-section-title--done">Заказано / куплено · {bought.length}</h3>
           {renderList(bought, true)}
         </div>
       )}

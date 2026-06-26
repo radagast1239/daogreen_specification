@@ -14,7 +14,7 @@ export default function AdminGuard() {
       return;
     }
     api
-      .getMaterials()
+      .getSettings()
       .then(() => {
         clearClientScope();
         setOk(true);

@@ -23,19 +23,25 @@ import {
 import { bulkMatchUploads, importPhotosFromDir } from "../services/photoImport.js";
 import { findDuplicateGroups, mergeMaterials } from "../services/materialMerge.js";
 import { getPriceHistory } from "../services/priceHistory.js";
+import { saveFile } from "../storage/index.js";
 import XLSX from "xlsx";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, "../../uploads");
 fs.mkdirSync(uploadDir, { recursive: true });
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => cb(null, `${nanoid(12)}${path.extname(file.originalname)}`),
-});
+import { multerFileFilter } from "../services/uploadFilter.js";
 
-const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } });
-const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const memUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: multerFileFilter(),
+});
+const memUploadDocs = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: multerFileFilter({ allowDocs: true }),
+});
 
 const router = Router();
 
@@ -101,7 +107,7 @@ router.post("/import/excel", memUpload.single("file"), async (req, res) => {
     if (withPhotos) {
       const wb = XLSX.read(req.file.buffer, { type: "buffer" });
       const images = await extractExcelImages(req.file.buffer, wb.SheetNames);
-      photosLinked = attachImagesToMaterials(result.materials, images, uploadDir);
+      photosLinked = await attachImagesToMaterials(result.materials, images, uploadDir);
     }
     const count = bulkUpsertMaterials(result.materials, mode);
     res.json({ ...result, imported: count, photosLinked });
@@ -129,16 +135,26 @@ router.post("/import/excel-photos", memUpload.single("file"), async (req, res) =
   }
 });
 
-router.post("/upload-photo", upload.single("file"), (req, res) => {
+router.post("/upload-photo", memUpload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file" });
-  const url = `/uploads/${req.file.filename}`;
-  res.json({ url, filename: req.file.filename });
+  try {
+    const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
+    const filename = `${nanoid(12)}${ext}`;
+    const url = await saveFile(req.file.buffer, filename);
+    res.json({ url, filename });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-router.post("/bulk-photos", memUpload.array("files", 500), (req, res) => {
+router.post("/bulk-photos", memUpload.array("files", 500), async (req, res) => {
   if (!req.files?.length) return res.status(400).json({ error: "No files" });
-  const result = bulkMatchUploads(req.files, uploadDir);
-  res.json(result);
+  try {
+    const result = await bulkMatchUploads(req.files, uploadDir);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 router.post("/import-photos-folder", (_req, res) => {

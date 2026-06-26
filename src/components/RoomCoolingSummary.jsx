@@ -1,15 +1,26 @@
 import React, { useMemo } from "react";
-import { money, num } from "../store/helpers.js";
+import { num } from "../store/helpers.js";
 import { isFarmGeneralItem, roomLabel } from "../lib/roomHelpers.js";
 import Collapsible from "./Collapsible.jsx";
+
+function resolveItemRoomId(item, rooms, itemRoomBySelection) {
+  if (item?.roomId) return item.roomId;
+  return itemRoomBySelection.get(item?.id) || "_none";
+}
 
 export default function RoomCoolingSummary({ project }) {
   const rows = useMemo(() => {
     const rooms = project.rooms || [];
+    const items = project.items || [];
+    const itemRoomBySelection = new Map();
+    for (const room of rooms) {
+      if (room?.selectedItemId) itemRoomBySelection.set(room.selectedItemId, room.id);
+    }
+
     const map = new Map();
-    for (const it of project.items || []) {
+    for (const it of items) {
       if (!isFarmGeneralItem(project, it)) continue;
-      const rid = it.roomId || "_none";
+      const rid = resolveItemRoomId(it, rooms, itemRoomBySelection);
       if (!map.has(rid)) {
         map.set(rid, { roomId: rid, kw: 0, btu: 0, exhaust: 0, items: 0 });
       }

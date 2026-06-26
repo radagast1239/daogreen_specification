@@ -1,6 +1,7 @@
 /** Правила публикации / отправки клиенту — общая логика front + back */
 
 import { isMiscCategory } from "./clientSections.js";
+import { lineContributesToSum, lineVisibleToClient } from "./itemTypes.js";
 
 export const PUBLISH_RULE_OPTIONS = [
   { id: "requirePrice", label: "Цена указана (> 0)" },
@@ -8,7 +9,7 @@ export const PUBLISH_RULE_OPTIONS = [
   { id: "requireLink", label: "Есть ссылка на товар" },
   { id: "requireSupplier", label: "Указан поставщик" },
   { id: "requireQtyPositive", label: "Количество > 0" },
-  { id: "requireApproved", label: "Галочка «Утверждено»" },
+  { id: "requireApproved", label: "Не скрыто от клиента" },
   { id: "blockMiscCategory", label: "Не «Прочее» — указана клиентская категория" },
 ];
 
@@ -18,7 +19,7 @@ export const ISSUE_LABELS = {
   no_link: "Нет ссылки",
   no_supplier: "Нет поставщика",
   no_qty: "Количество = 0",
-  not_approved: "Не утверждено",
+  not_approved: "Скрыто от клиента",
   misc_category: "Категория «Прочее» — укажите клиентский раздел",
   min_client_items: "Мало позиций для клиента",
 };
@@ -97,10 +98,10 @@ export function clientLinkFromTemplate(template, { projectName, clientName, url,
 }
 
 function clientReadyItems(items) {
-  return (items || []).filter(
-    (i) => i.approved && i.visible && i.enabled !== false && (Number(i.qty) || 0) > 0
-  );
+  return (items || []).filter((i) => lineVisibleToClient(i) && lineContributesToSum(i));
 }
+
+const WARNING_ONLY_ISSUES = new Set(["no_link"]);
 
 function checkItem(it, rules) {
   const problems = [];
@@ -119,13 +120,17 @@ function checkItem(it, rules) {
   if (rules.requireQtyPositive && !(Number(it.qty) > 0)) {
     problems.push("no_qty");
   }
-  if (rules.requireApproved && !it.approved) {
+  if (rules.requireApproved && !lineVisibleToClient(it)) {
     problems.push("not_approved");
   }
   if (rules.blockMiscCategory !== false && isMiscCategory(it)) {
     problems.push("misc_category");
   }
   return problems;
+}
+
+function issueSeverity(issue) {
+  return WARNING_ONLY_ISSUES.has(issue) ? "warning" : "critical";
 }
 
 /** Проверка позиций, которые видит клиент (утверждено + видно + включено) */
@@ -135,7 +140,7 @@ export function validateItemsForPublish(items, config) {
       ? { rules: config.rules, clientLinkTemplate: config.clientLinkTemplate }
       : parsePublishRulesSettings(config || {});
 
-  const target = (items || []).filter((i) => i.visible && i.enabled !== false);
+  const target = (items || []).filter((i) => lineVisibleToClient(i));
   const clientItems = clientReadyItems(items);
   const problems = [];
   const byIssue = {};
@@ -148,6 +153,7 @@ export function validateItemsForPublish(items, config) {
         module: it.module,
         issue,
         label: ISSUE_LABELS[issue] || issue,
+        severity: issueSeverity(issue),
       });
       byIssue[issue] = (byIssue[issue] || 0) + 1;
     }
@@ -160,18 +166,27 @@ export function validateItemsForPublish(items, config) {
       module: "",
       issue: "min_client_items",
       label: `${ISSUE_LABELS.min_client_items}: нужно минимум ${rules.minClientItems}, сейчас ${clientItems.length}`,
+      severity: "critical",
     });
     byIssue.min_client_items = 1;
   }
 
+  const critical = problems.filter((p) => p.severity === "critical");
+  const warnings = problems.filter((p) => p.severity === "warning");
+
   return {
-    ok: problems.length === 0,
+    ok: critical.length === 0,
+    status: critical.length ? "blocked" : warnings.length ? "warnings" : "ok",
+    critical,
+    warnings,
     problems,
     counts: {
       totalItems: (items || []).length,
       checkedItems: target.length,
       clientItems: clientItems.length,
       issueCount: problems.length,
+      criticalCount: critical.length,
+      warningCount: warnings.length,
       byIssue,
     },
     rules,

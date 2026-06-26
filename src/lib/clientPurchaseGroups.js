@@ -1,5 +1,6 @@
-import { getClientSections, resolveClientSection } from "../../shared/clientSections.js";
 import { money } from "../store/helpers.js";
+import { getClientSections, resolveClientSection } from "../../shared/clientSections.js";
+import { groupMergedByListCategories as buildListCategoryGroups } from "../../shared/clientListCategoryGroups.js";
 
 function sectionOrderKey(sectionId) {
   const order = [...getClientSections().map((s) => s.id), "__misc__"];
@@ -65,7 +66,31 @@ export function groupMergedBySupplier(rows, currency) {
     .map(([, g]) => ({ ...g, sumLabel: money(g.sum, currency) }));
 }
 
+export function flattenMergedBySectionOrder(rows, currency) {
+  const groups = groupMergedBySectionHierarchy(rows, currency);
+  const flat = [];
+  for (const sec of groups) {
+    for (const sub of sec.subsections) {
+      const sorted = [...sub.rows].sort((a, b) => {
+        const ao = Math.min(...(a.sourceItems || []).map((i) => i.sortOrder ?? 99999));
+        const bo = Math.min(...(b.sourceItems || []).map((i) => i.sortOrder ?? 99999));
+        if (ao !== bo) return ao - bo;
+        return (a.name || "").localeCompare(b.name || "", "ru");
+      });
+      flat.push(...sorted);
+    }
+  }
+  return flat;
+}
+
 export function groupMergedFlat(rows, currency) {
   const sum = (rows || []).reduce((s, r) => s + (r.sumVat || 0), 0);
   return [{ title: "Всё к закупке", rows: rows || [], sum, count: rows?.length || 0, sumLabel: money(sum, currency) }];
+}
+
+export function groupMergedByListCategories(rows, currency) {
+  return buildListCategoryGroups(rows).map((g) => ({
+    ...g,
+    sumLabel: money(g.sum, currency),
+  }));
 }

@@ -10,18 +10,21 @@ import { Modal, Empty } from "../../components/ui.jsx";
 import { useToast } from "../../components/Toast.jsx";
 import ImportPanel from "../../components/ImportPanel.jsx";
 import CompactTableToggle from "../../components/CompactTableToggle.jsx";
-import { downloadCSV } from "../../lib/export.js";
+import { downloadCSV } from "../../lib/exportDownload.js";
 import { materialSpecSubtitle, hasStructuredSpecEditor } from "../../lib/materialDisplay.js";
 import StructuredSpecEditor from "../../components/StructuredSpecEditor.jsx";
 import MaterialModulesEditor from "../../components/MaterialModulesEditor.jsx";
+import MaterialFarmSectionsEditor from "../../components/MaterialFarmSectionsEditor.jsx";
 import PhotoUploadField from "../../components/PhotoUploadField.jsx";
 import {
-  formatMaterialModulesLabel,
-  materialInModule,
   normalizeMaterialModules,
   patchMaterialModules,
   resolveMaterialModules,
 } from "../../../shared/materialModules.js";
+import {
+  patchMaterialFarmSections,
+  resolveMaterialFarmSections,
+} from "../../../shared/materialFarmSections.js";
 import {
   clientSectionLabel,
   suggestClientSectionFromCategory,
@@ -33,18 +36,21 @@ import {
   getClientSectionLabel,
 } from "../../../shared/clientSections.js";
 import { MaterialsQualityPanel } from "./MaterialsQualityPage.jsx";
-
+import MaterialsSubnav from "../../components/MaterialsSubnav.jsx";
+import { resolveFarmSections } from "../../lib/farmSectionsConfig.js";
 const blank = {
   name: "",
   unit: "шт.",
   basePrice: 0,
   defaultQty: 0,
-  module: "Общая закупка на ферму",
-  modules: ["Общая закупка на ферму"],
+  module: "",
+  modules: [],
   category: "Прочее",
   subcategory: "",
   clientSection: "",
   clientSubsection: "",
+  farmSectionId: "",
+  farmSections: [],
   itemType: "material",
   supplier: "",
   link: "",
@@ -74,24 +80,24 @@ const blank = {
 export default function MaterialsPage() {
   const { state, actions } = useStore();
   const ref = state.reference;
-  const { confirm } = useToast();
+  const { confirm, success } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = ["import", "duplicates", "quality"].includes(searchParams.get("tab"))
     ? searchParams.get("tab")
     : "base";
   const setTab = (t) => setSearchParams(t === "base" ? {} : { tab: t });
   const [q, setQ] = useState("");
-  const [modF, setModF] = useState("");
   const [catF, setCatF] = useState("");
   const [editing, setEditing] = useState(null);
   const [priceDraft, setPriceDraft] = useState({});
   const [suppliers, setSuppliers] = useState([]);
   const [categories, setCategories] = useState([...CATEGORIES]);
-
+  const [farmSections, setFarmSections] = useState([]);
   useEffect(() => {
     Promise.all([api.getSuppliers(), api.getSettings()]).then(([sup, settings]) => {
       setSuppliers(sup);
       setCategories(resolveCategories(settings));
+      setFarmSections(resolveFarmSections(settings));
     });
   }, []);
 
@@ -104,6 +110,16 @@ export default function MaterialsPage() {
         .sort((a, b) => a.localeCompare(b, "ru")),
     [state.modules]
   );
+
+  const filtered = useMemo(() => {
+    const ql = q.trim().toLowerCase();
+    return state.materials
+      .filter(
+        (m) =>
+          (!ql || m.name.toLowerCase().includes(ql)) && (!catF || m.category === catF)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [state.materials, q, catF]);
 
   const clientSectionOptions = useMemo(() => {
     const fromRef = state.reference?.clientSections?.filter((s) => !s.hidden);
@@ -133,26 +149,40 @@ export default function MaterialsPage() {
     return sectionLabel;
   }, [editing]);
 
-  const filtered = useMemo(() => {
-    const ql = q.trim().toLowerCase();
-    return state.materials.filter(
-      (m) =>
-        (!ql || m.name.toLowerCase().includes(ql)) &&
-        (!modF || materialInModule(m, modF)) &&
-        (!catF || m.category === catF)
+  const openMaterialEdit = (id) => {
+    const m = state.materials.find((x) => x.id === id);
+    if (!m) return;
+    setEditing(
+      patchMaterialFarmSections(
+        patchMaterialModules({ ...m }, resolveMaterialModules(m)),
+        resolveMaterialFarmSections(m)
+      )
     );
-  }, [state.materials, q, modF, catF]);
+  };
+
+  useEffect(() => {
+    const editId = searchParams.get("edit");
+    if (!editId || !state.materials.length) return;
+    openMaterialEdit(editId);
+    const next = new URLSearchParams(searchParams);
+    next.delete("edit");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, state.materials]);
+
+  const patchMaterialFromQuality = async (id, patch) => {
+    await actions.materialUpdate(id, patch);
+    success("Изменения сохранены");
+  };
 
   const save = async () => {
     if (!editing.name?.trim()) return;
     const mods = normalizeMaterialModules(editing.modules ?? editing.module).filter((m) =>
       activeModules.includes(m)
     );
-    if (!mods.length) {
-      alert("Выберите хотя бы один активный модуль.");
-      return;
-    }
-    const payload = patchMaterialModules({ ...editing, defaultQty: 0 }, mods);
+    const payload = patchMaterialFarmSections(
+      patchMaterialModules({ ...editing, defaultQty: 0 }, mods),
+      editing.farmSections ?? resolveMaterialFarmSections(editing)
+    );
     if (payload.id) await actions.materialUpdate(payload.id, payload);
     else await actions.materialAdd(payload);
     setEditing(null);
@@ -174,7 +204,6 @@ export default function MaterialsPage() {
         Наименование: m.name,
         Ед: m.unit,
         Цена: m.basePrice,
-        Модуль: formatMaterialModulesLabel(m),
         Категория: m.category,
         Поставщик: m.supplier,
         Ссылка: m.link,
@@ -182,7 +211,7 @@ export default function MaterialsPage() {
     );
 
   return (
-    <>
+    <div className="materials-page">
       <PageHeader
         title="Материалы"
         sub="Справочник позиций, цен и импорт из Excel"
@@ -202,49 +231,27 @@ export default function MaterialsPage() {
         }
       />
       <div className="content">
-        <div className="toolbar" style={{ borderBottom: "1px solid var(--line)", paddingBottom: 0, gap: 0 }}>
-          {[
-            ["base", "База"],
-            ["import", "Импорт"],
-            ["duplicates", "Дубликаты"],
-            ["quality", "Проверка"],
-          ].map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              className="btn btn-ghost"
-              style={{
-                borderRadius: 0,
-                borderBottom: tab === k ? "2px solid var(--brand)" : "2px solid transparent",
-                color: tab === k ? "var(--brand)" : "var(--muted)",
-              }}
-              onClick={() => setTab(k)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <MaterialsSubnav />
 
         {tab === "import" ? (
           <div style={{ marginTop: 16 }}>
             <ImportPanel />
           </div>
         ) : tab === "duplicates" ? (
-          <DuplicatesTab materials={state.materials} onMerged={() => actions.refresh()} />
+          <DuplicatesTab materials={state.materials} onMerged={() => actions.refreshMaterials()} />
         ) : tab === "quality" ? (
           <div style={{ marginTop: 16 }}>
-            <MaterialsQualityPanel materials={state.materials} modules={state.modules} />
+            <MaterialsQualityPanel
+              materials={state.materials}
+              modules={state.modules}
+              onEditMaterial={openMaterialEdit}
+              onPatchMaterial={patchMaterialFromQuality}
+            />
           </div>
         ) : (
           <>
         <div className="toolbar" style={{ marginTop: 16 }}>
           <input placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />
-          <select value={modF} onChange={(e) => setModF(e.target.value)} style={{ width: "auto" }}>
-            <option value="">Все модули</option>
-            {activeModules.map((m) => (
-              <option key={m}>{m}</option>
-            ))}
-          </select>
           <select value={catF} onChange={(e) => setCatF(e.target.value)} style={{ width: "auto" }}>
             <option value="">Все категории</option>
             {categories.map((c) => (
@@ -259,13 +266,13 @@ export default function MaterialsPage() {
         {filtered.length === 0 ? (
           <Empty title="Ничего не найдено" />
         ) : (
-          <div className="card" style={{ overflowX: "auto", padding: "4px 8px 12px" }}>
+          <div className="card table-scroll-wrap materials-table-wrap">
             <table className="spec materials-table">
-              <thead>
+              <thead className="materials-table-head">
                 <tr>
                   <th>Фото</th>
                   <th>Наименование</th>
-                  <th>Модуль</th>
+                  <th>Категория</th>
                   <th>Ед</th>
                   <th className="right">Цена, ₽</th>
                   <th>Ссылка</th>
@@ -274,65 +281,24 @@ export default function MaterialsPage() {
               </thead>
               <tbody>
                 {filtered.map((m) => (
-                  <tr key={m.id} className="material-row">
-                    <td className="spec-photo">
-                      {(m.imageUrl || m.photoUrl) ? (
-                        <img src={photoSrc(m.imageUrl || m.photoUrl)} alt="" className="thumb-img" />
-                      ) : (
-                        <span className="muted" style={{ fontSize: 11 }}>нет фото</span>
-                      )}
-                    </td>
-                    <td style={{ minWidth: 220 }} className="material-name">
-                      {m.name}
-                      {materialSpecSubtitle(m) && (
-                        <div className="muted" style={{ fontSize: 11, marginTop: 4, fontWeight: 400 }}>
-                          {materialSpecSubtitle(m)}
-                        </div>
-                      )}
-                    </td>
-                    <td className="muted" style={{ fontSize: 12 }}>{formatMaterialModulesLabel(m)}</td>
-                    <td>{m.unit}</td>
-                    <td className="right">
-                      <input
-                        className="spec-cell-input spec-cell-input--num"
-                        style={{ maxWidth: 110, marginLeft: "auto" }}
-                        type="number"
-                        min={0}
-                        value={priceDraft[m.id] ?? m.basePrice}
-                        onChange={(e) => setPriceDraft((d) => ({ ...d, [m.id]: e.target.value }))}
-                        onBlur={() => {
-                          if (priceDraft[m.id] == null) return;
-                          patchPrice(m.id, priceDraft[m.id]);
-                        }}
-                      />
-                    </td>
-                    <td>
-                      {m.link ? (
-                        <a href={m.link} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
-                          ↗
-                        </a>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    <td className="row" style={{ gap: 2 }}>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => setEditing(patchMaterialModules({ ...m }, resolveMaterialModules(m)))}
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={async () => {
-                          if (await confirm({ title: "Удалить позицию?", message: m.name, confirmLabel: "Удалить" }))
-                            actions.materialDelete(m.id);
-                        }}
-                      >
-                        ✕
-                      </button>
-                    </td>
-                  </tr>
+                  <MaterialRow
+                    key={m.id}
+                    m={m}
+                    priceDraft={priceDraft}
+                    setPriceDraft={setPriceDraft}
+                    patchPrice={patchPrice}
+                    onEdit={() => openMaterialEdit(m.id)}
+                    onDelete={async () => {
+                      if (
+                        await confirm({
+                          title: "Удалить позицию?",
+                          message: m.name,
+                          confirmLabel: "Удалить",
+                        })
+                      )
+                        actions.materialDelete(m.id);
+                    }}
+                  />
                 ))}
               </tbody>
             </table>
@@ -456,12 +422,25 @@ export default function MaterialsPage() {
               </span>
             )}
           </p>
-          <MaterialModulesEditor
-            value={editing.modules ?? editing.module}
-            activeModules={activeModules}
-            archivedModules={resolveMaterialModules(editing).filter((m) => !activeModules.includes(m))}
-            onChange={(modules) => setEditing(patchMaterialModules(editing, modules))}
+          <MaterialFarmSectionsEditor
+            value={editing}
+            farmSections={farmSections}
+            onChange={(farmSections) => setEditing(patchMaterialFarmSections(editing, farmSections))}
           />
+          <details className="legacy-field-block" style={{ marginTop: 8 }}>
+            <summary className="muted" style={{ cursor: "pointer", fontSize: 13 }}>
+              Служебное: старые модули (не для сборки)
+            </summary>
+            <div style={{ marginTop: 10 }}>
+              <MaterialModulesEditor
+                legacy
+                value={editing.modules ?? editing.module}
+                activeModules={activeModules}
+                archivedModules={resolveMaterialModules(editing).filter((m) => !activeModules.includes(m))}
+                onChange={(modules) => setEditing(patchMaterialModules(editing, modules))}
+              />
+            </div>
+          </details>
           <div className="field">
             <label>Поставщик</label>
             <select value={editing.supplier || ""} onChange={(e) => setEditing({ ...editing, supplier: e.target.value })}>
@@ -544,9 +523,68 @@ export default function MaterialsPage() {
           {editing.id && <PriceHistoryBlock materialId={editing.id} />}
         </Modal>
       )}
-    </>
+    </div>
   );
 }
+
+const MaterialRow = function MaterialRow({ m, priceDraft, setPriceDraft, patchPrice, onEdit, onDelete }) {
+  return (
+    <tr className="material-row">
+      <td className="spec-photo">
+        {m.imageUrl || m.photoUrl ? (
+          <img src={photoSrc(m.imageUrl || m.photoUrl)} alt="" className="thumb-img" />
+        ) : (
+          <span className="muted" style={{ fontSize: 11 }}>
+            нет фото
+          </span>
+        )}
+      </td>
+      <td style={{ minWidth: 220 }} className="material-name">
+        {m.name}
+        {materialSpecSubtitle(m) && (
+          <div className="muted" style={{ fontSize: 11, marginTop: 4, fontWeight: 400 }}>
+            {materialSpecSubtitle(m)}
+          </div>
+        )}
+      </td>
+      <td className="muted" style={{ fontSize: 12 }}>
+        {m.category || "Прочее"}
+      </td>
+      <td>{m.unit}</td>
+      <td className="right">
+        <input
+          className="spec-cell-input spec-cell-input--num"
+          style={{ maxWidth: 110, marginLeft: "auto" }}
+          type="number"
+          min={0}
+          value={priceDraft[m.id] ?? m.basePrice}
+          onChange={(e) => setPriceDraft((d) => ({ ...d, [m.id]: e.target.value }))}
+          onBlur={() => {
+            if (priceDraft[m.id] == null) return;
+            patchPrice(m.id, priceDraft[m.id]);
+          }}
+        />
+      </td>
+      <td>
+        {m.link ? (
+          <a href={m.link} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
+            ↗
+          </a>
+        ) : (
+          <span className="muted">—</span>
+        )}
+      </td>
+      <td className="row" style={{ gap: 2 }}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onEdit}>
+          ✎
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onDelete}>
+          ✕
+        </button>
+      </td>
+    </tr>
+  );
+};
 
 function PriceHistoryBlock({ materialId }) {
   const [rows, setRows] = useState(null);
@@ -564,6 +602,7 @@ function PriceHistoryBlock({ materialId }) {
         {rows.slice(0, 8).map((r, i) => (
           <li key={`${r.createdAt}-${i}`}>
             {r.oldPrice} → {r.newPrice} ₽ · {new Date(r.createdAt).toLocaleDateString("ru-RU")}
+            {r.changedBy ? ` · ${r.changedBy}` : ""}
           </li>
         ))}
       </ul>

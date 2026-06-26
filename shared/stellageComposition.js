@@ -4,13 +4,14 @@ import { materialInModule, resolveMaterialModules } from "./materialModules.js";
 
 export const STELLAGE_GROUPS = [
   { id: "karkas", label: "Каркас и крепёж", order: 1 },
-  { id: "poliv", label: "Полив стеллажа", order: 2 },
-  { id: "drenazh", label: "Дренаж на стеллаже", order: 3 },
-  { id: "klimat", label: "Вентиляция", order: 4 },
-  { id: "osveshchenie", label: "Освещение", order: 5 },
+  { id: "lotki", label: "Лотки / каналы / поддоны", order: 2 },
+  { id: "poliv", label: "Полив стеллажа", order: 3 },
+  { id: "drenazh", label: "Дренаж стеллажа", order: 4 },
+  { id: "osveshchenie", label: "Освещение стеллажа", order: 5 },
   { id: "elektrika", label: "Электрика стеллажа", order: 6 },
-  { id: "emkosti", label: "Ёмкости и баки", order: 7 },
-  { id: "opcii", label: "Опции (не в базовый состав)", order: 8 },
+  { id: "klimat", label: "Вентиляция", order: 7 },
+  { id: "emkosti", label: "Ёмкости и баки", order: 8 },
+  { id: "opcii", label: "Опции стеллажа", order: 9 },
 ];
 
 const GROUP_BY_ID = Object.fromEntries(STELLAGE_GROUPS.map((g) => [g.id, g]));
@@ -69,6 +70,15 @@ export function inferCompositionGroup(mat) {
   const qty = Number(mat.defaultQty ?? mat.default_qty) || 0;
 
   if (qty === 0) return "opcii";
+
+  if (
+    n.includes("лоток") ||
+    n.includes("канал") ||
+    n.includes("поддон") ||
+    n.includes("кювет")
+  ) {
+    return "lotki";
+  }
 
   if (
     cat === "Каркас и крепёж" ||

@@ -3,17 +3,10 @@ import { MATERIAL_TAGS } from "./materialTags.js";
 import { STELLAGE_GROUPS } from "../../shared/stellageComposition.js";
 import { parseCategoriesJson } from "./categories.js";
 import { parseClientSectionsJson } from "../../shared/clientSections.js";
-import { resolveFarmSectionGroups } from "./farmSectionsConfig.js";
+import { resolveFarmSectionGroups } from "./farmSectionGroupsRef.js";
+import { DEFAULT_RESPONSIBLE_ROLES } from "./responsibleRoles.js";
 
-export const DEFAULT_RESPONSIBLE_ROLES = [
-  { id: "plumber", label: "Сантехник" },
-  { id: "electrician", label: "Электрик" },
-  { id: "installer", label: "Монтажник" },
-  { id: "client", label: "Клиент" },
-  { id: "purchaser", label: "Закупщик" },
-  { id: "consumables", label: "Расходники" },
-  { id: "general", label: "Общий" },
-];
+export { DEFAULT_RESPONSIBLE_ROLES };
 
 export const DEFAULT_UNITS = ["шт.", "м", "м²", "м³", "кг", "л", "компл.", "уп."];
 

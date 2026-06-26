@@ -50,11 +50,12 @@ const TABS = [
   { id: "stellage", label: "Пресеты стеллажей" },
   { id: "stellage_composition", label: "Состав стеллажей" },
   { id: "farm", label: "Разделы фермы" },
-  { id: "catalog", label: "Модули базы" },
   { id: "directories", label: "Справочники" },
   { id: "brand", label: "Клиент и бренд" },
   { id: "publish", label: "Правила публикации" },
 ];
+
+const LEGACY_TAB = { id: "catalog", label: "Старые модули базы" };
 
 const MODULE_TYPES = [
   { id: "stellage", label: "Стеллаж" },
@@ -127,6 +128,7 @@ export default function ModulesPage() {
   const [editingStellageMod, setEditingStellageMod] = useState(null);
   const [editingStellagePhoto, setEditingStellagePhoto] = useState("");
   const [stellageGroupsDraft, setStellageGroupsDraft] = useState([]);
+  const [showLegacyTools, setShowLegacyTools] = useState(false);
 
   const stellageMods = state.modules.filter((m) => m.type === "stellage");
   const stellagePresets = useMemo(
@@ -182,7 +184,6 @@ export default function ModulesPage() {
 
   const saveMaterial = async (payload) => {
     const m = await actions.materialAdd(payload);
-    await actions.refresh();
     return m;
   };
 
@@ -218,7 +219,7 @@ export default function ModulesPage() {
   const saveStellageGroups = async () => {
     const nextRef = { ...ref, stellageGroups: stellageGroupsDraft };
     await api.saveSettings(referenceToSettings(nextRef));
-    await actions.refresh();
+    await actions.refreshSettings();
   };
 
   const saveStellageModuleCatalog = async () => {
@@ -239,7 +240,7 @@ export default function ModulesPage() {
       setStellageModuleMeta(meta);
       setEditingStellageMod(null);
       await reload();
-      await actions.refresh();
+      await actions.refreshSettings();
     } catch (e) {
       alert(e.message);
     } finally {
@@ -425,7 +426,7 @@ export default function ModulesPage() {
 
   const sectionVersions = editingSection ? farmSectionVersions[editingSection.id] || [] : [];
   const inEditor = !!(editing || editingSection || editingMod || editingStellageMod);
-  const tabLabel = TABS.find((t) => t.id === tab)?.label || "раздел";
+  const tabLabel = [...TABS, LEGACY_TAB].find((t) => t.id === tab)?.label || "раздел";
 
   const exitEditor = () => {
     setEditing(null);
@@ -521,7 +522,7 @@ export default function ModulesPage() {
       });
       setStellageCatalogs(catalogs);
       await reload();
-      await actions.refresh();
+      await actions.refreshSettings();
       alert(`Состав скопирован в «${target.name}».`);
     } catch (e) {
       alert(e.message);
@@ -616,7 +617,7 @@ export default function ModulesPage() {
       }
       setEditingMod(null);
       await reload();
-      await actions.refresh();
+      await actions.refreshSettings();
     } catch (e) {
       alert(e.message);
     } finally {
@@ -643,7 +644,7 @@ export default function ModulesPage() {
     });
     if (editingMod?.id === m.id) setEditingMod(null);
     await reload();
-    await actions.refresh();
+    await actions.refreshModules();
   };
 
   const handleBulkArchive = async () => {
@@ -664,7 +665,7 @@ export default function ModulesPage() {
     for (const m of picked) await api.archiveModule(m.id);
     setSelectedModIds(new Set());
     await reload();
-    await actions.refresh();
+    await actions.refreshModules();
   };
 
   const handleBulkRestore = async () => {
@@ -674,13 +675,13 @@ export default function ModulesPage() {
     for (const m of picked) await api.restoreModule(m.id);
     setSelectedModIds(new Set());
     await reload();
-    await actions.refresh();
+    await actions.refreshModules();
   };
 
   const handleRestoreModule = async (m) => {
     await api.restoreModule(m.id);
     await reload();
-    await actions.refresh();
+    await actions.refreshModules();
   };
 
   const handleDuplicateModule = async (m) => {
@@ -690,7 +691,7 @@ export default function ModulesPage() {
       const result = await api.duplicateModule(m.id);
       alert(`Создан модуль «${result.module.name}» — ${result.materialCount} поз.`);
       await reload();
-      await actions.refresh();
+      await Promise.all([actions.refreshMaterials(), actions.refreshModules()]);
     } catch (e) {
       alert(e.message);
     } finally {
@@ -701,7 +702,7 @@ export default function ModulesPage() {
   return (
     <>
       <PageHeader
-        title="Модули / разделы фермы"
+        title="Модули и шаблоны фермы"
         sub="Разделы фермы, состав стеллажей по умолчанию, пресеты и справочники."
         back={{ to: "/", label: "Проекты" }}
       />
@@ -724,7 +725,45 @@ export default function ModulesPage() {
             {t.label}
           </button>
         ))}
+        {showLegacyTools && tab === "catalog" && (
+          <button type="button" className="btn btn-sm btn-primary">
+            {LEGACY_TAB.label}
+          </button>
+        )}
       </div>
+      )}
+
+      {!inEditor && tab !== "catalog" && (
+        <p className="muted" style={{ fontSize: 12, margin: "0 0 14px" }}>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            style={{ padding: "2px 8px", fontSize: 12 }}
+            onClick={() => {
+              setShowLegacyTools(true);
+              setTab("catalog");
+            }}
+          >
+            Служебное: старые модули базы
+          </button>
+        </p>
+      )}
+
+      {tab === "catalog" && !inEditor && (
+        <div className="card" style={{ padding: 12, marginBottom: 14, borderColor: "var(--amber, #c9a227)" }}>
+          <p style={{ margin: 0, fontSize: 13 }}>
+            <strong>Служебный режим.</strong> Старые модули базы не участвуют в сборке новых проектов.
+            Используйте «Состав стеллажей» и «Разделы фермы». Данные не удаляются — только совместимость.
+          </p>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            style={{ marginTop: 8 }}
+            onClick={() => setTab("farm")}
+          >
+            ← К основным вкладкам
+          </button>
+        </div>
       )}
 
       {tab === "directories" && !editing && !editingSection && !editingMod && (
@@ -732,7 +771,7 @@ export default function ModulesPage() {
           settings={appSettings}
           onSaved={async () => {
             await reload();
-            await actions.refresh();
+            await actions.refreshSettings();
           }}
         />
       )}
@@ -742,7 +781,7 @@ export default function ModulesPage() {
           settings={appSettings}
           onSaved={async () => {
             await reload();
-            await actions.refresh();
+            await actions.refreshSettings();
           }}
         />
       )}
@@ -828,7 +867,7 @@ export default function ModulesPage() {
             позиции, укажите кол-во и группу состава.
           </p>
           {stellageMods.length === 0 ? (
-            <p className="muted">Нет модулей типа «Стеллаж» — создайте в «Модули базы».</p>
+            <p className="muted">Нет типов стеллажей в справочнике. Добавьте в «Служебное → Старые модули базы» модуль с типом «Стеллаж».</p>
           ) : (
             <div className="card" style={{ padding: 0, overflow: "hidden" }}>
               <table className="spec">
@@ -1017,9 +1056,8 @@ export default function ModulesPage() {
             </label>
           </div>
           <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
-            Модули — «листы» каталога при сборке проекта. <strong>В архив</strong> = убрать из списка при
-            создании проекта. <strong>Материалы не удаляются</strong> — остаются в «Материалы» с тем же названием
-            модуля; при необходимости перенесите их в другой модуль.
+            <strong>Legacy.</strong> Не используется при сборке новых проектов. Тип «Стеллаж» нужен только как
+            идентификатор типа в «Составе стеллажей». Материалы в базе не удаляются.
           </p>
           <div className="card" style={{ overflowX: "auto" }}>
             <table className="spec">
@@ -1359,6 +1397,8 @@ export default function ModulesPage() {
             suppliers={suppliers}
             showQty
             qtyLabel="Кол-во по умолч."
+            showFarmLineGroups
+            catalogRefsOnly
           />
 
           <div className="toolbar" style={{ marginTop: 16 }}>
@@ -1417,7 +1457,7 @@ export default function ModulesPage() {
             lines={editLines}
             onChange={setEditLines}
             materials={state.materials}
-            catalogModule={editingStellageMod.name}
+            catalogModule=""
             catalogLabel="позицию"
             onSaveMaterial={saveMaterial}
             categories={categories}
@@ -1426,6 +1466,7 @@ export default function ModulesPage() {
             qtyLabel="Кол-во по умолч."
             showCompositionGroups
             stellageGroups={stellageGroupsDraft}
+            catalogRefsOnly
           />
 
           <div className="toolbar" style={{ marginTop: 16 }}>
@@ -1605,13 +1646,14 @@ export default function ModulesPage() {
             lines={editLines}
             onChange={setEditLines}
             materials={state.materials}
-            catalogModule={editing.moduleName}
+            catalogModule=""
             catalogLabel="позицию"
             onSaveMaterial={saveMaterial}
             categories={categories}
             suppliers={suppliers}
             showCompositionGroups
             stellageGroups={stellageGroupsDraft.length ? stellageGroupsDraft : ref.stellageGroups}
+            catalogRefsOnly
           />
 
           <div className="toolbar" style={{ marginTop: 16 }}>

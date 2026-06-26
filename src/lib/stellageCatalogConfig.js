@@ -1,11 +1,19 @@
-import { cloneBuilderLines } from "./presetHelpers.js";
-import { catalogLinesForModule, lineFromMaterial } from "./projectBuilder.js";
-import { parseJson, stripLineIds } from "./farmSectionsConfig.js";
+import { cloneBuilderLines } from "./builderLines.js";
+import { hydrateCatalogEditorLine } from "./specLineCore.js";
+import { parseJson } from "./jsonUtils.js";
+import { stripLineIds } from "./builderLines.js";
+import { normalizeStoredCatalog } from "../../shared/catalogLine.js";
 import { materialCompositionGroup } from "../../shared/stellageComposition.js";
-import { materialInModule } from "../../shared/materialModules.js";
+import { lineFromMaterial } from "./specLineCore.js";
 
 export function parseStellageModuleCatalogs(raw) {
-  return parseJson(raw, {});
+  const obj = parseJson(raw, {});
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    out[k] = Array.isArray(v) ? normalizeStoredCatalog(v) : v;
+  }
+  return out;
 }
 
 export function parseStellageModuleMeta(raw) {
@@ -34,46 +42,18 @@ function lineQtyFromCatalog(ln) {
   return Number(ln.defaultQty ?? ln.qty) || 0;
 }
 
-/** Строки из базы материалов — qty и галочки по defaultQty */
-export function stellageLinesFromMaterials(materials, moduleName) {
-  return materials
-    .filter((m) => materialInModule(m, moduleName) && m.status === "active")
-    .map((m) => {
-      const qty = Number(m.defaultQty) || 0;
-      return lineFromMaterial(m, {
-        included: qty > 0,
-        qty,
-        defaultQty: qty,
-        subcategory: m.subcategory || materialCompositionGroup(m),
-      });
-    });
+/** @deprecated Только для служебной совместимости — не использовать при сборке проекта */
+export function stellageLinesFromMaterials() {
+  return [];
 }
 
 /** Редактор шаблона стеллажа в «Модули / разделы» */
 export function stellageCatalogEditorLines(catalogs, moduleId, materials, moduleName) {
   const saved = catalogs[moduleId];
   if (saved?.length) {
-    return cloneBuilderLines(saved).map((ln) => {
-      const qty = lineQtyFromCatalog(ln);
-      if (!ln.materialId) {
-        return { ...ln, included: ln.included !== false, qty, defaultQty: qty };
-      }
-      const mat = materials.find((m) => m.id === ln.materialId);
-      return mat
-        ? {
-            ...lineFromMaterial(mat, {
-              ...ln,
-              included: ln.included !== false,
-              qty,
-              defaultQty: qty,
-              subcategory: ln.subcategory || materialCompositionGroup(mat),
-            }),
-            id: ln.id,
-          }
-        : { ...ln, included: ln.included !== false, qty, defaultQty: qty };
-    });
+    return cloneBuilderLines(saved).map((ln) => hydrateCatalogEditorLine(ln, materials));
   }
-  return stellageLinesFromMaterials(materials, moduleName);
+  return [];
 }
 
 /** Состав при сборке проекта — кол-во из шаблона, галочки снимаем */
@@ -82,36 +62,31 @@ export function projectStellageLinesFromCatalog(catalogs, moduleId, materials, m
   if (saved?.length) {
     return cloneBuilderLines(saved).map((ln) => {
       const defaultQty = lineQtyFromCatalog(ln);
-      const base = {
-        ...ln,
-        included: false,
-        qty: defaultQty,
-        defaultQty,
-      };
-      if (!ln.materialId) return base;
+      const sub = ln.subcategory || ln.farmGroup || "";
+      if (!ln.materialId) {
+        return {
+          ...hydrateCatalogEditorLine(ln, materials),
+          included: false,
+          qty: defaultQty,
+          defaultQty,
+        };
+      }
       const mat = materials.find((m) => m.id === ln.materialId);
       return mat
         ? {
             ...lineFromMaterial(mat, {
-              ...base,
-              subcategory: ln.subcategory || materialCompositionGroup(mat),
+              included: false,
+              qty: defaultQty,
+              defaultQty,
+              subcategory: sub || materialCompositionGroup(mat),
+              farmGroup: sub,
             }),
             id: ln.id,
           }
-        : base;
+        : hydrateCatalogEditorLine({ ...ln, included: false, qty: defaultQty, defaultQty }, materials);
     });
   }
-  return catalogLinesForModule(materials, moduleName).map((ln) => {
-    const mat = materials.find((m) => m.id === ln.materialId);
-    const defaultQty = Number(mat?.defaultQty) || 0;
-    return {
-      ...ln,
-      subcategory: ln.subcategory || (mat ? materialCompositionGroup(mat) : ""),
-      qty: defaultQty,
-      defaultQty,
-      included: false,
-    };
-  });
+  return [];
 }
 
 export function stripStellageCatalogLines(lines) {

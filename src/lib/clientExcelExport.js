@@ -48,7 +48,7 @@ function mergedDataRow(r, index, purchaseStatuses) {
     Цена: r.price ?? "",
     Сумма: Math.round(r.sumVat || 0),
     Поставщик: r.supplier || "",
-    "Открыть товар": r.link ? "Открыть товар" : "",
+    "Открыть товар": r.link ? "Открыть товар" : "без ссылки",
     _link: r.link || "",
     Статус: statusLabel(r.status, purchaseStatuses),
     "Факт. цена": rep?.actualPrice ?? "",
@@ -177,7 +177,7 @@ function supplierMergedSheet(merged) {
     "Кол-во": num(r.qty),
     "Ед.": r.unit || "шт.",
     Сумма: Math.round(r.sumVat || 0),
-    Ссылка: r.link ? "Открыть товар" : "",
+    Ссылка: r.link ? "Открыть товар" : "без ссылки",
     _link: r.link || "",
     Раздел: r.clientSectionLabel || "",
   }));
@@ -218,7 +218,7 @@ function moduleDetailSheet(items, project, purchaseStatuses) {
         Сумма: Math.round(lineGross(it)),
         Поставщик: it.supplier || "",
         Статус: statusLabel(it.status, purchaseStatuses),
-        Ссылка: it.link ? "Открыть товар" : "",
+        Ссылка: it.link ? "Открыть товар" : "без ссылки",
         _link: it.link || "",
       });
     }

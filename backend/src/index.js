@@ -3,9 +3,10 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
-import { initRemoteDb, startDbBackupLoop } from "./dbBackup.js";
+import { initRemoteDb, startDbBackupLoop, startLocalBackupLoop, backupStatus } from "./dbBackup.js";
 import { initDb, db, getDbPath } from "./db.js";
 import { adminAuthMiddleware } from "./auth.js";
+import { applySecurityMiddleware } from "./middleware/security.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
@@ -20,9 +21,16 @@ initDb();
 const { initActivityLog } = await import("./services/activityLog.js");
 initActivityLog();
 
+const { loadPublishRulesConfig } = await import("./services/publishRules.js");
+loadPublishRulesConfig();
+
 const { runSeedIfEmpty } = await import("./seed.js");
 runSeedIfEmpty();
-startDbBackupLoop(dbPath);
+if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+  startDbBackupLoop(dbPath);
+} else {
+  startLocalBackupLoop(dbPath);
+}
 
 const { default: materialsApi } = await import("./routes/materialsApi.js");
 const { default: projectsApi, clientRouter } = await import("./routes/projects.js");
@@ -31,12 +39,21 @@ const { default: presetsApi } = await import("./routes/presets.js");
 const { default: suppliersApi } = await import("./routes/suppliersApi.js");
 
 const isProd = process.env.NODE_ENV === "production";
-const corsOrigins = process.env.CORS_ORIGIN?.split(",").filter(Boolean);
+const corsOrigins = process.env.CORS_ORIGIN?.split(",").map((s) => s.trim()).filter(Boolean);
+const defaultProdOrigins = [
+  "http://62.233.35.206",
+  "https://62.233.35.206",
+  "http://spec.nikita-daogreen.ru",
+  "https://spec.nikita-daogreen.ru",
+];
+const corsOriginList = corsOrigins?.length ? corsOrigins : isProd ? defaultProdOrigins : ["http://localhost:5173", "http://localhost:4173"];
 
 const app = express();
+if (isProd) app.set("trust proxy", 1);
+applySecurityMiddleware(app, { isProd });
 app.use(
   cors({
-    origin: corsOrigins?.length ? corsOrigins : isProd ? true : ["http://localhost:5173"],
+    origin: corsOriginList,
     credentials: true,
   })
 );
@@ -50,11 +67,13 @@ function adminAuth(req, res, next) {
 app.get("/api/health", (_req, res) => {
   const mats = db.prepare("SELECT COUNT(*) as c FROM materials").get();
   const projs = db.prepare("SELECT COUNT(*) as c FROM projects").get();
+  const backup = backupStatus();
   res.json({
     ok: true,
     materials: mats.c,
     projects: projs.c,
-    dbBackup: !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY),
+    dbBackup: backup.ok,
+    backup,
   });
 });
 
@@ -67,16 +86,30 @@ app.use("/api/client", clientRouter);
 
 if (isProd) {
   const distPath = path.join(__dirname, "../../dist");
-  app.use(express.static(distPath));
+  app.use(
+    express.static(distPath, {
+      setHeaders(res, filePath) {
+        if (
+          filePath.endsWith(`${path.sep}index.html`) ||
+          filePath.endsWith("sw.js") ||
+          filePath.endsWith("manifest.webmanifest")
+        ) {
+          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        }
+      },
+    })
+  );
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api") || req.path.startsWith("/uploads")) return next();
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.sendFile(path.join(distPath, "index.html"));
   });
 }
 
 app.use((err, _req, res, _next) => {
   console.error(err);
-  res.status(500).json({ error: err.message || "Server error" });
+  const message = isProd ? "Server error" : err.message || "Server error";
+  res.status(err.status || 500).json({ error: message });
 });
 
 app.listen(PORT, () => {

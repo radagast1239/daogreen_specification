@@ -65,6 +65,12 @@ const ICONS = {
       <path d="M12 6c0-2 1-3 3-3" />
     </svg>
   ),
+  economics: (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M4 19V5M4 19h16" />
+      <path d="M8 15v-4M12 15V8M16 15v-6" />
+    </svg>
+  ),
   menu: (
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
       <path d="M4 7h16M4 12h16M4 17h16" />

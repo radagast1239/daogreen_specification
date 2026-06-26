@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from "react";
-import { Link, NavLink, Outlet } from "react-router-dom";
-import { berryCalculatorUrl, economicCalculatorUrl } from "../lib/calcUrls.js";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { berryCalculatorUrl, economicCalculatorUrl, saladEconomicsUrl } from "../lib/calcUrls.js";
 import GlobalSearch from "./GlobalSearch.jsx";
 import { getCompactMode, setCompactMode } from "../lib/compactMode.js";
 import { NavIcon } from "./NavIcons.jsx";
+import { useStore } from "../store/StoreContext.jsx";
 
 const NAV = [
   { to: "/", label: "Проекты", icon: "projects", end: true },
   { to: "/clients", label: "Клиенты", icon: "clients" },
   { to: "/materials", label: "Материалы", icon: "materials" },
-  { to: "/modules", label: "Модули / разделы", icon: "modules" },
+  { to: "/modules", label: "Модули и шаблоны", icon: "modules" },
   { to: "/suppliers", label: "Поставщики", icon: "suppliers" },
   { to: "/reports", label: "Отчёты", icon: "reports" },
   { to: "/archive", label: "Архив", icon: "archive" },
@@ -19,6 +20,7 @@ const NAV = [
 
 const CALC_LINKS = [
   { href: economicCalculatorUrl, label: "Калькулятор салатов", icon: "calc" },
+  { href: saladEconomicsUrl, label: "Экономика", icon: "economics" },
   { href: berryCalculatorUrl, label: "Калькулятор ягод", icon: "berry" },
 ];
 
@@ -68,6 +70,17 @@ function SidebarNav({ compact, onToggleCompact, onNavigate }) {
 export default function Layout() {
   const [compact, setCompact] = useState(getCompactMode());
   const [menuOpen, setMenuOpen] = useState(false);
+  const { actions } = useStore();
+  const { pathname } = useLocation();
+
+  const wideLayout = /^\/(materials|project\/|modules|reports)/.test(pathname);
+
+  useEffect(() => {
+    const needMats = /^\/(materials|modules|new|project\/)/.test(pathname);
+    const needMods = /^\/(modules|new|project\/)/.test(pathname);
+    if (needMats) actions.ensureMaterials();
+    if (needMods) actions.ensureModules();
+  }, [pathname, actions]);
 
   const toggleCompact = () => {
     const next = !compact;
@@ -98,7 +111,7 @@ export default function Layout() {
       </aside>
       <div className="main">
         <GlobalSearch />
-        <div className="main-inner">
+        <div className={"main-inner" + (wideLayout ? " main-inner--wide" : "")}>
           <Outlet />
         </div>
       </div>
@@ -137,7 +150,7 @@ export function PageHeader({ title, sub, actions, breadcrumbs, back }) {
         <h1>{title}</h1>
         {sub && <p className="muted">{sub}</p>}
       </div>
-      {actions && <div className="row wrap">{actions}</div>}
+      {actions && <div className="row wrap page-head__actions">{actions}</div>}
     </header>
   );
 }

@@ -10,12 +10,88 @@ import path from "path";
 
 const BUCKET = process.env.DB_BACKUP_BUCKET || "daogreen-db";
 const REMOTE_FILE = "daogreen.db";
+const LOCAL_BACKUP_DIR =
+  process.env.LOCAL_BACKUP_DIR ||
+  (process.platform === "win32" ? null : "/opt/backups/daogreen");
+const LOCAL_BACKUP_KEEP_DAYS = Number(process.env.LOCAL_BACKUP_KEEP_DAYS) || 14;
 
 function supabaseCfg() {
   const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
   const key = process.env.SUPABASE_SERVICE_KEY;
   if (!url || !key) return null;
   return { url, key };
+}
+
+export function hasLocalBackupDir() {
+  if (!LOCAL_BACKUP_DIR) return false;
+  try {
+    if (!fs.existsSync(LOCAL_BACKUP_DIR)) return false;
+    return fs.readdirSync(LOCAL_BACKUP_DIR).some((f) => f.endsWith(".db"));
+  } catch {
+    return false;
+  }
+}
+
+function pruneLocalBackups() {
+  if (!LOCAL_BACKUP_DIR || !fs.existsSync(LOCAL_BACKUP_DIR)) return;
+  const cutoff = Date.now() - LOCAL_BACKUP_KEEP_DAYS * 86400000;
+  for (const f of fs.readdirSync(LOCAL_BACKUP_DIR)) {
+    const p = path.join(LOCAL_BACKUP_DIR, f);
+    try {
+      if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export function copyLocalBackup(localPath) {
+  if (!LOCAL_BACKUP_DIR || !fs.existsSync(localPath)) return false;
+  fs.mkdirSync(LOCAL_BACKUP_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const dest = path.join(LOCAL_BACKUP_DIR, `daogreen_${stamp}.db`);
+  fs.copyFileSync(localPath, dest);
+  pruneLocalBackups();
+  console.log(`DB backup: локальная копия ${dest}`);
+  return true;
+}
+
+export function startLocalBackupLoop(localPath, intervalMs = 60 * 60 * 1000) {
+  if (!LOCAL_BACKUP_DIR) {
+    console.log("DB backup: LOCAL_BACKUP_DIR не задан — только основной файл БД");
+    return () => {};
+  }
+  let busy = false;
+  const tick = () => {
+    if (busy) return;
+    busy = true;
+    try {
+      copyLocalBackup(localPath);
+    } catch (e) {
+      console.warn("Local DB backup:", e.message);
+    } finally {
+      busy = false;
+    }
+  };
+  tick();
+  const id = setInterval(tick, intervalMs);
+  const onStop = () => {
+    clearInterval(id);
+    try {
+      copyLocalBackup(localPath);
+    } catch {
+      /* ignore */
+    }
+  };
+  process.on("SIGTERM", onStop);
+  process.on("SIGINT", onStop);
+  return onStop;
+}
+
+export function backupStatus() {
+  const cloud = !!supabaseCfg();
+  const local = hasLocalBackupDir();
+  return { cloud, local, ok: cloud || local };
 }
 
 async function storage(pathname, { method = "GET", body, contentType } = {}) {
@@ -75,23 +151,35 @@ export async function uploadDb(localPath) {
   const cfg = supabaseCfg();
   if (!cfg || !fs.existsSync(localPath)) return false;
   const body = fs.readFileSync(localPath);
-  const res = await storage(REMOTE_FILE, {
-    method: "POST",
-    body,
-    contentType: "application/x-sqlite3",
-  });
-  if (!res.ok) {
-    const alt = await storage(REMOTE_FILE, {
-      method: "PUT",
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const archivePath = `backups/daogreen-${stamp}.db`;
+
+  async function put(pathname) {
+    let res = await storage(pathname, {
+      method: "POST",
       body,
       contentType: "application/x-sqlite3",
     });
-    if (!alt.ok) {
-      console.warn("DB backup upload failed:", await alt.text());
-      return false;
+    if (!res.ok) {
+      res = await storage(pathname, {
+        method: "PUT",
+        body,
+        contentType: "application/x-sqlite3",
+      });
     }
+    return res.ok;
   }
-  console.log(`DB backup: сохранено ${body.length} байт в Supabase`);
+
+  const archived = await put(archivePath);
+  const latest = await put(REMOTE_FILE);
+  if (!latest) {
+    console.warn("DB backup upload failed for latest copy");
+    return false;
+  }
+  console.log(
+    `DB backup: сохранено ${body.length} байт в Supabase` +
+      (archived ? ` (+ архив ${archivePath})` : "")
+  );
   return true;
 }
 

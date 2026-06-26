@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { buildReferenceData } from "../lib/referenceData.js";
 import { applyClientSectionsFromSettings } from "../lib/clientSectionsConfig.js";
 import { buildItemsFromModules } from "../lib/apiHelpers.js";
@@ -17,9 +17,9 @@ function reducer(state, action) {
     case "SET_ERROR":
       return { ...state, error: action.error };
     case "MATERIALS_SET":
-      return { ...state, materials: action.materials };
+      return { ...state, materials: action.materials, materialsLoaded: true };
     case "MODULES_SET":
-      return { ...state, modules: action.modules };
+      return { ...state, modules: action.modules, modulesLoaded: true };
     case "PROJECTS_SET":
       return { ...state, projects: action.projects };
     case "PROJECT_SET":
@@ -29,6 +29,68 @@ function reducer(state, action) {
       };
     case "DASHBOARD_SET":
       return { ...state, dashboard: action.dashboard };
+    case "SETTINGS_SET":
+      return {
+        ...state,
+        settings: action.settings,
+        reference: action.reference,
+      };
+    case "MATERIAL_ADD":
+      return { ...state, materials: [...state.materials, action.material], materialsLoaded: true };
+    case "MATERIAL_UPDATE_ONE":
+      return {
+        ...state,
+        materials: state.materials.map((x) => (x.id === action.id ? action.material : x)),
+      };
+    case "MATERIAL_REMOVE":
+      return { ...state, materials: state.materials.filter((x) => x.id !== action.id) };
+    case "PROJECT_PREPEND":
+      return { ...state, projects: [action.project, ...state.projects] };
+    case "PROJECT_REMOVE":
+      return { ...state, projects: state.projects.filter((p) => p.id !== action.id) };
+    case "PROJECT_TOKEN":
+      return {
+        ...state,
+        projects: state.projects.map((p) =>
+          p.id === action.id ? { ...p, clientToken: action.clientToken } : p
+        ),
+      };
+    case "PROJECT_ITEM_UPDATE":
+      return {
+        ...state,
+        projects: state.projects.map((p) =>
+          p.id === action.projectId
+            ? {
+                ...p,
+                updatedAt: action.updatedAt || new Date().toISOString(),
+                items: p.items.map((it) => (it.id === action.itemId ? { ...it, ...action.item } : it)),
+              }
+            : p
+        ),
+      };
+    case "PROJECT_ITEM_ADD":
+      return {
+        ...state,
+        projects: state.projects.map((p) =>
+          p.id === action.projectId ? { ...p, items: [...p.items, action.item] } : p
+        ),
+      };
+    case "PROJECT_ITEM_REMOVE":
+      return {
+        ...state,
+        projects: state.projects.map((p) =>
+          p.id === action.projectId
+            ? { ...p, items: p.items.filter((it) => it.id !== action.itemId) }
+            : p
+        ),
+      };
+    case "PROJECT_ENSURE":
+      return state.projects.some((p) => p.id === action.project.id)
+        ? {
+            ...state,
+            projects: state.projects.map((p) => (p.id === action.project.id ? action.project : p)),
+          }
+        : { ...state, projects: [action.project, ...state.projects] };
     default:
       return state;
   }
@@ -40,6 +102,8 @@ const initial = {
   error: null,
   materials: [],
   modules: [],
+  materialsLoaded: false,
+  modulesLoaded: false,
   projects: [],
   dashboard: null,
   settings: {},
@@ -49,64 +113,145 @@ const initial = {
 export function StoreProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initial);
   const [, tick] = useState(0);
+  const materialsInflight = useRef(null);
+  const modulesInflight = useRef(null);
 
-  const refresh = useCallback(async () => {
-    dispatch({ type: "SET_LOADING", loading: true });
-    dispatch({ type: "SET_ERROR", error: null });
-    try {
-      const [materials, modules, projects, dashboard, settings] = await Promise.all([
-        apiClient.getMaterials(),
-        apiClient.getModules(),
-        apiClient.getProjects(),
-        apiClient.getDashboard(),
-        apiClient.getSettings(),
-      ]);
-      const reference = buildReferenceData(settings);
-      applyClientSectionsFromSettings(settings);
-      dispatch({
-        type: "HYDRATE",
-        payload: { materials, modules, projects, dashboard, settings, reference, loading: false },
+  const refreshSettings = useCallback(async () => {
+    const settings = await apiClient.getSettings();
+    const reference = buildReferenceData(settings);
+    applyClientSectionsFromSettings(settings);
+    dispatch({ type: "SETTINGS_SET", settings, reference });
+    return settings;
+  }, []);
+
+  const refreshMaterials = useCallback(async () => {
+    const materials = await apiClient.getMaterials();
+    dispatch({ type: "MATERIALS_SET", materials });
+    return materials;
+  }, []);
+
+  const refreshModules = useCallback(async () => {
+    const modules = await apiClient.getModules();
+    dispatch({ type: "MODULES_SET", modules });
+    return modules;
+  }, []);
+
+  const ensureMaterials = useCallback(async () => {
+    if (state.materialsLoaded) return state.materials;
+    if (!materialsInflight.current) {
+      materialsInflight.current = refreshMaterials().finally(() => {
+        materialsInflight.current = null;
       });
+    }
+    return materialsInflight.current;
+  }, [state.materialsLoaded, state.materials, refreshMaterials]);
+
+  const ensureModules = useCallback(async () => {
+    if (state.modulesLoaded) return state.modules;
+    if (!modulesInflight.current) {
+      modulesInflight.current = refreshModules().finally(() => {
+        modulesInflight.current = null;
+      });
+    }
+    return modulesInflight.current;
+  }, [state.modulesLoaded, state.modules, refreshModules]);
+
+  const refreshProjects = useCallback(async () => {
+    const projects = await apiClient.getProjects();
+    dispatch({ type: "PROJECTS_SET", projects });
+    return projects;
+  }, []);
+
+  const refreshDashboard = useCallback(async () => {
+    const dashboard = await apiClient.getDashboard();
+    dispatch({ type: "DASHBOARD_SET", dashboard });
+    return dashboard;
+  }, []);
+
+  const refreshCore = useCallback(async ({ silent = false, full = false } = {}) => {
+    if (!silent) {
+      dispatch({ type: "SET_LOADING", loading: true });
+      dispatch({ type: "SET_ERROR", error: null });
+    }
+    try {
+      if (full) {
+        const [materials, modules, projects, settings] = await Promise.all([
+          apiClient.getMaterials(),
+          apiClient.getModules(),
+          apiClient.getProjects(),
+          apiClient.getSettings(),
+        ]);
+        const reference = buildReferenceData(settings);
+        applyClientSectionsFromSettings(settings);
+        dispatch({
+          type: "HYDRATE",
+          payload: {
+            materials,
+            modules,
+            projects,
+            settings,
+            reference,
+            materialsLoaded: true,
+            modulesLoaded: true,
+            loading: false,
+          },
+        });
+      } else {
+        const [projects, settings] = await Promise.all([
+          apiClient.getProjects(),
+          apiClient.getSettings(),
+        ]);
+        const reference = buildReferenceData(settings);
+        applyClientSectionsFromSettings(settings);
+        dispatch({
+          type: "HYDRATE",
+          payload: { projects, settings, reference, loading: false },
+        });
+      }
     } catch (e) {
       dispatch({ type: "SET_ERROR", error: e.message });
       dispatch({ type: "SET_LOADING", loading: false });
     }
   }, []);
 
+  const refresh = useCallback(() => refreshCore({ full: true }), [refreshCore]);
+
   useEffect(() => {
     if (typeof window !== "undefined" && /\/client(\/p)?\//.test(window.location.pathname)) {
       dispatch({ type: "HYDRATE", payload: { loading: false, ready: true, error: null } });
       return;
     }
-    refresh();
-  }, [refresh]);
+    refreshCore();
+  }, [refreshCore]);
 
   const actions = useMemo(
     () => ({
       refresh,
+      refreshCore,
+      ensureMaterials,
+      ensureModules,
+      refreshSettings,
+      refreshMaterials,
+      refreshModules,
+      refreshProjects,
+      refreshDashboard,
       async materialAdd(material) {
         const m = await apiClient.createMaterial(material);
-        dispatch({ type: "MATERIALS_SET", materials: [...state.materials, m] });
+        dispatch({ type: "MATERIAL_ADD", material: m });
         return m;
       },
       async materialUpdate(id, patch) {
         const m = await apiClient.updateMaterial(id, patch);
-        dispatch({
-          type: "MATERIALS_SET",
-          materials: state.materials.map((x) => (x.id === id ? m : x)),
-        });
+        dispatch({ type: "MATERIAL_UPDATE_ONE", id, material: m });
         return m;
       },
       async materialDelete(id) {
         await apiClient.deleteMaterial(id);
-        dispatch({
-          type: "MATERIALS_SET",
-          materials: state.materials.filter((x) => x.id !== id),
-        });
+        dispatch({ type: "MATERIAL_REMOVE", id });
       },
       async projectCreate(data) {
         const p = await apiClient.createProject(data);
-        dispatch({ type: "PROJECTS_SET", projects: [p, ...state.projects] });
+        dispatch({ type: "PROJECT_PREPEND", project: p });
         return p;
       },
       async projectUpdate(id, patch) {
@@ -116,14 +261,11 @@ export function StoreProvider({ children }) {
       },
       async projectDelete(id) {
         await apiClient.deleteProject(id);
-        dispatch({
-          type: "PROJECTS_SET",
-          projects: state.projects.filter((p) => p.id !== id),
-        });
+        dispatch({ type: "PROJECT_REMOVE", id });
       },
-      async projectDuplicate(id) {
-        const p = await apiClient.duplicateProject(id);
-        dispatch({ type: "PROJECTS_SET", projects: [p, ...state.projects] });
+      async projectDuplicate(id, body = {}) {
+        const p = await apiClient.duplicateProject(id, body);
+        dispatch({ type: "PROJECT_PREPEND", project: p });
         return p;
       },
       async approveAll(id) {
@@ -142,53 +284,37 @@ export function StoreProvider({ children }) {
       },
       async regenerateToken(id) {
         const { clientToken } = await apiClient.regenerateToken(id);
-        const p = state.projects.find((x) => x.id === id);
-        if (p) dispatch({ type: "PROJECT_SET", project: { ...p, clientToken } });
+        dispatch({ type: "PROJECT_TOKEN", id, clientToken });
         return clientToken;
       },
       async archiveProject(id) {
         await apiClient.archiveProject(id);
-        dispatch({ type: "PROJECTS_SET", projects: state.projects.filter((p) => p.id !== id) });
+        dispatch({ type: "PROJECT_REMOVE", id });
       },
       async itemUpdate(projectId, itemId, patch) {
         const item = await apiClient.patchItem(projectId, itemId, patch);
-        const p = state.projects.find((x) => x.id === projectId);
-        if (p) {
-          dispatch({
-            type: "PROJECT_SET",
-            project: { ...p, items: p.items.map((it) => (it.id === itemId ? { ...it, ...item } : it)) },
-          });
-        }
+        dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId, item });
         return item;
       },
       async itemAdd(projectId, item) {
         const created = await apiClient.addItem(projectId, item);
-        const p = state.projects.find((x) => x.id === projectId);
-        if (p) dispatch({ type: "PROJECT_SET", project: { ...p, items: [...p.items, created] } });
+        dispatch({ type: "PROJECT_ITEM_ADD", projectId, item: created });
         return created;
       },
       async itemDelete(projectId, itemId) {
         await apiClient.deleteItem(projectId, itemId);
-        const p = state.projects.find((x) => x.id === projectId);
-        if (p)
-          dispatch({
-            type: "PROJECT_SET",
-            project: { ...p, items: p.items.filter((it) => it.id !== itemId) },
-          });
+        dispatch({ type: "PROJECT_ITEM_REMOVE", projectId, itemId });
       },
       async importExcel(file, opts) {
         const result = await apiClient.importExcel(file, opts);
-        await refresh();
+        await refreshMaterials();
         return result;
       },
       async loadProject(id) {
         const p = await apiClient.getProject(id);
-        dispatch({ type: "PROJECT_SET", project: p });
-        const exists = state.projects.some((x) => x.id === id);
-        if (!exists) dispatch({ type: "PROJECTS_SET", projects: [p, ...state.projects] });
+        dispatch({ type: "PROJECT_ENSURE", project: p });
         return p;
       },
-      // client-side (no admin key)
       async clientPatchItem(token, itemId, patch) {
         return apiClient.patchClientItem(token, itemId, patch);
       },
@@ -200,7 +326,17 @@ export function StoreProvider({ children }) {
       },
       rerender: () => tick((n) => n + 1),
     }),
-    [refresh, state.materials, state.projects]
+    [
+      refresh,
+      refreshCore,
+      ensureMaterials,
+      ensureModules,
+      refreshSettings,
+      refreshMaterials,
+      refreshModules,
+      refreshProjects,
+      refreshDashboard,
+    ]
   );
 
   const value = useMemo(() => ({ state, dispatch, actions }), [state, actions]);
@@ -217,7 +353,6 @@ export function useReference() {
   return useStore().state.reference;
 }
 
-// legacy dispatch shim for gradual migration
 export function useDispatch() {
   const { state, actions } = useStore();
   return async (action) => {

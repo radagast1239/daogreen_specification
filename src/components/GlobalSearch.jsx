@@ -5,7 +5,7 @@ import { api } from "../lib/api.js";
 import { formatMaterialModulesLabel } from "../../shared/materialModules.js";
 
 export default function GlobalSearch() {
-  const { state } = useStore();
+  const { state, actions } = useStore();
   const nav = useNavigate();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -66,7 +66,10 @@ export default function GlobalSearch() {
           setQ(e.target.value);
           setOpen(true);
         }}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          actions.ensureMaterials();
+          setOpen(true);
+        }}
         aria-label="Глобальный поиск"
       />
       {open && q.trim().length >= 2 && (

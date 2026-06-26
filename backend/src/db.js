@@ -7,11 +7,15 @@ import { parseBreakerSpecsFromDb } from "../../shared/breakerSpecs.js";
 import { parseFlowSpecsFromDb } from "../../shared/flowSpecs.js";
 import { parseSplitSpecsFromDb } from "../../shared/splitSpecs.js";
 import { resolveMaterialModules } from "../../shared/materialModules.js";
+import { resolveMaterialFarmSections } from "../../shared/materialFarmSections.js";
+import { normalizeItemFlags, resolveItemType } from "../../shared/itemTypes.js";
+import { runSqlMigrations } from "./migrations/runner.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.DATABASE_PATH || path.join(__dirname, "../data/daogreen.db");
 
 let dbInstance = null;
+let schemaReady = false;
 
 function connect() {
   if (dbInstance) return dbInstance;
@@ -19,6 +23,10 @@ function connect() {
   dbInstance = new DatabaseSync(dbPath);
   dbInstance.exec("PRAGMA journal_mode = WAL");
   dbInstance.exec("PRAGMA foreign_keys = ON");
+  if (!schemaReady) {
+    schemaReady = true;
+    initDb();
+  }
   return dbInstance;
 }
 
@@ -28,6 +36,25 @@ export const db = new Proxy(
   {
     get(_t, prop) {
       const d = connect();
+      if (prop === "transaction") {
+        return (fn) => {
+          return (...args) => {
+            d.exec("BEGIN");
+            try {
+              const result = fn(...args);
+              d.exec("COMMIT");
+              return result;
+            } catch (e) {
+              try {
+                d.exec("ROLLBACK");
+              } catch {
+                /* ignore */
+              }
+              throw e;
+            }
+          };
+        };
+      }
       const v = d[prop];
       return typeof v === "function" ? v.bind(d) : v;
     },
@@ -158,6 +185,7 @@ export function initDb() {
     );
   `);
   migrateDb();
+  runSqlMigrations(db);
 }
 
 function migrateDb() {
@@ -217,6 +245,7 @@ function migrateDb() {
   addCol("modules", "farm_section_id", "TEXT DEFAULT ''");
   addCol("materials", "pipe_cuts", "TEXT NOT NULL DEFAULT '[]'");
   addCol("materials", "modules_json", "TEXT NOT NULL DEFAULT '[]'");
+  addCol("materials", "farm_sections_json", "TEXT NOT NULL DEFAULT '[]'");
   addCol("project_items", "pipe_cuts", "TEXT NOT NULL DEFAULT '[]'");
   addCol("materials", "breaker_specs", "TEXT NOT NULL DEFAULT '[]'");
   addCol("project_items", "breaker_specs", "TEXT NOT NULL DEFAULT '[]'");
@@ -229,6 +258,31 @@ function migrateDb() {
   addCol("project_items", "client_section", "TEXT DEFAULT ''");
   addCol("project_items", "client_subsection", "TEXT DEFAULT ''");
   addCol("materials", "purchase_key", "TEXT DEFAULT ''");
+  addCol("project_items", "included_in_project", "INTEGER");
+  addCol("project_items", "visible_to_client", "INTEGER");
+  addCol("project_items", "item_type", "TEXT DEFAULT 'material'");
+  addCol("project_items", "subcategory", "TEXT DEFAULT ''");
+  addCol("project_items", "purchase_key", "TEXT DEFAULT ''");
+  addCol("project_items", "purchase_priority", "TEXT DEFAULT ''");
+  addCol("project_items", "replacement_link", "TEXT DEFAULT ''");
+  addCol("project_items", "replacement_photo_url", "TEXT DEFAULT ''");
+  addCol("project_items", "replacement_price", "REAL");
+  addCol("project_items", "replacement_comment", "TEXT DEFAULT ''");
+  addCol("project_items", "replacement_proposed_at", "TEXT DEFAULT ''");
+  addCol("material_price_history", "changed_by", "TEXT DEFAULT ''");
+
+  const needsItemFlagBackfill = db
+    .prepare("SELECT 1 FROM project_items WHERE included_in_project IS NULL LIMIT 1")
+    .get();
+  if (needsItemFlagBackfill) {
+    db.exec(`
+      UPDATE project_items SET
+        included_in_project = CASE WHEN enabled = 0 OR qty = 0 THEN 0 ELSE 1 END,
+        visible_to_client = CASE WHEN visible = 1 AND approved = 1 THEN 1 ELSE 0 END,
+        item_type = COALESCE(NULLIF(item_type, ''), 'material')
+      WHERE included_in_project IS NULL
+    `);
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS material_price_history (
@@ -265,6 +319,26 @@ function migrateDb() {
   `);
 
   addCol("spec_presets", "params_json", "TEXT NOT NULL DEFAULT '{}'");
+
+  const visibleDefaultMigrated = db
+    .prepare("SELECT 1 FROM settings WHERE key = 'migration_client_visible_default_v2'")
+    .get();
+  if (!visibleDefaultMigrated) {
+    db.exec(`
+      UPDATE project_items SET
+        visible_to_client = 1,
+        visible = 1,
+        approved = 1
+      WHERE COALESCE(included_in_project, enabled, 1) = 1
+        AND visible_to_client = 0
+        AND visible = 1
+        AND COALESCE(NULLIF(item_type, ''), 'material') != 'internal_note'
+    `);
+    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(
+      "migration_client_visible_default_v2",
+      new Date().toISOString()
+    );
+  }
 }
 
 export function rowToMaterial(row) {
@@ -283,6 +357,7 @@ export function rowToMaterial(row) {
     clientSubsection: row.client_subsection || "",
     purchaseKey: row.purchase_key || "",
     farmSectionId: row.farm_section_id || "",
+    farmSections: resolveMaterialFarmSections(row),
     itemType: row.item_type,
     supplier: row.supplier,
     link: row.link,
@@ -335,7 +410,14 @@ export function rowToModule(row) {
 
 export function rowToItem(row) {
   if (!row) return null;
-  return {
+  const includedInProject =
+    row.included_in_project != null ? !!row.included_in_project : !!row.enabled;
+  const itemType = resolveItemType({ itemType: row.item_type });
+  const visibleToClient =
+    row.visible_to_client != null
+      ? !!row.visible_to_client
+      : includedInProject && itemType !== "internal_note";
+  return normalizeItemFlags({
     id: row.id,
     materialId: row.material_id,
     module: row.module,
@@ -345,6 +427,7 @@ export function rowToItem(row) {
     category: row.category,
     clientSection: row.client_section || "",
     clientSubsection: row.client_subsection || "",
+    purchaseKey: row.purchase_key || "",
     supplier: row.supplier,
     link: row.link,
     linkAlt: row.link_alt,
@@ -359,6 +442,10 @@ export function rowToItem(row) {
     visible: !!row.visible,
     approved: !!row.approved,
     enabled: !!row.enabled,
+    includedInProject,
+    visibleToClient,
+    itemType,
+    subcategory: row.subcategory || "",
     needsApproval: !!row.needs_approval,
     status: row.status,
     actualPrice: row.actual_price,
@@ -371,11 +458,17 @@ export function rowToItem(row) {
     internalNote: row.internal_note || "",
     deliveryDays: row.delivery_days || 0,
     itemRole: row.item_role || "purchase",
+    purchasePriority: row.purchase_priority || "",
+    replacementLink: row.replacement_link || "",
+    replacementPhotoUrl: row.replacement_photo_url || "",
+    replacementPrice: row.replacement_price,
+    replacementComment: row.replacement_comment || "",
+    replacementProposedAt: row.replacement_proposed_at || "",
     pipeCuts: parsePipeCutsFromDb(row.pipe_cuts, row.client_note || row.tech_note),
     breakerSpecs: parseBreakerSpecsFromDb(row.breaker_specs, row.client_note || row.tech_note),
     flowSpecs: parseFlowSpecsFromDb(row.flow_specs, row.client_note || row.tech_note, row.link),
     splitSpecs: parseSplitSpecsFromDb(row.split_specs, row.client_note || row.tech_note),
-  };
+  });
 }
 
 export function rowToProject(row, items = []) {
@@ -415,6 +508,46 @@ export function loadProjectItems(projectId) {
     .prepare("SELECT * FROM project_items WHERE project_id = ? ORDER BY sort_order, module, name")
     .all(projectId)
     .map(rowToItem);
+}
+
+/** Поля позиций, достаточные для projectTotals (без N+1 loadProjectItems). */
+export function rowToItemTotals(row) {
+  const includedInProject =
+    row.included_in_project != null ? !!row.included_in_project : !!row.enabled;
+  const itemType = resolveItemType({ itemType: row.item_type });
+  const visibleToClient =
+    row.visible_to_client != null
+      ? !!row.visible_to_client
+      : includedInProject && itemType !== "internal_note";
+  return {
+    qty: row.qty,
+    price: row.price,
+    actualPrice: row.actual_price,
+    vatRate: row.vat_rate,
+    status: row.status,
+    itemType,
+    includedInProject,
+    enabled: !!row.enabled,
+    visibleToClient,
+  };
+}
+
+export function loadSlimItemsForProjects(projectIds) {
+  const map = new Map();
+  if (!projectIds?.length) return map;
+  for (const id of projectIds) map.set(id, []);
+  const placeholders = projectIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT project_id, qty, price, actual_price, vat_rate, status, item_type,
+              included_in_project, enabled, visible_to_client
+       FROM project_items WHERE project_id IN (${placeholders})`
+    )
+    .all(...projectIds);
+  for (const row of rows) {
+    map.get(row.project_id).push(rowToItemTotals(row));
+  }
+  return map;
 }
 
 export function loadProject(id) {

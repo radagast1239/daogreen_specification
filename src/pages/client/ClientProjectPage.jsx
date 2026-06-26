@@ -3,21 +3,30 @@ import { useParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { projectTotals, money } from "../../store/helpers.js";
 import { PURCHASE_STATUSES } from "../../data/modules.js";
-import { clientVisibleItems, lineGross } from "../../lib/itemHelpers.js";
+import { clientVisibleItems, clientPurchaseItems } from "../../lib/itemHelpers.js";
 import { Progress, Empty } from "../../components/ui.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
 import { setClientScope } from "../../components/ClientGuard.jsx";
-import { generateClientPurchasePdf } from "../../lib/clientPdfExport.js";
 import { clientTabDefs, heroEyebrow, legacyTabToPurchaseMode } from "../../lib/clientBrandConfig.js";
-import QRCode from "qrcode";
-import { printPDF } from "../../lib/export.js";
-import { downloadClientWorkbook } from "../../lib/clientExcelExport.js";
+import { printPDF } from "../../lib/exportDownload.js";
 import { ClientSchemesViewer } from "../../components/ClientSchemesEditor.jsx";
 import ClientOverviewPanel from "../../components/client/ClientOverviewPanel.jsx";
-import ClientPurchasePanel, { ClientMergedList } from "../../components/client/ClientPurchasePanel.jsx";
-import { isBoughtStatus } from "../../lib/itemHelpers.js";
+import ClientPurchasePanel from "../../components/client/ClientPurchasePanel.jsx";
+import { isClosedPurchaseStatus } from "../../lib/itemHelpers.js";
 import { applyClientSectionsFromSettings } from "../../lib/clientSectionsConfig.js";
+import ClientPurchaseGuide from "../../components/client/ClientPurchaseGuide.jsx";
+import ClientPurchaseViewToggles from "../../components/client/ClientPurchaseViewToggles.jsx";
+import ClientReplacementModal from "../../components/client/ClientReplacementModal.jsx";
+import {
+  getClientCompactMode,
+  getClientPurchaseLayout,
+  setClientCompactMode,
+  setClientPurchaseLayout,
+} from "../../lib/clientPurchaseView.js";
+import { mergedPurchaseRows } from "../../store/helpers.js";
 import { STELLAGE_GROUPS } from "../../../shared/stellageComposition.js";
+import { clientPurchaseDashboard } from "../../../shared/clientPurchaseStats.js";
+import { api } from "../../lib/api.js";
 
 function clientPageStyle(branding) {
   const brand = branding.brandColor || "#116355";
@@ -35,17 +44,19 @@ export default function ClientProjectPage() {
   const { token } = useParams();
   const { state, actions } = useStore();
   const [data, setData] = useState(null);
-  const [tab, setTab] = useState("overview");
-  const [purchaseMode, setPurchaseMode] = useState("all");
-  const [purchaseFilter, setPurchaseFilter] = useState("all");
+  const [tab, setTab] = useState("purchase");
+  const [purchaseMode, setPurchaseMode] = useState("categories");
+  const [purchaseFilter, setPurchaseFilter] = useState("todo");
   const [showBought, setShowBought] = useState(false);
   const purchaseStatuses = data?.purchaseStatuses || PURCHASE_STATUSES;
   const [supplierFilter, setSupplierFilter] = useState("");
   const [purchaseQuery, setPurchaseQuery] = useState("");
-  const [purchaseSort, setPurchaseSort] = useState("category");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
   const [qrUrl, setQrUrl] = useState("");
+  const [replacementItem, setReplacementItem] = useState(null);
+  const [purchaseLayout, setPurchaseLayoutState] = useState(() => getClientPurchaseLayout());
+  const [clientCompact, setClientCompactState] = useState(() => getClientCompactMode());
 
   useEffect(() => {
     if (token) setClientScope(decodeURIComponent(token));
@@ -53,7 +64,9 @@ export default function ClientProjectPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    QRCode.toDataURL(window.location.href, { width: 200, margin: 1 }).then(setQrUrl).catch(() => {});
+    import("qrcode").then(({ default: QRCode }) => {
+      QRCode.toDataURL(window.location.href, { width: 200, margin: 1 }).then(setQrUrl).catch(() => {});
+    });
   }, [token]);
 
   useEffect(() => {
@@ -118,47 +131,30 @@ export default function ClientProjectPage() {
   const filterSupplier = (list) =>
     supplierFilter ? list.filter((i) => i.supplier === supplierFilter) : list;
 
-  const filterAndSortPurchase = (list) => {
-    let out = filterSupplier(list);
-    const q = purchaseQuery.trim().toLowerCase();
-    if (q) {
-      out = out.filter(
-        (i) =>
-          (i.name || "").toLowerCase().includes(q) ||
-          (i.supplier || "").toLowerCase().includes(q)
-      );
-    }
-    const sorted = [...out];
-    sorted.sort((a, b) => {
-      if (purchaseSort === "sum") return lineGross(b) - lineGross(a);
-      if (purchaseSort === "status") {
-        const la = purchaseStatuses.find((s) => s.id === a.status)?.label || "";
-        const lb = purchaseStatuses.find((s) => s.id === b.status)?.label || "";
-        return la.localeCompare(lb, "ru");
-      }
-      if (purchaseSort === "category") {
-        const c = (a.category || "").localeCompare(b.category || "", "ru");
-        if (c !== 0) return c;
-      }
-      return (a.name || "").localeCompare(b.name || "", "ru");
-    });
-    return sorted;
-  };
 
-  const purchaseItems = visibleItems.filter((i) => i.itemRole !== "installation");
+  const purchaseItems = clientPurchaseItems({ items: visibleItems });
+  const purchaseDash = clientPurchaseDashboard(purchaseItems);
   const hasPurchase = visibleItems.length > 0;
   const clientTabs = clientTabDefs(branding);
-  const trustLines = (branding.clientTrustLines || []).filter(Boolean);
   const activeTab = clientTabs.some(([k]) => k === tab) ? tab : clientTabs[0]?.[0] || "overview";
-  const stellageGroups = state.reference?.stellageGroups?.length ? state.reference.stellageGroups : STELLAGE_GROUPS;
+  const stellageGroups = data.catalog?.stellageGroups?.length
+    ? data.catalog.stellageGroups
+    : state.reference?.stellageGroups?.length
+      ? state.reference.stellageGroups
+      : STELLAGE_GROUPS;
   const delta = versionInfo?.summary?.delta;
 
-  const openPurchase = (mode = "all") => {
-    setPurchaseMode(mode);
+  const openPurchase = (mode = "categories") => {
+    setPurchaseMode(mode === "all" ? "categories" : mode);
     setTab("purchase");
   };
 
   const mapLegacyTab = (nextTab) => {
+    if (nextTab === "merged") {
+      setPurchaseMode("categories");
+      setTab("purchase");
+      return;
+    }
     const legacy = ["categories", "modules", "plumber", "electric", "installer", "consumables", "install", "cooling"];
     if (legacy.includes(nextTab)) {
       setPurchaseMode(legacyTabToPurchaseMode(nextTab));
@@ -169,13 +165,60 @@ export default function ClientProjectPage() {
   };
 
   const patch = async (itemId, p) => {
-    await actions.clientPatchItem(token, itemId, p);
+    setData((prev) => {
+      if (!prev?.project?.items) return prev;
+      const items = prev.project.items.map((it) => (it.id === itemId ? { ...it, ...p } : it));
+      return { ...prev, project: { ...prev.project, items } };
+    });
+    try {
+      const updated = await actions.clientPatchItem(token, itemId, p);
+      if (updated?.id) {
+        setData((prev) => {
+          if (!prev?.project?.items) return prev;
+          const items = prev.project.items.map((it) => (it.id === itemId ? { ...it, ...updated } : it));
+          return { ...prev, project: { ...prev.project, items } };
+        });
+      }
+    } catch {
+      const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
+      applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
+      setData(fresh);
+    }
+  };
+
+  const patchBulk = async (itemIds, p) => {
+    const idSet = new Set(itemIds);
+    setData((prev) => {
+      if (!prev?.project?.items) return prev;
+      const items = prev.project.items.map((it) => (idSet.has(it.id) ? { ...it, ...p } : it));
+      return { ...prev, project: { ...prev.project, items } };
+    });
+    try {
+      const result = await api.bulkPatchClientItems(decodeURIComponent(token || ""), { itemIds, patch: p });
+      const byId = new Map((result?.updated || []).map((it) => [it.id, it]));
+      if (byId.size) {
+        setData((prev) => {
+          if (!prev?.project?.items) return prev;
+          const items = prev.project.items.map((it) => (byId.has(it.id) ? { ...it, ...byId.get(it.id) } : it));
+          return { ...prev, project: { ...prev.project, items } };
+        });
+      }
+    } catch {
+      const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
+      applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
+      setData(fresh);
+    }
+  };
+
+  const proposeReplacement = async (body) => {
+    await api.proposeClientReplacement(decodeURIComponent(token || ""), replacementItem.id, body);
     const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
     applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
     setData(fresh);
   };
 
-  const exportPdf = (mode = "client_full") =>
+  const exportPdf = async (mode = "client_full") => {
+    const { generateClientPurchasePdf } = await import("../../lib/clientPdfExport.js");
     generateClientPurchasePdf({
       project,
       items: visibleItems,
@@ -184,16 +227,22 @@ export default function ClientProjectPage() {
       pageUrl: typeof window !== "undefined" ? window.location.href : "",
       mode,
     });
+  };
 
-  const exportExcel = () =>
+  const exportExcel = async () => {
+    const { downloadClientWorkbook } = await import("../../lib/clientExcelExport.js");
     downloadClientWorkbook(project, visibleItems, {
       purchaseStatuses,
       branding,
       versionInfo,
     });
+  };
 
   return (
-    <div className="client-page" style={brandStyle}>
+    <div
+      className={`client-page${clientCompact ? " client-compact-tables" : ""}`}
+      style={brandStyle}
+    >
       <div className="print-header">
         <h1>{project.name}</h1>
         <p>
@@ -202,6 +251,7 @@ export default function ClientProjectPage() {
         </p>
       </div>
 
+      <div className="client-wrap">
       <header className="client-topbar no-print" style={{ "--topbar-brand": branding.brandColor || "#116355" }}>
         <div className="client-topbar__row">
           <div className="client-topbar__brand">
@@ -211,7 +261,7 @@ export default function ClientProjectPage() {
               <div className="client-topbar__mark">{(branding.companyName || "D").charAt(0)}</div>
             )}
             <div className="client-topbar__titles">
-              <div className="client-topbar__eyebrow">{heroEyebrow(branding)}</div>
+              <div className="client-topbar__eyebrow">{branding.companyName || heroEyebrow(branding)}</div>
               <h1 className="client-topbar__title">{project.name}</h1>
               <p className="client-topbar__sub">
                 {project.client}
@@ -221,54 +271,37 @@ export default function ClientProjectPage() {
             </div>
           </div>
           <div className="client-topbar__actions">
-            <button type="button" className="btn btn-sm btn-ghost-light" onClick={exportExcel}>
+            <button type="button" className="btn btn-sm" onClick={exportExcel}>
               Excel
             </button>
-            <button type="button" className="btn btn-sm btn-ghost-light" onClick={() => exportPdf("client_full")}>
+            <button type="button" className="btn btn-sm" onClick={() => exportPdf("client_full")}>
               PDF
             </button>
-            <button type="button" className="btn btn-sm btn-ghost-light" onClick={() => setTab("merged")}>
-              Всё к покупке
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => openPurchase("categories")}>
+              К списку
             </button>
           </div>
         </div>
-        {versionInfo && delta != null && delta !== 0 && (
-          <div className="client-topbar__version">
-            Обновлено v{versionInfo.versionNumber}: Δ {delta > 0 ? "+" : ""}
-            {money(delta, project.currency)}
+        <div className="client-topbar__foot">
+          <div className="client-topbar__progress-mini">
+            <Progress value={totals.progress} />
           </div>
-        )}
-        <div className="client-topbar__stats">
-          <div className="client-topbar__stat">
-            <span className="k">Всего</span>
-            <span className="v num">{money(totals.budget, project.currency)}</span>
-          </div>
-          <div className="client-topbar__stat">
-            <span className="k">Куплено</span>
-            <span className="v num">{money(totals.spent, project.currency)}</span>
-          </div>
-          <div className="client-topbar__stat">
-            <span className="k">Осталось</span>
-            <span className="v num">{money(totals.remaining, project.currency)}</span>
-          </div>
-          <div className="client-topbar__stat">
-            <span className="k">Готовность</span>
-            <span className="v num">{totals.progress}%</span>
+          <div className="client-topbar__meta">
+            <span className="num">{totals.progress}%</span>
+            <span className="muted">
+              · куплено {purchaseDash.boughtCount} из {purchaseDash.totalCount}
+            </span>
+            <span className="muted">· {money(totals.remaining, project.currency)} осталось</span>
+            {versionInfo && delta != null && delta !== 0 && (
+              <span className="client-topbar__delta">
+                v{versionInfo.versionNumber}: {delta > 0 ? "+" : ""}
+                {money(delta, project.currency)}
+              </span>
+            )}
           </div>
         </div>
-        <div className="client-topbar__progress">
-          <Progress value={totals.progress} />
-        </div>
-        {trustLines.length > 0 && (
-          <div className="client-topbar__trust">
-            {trustLines.map((line) => (
-              <span key={line}>{line}</span>
-            ))}
-          </div>
-        )}
       </header>
 
-      <div className="client-wrap">
       <ClientSchemesViewer manualParams={project.manualParams} />
       {!hasPurchase && (
         <div className="card" style={{ padding: 16, marginBottom: 16, borderColor: "var(--accent)" }}>
@@ -286,21 +319,32 @@ export default function ClientProjectPage() {
         ))}
       </div>
 
-      {(activeTab === "purchase" || activeTab === "merged") && hasPurchase && (
+      {(activeTab === "purchase") && hasPurchase && (
         <>
+          <ClientPurchaseGuide
+            projectId={project.id}
+            itemCount={purchaseItems.length}
+            uniqueCount={mergedPurchaseRows(purchaseItems).length}
+          />
           <div className="client-purchase-toolbar no-print">
             <input
+              className="client-purchase-toolbar__search"
               placeholder="Поиск: название или поставщик…"
               value={purchaseQuery}
               onChange={(e) => setPurchaseQuery(e.target.value)}
-              style={{ flex: "1 1 180px", maxWidth: 280 }}
             />
-            <select value={purchaseSort} onChange={(e) => setPurchaseSort(e.target.value)} style={{ width: "auto" }}>
-              <option value="category">По разделу</option>
-              <option value="sum">По сумме</option>
-              <option value="status">По статусу</option>
-              <option value="name">По названию</option>
-            </select>
+            <ClientPurchaseViewToggles
+              layout={purchaseLayout}
+              compact={clientCompact}
+              onLayoutChange={(next) => {
+                setClientPurchaseLayout(next);
+                setPurchaseLayoutState(next);
+              }}
+              onCompactChange={(next) => {
+                setClientCompactMode(next);
+                setClientCompactState(next);
+              }}
+            />
           </div>
           <div className="client-supplier-bar no-print">
             <strong style={{ fontSize: 13 }}>Поставщик:</strong>
@@ -321,7 +365,7 @@ export default function ClientProjectPage() {
               </span>
             )}
             <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>
-              Куплено {purchaseItems.filter((i) => isBoughtStatus(i.status)).length} из {purchaseItems.length}
+              Куплено / заказано {purchaseItems.filter((i) => isClosedPurchaseStatus(i.status)).length} из {purchaseItems.length}
             </span>
           </div>
         </>
@@ -368,36 +412,29 @@ export default function ClientProjectPage() {
               onShowBoughtChange={setShowBought}
               supplierFilter={supplierFilter}
               purchaseQuery={purchaseQuery}
-              purchaseSort={purchaseSort}
               patch={patch}
+              patchBulk={patchBulk}
               purchaseStatuses={purchaseStatuses}
-              materials={state.materials}
-              modules={state.modules}
+              materials={data.catalog?.materials || []}
+              modules={data.catalog?.modules || []}
               stellageGroups={stellageGroups}
+              onProposeReplacement={setReplacementItem}
+              simple
+              layout={purchaseLayout}
+              compact={clientCompact}
             />
-          )}
-          {activeTab === "merged" && (
-            <div style={{ marginTop: 8 }}>
-              <div className="toolbar no-print" style={{ marginBottom: 10 }}>
-                <span className="muted">Сводный список — одинаковые позиции объединены</span>
-                <button type="button" className="btn btn-sm" style={{ marginLeft: "auto" }} onClick={exportExcel}>
-                  Excel ↓
-                </button>
-              </div>
-              <ClientMergedList
-                project={project}
-                items={filterAndSortPurchase(purchaseItems)}
-                patch={patch}
-                purchaseStatuses={purchaseStatuses}
-                groupBySection
-              />
-            </div>
           )}
         </>
       ) : null}
       </div>
 
       <ClientBrandFooter branding={branding} />
+      <ClientReplacementModal
+        open={!!replacementItem}
+        itemName={replacementItem?.name}
+        onClose={() => setReplacementItem(null)}
+        onSubmit={proposeReplacement}
+      />
     </div>
   );
 }

@@ -1,11 +1,11 @@
-import { uid } from "../store/helpers.js";
+import { uid } from "./ids.js";
+import { cloneBuilderLines } from "./builderLines.js";
+import { stripCatalogLines } from "../../shared/catalogLine.js";
 import { emptyFarmSectionsState as buildFarmSectionsState } from "./farmSectionsConfig.js";
 import { normalizeStellageParams } from "./stellagePresetParams.js";
 import { resolveStellagePhoto } from "./stellageCatalogConfig.js";
 
-export function cloneBuilderLines(items) {
-  return (items || []).map((ln) => ({ ...ln, id: uid("ln") }));
-}
+export { cloneBuilderLines };
 
 export function duplicateStellageInstance(st) {
   return {
@@ -13,7 +13,7 @@ export function duplicateStellageInstance(st) {
     id: uid("st"),
     name: `${st.name} (копия)`,
     params: st.params ? { ...st.params } : {},
-    items: cloneBuilderLines(st.items),
+    items: cloneBuilderLines(st.items, { freshIds: true }),
   };
 }
 
@@ -25,9 +25,9 @@ export function presetPayloadFromDraft(draft, name) {
     moduleName: draft.moduleName,
     sectionId: "",
     params: normalizeStellageParams({ ...(draft.params || {}), photoUrl: draft.photoUrl || draft.params?.photoUrl }),
-    items: (draft.items || [])
-      .filter((ln) => ln.included && ln.name?.trim())
-      .map(({ id, qty, ...rest }) => rest),
+    items: stripCatalogLines(
+      (draft.items || []).filter((ln) => ln.included !== false && (ln.materialId || ln.name?.trim()))
+    ),
     note: draft.tech || "",
   };
 }

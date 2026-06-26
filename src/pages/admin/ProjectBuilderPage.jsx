@@ -30,12 +30,14 @@ import {
 } from "../../lib/presetHelpers.js";
 import { formatStellageParamsSummary } from "../../lib/stellagePresetParams.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
+import RoomCoolingEditor from "../../components/RoomCoolingEditor.jsx";
 import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
 import FloorPlanField from "../../components/FloorPlanField.jsx";
 import FloorPlanPin from "../../components/FloorPlanPin.jsx";
 import { COOLING_FARM_DEFAULTS, computeCoolingFarm } from "../../lib/coolingFarmCalc.js";
 import { defaultRooms } from "../../lib/roomHelpers.js";
+import { enrichRooms } from "../../../shared/roomCoolingCalc.js";
 
 const STEPS = [
   { id: "basics", label: "1. Проект" },
@@ -127,9 +129,58 @@ export default function ProjectBuilderPage() {
     }
   }, [step, farmLoaded, sections, farmCatalogs, state.materials]);
 
+  const effectiveFarmSectionId = useMemo(() => {
+    if (!sections.length) return null;
+    if (activeFarmSection && sections.some((s) => s.id === activeFarmSection)) {
+      return activeFarmSection;
+    }
+    return sections[0].id;
+  }, [sections, activeFarmSection]);
+
   useEffect(() => {
+    if (step !== "general" || !sections.length) return;
+    if (effectiveFarmSectionId && effectiveFarmSectionId !== activeFarmSection) {
+      setActiveFarmSection(effectiveFarmSectionId);
+    }
+  }, [step, sections.length, effectiveFarmSectionId, activeFarmSection]);
+
+  const farmHasSelections = useMemo(
+    () => Object.values(farmSectionLines).some((lines) => activeLines(lines || []).length > 0),
+    [farmSectionLines]
+  );
+
+  const goToStep = async (next) => {
+    if (next === step) return;
+    if (step === "stellages" && next !== "stellages" && draft?.items?.some((ln) => ln.included)) {
+      if (
+        !(await confirm({
+          title: "Незавершённый стеллаж",
+          message:
+            "Есть незавершённая сборка стеллажа. Если уйти сейчас, отмеченные позиции не попадут в проект.",
+        }))
+      ) {
+        return;
+      }
+      setDraft(null);
+    }
+    setStep(next);
+  };
+
+  const changeFarmType = async (newType) => {
+    if (newType === form.type) return;
+    if (
+      farmHasSelections &&
+      !(await confirm({
+        title: "Сменить тип фермы?",
+        message: `Разделы «Ферма целиком» будут перезагружены для типа «${newType}». Текущие отметки пропадут.`,
+      }))
+    ) {
+      return;
+    }
+    if (farmHasSelections) setFarmSectionLines({});
     setFarmLoaded(false);
-  }, [form.type]);
+    set("type", newType);
+  };
 
   const changeDraftModule = async (moduleId) => {
     const mod = state.modules.find((m) => m.id === moduleId);
@@ -145,7 +196,7 @@ export default function ProjectBuilderPage() {
         items: projectStellageLinesFromCatalog(stellageCatalogs, mod.id, state.materials, mod.name),
       }));
     if (draft?.items?.some((ln) => ln.included)) {
-      if (!(await confirm({ title: "Сменить тип?", message: "Текущие отметки будут заменены списком из базы." }))) return;
+      if (!(await confirm({ title: "Сменить тип?", message: "Текущие отметки будут заменены шаблоном из «Состав стеллажей»." }))) return;
     }
     reload();
   };
@@ -165,7 +216,7 @@ export default function ProjectBuilderPage() {
     try {
       await api.createPreset(presetPayloadFromDraft(draft, name));
       setPresets(await api.getPresets());
-      success("Пресет сохранён в «Модули / разделы».");
+      success("Пресет сохранён в «Модули и шаблоны».");
     } catch (e) {
       error(e.message);
     }
@@ -187,6 +238,15 @@ export default function ProjectBuilderPage() {
   const editStellage = async (id) => {
     const st = stellages.find((s) => s.id === id);
     if (!st) return;
+    if (
+      !(await confirm({
+        title: "Изменить стеллаж?",
+        message:
+          "Стеллаж временно уберётся из списка до нажатия «Стеллаж готов». Не уходите с шага, пока не сохраните.",
+      }))
+    ) {
+      return;
+    }
     if (draft?.items?.some((ln) => ln.included) && !(await confirm({ title: "Заменить сборку?" }))) return;
     setStellages((list) => list.filter((s) => s.id !== id));
     setDraft({ ...st, items: st.items.map((ln) => ({ ...ln })) });
@@ -206,7 +266,6 @@ export default function ProjectBuilderPage() {
 
   const saveMaterial = async (payload) => {
     const m = await actions.materialAdd(payload);
-    await actions.refresh();
     return m;
   };
 
@@ -225,6 +284,28 @@ export default function ProjectBuilderPage() {
 
   const coolingInputs = form.manualParams?.coolingFarm || COOLING_FARM_DEFAULTS;
   const coolingCalc = useMemo(() => computeCoolingFarm(coolingInputs), [coolingInputs]);
+
+  const draftProjectItems = useMemo(() => {
+    const farmSections = sections.map((sec) => ({
+      sectionId: sec.id,
+      sectionName: sec.name,
+      defaultResponsible: sec.defaultResponsible || "",
+      items: farmSectionLines[sec.id] || [],
+    }));
+    return buildProjectFromBuilder({
+      form,
+      stellages,
+      farmSections,
+      materials: state.materials,
+      rooms,
+      stellageModuleMeta,
+    }).items;
+  }, [form, stellages, farmSectionLines, sections, state.materials, rooms, stellageModuleMeta]);
+
+  const roomsCoolingRecKw = useMemo(
+    () => enrichRooms(rooms).reduce((sum, r) => sum + (Number(r.recommendedCoolingKw) || 0), 0),
+    [rooms]
+  );
 
   const setCoolingInputs = (next) => {
     setForm((f) => ({
@@ -276,19 +357,19 @@ export default function ProjectBuilderPage() {
     }
   };
 
-  const activeSection = sections.find((s) => s.id === activeFarmSection);
+  const activeSection = sections.find((s) => s.id === effectiveFarmSectionId);
 
   return (
     <>
       <PageHeader
         title="Новый проект"
-        sub="Соберите стеллажи и разделы фермы. Состав разделов — в «Модули / разделы фермы»."
+        sub="Соберите стеллажи и разделы фермы. Шаблоны разделов — в «Модули и шаблоны → Разделы фермы»."
         back={{ to: "/", label: "Проекты" }}
         actions={
           <>
             <CompactTableToggle />
             <Link to="/modules" className="btn btn-sm">
-              Модули / разделы
+              Модули и шаблоны
             </Link>
           </>
         }
@@ -300,7 +381,7 @@ export default function ProjectBuilderPage() {
             key={s.id}
             type="button"
             className={`btn btn-sm ${step === s.id ? "btn-primary" : ""}`}
-            onClick={() => setStep(s.id)}
+            onClick={() => goToStep(s.id)}
           >
             {s.label}
           </button>
@@ -325,7 +406,7 @@ export default function ProjectBuilderPage() {
             </label>
             <label>
               Тип фермы
-              <select value={form.type} onChange={(e) => set("type", e.target.value)}>
+              <select value={form.type} onChange={(e) => changeFarmType(e.target.value)}>
                 {ref.farmTypes.map((t) => (
                   <option key={t} value={t}>{t}</option>
                 ))}
@@ -350,7 +431,7 @@ export default function ProjectBuilderPage() {
           <FloorPlanField value={floorPlanUrl} onChange={(url) => setManual("floorPlanUrl", url)} />
 
           <div className="toolbar" style={{ marginTop: 16 }}>
-            <button type="button" className="btn btn-primary" disabled={!form.name.trim()} onClick={() => setStep("stellages")}>
+            <button type="button" className="btn btn-primary" disabled={!form.name.trim()} onClick={() => goToStep("stellages")}>
               Далее: стеллажи →
             </button>
           </div>
@@ -360,8 +441,8 @@ export default function ProjectBuilderPage() {
       {step === "stellages" && draft && (
         <div>
           <div className="toolbar" style={{ marginBottom: 14 }}>
-            <button type="button" className="btn" onClick={() => setStep("basics")}>← Назад</button>
-            <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={() => setStep("general")}>
+            <button type="button" className="btn" onClick={() => goToStep("basics")}>← Назад</button>
+            <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={() => goToStep("general")}>
               Ферма целиком →
             </button>
           </div>
@@ -477,7 +558,7 @@ export default function ProjectBuilderPage() {
             lines={draft.items}
             onChange={(items) => setDraft((d) => ({ ...d, items }))}
             materials={state.materials}
-            catalogModule={draft.moduleName}
+            catalogModule=""
             catalogLabel="позицию"
             onSaveMaterial={saveMaterial}
             showQty
@@ -491,8 +572,8 @@ export default function ProjectBuilderPage() {
             <button type="button" className="btn btn-primary" onClick={finishStellage}>
               ✓ Стеллаж готов — следующий
             </button>
-            <button type="button" className="btn" onClick={() => setStep("basics")}>← Назад</button>
-            <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={() => setStep("general")}>
+            <button type="button" className="btn" onClick={() => goToStep("basics")}>← Назад</button>
+            <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={() => goToStep("general")}>
               Ферма целиком →
             </button>
           </div>
@@ -502,16 +583,16 @@ export default function ProjectBuilderPage() {
       {step === "general" && !sections.length && (
         <div className="card" style={{ padding: 20 }}>
           <p className="muted" style={{ margin: 0 }}>
-            Для типа фермы «{form.type}» нет доступных разделов — проверьте настройки в «Модули / разделы → Разделы фермы»
+            Для типа фермы «{form.type}» нет доступных разделов — проверьте настройки в «Модули и шаблоны → Разделы фермы»
             (галочки «Скрыть для типов фермы»).
           </p>
-          <button type="button" className="btn btn-sm" style={{ marginTop: 12 }} onClick={() => setStep("basics")}>
+          <button type="button" className="btn btn-sm" style={{ marginTop: 12 }} onClick={() => goToStep("basics")}>
             ← Изменить тип фермы
           </button>
         </div>
       )}
 
-      {step === "general" && activeSection && (
+      {step === "general" && sections.length > 0 && (
         <div>
           <FloorPlanField value={floorPlanUrl} onChange={(url) => setManual("floorPlanUrl", url)} />
 
@@ -520,22 +601,27 @@ export default function ProjectBuilderPage() {
               Комнаты ({rooms.length}):{" "}
               {rooms.map((r) => r.name + (r.area ? ` ${r.area} м²` : "")).join(" · ")}
               {" — "}
-              <button type="button" className="btn btn-ghost btn-sm" style={{ padding: 0, verticalAlign: "baseline" }} onClick={() => setStep("basics")}>
+              <button type="button" className="btn btn-ghost btn-sm" style={{ padding: 0, verticalAlign: "baseline" }} onClick={() => goToStep("basics")}>
                 изменить в «Проект»
               </button>
             </p>
           )}
 
+          {!farmLoaded ? (
+            <div className="card" style={{ padding: 20 }}>
+              <p className="muted" style={{ margin: 0 }}>Загрузка разделов фермы…</p>
+            </div>
+          ) : (
           <div className="farm-layout">
             <nav className="section-tabs" aria-label="Разделы фермы">
               {sections.map((sec) => (
                 <button
                   key={sec.id}
                   type="button"
-                  className={sec.id === activeFarmSection ? "active" : ""}
+                  className={sec.id === effectiveFarmSectionId ? "active" : ""}
                   title={`${GROUP_LABEL[sec.group] || ""} · ${sec.name}`}
                   style={
-                    sec.id === activeFarmSection
+                    sec.id === effectiveFarmSectionId
                       ? {
                           borderColor: sec.color,
                           color: sec.color,
@@ -562,9 +648,9 @@ export default function ProjectBuilderPage() {
 
             <div className="farm-layout__main">
               <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-                <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>{activeSection.name}</h3>
+                <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>{activeSection?.name || "Раздел фермы"}</h3>
                 <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-                  Отметьте нужные позиции, укажите количество и комнату. Список взят из шаблона раздела (Пресеты → Разделы фермы).
+                  Отметьте нужные позиции, укажите количество и комнату. Состав — из шаблона «Разделы фермы»; наименования — из справочника материалов.
                 </p>
                 <button type="button" className="btn btn-sm" style={{ marginTop: 10 }} onClick={resetFarmSection}>
                   ↺ Сбросить к шаблону раздела
@@ -572,28 +658,32 @@ export default function ProjectBuilderPage() {
               </div>
 
               <SpecPickerTable
-                lines={farmSectionLines[activeFarmSection] || []}
-                onChange={(lines) => setFarmSectionLines((s) => ({ ...s, [activeFarmSection]: lines }))}
+                lines={farmSectionLines[effectiveFarmSectionId] || []}
+                onChange={(lines) =>
+                  setFarmSectionLines((s) => ({ ...s, [effectiveFarmSectionId]: lines }))
+                }
                 materials={state.materials}
-                catalogModule=""
                 catalogLabel="материал"
+                staticNames
                 onSaveMaterial={saveMaterial}
                 showQty
                 showRoom={rooms.length > 0}
                 rooms={rooms}
+                showFarmLineGroups
                 categories={categories}
                 suppliers={suppliers}
-                farmSectionId={activeFarmSection}
+                farmSectionId={effectiveFarmSectionId}
               />
             </div>
           </div>
+          )}
 
           <div className="toolbar" style={{ marginTop: 16 }}>
-            <button type="button" className="btn" onClick={() => setStep("stellages")}>← Стеллажи</button>
+            <button type="button" className="btn" onClick={() => goToStep("stellages")}>← Стеллажи</button>
             {floorPlanUrl && (
               <FloorPlanPin url={floorPlanUrl} title="Схема помещения" variant="button" />
             )}
-            <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setStep("cooling")}>
+            <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => goToStep("cooling")}>
               Расчёт охлаждения →
             </button>
           </div>
@@ -614,9 +704,17 @@ export default function ProjectBuilderPage() {
             draftHeight={form.height}
             onApplyToProject={applyCoolingToForm}
           />
+          <div className="card" style={{ padding: 16, marginTop: 16 }}>
+            <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>Кондиционеры по комнатам</h4>
+            <p className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>
+              Нагрузки по каждой комнате и привязка к сплит-системам из разделов фермы.
+            </p>
+            <RoomsEditor rooms={rooms} onChange={setRooms} compact showCount={false} />
+            <RoomCoolingEditor rooms={rooms} items={draftProjectItems} onChange={setRooms} />
+          </div>
           <div className="toolbar" style={{ marginTop: 16 }}>
-            <button type="button" className="btn" onClick={() => setStep("general")}>← Ферма целиком</button>
-            <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setStep("consumables")}>
+            <button type="button" className="btn" onClick={() => goToStep("general")}>← Ферма целиком</button>
+            <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => goToStep("consumables")}>
               Расходные материалы →
             </button>
           </div>
@@ -646,8 +744,8 @@ export default function ProjectBuilderPage() {
             </p>
           )}
           <div className="toolbar" style={{ marginTop: 20 }}>
-            <button type="button" className="btn" onClick={() => setStep("cooling")}>← Расчёт охлаждения</button>
-            <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setStep("review")}>
+            <button type="button" className="btn" onClick={() => goToStep("cooling")}>← Расчёт охлаждения</button>
+            <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => goToStep("review")}>
               Проверить →
             </button>
           </div>
@@ -684,9 +782,15 @@ export default function ProjectBuilderPage() {
               )}
             </li>
             <li>
-              Охлаждение: <strong>{Math.round(coolingCalc.totalKwSafety * 10) / 10} кВт</strong>
+              Охлаждение (ферма): <strong>{Math.round(coolingCalc.totalKwSafety * 10) / 10} кВт</strong>
               {form.manualParams?.coolingPower ? ` (сохранено ${form.manualParams.coolingPower} кВт)` : ""}
             </li>
+            {roomsCoolingRecKw > 0 && (
+              <li>
+                Кондиционеры по комнатам (рекомендуемо):{" "}
+                <strong>{Math.round(roomsCoolingRecKw * 10) / 10} кВт</strong>
+              </li>
+            )}
             {form.manualParams?.consumablesCartUrl && (
               <li>
                 Корзина расходников:{" "}
@@ -700,7 +804,7 @@ export default function ProjectBuilderPage() {
             <p style={{ color: "var(--danger)", fontSize: 13 }}>Нужно название и хотя бы одна позиция.</p>
           )}
           <div className="toolbar" style={{ marginTop: 16 }}>
-            <button type="button" className="btn" onClick={() => setStep("consumables")}>← Назад</button>
+            <button type="button" className="btn" onClick={() => goToStep("consumables")}>← Назад</button>
             <button type="button" className="btn btn-primary" disabled={!canCreate || saving} onClick={create}>
               {saving ? "Создание…" : "Создать проект"}
             </button>

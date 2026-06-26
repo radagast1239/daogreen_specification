@@ -20,6 +20,10 @@ export function storageDriver() {
   return driver;
 }
 
+export function localUploadDir() {
+  return localDir;
+}
+
 /** Save buffer to storage; returns public URL path or absolute URL */
 export async function saveFile(buffer, filename) {
   if (driver === "s3") {

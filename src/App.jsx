@@ -1,21 +1,36 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import Layout from "./components/Layout.jsx";
 import AdminGuard from "./components/AdminGuard.jsx";
 import { ClientAccessDenied, ClientScope } from "./components/ClientGuard.jsx";
-import ProjectsPage from "./pages/admin/ProjectsPage.jsx";
-import ProjectBuilderPage from "./pages/admin/ProjectBuilderPage.jsx";
-import SpecEditorPage from "./pages/admin/SpecEditorPage.jsx";
-import MaterialsPage from "./pages/admin/MaterialsPage.jsx";
-import MaterialsQualityPage from "./pages/admin/MaterialsQualityPage.jsx";
-import ClientsPage from "./pages/admin/ClientsPage.jsx";
-import ModulesPage from "./pages/admin/ModulesPage.jsx";
-import SuppliersPage from "./pages/admin/SuppliersPage.jsx";
-import ReportsPage from "./pages/admin/ReportsPage.jsx";
-import ArchivePage from "./pages/admin/ArchivePage.jsx";
-import SettingsPage from "./pages/admin/SettingsPage.jsx";
+import PageSkeleton from "./components/PageSkeleton.jsx";
 import LoginPage from "./pages/admin/LoginPage.jsx";
-import ClientProjectPage from "./pages/client/ClientProjectPage.jsx";
+
+const ProjectsPage = lazy(() => import("./pages/admin/ProjectsPage.jsx"));
+const ProjectBuilderPage = lazy(() => import("./pages/admin/ProjectBuilderPage.jsx"));
+const SpecEditorPage = lazy(() => import("./pages/admin/SpecEditorPage.jsx"));
+const MaterialsPage = lazy(() => import("./pages/admin/MaterialsPage.jsx"));
+const MaterialsQualityPage = lazy(() => import("./pages/admin/MaterialsQualityPage.jsx"));
+const ClientsPage = lazy(() => import("./pages/admin/ClientsPage.jsx"));
+const ModulesPage = lazy(() => import("./pages/admin/ModulesPage.jsx"));
+const SuppliersPage = lazy(() => import("./pages/admin/SuppliersPage.jsx"));
+const ReportsPage = lazy(() => import("./pages/admin/ReportsPage.jsx"));
+const ArchivePage = lazy(() => import("./pages/admin/ArchivePage.jsx"));
+const SettingsPage = lazy(() => import("./pages/admin/SettingsPage.jsx"));
+const PhotosPage = lazy(() => import("./pages/admin/PhotosPage.jsx"));
+const ClientProjectPage = lazy(() => import("./pages/client/ClientProjectPage.jsx"));
+
+function RouteFallback() {
+  return (
+    <div className="main-inner">
+      <PageSkeleton lines={3} />
+    </div>
+  );
+}
+
+function Lazy({ children }) {
+  return <Suspense fallback={<RouteFallback />}>{children}</Suspense>;
+}
 
 function ClientLegacyRedirect() {
   const { token } = useParams();
@@ -29,12 +44,13 @@ function FallbackRoute() {
 export default function App() {
   return (
     <Routes>
-      {/* Клиент — только своя страница, без админки */}
       <Route
         path="/client/p/:token"
         element={
           <ClientScope>
-            <ClientProjectPage />
+            <Lazy>
+              <ClientProjectPage />
+            </Lazy>
           </ClientScope>
         }
       />
@@ -45,19 +61,20 @@ export default function App() {
 
       <Route element={<AdminGuard />}>
         <Route element={<Layout />}>
-          <Route path="/" element={<ProjectsPage />} />
-          <Route path="/clients" element={<ClientsPage />} />
-          <Route path="/modules" element={<ModulesPage />} />
-          <Route path="/materials" element={<MaterialsPage />} />
-          <Route path="/materials/quality" element={<MaterialsQualityPage />} />
+          <Route path="/" element={<Lazy><ProjectsPage /></Lazy>} />
+          <Route path="/clients" element={<Lazy><ClientsPage /></Lazy>} />
+          <Route path="/modules" element={<Lazy><ModulesPage /></Lazy>} />
+          <Route path="/materials" element={<Lazy><MaterialsPage /></Lazy>} />
+          <Route path="/materials/photos" element={<Lazy><PhotosPage /></Lazy>} />
+          <Route path="/materials/quality" element={<Lazy><MaterialsQualityPage /></Lazy>} />
           <Route path="/import" element={<Navigate to="/materials?tab=import" replace />} />
-          <Route path="/suppliers" element={<SuppliersPage />} />
-          <Route path="/archive" element={<ArchivePage />} />
-          <Route path="/reports" element={<ReportsPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/new" element={<ProjectBuilderPage />} />
+          <Route path="/suppliers" element={<Lazy><SuppliersPage /></Lazy>} />
+          <Route path="/archive" element={<Lazy><ArchivePage /></Lazy>} />
+          <Route path="/reports" element={<Lazy><ReportsPage /></Lazy>} />
+          <Route path="/settings" element={<Lazy><SettingsPage /></Lazy>} />
+          <Route path="/new" element={<Lazy><ProjectBuilderPage /></Lazy>} />
           <Route path="/new/template" element={<Navigate to="/new" replace />} />
-          <Route path="/project/:id" element={<SpecEditorPage />} />
+          <Route path="/project/:id" element={<Lazy><SpecEditorPage /></Lazy>} />
         </Route>
       </Route>
 

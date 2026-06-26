@@ -16,3 +16,4 @@ materials-photos/*
 !materials-photos/.gitkeep
 import-sources/
 backend/import-sources/
+tmp-*

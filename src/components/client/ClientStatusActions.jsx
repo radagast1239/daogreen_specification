@@ -1,38 +1,38 @@
-import React from "react";
-import { PURCHASE_STATUSES } from "../../data/modules.js";
-
-/** Порядок статусов в выпадающем списке для клиента */
-export const CLIENT_STATUS_DROPDOWN_IDS = [
-  "not_bought",
-  "searching",
-  "ordered",
-  "bought",
-  "delivered",
-  "have",
-  "need_help",
-  "replacement_check",
-  "not_fit",
-];
+import React, { useState } from "react";
 
 const QUICK_ACTIONS = [
-  { id: "ordered", label: "Заказал" },
-  { id: "bought", label: "Купил", primary: true },
-  { id: "need_help", label: "Нужна помощь", attention: true },
+  {
+    id: "ordered",
+    label: "Заказано",
+    title: "Оформлен заказ, ждём доставку — смотрите во вкладке «Заказано»",
+  },
+  {
+    id: "bought",
+    label: "Куплено",
+    title: "Товар получен — уйдёт из списка закупки",
+  },
+  { id: "have", label: "Уже есть", title: "Уже на объекте — уйдёт из списка закупки" },
+  { id: "need_help", label: "Нужна помощь", attention: true, title: "Нужна помощь Daogreen" },
 ];
-
-function statusLabel(statuses, id) {
-  return statuses.find((s) => s.id === id)?.label || id;
-}
 
 export default function ClientStatusActions({
   status,
   onStatusChange,
-  purchaseStatuses = PURCHASE_STATUSES,
+  onNeedReplacement,
+  disabled = false,
 }) {
   const current = status || "not_bought";
-  const dropdownIds = CLIENT_STATUS_DROPDOWN_IDS.filter((id) =>
-    purchaseStatuses.some((s) => s.id === id && s.clientVisible !== false)
-  );
+  const [pending, setPending] = useState(null);
+
+  const run = async (next) => {
+    if (disabled || pending) return;
+    setPending(next);
+    try {
+      await onStatusChange(next);
+    } finally {
+      setPending(null);
+    }
+  };
 
   return (
     <div className="client-status-actions no-print">
@@ -40,31 +40,34 @@ export default function ClientStatusActions({
         {QUICK_ACTIONS.map((action) => {
           const active = current === action.id;
           let className = "btn btn-sm";
-          if (action.primary) className += active ? " btn-primary" : "";
-          else if (action.attention && active) className += " btn-attention";
+          if (action.attention && active) className += " btn-attention";
           else if (active) className += " btn-active";
+          if (pending === action.id) className += " btn--pending";
           return (
             <button
               key={action.id}
               type="button"
               className={className}
-              onClick={() => onStatusChange(action.id)}
+              title={action.title}
+              disabled={disabled || !!pending}
+              onClick={() => run(action.id)}
             >
-              {action.label}
+              {pending === action.id ? "…" : action.label}
             </button>
           );
         })}
+        {onNeedReplacement && (
+          <button
+            type="button"
+            className="btn btn-sm"
+            title="Предложить другой товар на замену"
+            disabled={disabled || !!pending || current === "replacement_check"}
+            onClick={onNeedReplacement}
+          >
+            Нужна замена
+          </button>
+        )}
       </div>
-      <label className="client-status-actions__more">
-        <span className="muted">Другой статус</span>
-        <select value={current} onChange={(e) => onStatusChange(e.target.value)}>
-          {dropdownIds.map((id) => (
-            <option key={id} value={id}>
-              {statusLabel(purchaseStatuses, id)}
-            </option>
-          ))}
-        </select>
-      </label>
     </div>
   );
 }

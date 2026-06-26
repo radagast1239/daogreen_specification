@@ -1,14 +1,26 @@
 import React from "react";
 import { newRoom, ROOM_NAME_HINTS } from "../lib/roomHelpers.js";
+import { useDebouncedSync } from "../lib/useDebouncedSync.js";
+
+function parseNumInput(raw) {
+  if (raw === "" || raw == null) return "";
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : raw;
+}
 
 export default function RoomsEditor({ rooms, onChange, compact = false, showCount = true }) {
-  const list = rooms?.length ? rooms : [];
+  const [list, setList] = useDebouncedSync(rooms?.length ? rooms : [], onChange, 450);
 
-  const patch = (id, data) => onChange(list.map((r) => (r.id === id ? { ...r, ...data } : r)));
+  const patch = (id, data, { immediate = false } = {}) => {
+    const next = list.map((r) => (r.id === id ? { ...r, ...data } : r));
+    if (immediate) onChange(next);
+    else setList(next);
+  };
 
   const add = () => {
     const hint = ROOM_NAME_HINTS[list.length] || "";
-    onChange([...list, newRoom(hint || `Комната ${list.length + 1}`)]);
+    const next = [...list, newRoom(hint || `Комната ${list.length + 1}`)];
+    onChange(next);
   };
 
   const setCount = (raw) => {
@@ -97,9 +109,7 @@ export default function RoomsEditor({ rooms, onChange, compact = false, showCoun
                       style={{ textAlign: "right" }}
                       value={r.area ?? ""}
                       placeholder="—"
-                      onChange={(e) =>
-                        patch(r.id, { area: e.target.value === "" ? "" : Number(e.target.value) })
-                      }
+                      onChange={(e) => patch(r.id, { area: parseNumInput(e.target.value) })}
                     />
                   </td>
                   <td>

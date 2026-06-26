@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useStore } from "../../store/StoreContext.jsx";
 import { api } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
+import MaterialsSubnav from "../../components/MaterialsSubnav.jsx";
 
 export default function PhotosPage() {
   const { state, actions } = useStore();
@@ -21,7 +22,7 @@ export default function PhotosPage() {
     try {
       const data = await api.bulkPhotos(files);
       setResult(data);
-      await actions.refresh();
+      await actions.refreshMaterials();
       setFiles([]);
     } catch (e) {
       setErr(e.message);
@@ -37,7 +38,7 @@ export default function PhotosPage() {
     try {
       const data = await api.importPhotosFolder();
       setResult(data);
-      await actions.refresh();
+      await actions.refreshMaterials();
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -50,9 +51,11 @@ export default function PhotosPage() {
       <PageHeader
         title="Фото материалов"
         sub={`${withPhoto} из ${state.materials.length} с фото · стеллажи: ${stellage.length} поз.`}
-        back={{ to: "/", label: "Проекты" }}
+        back={{ to: "/materials", label: "Материалы" }}
       />
-      <div className="content" style={{ maxWidth: 720 }}>
+      <div className="content">
+        <MaterialsSubnav />
+      <div style={{ maxWidth: 720, marginTop: 16 }}>
         <div className="card" style={{ padding: 22 }}>
           <h3 style={{ margin: "0 0 12px" }}>Как называть файлы</h3>
           <p className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>
@@ -118,6 +121,7 @@ export default function PhotosPage() {
             )}
           </div>
         )}
+      </div>
       </div>
     </>
   );

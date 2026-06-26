@@ -13,16 +13,16 @@ import { getAnalytics } from "../services/analytics.js";
 import { listAdminUsers, upsertAdminUser, deactivateAdminUser } from "../auth.js";
 import { brandSettingsResponse } from "../services/clientBrand.js";
 import { publishRulesSettingsPayload } from "../services/publishRules.js";
+import { multerFileFilter } from "../services/uploadFilter.js";
+import { saveFile } from "../storage/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, "../uploads");
 fs.mkdirSync(uploadDir, { recursive: true });
 const docUpload = multer({
-  storage: multer.diskStorage({
-    destination: (_r, _f, cb) => cb(null, uploadDir),
-    filename: (_r, file, cb) => cb(null, `${nanoid(10)}${path.extname(file.originalname)}`),
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: multerFileFilter({ allowDocs: true }),
 });
 
 const router = Router();
@@ -234,15 +234,21 @@ router.get("/projects/:id/documents", (req, res) => {
   res.json(rows);
 });
 
-router.post("/projects/:id/documents", docUpload.single("file"), (req, res) => {
+router.post("/projects/:id/documents", docUpload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file" });
-  const id = nanoid(12);
-  const url = `/uploads/${req.file.filename}`;
-  const type = req.body.type || "other";
-  db.prepare(
-    "INSERT INTO files (id, project_id, type, filename, url) VALUES (?, ?, ?, ?, ?)"
-  ).run(id, req.params.id, type, req.file.originalname, url);
-  res.status(201).json({ id, type, filename: req.file.originalname, url, uploadedAt: new Date().toISOString() });
+  try {
+    const id = nanoid(12);
+    const ext = path.extname(req.file.originalname).toLowerCase() || "";
+    const filename = `${nanoid(10)}${ext}`;
+    const url = await saveFile(req.file.buffer, filename);
+    const type = req.body.type || "other";
+    db.prepare(
+      "INSERT INTO files (id, project_id, type, filename, url) VALUES (?, ?, ?, ?, ?)"
+    ).run(id, req.params.id, type, req.file.originalname, url);
+    res.status(201).json({ id, type, filename: req.file.originalname, url, uploadedAt: new Date().toISOString() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 router.delete("/documents/:id", (req, res) => {

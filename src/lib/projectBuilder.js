@@ -1,74 +1,61 @@
-import { uid } from "../store/helpers.js";
-import { defaultResponsible } from "./itemHelpers.js";
+import { uid } from "./ids.js";
+import { defaultResponsible } from "./responsibleDefaults.js";
 import { hydrateLinePhoto } from "./photoHelpers.js";
 import { groupLabel, materialCompositionGroup } from "../../shared/stellageComposition.js";
 import { projectStellageLinesFromCatalog, stellageModulePhoto, resolveStellagePhoto } from "./stellageCatalogConfig.js";
 import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
+import { blankLine, lineFromMaterial } from "./specLineCore.js";
 import { resolvePipeCuts, normalizePipeCuts } from "../../shared/profilePipeCuts.js";
 import { resolveBreakerSpecs, normalizeBreakerSpecs } from "../../shared/breakerSpecs.js";
 import { resolveFlowSpecs, normalizeFlowSpecs } from "../../shared/flowSpecs.js";
 import { resolveSplitSpecs, normalizeSplitSpecs } from "../../shared/splitSpecs.js";
 import { patchMaterialModules, normalizeMaterialModules, primaryMaterialModule, materialInModule } from "../../shared/materialModules.js";
+import {
+  materialInFarmSection,
+  normalizeMaterialFarmSections,
+  patchMaterialFarmSections,
+  resolveMaterialFarmSections,
+} from "../../shared/materialFarmSections.js";
+import { resolveItemType } from "../../shared/itemTypes.js";
 
-export function blankLine(overrides = {}) {
-  return {
-    id: uid("ln"),
-    materialId: null,
-    name: "",
-    unit: "шт.",
-    category: "Прочее",
-    subcategory: "",
-    supplier: "",
-    link: "",
-    linkAlt: "",
-    imageUrl: "",
-    photoUrl: "",
-    qty: 1,
-    price: 0,
-    vatRate: 0,
-    techNote: "",
-    clientNote: "",
-    pipeCuts: [],
-    breakerSpecs: [],
-    flowSpecs: [],
-    splitSpecs: [],
-    coolingKw: 0,
-    coolingBtu: 0,
-    exhaustM3: 0,
-    roomId: "",
-    included: true,
-    ...overrides,
-  };
+export { blankLine, lineFromMaterial };
+
+export function lineToMaterialPayload(line, moduleName = "", farmSectionId = "") {
+  const mods = moduleName ? normalizeMaterialModules([moduleName]) : [];
+  const sid = farmSectionId || line.farmSectionId || "";
+  const farmSections = sid
+    ? normalizeMaterialFarmSections([...resolveMaterialFarmSections(line), sid])
+    : resolveMaterialFarmSections(line);
+  return patchMaterialFarmSections(
+    {
+      name: line.name.trim(),
+      unit: line.unit || "шт.",
+      module: mods[0] || "",
+      modules: mods,
+      category: line.category || "Прочее",
+      subcategory: line.subcategory || "",
+      defaultQty: 0,
+      basePrice: Number(line.price) || 0,
+      link: line.link || "",
+      linkAlt: line.linkAlt || "",
+      vatRate: Number(line.vatRate) || 0,
+      techNote: line.techNote || "",
+      clientNote: line.clientNote || "",
+      pipeCuts: normalizePipeCuts(line.pipeCuts ?? resolvePipeCuts(line)),
+      breakerSpecs: normalizeBreakerSpecs(line.breakerSpecs ?? resolveBreakerSpecs(line)),
+      flowSpecs: normalizeFlowSpecs(line.flowSpecs ?? resolveFlowSpecs(line)),
+      splitSpecs: normalizeSplitSpecs(line.splitSpecs ?? resolveSplitSpecs(line)),
+      supplier: line.supplier || "",
+      coolingKw: Number(line.coolingKw) || 0,
+      coolingBtu: Number(line.coolingBtu) || 0,
+      exhaustM3: Number(line.exhaustM3) || 0,
+      status: "active",
+    },
+    farmSections
+  );
 }
 
-export function lineToMaterialPayload(line, moduleName, farmSectionId = "") {
-  return {
-    name: line.name.trim(),
-    unit: line.unit || "шт.",
-    module: moduleName,
-    modules: normalizeMaterialModules([moduleName]),
-    category: line.category || "Прочее",
-    subcategory: line.subcategory || "",
-    farmSectionId: farmSectionId || line.farmSectionId || "",
-    defaultQty: 0,
-    basePrice: Number(line.price) || 0,
-    link: line.link || "",
-    linkAlt: line.linkAlt || "",
-    vatRate: Number(line.vatRate) || 0,
-    techNote: line.techNote || "",
-    clientNote: line.clientNote || "",
-    pipeCuts: normalizePipeCuts(line.pipeCuts ?? resolvePipeCuts(line)),
-    breakerSpecs: normalizeBreakerSpecs(line.breakerSpecs ?? resolveBreakerSpecs(line)),
-    flowSpecs: normalizeFlowSpecs(line.flowSpecs ?? resolveFlowSpecs(line)),
-    splitSpecs: normalizeSplitSpecs(line.splitSpecs ?? resolveSplitSpecs(line)),
-    supplier: line.supplier || "",
-    coolingKw: Number(line.coolingKw) || 0,
-    coolingBtu: Number(line.coolingBtu) || 0,
-    exhaustM3: Number(line.exhaustM3) || 0,
-    status: "active",
-  };
-}
-
+/** Снимок полей материала в строку — без повторного чтения из базы после сохранения */
 export function syncLineFromMaterial(line, mat) {
   const img = mat.imageUrl || mat.photoUrl || "";
   return {
@@ -93,18 +80,17 @@ export function syncLineFromMaterial(line, mat) {
     flowSpecs: resolveFlowSpecs(mat),
     splitSpecs: resolveSplitSpecs(mat),
     clientNote: mat.clientNote || mat.comment || "",
+    clientSection: mat.clientSection || "",
+    clientSubsection: mat.clientSubsection || "",
+    purchaseKey: mat.purchaseKey || "",
+    itemType: resolveItemType({ itemType: mat.itemType }),
   };
 }
 
 /** Строки каталога для раздела «Ферма целиком» */
 export function catalogLinesForFarmSection(materials, sectionId) {
   return materials
-    .filter(
-      (m) =>
-        m.module === "Общая закупка на ферму" &&
-        m.farmSectionId === sectionId &&
-        m.status === "active"
-    )
+    .filter((m) => materialInFarmSection(m, sectionId) && m.status === "active")
     .map((m) => lineFromMaterial(m, { included: false }));
 }
 
@@ -119,38 +105,6 @@ export function activeLines(lines) {
   return (lines || []).filter((ln) => ln.included && ln.name?.trim());
 }
 
-export function lineFromMaterial(mat, overrides = {}) {
-  const img = mat.imageUrl || mat.photoUrl || "";
-  const qty = overrides.qty ?? 0;
-  return blankLine({
-    materialId: mat.id,
-    name: mat.name,
-    unit: mat.unit,
-    category: mat.category,
-    subcategory: mat.subcategory || materialCompositionGroup(mat),
-    supplier: mat.supplier || "",
-    link: mat.link || "",
-    linkAlt: mat.linkAlt || "",
-    imageUrl: img,
-    photoUrl: img,
-    qty,
-    price: Number(mat.basePrice) || 0,
-    vatRate: [0, 5, 20].includes(Number(mat.vatRate)) ? Number(mat.vatRate) : 0,
-    techNote: mat.techNote || "",
-    clientNote: mat.clientNote || mat.comment || "",
-    pipeCuts: resolvePipeCuts(mat),
-    breakerSpecs: resolveBreakerSpecs(mat),
-    flowSpecs: resolveFlowSpecs(mat),
-    splitSpecs: resolveSplitSpecs(mat),
-    clientSection: mat.clientSection || "",
-    clientSubsection: mat.clientSubsection || "",
-    coolingKw: Number(mat.coolingKw) || 0,
-    coolingBtu: Number(mat.coolingBtu) || 0,
-    exhaustM3: Number(mat.exhaustM3) || 0,
-    ...overrides,
-  });
-}
-
 /** Опциональный шаблон — только по кнопке, не по умолчанию */
 export function templateLinesForModule(materials, moduleName) {
   return materials
@@ -158,12 +112,19 @@ export function templateLinesForModule(materials, moduleName) {
     .map((m) => lineFromMaterial(m));
 }
 
-export function lineToProjectItem(line, section, sortOrder) {
+export function lineToProjectItem(line, section, sortOrder, opts = {}) {
   const qty = Number(line.qty) || 0;
   const on = line.included !== false;
   const img = line.imageUrl || line.photoUrl || "";
+  const itemType = resolveItemType(line);
+  const includedInProject = line.includedInProject != null ? !!line.includedInProject : on;
+  const visibleToClient =
+    line.visibleToClient != null ? !!line.visibleToClient : includedInProject;
+  const instanceId = opts.instanceId || "";
+  const id =
+    instanceId && line.id ? `${instanceId}__${line.id}` : line.id || uid("it");
   return {
-    id: uid("it"),
+    id,
     materialId: line.materialId || null,
     module: section,
     section,
@@ -178,6 +139,11 @@ export function lineToProjectItem(line, section, sortOrder) {
     clientNote: line.clientNote || "",
     techNote: line.techNote || "",
     comment: line.clientNote || line.techNote || "",
+    clientSection: line.clientSection || "",
+    clientSubsection: line.clientSubsection || "",
+    purchaseKey: line.purchaseKey || "",
+    subcategory: line.subcategory || line.farmGroup || "",
+    itemType,
     pipeCuts: normalizePipeCuts(line.pipeCuts ?? resolvePipeCuts(line)),
     breakerSpecs: normalizeBreakerSpecs(line.breakerSpecs ?? resolveBreakerSpecs(line)),
     flowSpecs: normalizeFlowSpecs(line.flowSpecs ?? resolveFlowSpecs(line)),
@@ -190,9 +156,11 @@ export function lineToProjectItem(line, section, sortOrder) {
     exhaustM3: Number(line.exhaustM3) || 0,
     roomId: line.roomId || "",
     responsible: line.responsible || defaultResponsible(line.category, line),
-    visible: on && qty > 0,
-    approved: on && qty > 0,
-    enabled: on,
+    includedInProject,
+    visibleToClient,
+    visible: visibleToClient,
+    approved: visibleToClient,
+    enabled: includedInProject,
     needsApproval: false,
     status: "not_bought",
     actualPrice: null,
@@ -214,9 +182,9 @@ export function buildProjectFromBuilder({
   const stellageConfigs = [];
   let order = 0;
 
-  const pushLine = (line, section) => {
+  const pushLine = (line, section, opts = {}) => {
     const hydrated = hydrateLinePhoto(line, materials);
-    items.push(lineToProjectItem(hydrated, section, order++));
+    items.push(lineToProjectItem(hydrated, section, order++, opts));
   };
 
   for (const st of stellages) {
@@ -239,10 +207,14 @@ export function buildProjectFromBuilder({
         group: groupLabel(ln.subcategory),
       })),
     });
-    for (const line of activeLines(syncFastenersFromCrabs(st.items))) {
+    for (const line of activeLines(syncFastenersFromCrabs(st.items, materials))) {
       const baseQty = Number(line.qty) || 0;
       if (baseQty <= 0) continue;
-      pushLine({ ...line, qty: Math.round(baseQty * stCount * 100) / 100 }, section);
+      pushLine(
+        { ...line, qty: Math.round(baseQty * stCount * 100) / 100 },
+        section,
+        { instanceId: st.id }
+      );
     }
   }
 
@@ -250,7 +222,7 @@ export function buildProjectFromBuilder({
     for (const sec of farmSections) {
       const sectionName = sec.sectionName || sec.name;
       const defaultResp = sec.defaultResponsible || "";
-      for (const line of activeLines(syncFastenersFromCrabs(sec.items))) {
+      for (const line of activeLines(syncFastenersFromCrabs(sec.items, materials))) {
         if ((Number(line.qty) || 0) <= 0) continue;
         pushLine(
           { ...line, responsible: line.responsible || defaultResp || undefined },
@@ -264,6 +236,12 @@ export function buildProjectFromBuilder({
       if ((Number(line.qty) || 0) <= 0) continue;
       pushLine(line, generalSection);
     }
+  }
+
+  for (const room of rooms || []) {
+    if (!room?.selectedItemId) continue;
+    const it = items.find((i) => i.id === room.selectedItemId);
+    if (it && !it.roomId) it.roomId = room.id;
   }
 
   return {

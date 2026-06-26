@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import XLSX from "xlsx";
 import { parseExcelBuffer } from "./excelImport.js";
 import { materialInModule } from "../../../shared/materialModules.js";
+import { localUploadDir, saveFile, storageDriver } from "../storage/index.js";
 
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".emf", ".wmf"]);
 
@@ -80,12 +81,16 @@ export async function extractExcelImages(buffer, sheetNames = []) {
   return out;
 }
 
-export function saveMaterialImage(materialId, buffer, ext, uploadDir) {
+export async function saveMaterialImage(materialId, buffer, ext, uploadDir) {
   const safeExt = IMAGE_EXT.has(ext) ? ext : ".png";
   const destName = `${materialId}${safeExt}`;
-  fs.mkdirSync(uploadDir, { recursive: true });
-  fs.writeFileSync(path.join(uploadDir, destName), buffer);
-  return `/uploads/${destName}`;
+  if (storageDriver() === "local") {
+    const dir = uploadDir || localUploadDir();
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, destName), buffer);
+    return `/uploads/${destName}`;
+  }
+  return saveFile(buffer, destName);
 }
 
 const norm = (s) =>
@@ -142,12 +147,12 @@ function findMaterialForRow(materials, row, moduleHint) {
 }
 
 /** Привязка фото к импортируемым материалам по листу и строке */
-export function attachImagesToMaterials(materials, images, uploadDir) {
+export async function attachImagesToMaterials(materials, images, uploadDir) {
   let linked = 0;
   for (const mat of materials) {
     const img = findImageForRow(images, mat._sheet, mat._row);
     if (!img) continue;
-    const url = saveMaterialImage(mat.id, img.buffer, img.ext, uploadDir);
+    const url = await saveMaterialImage(mat.id, img.buffer, img.ext, uploadDir);
     mat.imageUrl = url;
     mat.photoUrl = url;
     linked++;
@@ -160,7 +165,7 @@ export function attachImagesToMaterials(materials, images, uploadDir) {
 }
 
 /** Фото из Excel → существующие материалы по модулю + названию + строке */
-export function linkImagesToExistingMaterials(parsedRows, images, materials, uploadDir, updateMaterial) {
+export async function linkImagesToExistingMaterials(parsedRows, images, materials, uploadDir, updateMaterial) {
   let linked = 0;
   const unmatched = [];
   const linkedIds = new Set();
@@ -175,7 +180,7 @@ export function linkImagesToExistingMaterials(parsedRows, images, materials, upl
       continue;
     }
     if (linkedIds.has(mat.id)) continue;
-    const url = saveMaterialImage(mat.id, img.buffer, img.ext, uploadDir);
+    const url = await saveMaterialImage(mat.id, img.buffer, img.ext, uploadDir);
     updateMaterial(mat.id, { imageUrl: url, photoUrl: url });
     linkedIds.add(mat.id);
     linked++;
@@ -208,7 +213,7 @@ export async function importPhotosFromExcelBuffer(
   const moduleName = moduleOverride || moduleFromExcelFilename(filename) || "Импорт";
   const parsed = parseExcelBuffer(buffer, moduleName);
   const images = await extractExcelImages(buffer, wb.SheetNames);
-  const result = linkImagesToExistingMaterials(parsed.materials, images, materials, uploadDir, updateMaterial);
+  const result = await linkImagesToExistingMaterials(parsed.materials, images, materials, uploadDir, updateMaterial);
   return { file: path.basename(filename), module: moduleName, ...result };
 }
 

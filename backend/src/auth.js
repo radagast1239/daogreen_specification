@@ -44,14 +44,14 @@ export function clientIp(req) {
 export function ipAllowed(req) {
   if (!IP_ALLOWLIST.length) return true;
   const ip = clientIp(req);
-  return IP_ALLOWLIST.some((a) => ip === a || ip.endsWith(a));
+  return IP_ALLOWLIST.some((a) => ip === a);
 }
 
 export function adminAuthMiddleware(req, res, next) {
   if (!ipAllowed(req)) {
     return res.status(403).json({ error: "IP not allowed" });
   }
-  const key = req.headers["x-admin-key"] || req.query.adminKey;
+  const key = req.headers["x-admin-key"];
   if (!validateAdminKey(key)) {
     return res.status(401).json({ error: "Unauthorized" });
   }

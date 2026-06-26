@@ -2,6 +2,8 @@ import { resolveClientSection, isSubsectionValid, getClientSectionLabel } from "
 import { resolveMaterialModules } from "./materialModules.js";
 
 export const QUALITY_CHECK_SECTIONS = [
+  { id: "noPhoto", label: "Без фото", warning: true },
+  { id: "noLink", label: "Без ссылки", warning: true },
   { id: "noClientSection", label: "Без клиентского раздела" },
   { id: "noClientSubsection", label: "Без подраздела клиента" },
   { id: "needsReviewCategory", label: "Категория «Требует разбора»" },
@@ -80,6 +82,8 @@ export function analyzeMaterialsQuality(materials, { activeModuleNames = [] } = 
     if (!Number(m.basePrice)) sections.priceZero.push(row);
     if (!(m.unit || "").trim()) sections.noUnit.push(row);
     if (!(m.supplier || "").trim()) sections.noSupplier.push(row);
+    if (!(m.photoUrl || m.imageUrl)) sections.noPhoto.push(row);
+    if (!(m.link || "").trim()) sections.noLink.push(row);
 
     if (section && subsection && !isSubsectionValid(section, subsection)) {
       sections.subsectionMismatch.push(row);

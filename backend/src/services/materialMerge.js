@@ -21,11 +21,14 @@ export function mergeMaterials(keepId, duplicateId) {
   const dup = db.prepare("SELECT id FROM materials WHERE id = ?").get(duplicateId);
   if (!keep || !dup) throw new Error("Material not found");
 
-  db.prepare("UPDATE project_items SET material_id = ? WHERE material_id = ?").run(keepId, duplicateId);
-  db.prepare("UPDATE materials SET alternative_material_id = ? WHERE alternative_material_id = ?").run(
-    keepId,
-    duplicateId
-  );
-  db.prepare("DELETE FROM materials WHERE id = ?").run(duplicateId);
+  const run = db.transaction(() => {
+    db.prepare("UPDATE project_items SET material_id = ? WHERE material_id = ?").run(keepId, duplicateId);
+    db.prepare("UPDATE materials SET alternative_material_id = ? WHERE alternative_material_id = ?").run(
+      keepId,
+      duplicateId
+    );
+    db.prepare("DELETE FROM materials WHERE id = ?").run(duplicateId);
+  });
+  run();
   return { ok: true, keepId, removedId: duplicateId };
 }

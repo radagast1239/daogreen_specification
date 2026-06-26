@@ -4,6 +4,7 @@ import {
   loadProject,
   loadProjectByToken,
   loadProjectItems,
+  loadSlimItemsForProjects,
   rowToProject,
 } from "../db.js";
 import {
@@ -14,7 +15,7 @@ import {
   projectTotals,
 } from "../services/buildItems.js";
 import { listMaterials, listModules } from "./materials.js";
-import { validateProjectForPublish } from "../services/publishRules.js";
+import { validateProjectForPublish, validateProjectForPublishFromItems } from "../services/publishRules.js";
 import { getAnalytics } from "../services/analytics.js";
 import {
   listActivity,
@@ -24,7 +25,9 @@ import {
   sanitizeProjectForClient,
 } from "../services/activityLog.js";
 import { clientPurchaseStatuses } from "../services/referenceData.js";
+import { clientAuthMiddleware } from "../services/clientAuth.js";
 import { loadClientBrand } from "../services/clientBrand.js";
+import { clientCatalogForProject } from "../services/clientCatalog.js";
 import { normalizePipeCuts, resolvePipeCuts } from "../../../shared/profilePipeCuts.js";
 import { normalizeBreakerSpecs, resolveBreakerSpecs } from "../../../shared/breakerSpecs.js";
 import {
@@ -41,6 +44,21 @@ import {
   isSplitSystemName,
 } from "../../../shared/splitSpecs.js";
 import { structuredClientNote } from "../../../shared/structuredClientNote.js";
+import { itemFlagsToDb, normalizeItemFlags, resolveItemType, lineVisibleToClient } from "../../../shared/itemTypes.js";
+import {
+  getMaterialById,
+  patchFromMaterial,
+  resolveRefreshFields,
+} from "../services/refreshItemFromMaterial.js";
+import {
+  cloneProjectItem,
+  cloneProjectItemsWithIdMap,
+  remapRoomsSelectedItemIds,
+  stripProjectForClone,
+  templateItemFromProjectItem,
+} from "../../../shared/projectItemClone.js";
+import { compareProjectItems } from "../../../shared/projectCompare.js";
+import { buildImportPreview } from "../../../shared/importFromProject.js";
 
 const router = Router();
 
@@ -70,13 +88,19 @@ const INSERT_ITEM = db.prepare(`
     supplier, link, link_alt, photo_url, client_note, tech_note,
     qty, price, vat_rate, visible, approved, enabled, needs_approval,
     status, actual_price, client_comment, sort_order, responsible,
-    cooling_kw, cooling_btu, exhaust_m3, room_id, internal_note, delivery_days, item_role, pipe_cuts, breaker_specs, flow_specs, split_specs, client_section, client_subsection
+    cooling_kw, cooling_btu, exhaust_m3, room_id, internal_note, delivery_days, item_role, pipe_cuts, breaker_specs, flow_specs, split_specs,     client_section, client_subsection,
+    included_in_project, visible_to_client, item_type, subcategory, purchase_key,
+    purchase_priority, replacement_link, replacement_photo_url, replacement_price,
+    replacement_comment, replacement_proposed_at
   ) VALUES (
     @id, @project_id, @material_id, @module, @section, @name, @unit, @category,
     @supplier, @link, @link_alt, @photo_url, @client_note, @tech_note,
     @qty, @price, @vat_rate, @visible, @approved, @enabled, @needs_approval,
     @status, @actual_price, @client_comment, @sort_order, @responsible,
-    @cooling_kw, @cooling_btu, @exhaust_m3, @room_id, @internal_note, @delivery_days, @item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs, @client_section, @client_subsection
+    @cooling_kw, @cooling_btu, @exhaust_m3, @room_id, @internal_note, @delivery_days, @item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs,     @client_section, @client_subsection,
+    @included_in_project, @visible_to_client, @item_type, @subcategory, @purchase_key,
+    @purchase_priority, @replacement_link, @replacement_photo_url, @replacement_price,
+    @replacement_comment, @replacement_proposed_at
   )
 `);
 
@@ -91,73 +115,109 @@ const UPDATE_ITEM = db.prepare(`
     responsible=@responsible, cooling_kw=@cooling_kw, cooling_btu=@cooling_btu, exhaust_m3=@exhaust_m3,
     room_id=@room_id, internal_note=@internal_note, delivery_days=@delivery_days, item_role=@item_role,
     pipe_cuts=@pipe_cuts, breaker_specs=@breaker_specs, flow_specs=@flow_specs, split_specs=@split_specs,
-    client_section=@client_section, client_subsection=@client_subsection
+    client_section=@client_section, client_subsection=@client_subsection,
+    included_in_project=@included_in_project, visible_to_client=@visible_to_client, item_type=@item_type,
+    subcategory=@subcategory, purchase_key=@purchase_key,
+    purchase_priority=@purchase_priority, replacement_link=@replacement_link,
+    replacement_photo_url=@replacement_photo_url, replacement_price=@replacement_price,
+    replacement_comment=@replacement_comment, replacement_proposed_at=@replacement_proposed_at
   WHERE id=@id AND project_id=@project_id
 `);
 
 function itemToParams(it, projectId) {
-  const cuts = normalizePipeCuts(it.pipeCuts ?? resolvePipeCuts(it));
-  const breakerSpecs = normalizeBreakerSpecs(it.breakerSpecs ?? resolveBreakerSpecs(it));
-  const flowSpecs = normalizeFlowSpecs(it.flowSpecs ?? resolveFlowSpecs(it));
-  const splitSpecs = normalizeSplitSpecs(it.splitSpecs ?? resolveSplitSpecs(it));
-  const enriched = { ...it, pipeCuts: cuts, breakerSpecs, flowSpecs, splitSpecs };
+  const normalized = normalizeItemFlags(it);
+  const flags = itemFlagsToDb(normalized);
+  const cuts = normalizePipeCuts(normalized.pipeCuts ?? resolvePipeCuts(normalized));
+  const breakerSpecs = normalizeBreakerSpecs(normalized.breakerSpecs ?? resolveBreakerSpecs(normalized));
+  const flowSpecs = normalizeFlowSpecs(normalized.flowSpecs ?? resolveFlowSpecs(normalized));
+  const splitSpecs = normalizeSplitSpecs(normalized.splitSpecs ?? resolveSplitSpecs(normalized));
+  const enriched = { ...normalized, pipeCuts: cuts, breakerSpecs, flowSpecs, splitSpecs };
   const clientNote = structuredClientNote(enriched);
-  let link = it.link || "";
-  let coolingKw = Number(it.coolingKw) || 0;
-  let exhaustM3 = Number(it.exhaustM3) || 0;
-  if (isFlowSpecName(it.name)) {
+  let link = normalized.link || "";
+  let coolingKw = Number(normalized.coolingKw) || 0;
+  let exhaustM3 = Number(normalized.exhaustM3) || 0;
+  if (isFlowSpecName(normalized.name)) {
     exhaustM3 = aggregateFlowM3(flowSpecs);
     link = primaryFlowLink(flowSpecs, link);
   }
-  if (isSplitSystemName(it.name)) {
+  if (isSplitSystemName(normalized.name)) {
     coolingKw = aggregateSplitCoolingKw(splitSpecs);
   }
   return {
-    id: it.id,
+    id: normalized.id,
     project_id: projectId,
-    material_id: it.materialId || null,
-    module: it.module,
-    section: it.section || it.module,
-    name: it.name,
-    unit: it.unit || "шт.",
-    category: it.category || "Прочее",
-    supplier: it.supplier || "",
+    material_id: normalized.materialId || null,
+    module: normalized.module,
+    section: normalized.section || normalized.module,
+    name: normalized.name,
+    unit: normalized.unit || "шт.",
+    category: normalized.category || "Прочее",
+    supplier: normalized.supplier || "",
     link,
-    link_alt: it.linkAlt || "",
-    photo_url: it.imageUrl || it.photoUrl || "",
+    link_alt: normalized.linkAlt || "",
+    photo_url: normalized.imageUrl || normalized.photoUrl || "",
     client_note: clientNote,
-    tech_note: it.techNote || "",
-    qty: Number(it.qty) || 0,
-    price: Number(it.price) || 0,
-    vat_rate: Number(it.vatRate) || 0,
-    visible: it.visible !== false ? 1 : 0,
-    approved: it.approved ? 1 : 0,
-    enabled: it.enabled === false || (Number(it.qty) || 0) === 0 ? 0 : 1,
-    needs_approval: it.needsApproval ? 1 : 0,
-    status: it.status || "not_bought",
-    actual_price: it.actualPrice != null ? Number(it.actualPrice) : null,
-    client_comment: it.clientComment || "",
-    sort_order: it.sortOrder || 0,
-    responsible: it.responsible || "general",
+    tech_note: normalized.techNote || "",
+    qty: Number(normalized.qty) || 0,
+    price: Number(normalized.price) || 0,
+    vat_rate: Number(normalized.vatRate) || 0,
+    visible: flags.visible,
+    approved: flags.approved,
+    enabled: flags.enabled,
+    needs_approval: normalized.needsApproval ? 1 : 0,
+    status: normalized.status || "not_bought",
+    actual_price: normalized.actualPrice != null ? Number(normalized.actualPrice) : null,
+    client_comment: normalized.clientComment || "",
+    sort_order: normalized.sortOrder || 0,
+    responsible: normalized.responsible || "general",
     cooling_kw: coolingKw,
-    cooling_btu: it.coolingBtu || "",
+    cooling_btu: normalized.coolingBtu || "",
     exhaust_m3: exhaustM3,
-    room_id: it.roomId || "",
-    internal_note: it.internalNote || "",
-    delivery_days: Number(it.deliveryDays) || 0,
-    item_role: it.itemRole || "purchase",
+    room_id: normalized.roomId || "",
+    internal_note: normalized.internalNote || "",
+    delivery_days: Number(normalized.deliveryDays) || 0,
+    item_role: normalized.itemRole || "purchase",
     pipe_cuts: JSON.stringify(cuts),
     breaker_specs: JSON.stringify(breakerSpecs),
     flow_specs: JSON.stringify(flowSpecs),
     split_specs: JSON.stringify(splitSpecs),
-    client_section: it.clientSection || "",
-    client_subsection: it.clientSubsection || "",
+    client_section: normalized.clientSection || "",
+    client_subsection: normalized.clientSubsection || "",
+    included_in_project: flags.included_in_project,
+    visible_to_client: flags.visible_to_client,
+    item_type: resolveItemType(normalized),
+    subcategory: normalized.subcategory || "",
+    purchase_key: normalized.purchaseKey || normalized.purchase_key || "",
+    purchase_priority: normalized.purchasePriority || "",
+    replacement_link: normalized.replacementLink || "",
+    replacement_photo_url: normalized.replacementPhotoUrl || "",
+    replacement_price:
+      normalized.replacementPrice != null && normalized.replacementPrice !== ""
+        ? Number(normalized.replacementPrice)
+        : null,
+    replacement_comment: normalized.replacementComment || "",
+    replacement_proposed_at: normalized.replacementProposedAt || "",
   };
 }
 
 function saveItems(projectId, items) {
-  db.prepare("DELETE FROM project_items WHERE project_id = ?").run(projectId);
-  for (const it of items) INSERT_ITEM.run(itemToParams(it, projectId));
+  const run = db.transaction((pid, list) => {
+    db.prepare("DELETE FROM project_items WHERE project_id = ?").run(pid);
+    for (const it of list) INSERT_ITEM.run(itemToParams(it, pid));
+  });
+  run(projectId, items);
+}
+
+export function saveItemsAppend(projectId, items) {
+  const maxSort = db
+    .prepare("SELECT COALESCE(MAX(sort_order), 0) as m FROM project_items WHERE project_id = ?")
+    .get(projectId)?.m || 0;
+  let order = maxSort + 1;
+  for (const it of items) {
+    const row = itemToParams({ ...it, sortOrder: it.sortOrder ?? order++ }, projectId);
+    INSERT_ITEM.run(row);
+  }
+  touchProject(projectId);
 }
 
 function projectRow(p) {
@@ -205,8 +265,9 @@ function updateItemParams(it, projectId) {
 
 export function listProjects() {
   const rows = db.prepare("SELECT * FROM projects WHERE status != 'archived' ORDER BY created_at DESC").all();
+  const itemsByProject = loadSlimItemsForProjects(rows.map((r) => r.id));
   return rows.map((r) => {
-    const items = loadProjectItems(r.id);
+    const items = itemsByProject.get(r.id) || [];
     const t = projectTotals(items);
     return { ...rowToProject(r, []), itemCount: items.length, totals: t };
   });
@@ -245,21 +306,165 @@ export function deleteProject(id) {
   db.prepare("DELETE FROM projects WHERE id = ?").run(id);
 }
 
-export function duplicateProject(id) {
+export function duplicateProject(id, body = {}) {
   const src = loadProject(id);
   if (!src) return null;
-  return createProject({
-    ...src,
-    name: src.name + " (копия)",
-    items: src.items.map((it) => ({ ...it, id: uid("it") })),
+
+  const mode = body.mode === "copy_as_is" ? "copy_as_is" : "new_purchase";
+  const meta = stripProjectForClone(src, { mode });
+  const { items, idMap } = cloneProjectItemsWithIdMap(src.items, {
+    idGen: () => uid("it"),
+    mode,
   });
+
+  return createProject({
+    ...meta,
+    name: (body.name || `${src.name} (копия)`).trim(),
+    client: body.client != null ? body.client : "",
+    city: body.city != null ? body.city : src.city,
+    area: body.area != null ? body.area : src.area,
+    items,
+    selectedModules: src.selectedModules,
+    zones: src.zones,
+    stellageConfigs: src.stellageConfigs,
+    manualParams: src.manualParams,
+    rooms: remapRoomsSelectedItemIds(src.rooms, idMap),
+  });
+}
+
+function presetRowToObj(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    presetType: row.preset_type,
+    moduleName: row.module_name || "",
+    items: JSON.parse(row.items_json || "[]"),
+    note: row.note || "",
+  };
+}
+
+export function previewImportToProject(targetId, body = {}) {
+  const target = loadProject(targetId);
+  const source = loadProject(body.sourceProjectId);
+  if (!target || !source) return null;
+  return buildImportPreview({
+    sourceItems: source.items,
+    targetItems: target.items,
+    kind: body.kind || "section",
+    module: body.module || "",
+    itemIds: body.itemIds || [],
+    targetModule: body.targetModule || body.module || "",
+  });
+}
+
+export function importToProject(targetId, body = {}) {
+  const target = loadProject(targetId);
+  const source = loadProject(body.sourceProjectId);
+  if (!target || !source) return null;
+
+  const preview = previewImportToProject(targetId, body);
+  const skipExisting = body.skipExisting !== false;
+  const toAdd = skipExisting
+    ? preview.added.map((r) => preview.toImport.find((i) => i.id === r.itemId))
+    : preview.toImport;
+
+  const targetModule = body.targetModule || body.module || "";
+  const cloned = toAdd.filter(Boolean).map((it) => {
+    const copy = cloneProjectItem(it, { newId: uid("it"), mode: "new_purchase" });
+    if (targetModule) {
+      copy.module = targetModule;
+      copy.section = targetModule;
+    }
+    return copy;
+  });
+
+  if (!cloned.length) return { project: target, added: [], preview };
+  saveItemsAppend(targetId, cloned);
+  logProjectEvent({
+    projectId: targetId,
+    actor: "admin",
+    summary: `Daogreen: импорт из «${source.name}» — ${cloned.length} поз.`,
+    clientVisible: false,
+  });
+  return { project: loadProject(targetId), added: cloned, preview };
+}
+
+export function compareProjects(baseId, otherId) {
+  const base = loadProject(baseId);
+  const other = loadProject(otherId);
+  if (!other || !base) return null;
+  const diff = compareProjectItems(base.items, other.items);
+  return {
+    base: { id: base.id, name: base.name },
+    other: { id: other.id, name: other.name },
+    ...diff,
+  };
+}
+
+export function saveSectionAsTemplate(projectId, module, { name, note = "" } = {}) {
+  const p = loadProject(projectId);
+  if (!p || !name?.trim()) return null;
+  const items = (p.items || []).filter((it) => (it.module || "").trim() === (module || "").trim());
+  if (!items.length) return null;
+
+  const templateItems = items
+    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+    .map((it, idx) => ({ ...templateItemFromProjectItem(it), sortOrder: idx }));
+
+  const id = uid("pr");
+  db.prepare(`
+    INSERT INTO spec_presets (
+      id, name, preset_type, module_id, module_name, section_id, sort_order, items_json, params_json, note, updated_at
+    ) VALUES (?, ?, 'project_section', '', ?, '', 0, ?, '{}', ?, datetime('now'))
+  `).run(id, name.trim(), module, JSON.stringify(templateItems), note || "");
+
+  logProjectEvent({
+    projectId,
+    actor: "admin",
+    summary: `Daogreen: сохранён шаблон «${name.trim()}» (${module})`,
+    clientVisible: false,
+  });
+  return presetRowToObj(db.prepare("SELECT * FROM spec_presets WHERE id = ?").get(id));
+}
+
+export function applySectionTemplate(projectId, templateId, { targetModule } = {}) {
+  const p = loadProject(projectId);
+  const row = db.prepare("SELECT * FROM spec_presets WHERE id = ? AND preset_type = 'project_section'").get(templateId);
+  if (!p || !row) return null;
+
+  const preset = presetRowToObj(row);
+  const module = targetModule || preset.moduleName || "Импорт";
+  const cloned = (preset.items || []).map((it, idx) =>
+    cloneProjectItem(
+      { ...it, module, section: module, sortOrder: (p.items?.length || 0) + idx },
+      { newId: uid("it"), mode: "new_purchase" }
+    )
+  );
+
+  saveItemsAppend(projectId, cloned);
+  return { project: loadProject(projectId), added: cloned, preset };
+}
+
+export function listSectionTemplates() {
+  return db
+    .prepare("SELECT * FROM spec_presets WHERE preset_type = 'project_section' ORDER BY name")
+    .all()
+    .map(presetRowToObj);
 }
 
 export function approveAll(id) {
   const p = loadProject(id);
   if (!p) return null;
-  const items = p.items.map((it) => ({ ...it, approved: true }));
+  const items = p.items.map((it) =>
+    normalizeItemFlags({
+      ...it,
+      approved: true,
+      visibleToClient: it.includedInProject !== false,
+    })
+  );
   saveItems(id, items);
+  touchProject(id);
   return loadProject(id);
 }
 
@@ -268,10 +473,10 @@ export function createVersion(id, createdBy = "admin", { force = false } = {}) {
   if (!p) return null;
   if (!force) {
     const check = validateProjectForPublish(id);
-    if (!check.ok) {
+    if (check.status === "blocked") {
       const err = new Error("Publish validation failed");
       err.code = "PUBLISH_VALIDATION";
-      err.problems = check.problems;
+      err.problems = check.critical?.length ? check.critical : check.problems;
       throw err;
     }
   }
@@ -317,15 +522,71 @@ export function listVersions(id) {
     }));
 }
 
+function touchProject(projectId) {
+  db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(projectId);
+}
+
 export function patchItem(projectId, itemId, patch) {
   const p = loadProject(projectId);
   if (!p) return null;
-  const items = p.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it));
-  const item = items.find((i) => i.id === itemId);
+  let item = p.items.find((i) => i.id === itemId);
   if (!item) return null;
-  if (patch.qty !== undefined && patch.qty === 0) item.enabled = false;
+  item = normalizeItemFlags({ ...item, ...patch });
+  if (patch.qty !== undefined && patch.qty === 0) item.includedInProject = false;
   UPDATE_ITEM.run(updateItemParams(item, projectId));
+  touchProject(projectId);
   return item;
+}
+
+export function bulkPatchItems(projectId, { itemIds = [], patch = {} } = {}) {
+  const p = loadProject(projectId);
+  if (!p) return { updated: [], skipped: [], before: [] };
+  const ids = new Set(itemIds);
+  const updated = [];
+  const skipped = [];
+  const before = [];
+  const found = new Set();
+  for (const it of p.items) {
+    if (!ids.has(it.id)) continue;
+    found.add(it.id);
+    before.push({ ...it });
+    updated.push(patchItem(projectId, it.id, patch));
+  }
+  for (const id of ids) {
+    if (!found.has(id)) skipped.push({ itemId: id, reason: "not_found" });
+  }
+  if (updated.length) touchProject(projectId);
+  return { updated: updated.filter(Boolean), skipped, before, patch };
+}
+
+export function refreshItemsFromMaterial(projectId, { itemIds = [], fields = [] } = {}) {
+  const p = loadProject(projectId);
+  if (!p) return { updated: [], skipped: [] };
+  const refreshFields = resolveRefreshFields(fields);
+  const ids = itemIds.length ? itemIds : p.items.map((i) => i.id);
+  const updated = [];
+  const skipped = [];
+
+  for (const itemId of ids) {
+    const item = p.items.find((i) => i.id === itemId);
+    if (!item?.materialId) {
+      skipped.push({ itemId, reason: "no_material" });
+      continue;
+    }
+    const mat = getMaterialById(item.materialId);
+    if (!mat) {
+      skipped.push({ itemId, reason: "material_missing" });
+      continue;
+    }
+    const matPatch = patchFromMaterial(mat, refreshFields);
+    if (!Object.keys(matPatch).length) {
+      skipped.push({ itemId, reason: "no_fields" });
+      continue;
+    }
+    updated.push(patchItem(projectId, itemId, matPatch));
+  }
+
+  return { updated, skipped };
 }
 
 export function addItem(projectId, item) {
@@ -339,7 +600,9 @@ export function removeItem(projectId, itemId) {
 }
 
 export function getDashboard() {
-  const projects = listProjects();
+  const rows = db
+    .prepare("SELECT * FROM projects WHERE status != 'archived' ORDER BY created_at DESC")
+    .all();
   const materials = listMaterials();
   const problems = [];
   const publishCheck = [];
@@ -358,27 +621,30 @@ export function getDashboard() {
 
   const now = Date.now();
   const day = 86400000;
+  const projects = [];
 
-  for (const p of projects) {
-    const full = loadProject(p.id);
-    const totals = p.totals || projectTotals(full.items);
+  for (const r of rows) {
+    const items = loadProjectItems(r.id);
+    const totals = projectTotals(items);
+    const p = { ...rowToProject(r, []), itemCount: items.length, totals };
+    projects.push(p);
     const progress = totals.progress || 0;
 
-    const check = validateProjectForPublish(p.id);
-    if (!check.ok) {
+    const check = validateProjectForPublishFromItems(p.id, items);
+    if (check.status === "blocked") {
       const row = {
         projectId: p.id,
         name: p.name,
         client: p.client,
         type: "publish_check",
-        issueCount: check.counts?.issueCount || check.problems?.length || 0,
+        issueCount: check.counts?.criticalCount || check.critical?.length || 0,
         clientItems: check.counts?.clientItems || 0,
       };
       publishCheck.push(row);
       problems.push(row);
     }
 
-    const help = full.items.filter((i) => i.status === "need_help" && i.approved && i.visible);
+    const help = items.filter((i) => i.status === "need_help" && lineVisibleToClient(i));
     if (help.length) {
       const row = { projectId: p.id, name: p.name, client: p.client, type: "need_help", count: help.length };
       needHelp.push(row);
@@ -450,6 +716,10 @@ api.get("/dashboard/summary", (_req, res) => {
   res.json(d);
 });
 
+api.get("/section-templates/list", (_req, res) => {
+  res.json(listSectionTemplates());
+});
+
 api.get("/:id", (req, res) => {
   const p = loadProject(req.params.id);
   if (!p) return res.status(404).json({ error: "Not found" });
@@ -476,14 +746,58 @@ api.delete("/:id", (req, res) => {
 });
 
 api.post("/:id/duplicate", (req, res) => {
-  const p = duplicateProject(req.params.id);
+  const p = duplicateProject(req.params.id, req.body || {});
   if (!p) return res.status(404).json({ error: "Not found" });
+  logProjectEvent({
+    projectId: p.id,
+    actor: "admin",
+    summary: `Daogreen: проект создан на основе прошлого (${req.body?.mode === "copy_as_is" ? "как есть" : "новая закупка"})`,
+    clientVisible: false,
+  });
   res.status(201).json(p);
+});
+
+api.post("/:id/import-preview", (req, res) => {
+  const preview = previewImportToProject(req.params.id, req.body || {});
+  if (!preview) return res.status(404).json({ error: "Not found" });
+  res.json(preview);
+});
+
+api.post("/:id/import-from-project", (req, res) => {
+  const result = importToProject(req.params.id, req.body || {});
+  if (!result) return res.status(404).json({ error: "Not found" });
+  res.json(result);
+});
+
+api.get("/:id/compare/:otherId", (req, res) => {
+  const diff = compareProjects(req.params.id, req.params.otherId);
+  if (!diff) return res.status(404).json({ error: "Not found" });
+  res.json(diff);
+});
+
+api.post("/:id/sections/:module/save-template", (req, res) => {
+  const tpl = saveSectionAsTemplate(req.params.id, decodeURIComponent(req.params.module), req.body || {});
+  if (!tpl) return res.status(400).json({ error: "Cannot save template" });
+  res.status(201).json(tpl);
+});
+
+api.post("/:id/apply-section-template", (req, res) => {
+  const result = applySectionTemplate(req.params.id, req.body?.templateId, {
+    targetModule: req.body?.targetModule,
+  });
+  if (!result) return res.status(404).json({ error: "Not found" });
+  res.json(result);
 });
 
 api.post("/:id/approve-all", (req, res) => {
   const p = approveAll(req.params.id);
   if (!p) return res.status(404).json({ error: "Not found" });
+  logProjectEvent({
+    projectId: req.params.id,
+    actor: "admin",
+    summary: "Daogreen: утверждены все позиции для клиента",
+    clientVisible: false,
+  });
   res.json(p);
 });
 
@@ -491,6 +805,12 @@ api.post("/:id/versions", (req, res) => {
   try {
     const v = createVersion(req.params.id, req.body?.createdBy, { force: !!req.body?.force });
     if (!v) return res.status(404).json({ error: "Not found" });
+    logProjectEvent({
+      projectId: req.params.id,
+      actor: "admin",
+      summary: `Daogreen: опубликована версия ${v.versionNumber}`,
+      clientVisible: false,
+    });
     res.status(201).json(v);
   } catch (e) {
     if (e.code === "PUBLISH_VALIDATION") {
@@ -506,6 +826,55 @@ api.get("/:id/publish-check", (req, res) => {
 
 api.get("/:id/versions", (req, res) => {
   res.json(listVersions(req.params.id));
+});
+
+api.post("/:id/items/bulk-patch", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const result = bulkPatchItems(req.params.id, {
+    itemIds: req.body?.itemIds || [],
+    patch: req.body?.patch || {},
+  });
+  for (const prev of result.before || []) {
+    logItemPatch({
+      projectId: req.params.id,
+      itemId: prev.id,
+      itemName: prev.name,
+      actor: "admin",
+      before: prev,
+      patch: result.patch,
+    });
+  }
+  res.json(result);
+});
+
+api.post("/:id/items/refresh-from-material", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const beforeMap = new Map((p.items || []).map((it) => [it.id, it]));
+  const result = refreshItemsFromMaterial(req.params.id, {
+    itemIds: req.body?.itemIds || (req.body?.itemId ? [req.body.itemId] : []),
+    fields: req.body?.fields || [],
+  });
+  for (const it of result.updated || []) {
+    const before = beforeMap.get(it.id);
+    if (!before) continue;
+    const patch = {};
+    for (const key of Object.keys(it)) {
+      if (before[key] !== it[key]) patch[key] = it[key];
+    }
+    if (Object.keys(patch).length) {
+      logItemPatch({
+        projectId: req.params.id,
+        itemId: it.id,
+        itemName: it.name,
+        actor: "admin",
+        before,
+        patch,
+      });
+    }
+  }
+  res.json(result);
 });
 
 api.patch("/:id/items/:itemId", (req, res) => {
@@ -524,6 +893,8 @@ api.patch("/:id/items/:itemId", (req, res) => {
   });
   res.json(it);
 });
+
+api.post("/:id/items/:itemId/replacement-review", reviewItemReplacement);
 
 api.get("/:id/activity", (req, res) => {
   const p = loadProject(req.params.id);
@@ -574,7 +945,7 @@ function loadBrandingSettings() {
 }
 
 function serveClientProject(req, res) {
-  const p = loadProjectByToken(req.params.token);
+  const p = loadProjectByToken(req.clientToken);
   if (!p) return res.status(404).json({ error: "Not found" });
   if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
     return res.status(410).json({ error: "Link expired" });
@@ -591,22 +962,37 @@ function serveClientProject(req, res) {
     purchaseStatuses: clientPurchaseStatuses(),
     documents,
     activity,
+    catalog: clientCatalogForProject(p),
   });
 }
 
+function clientPatchAllowed(body = {}) {
+  const allowed = ["status", "actualPrice", "clientComment"];
+  const patch = {};
+  for (const k of allowed) if (body[k] !== undefined) patch[k] = body[k];
+  return patch;
+}
+
+function validateClientStatus(status) {
+  if (status === undefined) return true;
+  const valid = new Set(clientPurchaseStatuses().map((s) => s.id));
+  return valid.has(status);
+}
+
 function patchClientItem(req, res) {
-  const p = loadProjectByToken(req.params.token);
+  const p = loadProjectByToken(req.clientToken);
   if (!p) return res.status(404).json({ error: "Not found" });
   if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
     return res.status(410).json({ error: "Link expired" });
   }
   const before = p.items.find((i) => i.id === req.params.itemId);
-  if (!before || !before.visible || !before.approved) {
+  if (!before || !lineVisibleToClient(before)) {
     return res.status(403).json({ error: "Item not available" });
   }
-  const allowed = ["status", "actualPrice", "clientComment"];
-  const patch = {};
-  for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
+  const patch = clientPatchAllowed(req.body);
+  if (patch.status !== undefined && !validateClientStatus(patch.status)) {
+    return res.status(400).json({ error: "Invalid status" });
+  }
   const it = patchItem(p.id, req.params.itemId, patch);
   logItemPatch({
     projectId: p.id,
@@ -628,8 +1014,121 @@ function patchClientItem(req, res) {
   res.json(sanitizeItemForClient(it));
 }
 
+function bulkPatchClientItems(req, res) {
+  const p = loadProjectByToken(req.clientToken);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
+    return res.status(410).json({ error: "Link expired" });
+  }
+  const patch = clientPatchAllowed(req.body?.patch || req.body);
+  const itemIds = Array.isArray(req.body?.itemIds) ? req.body.itemIds : [];
+  if (!itemIds.length) return res.status(400).json({ error: "itemIds required" });
+  if (patch.status !== undefined && !validateClientStatus(patch.status)) {
+    return res.status(400).json({ error: "Invalid status" });
+  }
+  const visibleIds = itemIds.filter((id) => {
+    const it = p.items.find((i) => i.id === id);
+    return it && lineVisibleToClient(it);
+  });
+  if (!visibleIds.length) return res.status(403).json({ error: "No items available" });
+  const result = bulkPatchItems(p.id, { itemIds: visibleIds, patch });
+  for (const it of result.updated) {
+    const before = result.before.find((b) => b.id === it.id);
+    if (before) {
+      logItemPatch({
+        projectId: p.id,
+        itemId: it.id,
+        itemName: it.name,
+        actor: "client",
+        before,
+        patch,
+      });
+    }
+  }
+  if (patch.status && ["bought", "delivered", "have"].includes(patch.status) && !p.purchaseStartedAt) {
+    db.prepare("UPDATE projects SET purchase_started_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(
+      p.id
+    );
+  }
+  db.prepare(
+    "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+  ).run(p.id);
+  res.json({ updated: result.updated.map(sanitizeItemForClient), skipped: result.skipped });
+}
+
+function proposeClientReplacement(req, res) {
+  const p = loadProjectByToken(req.clientToken);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
+    return res.status(410).json({ error: "Link expired" });
+  }
+  const before = p.items.find((i) => i.id === req.params.itemId);
+  if (!before || !lineVisibleToClient(before)) {
+    return res.status(403).json({ error: "Item not available" });
+  }
+  const patch = {
+    status: "replacement_check",
+    replacementLink: String(req.body?.link || "").trim(),
+    replacementPhotoUrl: String(req.body?.photoUrl || "").trim(),
+    replacementPrice:
+      req.body?.price != null && req.body.price !== "" ? Number(req.body.price) : null,
+    replacementComment: String(req.body?.comment || "").trim(),
+    replacementProposedAt: new Date().toISOString(),
+  };
+  const it = patchItem(p.id, req.params.itemId, patch);
+  logItemPatch({
+    projectId: p.id,
+    itemId: it.id,
+    itemName: it.name,
+    actor: "client",
+    before,
+    patch: { status: "replacement_check", replacementProposed: true },
+  });
+  db.prepare(
+    "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+  ).run(p.id);
+  res.json(sanitizeItemForClient(it));
+}
+
+function reviewItemReplacement(req, res) {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const before = p.items.find((i) => i.id === req.params.itemId);
+  if (!before) return res.status(404).json({ error: "Item not found" });
+  const action = req.body?.action;
+  if (!["accept", "reject"].includes(action)) {
+    return res.status(400).json({ error: "action must be accept or reject" });
+  }
+  const patch = {
+    status: "not_bought",
+    replacementLink: "",
+    replacementPhotoUrl: "",
+    replacementPrice: null,
+    replacementComment: "",
+    replacementProposedAt: "",
+  };
+  if (action === "accept") {
+    if (req.body?.link != null) patch.link = String(req.body.link).trim();
+    if (req.body?.supplier != null) patch.supplier = String(req.body.supplier).trim();
+    if (req.body?.price != null) patch.price = Number(req.body.price) || 0;
+  }
+  if (req.body?.adminNote) {
+    patch.clientComment = [before.clientComment, req.body.adminNote].filter(Boolean).join(" · ");
+  }
+  const it = patchItem(p.id, req.params.itemId, patch);
+  logItemPatch({
+    projectId: p.id,
+    itemId: it.id,
+    itemName: it.name,
+    actor: "admin",
+    before,
+    patch: { replacementReview: action, ...req.body },
+  });
+  res.json(it);
+}
+
 function patchClientCooling(req, res) {
-  const p = loadProjectByToken(req.params.token);
+  const p = loadProjectByToken(req.clientToken);
   if (!p) return res.status(404).json({ error: "Not found" });
   if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
     return res.status(410).json({ error: "Link expired" });
@@ -662,10 +1161,10 @@ function patchClientCooling(req, res) {
 
 // Client router — основной путь /api/client/p/:token
 export const clientRouter = Router();
+clientRouter.use(clientAuthMiddleware);
 
 clientRouter.get("/p/:token", serveClientProject);
+clientRouter.patch("/p/:token/items/bulk", bulkPatchClientItems);
 clientRouter.patch("/p/:token/items/:itemId", patchClientItem);
+clientRouter.post("/p/:token/items/:itemId/propose-replacement", proposeClientReplacement);
 clientRouter.patch("/p/:token/cooling", patchClientCooling);
-clientRouter.get("/:token", serveClientProject);
-clientRouter.patch("/:token/items/:itemId", patchClientItem);
-clientRouter.patch("/:token/cooling", patchClientCooling);

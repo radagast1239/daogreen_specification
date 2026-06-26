@@ -1,9 +1,9 @@
-const API = import.meta.env.VITE_API_URL || "";
+const API = (import.meta.env.VITE_API_URL || import.meta.env.BASE_URL || "").replace(/\/$/, "");
 
 const ADMIN_KEY_STORAGE = "daogreen-admin-key";
 
 export function getAdminKey() {
-  return localStorage.getItem(ADMIN_KEY_STORAGE) || import.meta.env.VITE_ADMIN_KEY || "";
+  return localStorage.getItem(ADMIN_KEY_STORAGE) || "";
 }
 
 export function setAdminKey(key) {
@@ -102,30 +102,61 @@ export const api = {
   createProject: (data) => request("/api/projects", { method: "POST", body: data }),
   updateProject: (id, patch) => request(`/api/projects/${id}`, { method: "PATCH", body: patch }),
   deleteProject: (id) => request(`/api/projects/${id}`, { method: "DELETE" }),
-  duplicateProject: (id) => request(`/api/projects/${id}/duplicate`, { method: "POST" }),
+  duplicateProject: (id, body) => request(`/api/projects/${id}/duplicate`, { method: "POST", body: body || {} }),
+  importPreview: (id, body) => request(`/api/projects/${id}/import-preview`, { method: "POST", body }),
+  importFromProject: (id, body) => request(`/api/projects/${id}/import-from-project`, { method: "POST", body }),
+  compareProjects: (id, otherId) => request(`/api/projects/${id}/compare/${otherId}`),
+  listSectionTemplates: () => request("/api/projects/section-templates/list"),
+  saveSectionTemplate: (id, module, body) =>
+    request(`/api/projects/${id}/sections/${encodeURIComponent(module)}/save-template`, { method: "POST", body }),
+  applySectionTemplate: (id, body) =>
+    request(`/api/projects/${id}/apply-section-template`, { method: "POST", body }),
   approveAll: (id) => request(`/api/projects/${id}/approve-all`, { method: "POST" }),
   createVersion: (id, body) => request(`/api/projects/${id}/versions`, { method: "POST", body: body || {} }),
   getVersions: (id) => request(`/api/projects/${id}/versions`),
   regenerateToken: (id) => request(`/api/projects/${id}/regenerate-token`, { method: "POST" }),
   patchItem: (projectId, itemId, patch) =>
     request(`/api/projects/${projectId}/items/${itemId}`, { method: "PATCH", body: patch }),
+  refreshItemsFromMaterial: (projectId, body) =>
+    request(`/api/projects/${projectId}/items/refresh-from-material`, { method: "POST", body }),
+  bulkPatchItems: (projectId, body) =>
+    request(`/api/projects/${projectId}/items/bulk-patch`, { method: "POST", body }),
   addItem: (projectId, item) => request(`/api/projects/${projectId}/items`, { method: "POST", body: item }),
   deleteItem: (projectId, itemId) =>
     request(`/api/projects/${projectId}/items/${itemId}`, { method: "DELETE" }),
 
-  getClientProject: (token) => request(`/api/client/p/${encodeURIComponent(token)}`, { admin: false }),
+  getClientProject: (token) =>
+    request(`/api/client/p/${encodeURIComponent(token)}`, { admin: false, token }),
   patchClientItem: (token, itemId, patch) =>
     request(`/api/client/p/${encodeURIComponent(token)}/items/${encodeURIComponent(itemId)}`, {
       method: "PATCH",
       body: patch,
       admin: false,
+      token,
+    }),
+  bulkPatchClientItems: (token, body) =>
+    request(`/api/client/p/${encodeURIComponent(token)}/items/bulk`, {
+      method: "PATCH",
+      body,
+      admin: false,
+      token,
     }),
   patchClientCooling: (token, safetyFactor) =>
     request(`/api/client/p/${encodeURIComponent(token)}/cooling`, {
       method: "PATCH",
       body: { safetyFactor },
       admin: false,
+      token,
     }),
+  proposeClientReplacement: (token, itemId, body) =>
+    request(`/api/client/p/${encodeURIComponent(token)}/items/${encodeURIComponent(itemId)}/propose-replacement`, {
+      method: "POST",
+      body,
+      admin: false,
+      token,
+    }),
+  reviewReplacement: (projectId, itemId, body) =>
+    request(`/api/projects/${projectId}/items/${itemId}/replacement-review`, { method: "POST", body }),
 
   getClients: () => request("/api/admin/clients"),
   patchClientProfile: (data) => request("/api/admin/clients/profile", { method: "PATCH", body: data }),

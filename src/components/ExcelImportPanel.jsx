@@ -53,12 +53,11 @@ export default function ExcelImportPanel() {
       if (mode === "photos") {
         const r = await api.importExcelPhotos(file, { module: module || undefined });
         setResult({ type: "photos", ...r });
-        await actions.refresh();
+        await actions.refreshMaterials();
         success(`Фото привязано: ${r.linked}`);
       } else {
         const r = await actions.importExcel(file, { module: module || undefined, mode: mergeMode });
         setResult({ type: "full", ...r });
-        await actions.refresh();
         success(`Импортировано: ${r.imported} поз.`);
       }
     } catch (e) {

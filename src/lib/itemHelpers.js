@@ -1,29 +1,36 @@
 import { DONE_STATUSES, SPECIALIST_MAP } from "../data/modules.js";
-import { DEFAULT_RESPONSIBLE_ROLES } from "./referenceData.js";
-import { num } from "../store/helpers.js";
+import { DEFAULT_RESPONSIBLE_ROLES } from "./responsibleRoles.js";
+import { defaultResponsible } from "./responsibleDefaults.js";
+import {
+  lineContributesToSum,
+  lineVisibleToClient,
+  isPurchasableLineType,
+  resolveItemType,
+} from "../../shared/itemTypes.js";
 
 const DONE = new Set(DONE_STATUSES);
+
+function num(n) {
+  const v = Number(n) || 0;
+  return Number.isInteger(v) ? String(v) : v.toFixed(2);
+}
+
+export const RESPONSIBLE_OPTIONS = DEFAULT_RESPONSIBLE_ROLES;
 
 export function isBoughtStatus(status) {
   return DONE.has(status);
 }
 
-export const RESPONSIBLE_OPTIONS = DEFAULT_RESPONSIBLE_ROLES;
-
-const CATEGORY_TO_RESPONSIBLE = {
-  "Полив и сантехника": "plumber",
-  "Электрика и свет": "electrician",
-  "Каркас и крепёж": "installer",
-  "Климат и вентиляция": "installer",
-  Расходники: "consumables",
-  "Работы и доставка": "client",
-  Прочее: "general",
-};
-
-export function defaultResponsible(category, mat = {}) {
-  if (mat.isConsumable || category === "Расходники") return "consumables";
-  return CATEGORY_TO_RESPONSIBLE[category] || "general";
+/** Заказано или уже получено — убираем из основного списка закупки */
+export function isClosedPurchaseStatus(status) {
+  return status === "ordered" || isBoughtStatus(status);
 }
+
+export function isPurchaseClosed(it) {
+  return isClosedPurchaseStatus(it?.status);
+}
+
+export { defaultResponsible };
 
 export function resolveResponsible(it) {
   if (it.responsible) return it.responsible;
@@ -42,6 +49,7 @@ export function itemImageUrl(it) {
 export const VAT_RATES = [0, 5, 20];
 
 export function lineNet(it) {
+  if (!lineContributesToSum(it)) return 0;
   return (Number(it.qty) || 0) * (Number(it.price) || 0);
 }
 
@@ -57,16 +65,21 @@ export function isPurchaseDone(it) {
   return DONE_STATUSES.includes(it?.status);
 }
 
-/** Склеенная строка закупки: в «куплено», если все исходные позиции куплены */
+/** Склеенная строка: все исходные позиции закрыты (заказано / куплено) */
+export function isMergedPurchaseClosed(row) {
+  return (row?.sourceItems || []).length > 0 && row.sourceItems.every((it) => isPurchaseClosed(it));
+}
+
+/** @deprecated используйте isMergedPurchaseClosed */
 export function isMergedPurchaseDone(row) {
-  return (row?.sourceItems || []).length > 0 && row.sourceItems.every((it) => isPurchaseDone(it));
+  return isMergedPurchaseClosed(row);
 }
 
 export function splitMergedPurchaseRows(rows) {
   const todo = [];
   const bought = [];
   for (const row of rows || []) {
-    (isMergedPurchaseDone(row) ? bought : todo).push(row);
+    (isMergedPurchaseClosed(row) ? bought : todo).push(row);
   }
   return { todo, bought };
 }
@@ -75,8 +88,8 @@ export function applyMergedPurchaseFilter(rows, filterId) {
   if (filterId === "all") return rows;
   return (rows || []).filter((row) => {
     const items = row.sourceItems || [];
-    if (filterId === "todo") return items.some((i) => !isPurchaseDone(i) && i.status !== "ordered");
-    if (filterId === "bought") return items.every((i) => isPurchaseDone(i));
+    if (filterId === "todo") return items.some((i) => !isPurchaseClosed(i));
+    if (filterId === "bought") return items.every((i) => isPurchaseClosed(i));
     return items.some((i) => i.status === filterId);
   });
 }
@@ -94,8 +107,8 @@ export function summarizeMergedStatus(sourceItems = []) {
   if (!sourceItems.length) return { status: "not_bought", mixed: false };
   const unique = [...new Set(sourceItems.map((i) => i.status))];
   if (unique.length === 1) return { status: unique[0], mixed: false };
-  if (sourceItems.every((i) => isPurchaseDone(i))) return { status: sourceItems[0].status, mixed: false };
-  const open = sourceItems.find((i) => !isPurchaseDone(i));
+  if (sourceItems.every((i) => isPurchaseClosed(i))) return { status: sourceItems[0].status, mixed: false };
+  const open = sourceItems.find((i) => !isPurchaseClosed(i));
   return { status: open?.status || "not_bought", mixed: true };
 }
 
@@ -122,7 +135,7 @@ export function splitPurchaseItems(items) {
   const todo = [];
   const bought = [];
   for (const it of items || []) {
-    (isPurchaseDone(it) ? bought : todo).push(it);
+    (isPurchaseClosed(it) ? bought : todo).push(it);
   }
   return { todo, bought };
 }
@@ -153,8 +166,18 @@ export const DEFAULT_MANUAL_PARAMS = {
 };
 
 export function clientVisibleItems(project) {
-  return (project?.items || []).filter((i) => i.approved && i.visible && i.enabled !== false);
+  return (project?.items || []).filter((i) => lineVisibleToClient(i));
 }
+
+export function projectBudgetItems(project) {
+  return (project?.items || []).filter((i) => lineContributesToSum(i));
+}
+
+export function clientPurchaseItems(project) {
+  return clientVisibleItems(project).filter((i) => isPurchasableLineType(resolveItemType(i)));
+}
+
+export { lineContributesToSum, lineVisibleToClient, resolveItemType, isPurchasableLineType };
 
 export function itemsByResponsible(items, responsibleId) {
   return items.filter((it) => resolveResponsible(it) === responsibleId);

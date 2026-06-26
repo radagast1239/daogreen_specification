@@ -25,3 +25,8 @@ export function berryCalculatorUrl() {
 export function economicCalculatorUrl() {
   return `${calcOrigin()}/economic/calculator-110x55_12.html`;
 }
+
+/** Прямо на вкладку «Экономика» в калькуляторе салатов. */
+export function saladEconomicsUrl() {
+  return `${economicCalculatorUrl()}#economics`;
+}

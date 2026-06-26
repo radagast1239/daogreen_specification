@@ -1,21 +1,27 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { groupLabel, STELLAGE_GROUPS } from "../../shared/stellageComposition.js";
+import { FARM_LINE_GROUPS, farmLineGroupLabel, resolveFarmLineGroup } from "../../shared/farmLineGroups.js";
+import {
+  matchSpecLineFilter,
+  patchLine,
+  patchLinesByIds,
+} from "../../shared/specLineFilters.js";
+import { uid } from "../store/helpers.js";
+import SpecSectionToolbar from "./SpecSectionToolbar.jsx";
 import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
-import { formatMaterialModulesLabel } from "../../shared/materialModules.js";
-import { materialSpecSubtitle, hasStructuredSpecEditor } from "../lib/materialDisplay.js";
-import StructuredSpecEditor from "./StructuredSpecEditor.jsx";
+import { formatMaterialModulesLabel, materialInModule } from "../../shared/materialModules.js";
 import { CATEGORIES } from "../data/modules.js";
-import { roomLabel } from "../lib/roomHelpers.js";
 import {
   blankLine,
   lineFromMaterial,
   lineToMaterialPayload,
   syncLineFromMaterial,
 } from "../lib/projectBuilder.js";
-import { photoSrc, api } from "../lib/api.js";
-import { linePhotoSrc, resolveLinePhoto } from "../lib/photoHelpers.js";
+import { hydrateCatalogEditorLine } from "../lib/specLineCore.js";
+import { attachLineSpecOverrides } from "../../shared/lineSpecOverrides.js";
 import { Modal } from "./ui.jsx";
-import PhotoUploadField from "./PhotoUploadField.jsx";
+import SpecPickerLineRow from "./SpecPickerLineRow.jsx";
+import CatalogPickerMaterialRow from "./CatalogPickerMaterialRow.jsx";
 
 function materialUpdatedTs(m) {
   if (!m?.updatedAt) return 0;
@@ -46,12 +52,61 @@ function groupMaterialsByCategory(items, categoryOrder = CATEGORIES) {
   });
 }
 
-function patchLine(lines, id, patch) {
-  return lines.map((ln) => (ln.id === id ? { ...ln, ...patch } : ln));
+function resolveLineDisplayName(line, materials) {
+  if (line.materialId) {
+    const mat = materials.find((m) => m.id === line.materialId);
+    if (mat?.name) return mat.name;
+  }
+  return line.name || "";
+}
+
+/** Состояние строки каталога — только ссылка на материал или черновик до сохранения в базу */
+function catalogStateLine(ln, materials) {
+  const h = hydrateCatalogEditorLine(ln, materials);
+  const sub = h.subcategory || h.farmGroup || "";
+  if (h.materialId) {
+    const out = {
+      id: h.id,
+      materialId: h.materialId,
+      included: h.included,
+      qty: h.qty,
+      defaultQty: h.defaultQty ?? h.qty,
+    };
+    if (sub) {
+      out.subcategory = sub;
+      out.farmGroup = sub;
+    }
+    return attachLineSpecOverrides(out, h);
+  }
+  const out = {
+    id: h.id,
+    name: h.name,
+    unit: h.unit,
+    category: h.category,
+    included: h.included,
+    qty: h.qty,
+    defaultQty: h.defaultQty ?? h.qty,
+  };
+  if (sub) {
+    out.subcategory = sub;
+    out.farmGroup = sub;
+  }
+  return attachLineSpecOverrides(out, h);
 }
 
 export function countIncluded(lines) {
-  return lines.filter((ln) => ln.included && ln.name?.trim()).length;
+  return lines.filter((ln) => ln.included && (ln.materialId || ln.name?.trim())).length;
+}
+
+/** Строки без id ломают галочки и select группы — patchLine не находит строку */
+function ensureLineIds(lines) {
+  let changed = false;
+  const next = (lines || []).map((ln) => {
+    if (ln?.id) return ln;
+    changed = true;
+    return { ...ln, id: uid("ln") };
+  });
+  return changed ? next : lines;
 }
 
 const emptyNew = () => ({
@@ -77,14 +132,25 @@ export default function SpecPickerTable({
   showQty = false,
   qtyLabel = "Кол-во",
   showCompositionGroups = false,
+  showFarmLineGroups = false,
+  farmLineGroups = FARM_LINE_GROUPS,
   stellageGroups = STELLAGE_GROUPS,
+  responsibleOptions,
+  sectionFilterMode = "builder",
   units: unitsProp,
   rooms = [],
   showRoom = false,
+  /** Наименования из базы — текст, без редактирования (сборка фермы) */
+  staticNames = false,
+  /** Каталог шаблона: в state только materialId + qty + группа (данные из базы материалов) */
+  catalogRefsOnly = false,
 }) {
   const categories = categoriesProp?.length ? categoriesProp : CATEGORIES;
   const unitOptions = unitsProp?.length ? unitsProp : ["шт.", "м", "м²", "м³", "кг", "л"];
-  const groupTitle = (id) => stellageGroups.find((g) => g.id === id)?.label || groupLabel(id);
+  const groupTitle = (id) => {
+    if (showFarmLineGroups) return farmLineGroupLabel(id, farmLineGroups);
+    return stellageGroups.find((g) => g.id === id)?.label || groupLabel(id);
+  };
   const [picker, setPicker] = useState(false);
   const [pickedIds, setPickedIds] = useState(() => new Set());
   const [newOpen, setNewOpen] = useState(false);
@@ -92,28 +158,59 @@ export default function SpecPickerTable({
   const [q, setQ] = useState("");
   const [onlyOn, setOnlyOn] = useState(false);
   const [search, setSearch] = useState("");
+  const [lineFilter, setLineFilter] = useState("");
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [savingId, setSavingId] = useState(null);
   const [savingNew, setSavingNew] = useState(false);
+  const pickerScrollRef = useRef(null);
+  const catalogScrollRef = useRef(null);
 
-  const emitLines = useCallback(
-    (next) => onChange(syncFastenersFromCrabs(next)),
-    [onChange]
+  const normalizedLines = useMemo(
+    () => ensureLineIds(lines).map((ln) => hydrateCatalogEditorLine(ln, materials)),
+    [lines, materials]
   );
 
-  /** Все активные материалы базы (без привязки к модулю/разделу) */
+  useEffect(() => {
+    if ((lines || []).some((ln) => !ln?.id)) {
+      let fixed = ensureLineIds(lines).map((ln) => hydrateCatalogEditorLine(ln, materials));
+      fixed = syncFastenersFromCrabs(fixed, materials);
+      if (catalogRefsOnly) {
+        fixed = fixed.map((ln) => catalogStateLine(ln, materials));
+      }
+      onChange(fixed);
+    }
+    // Однократно при открытии секции — не на каждое обновление lines
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const emitLines = useCallback(
+    (next) => {
+      const withIds = ensureLineIds(next);
+      let out = withIds.map((ln) => hydrateCatalogEditorLine(ln, materials));
+      out = syncFastenersFromCrabs(out, materials);
+      if (catalogRefsOnly) {
+        out = out.map((ln) => catalogStateLine(ln, materials));
+      }
+      onChange(out);
+    },
+    [onChange, materials, catalogRefsOnly]
+  );
+
+  /** Активные материалы базы; при catalogModule — только с этим модулем */
   const catalog = useMemo(() => {
     const ql = q.trim().toLowerCase();
     return materials.filter((m) => {
       if (m.status !== "active") return false;
+      if (catalogModule && !materialInModule(m, catalogModule)) return false;
       if (!ql) return true;
       const hay = `${m.name} ${formatMaterialModulesLabel(m)} ${m.category || ""} ${m.supplier || ""}`.toLowerCase();
       return hay.includes(ql);
     });
-  }, [materials, q]);
+  }, [materials, q, catalogModule]);
 
   const existingMaterialIds = useMemo(
-    () => new Set(lines.map((ln) => ln.materialId).filter(Boolean)),
-    [lines]
+    () => new Set(normalizedLines.map((ln) => ln.materialId).filter(Boolean)),
+    [normalizedLines]
   );
 
   const catalogGrouped = useMemo(
@@ -128,23 +225,57 @@ export default function SpecPickerTable({
 
   const visibleLines = useMemo(() => {
     const sq = search.trim().toLowerCase();
-    return lines.filter((ln) => {
+    return normalizedLines.filter((ln) => {
       if (onlyOn && !ln.included) return false;
-      if (sq && !ln.name.toLowerCase().includes(sq)) return false;
+      if (sq && !resolveLineDisplayName(ln, materials).toLowerCase().includes(sq)) return false;
+      if (!matchSpecLineFilter(ln, lineFilter, sectionFilterMode)) return false;
       return true;
     });
-  }, [lines, onlyOn, search]);
+  }, [normalizedLines, onlyOn, search, lineFilter, sectionFilterMode]);
+
+  const toggleSelected = (id, on) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const applyBulk = (patch) => {
+    if (!selectedIds.size) return;
+    const ids = [...selectedIds];
+    if (patch.__copyToSection) {
+      const target = patch.__copyToSection;
+      const copies = normalizedLines
+        .filter((ln) => selectedIds.has(ln.id))
+        .map((ln) => ({
+          ...ln,
+          id: uid("ln"),
+          module: target,
+          section: target,
+        }));
+      emitLines([...normalizedLines, ...copies]);
+      setSelectedIds(new Set());
+      return;
+    }
+    emitLines(patchLinesByIds(normalizedLines, ids, patch));
+    setSelectedIds(new Set());
+  };
 
   const grouped = useMemo(() => {
     const map = new Map();
     for (const ln of visibleLines) {
-      const g = ln.subcategory || "other";
+      const g = showFarmLineGroups
+        ? resolveFarmLineGroup(ln)
+        : ln.subcategory || "other";
       if (!map.has(g)) map.set(g, []);
       map.get(g).push(ln);
     }
-    if (!showCompositionGroups) return map;
+    if (!showCompositionGroups && !showFarmLineGroups) return map;
     const ordered = new Map();
-    for (const sg of stellageGroups) {
+    const defs = showFarmLineGroups ? farmLineGroups : stellageGroups;
+    for (const sg of defs) {
       if (map.has(sg.id)) ordered.set(sg.id, map.get(sg.id));
     }
     if (map.has("other")) ordered.set("other", map.get("other"));
@@ -152,9 +283,51 @@ export default function SpecPickerTable({
       if (!ordered.has(g)) ordered.set(g, arr);
     }
     return ordered;
-  }, [visibleLines, showCompositionGroups, stellageGroups]);
+  }, [visibleLines, showCompositionGroups, showFarmLineGroups, stellageGroups, farmLineGroups]);
 
-  const setAll = (included) => emitLines(lines.map((ln) => ({ ...ln, included })));
+  const flatPickerRows = useMemo(() => {
+    const rows = [];
+    for (const [g, grpLines] of grouped.entries()) {
+      if (g !== "other") rows.push({ kind: "group", g });
+      for (const ln of grpLines) rows.push({ kind: "line", ln });
+    }
+    return rows;
+  }, [grouped]);
+
+  const catalogFlatRows = useMemo(() => {
+    const rows = [];
+    for (const [catName, mats] of catalogGrouped) {
+      rows.push({ kind: "cat", catName, count: mats.length });
+      for (const m of mats) rows.push({ kind: "mat", m });
+    }
+    return rows;
+  }, [catalogGrouped]);
+
+  const lineRowProps = {
+    materials,
+    selectedIds,
+    toggleSelected,
+    toggleLine,
+    staticNames,
+    resolveLineDisplayName,
+    normalizedLines,
+    emitLines,
+    categories,
+    suppliers,
+    unitOptions,
+    showCompositionGroups,
+    stellageGroups,
+    showFarmLineGroups,
+    farmLineGroups,
+    showRoom,
+    rooms,
+    showQty,
+    onSaveMaterial,
+    savingId,
+    saveLineToBase,
+  };
+
+  const setAll = (included) => emitLines(normalizedLines.map((ln) => ({ ...ln, included })));
 
   const toggleLine = (ln, included) => {
     const patch = { included };
@@ -162,14 +335,7 @@ export default function SpecPickerTable({
       patch.qty = 1;
       patch.defaultQty = 1;
     }
-    if (included && !ln.imageUrl && !ln.photoUrl && ln.materialId) {
-      const img = resolveLinePhoto(ln, materials);
-      if (img) {
-        patch.imageUrl = img;
-        patch.photoUrl = img;
-      }
-    }
-    emitLines(patchLine(lines, ln.id, patch));
+    emitLines(patchLine(normalizedLines, ln.id, patch));
   };
 
   const openPicker = () => {
@@ -199,7 +365,7 @@ export default function SpecPickerTable({
     const toAdd = materials.filter((m) => pickedIds.has(m.id) && !existingMaterialIds.has(m.id));
     if (!toAdd.length) return;
     emitLines([
-      ...lines,
+      ...normalizedLines,
       ...toAdd.map((m) =>
         lineFromMaterial(m, {
           included: true,
@@ -213,8 +379,8 @@ export default function SpecPickerTable({
   };
 
   const addFromCatalog = (mat) => {
-    if (lines.some((ln) => ln.materialId === mat.id)) return;
-    emitLines([...lines, lineFromMaterial(mat, { included: true })]);
+    if (normalizedLines.some((ln) => ln.materialId === mat.id)) return;
+    emitLines([...normalizedLines, lineFromMaterial(mat, { included: true })]);
     setPicker(false);
     setQ("");
     setPickedIds(new Set());
@@ -222,11 +388,11 @@ export default function SpecPickerTable({
 
   const saveLineToBase = async (ln) => {
     if (!onSaveMaterial || !ln.name?.trim()) return;
-    const mod = catalogModule || ln.module || "Общая закупка на ферму";
+    const mod = catalogModule || ln.module || "";
     setSavingId(ln.id);
     try {
       const mat = await onSaveMaterial(lineToMaterialPayload(ln, mod, farmSectionId));
-      emitLines(patchLine(lines, ln.id, syncLineFromMaterial(ln, mat)));
+      emitLines(patchLine(normalizedLines, ln.id, syncLineFromMaterial(ln, mat)));
     } catch (e) {
       alert(e.message || "Не удалось сохранить в базу");
     } finally {
@@ -235,8 +401,12 @@ export default function SpecPickerTable({
   };
 
   const createNewInBase = async () => {
+    if (catalogRefsOnly && !onSaveMaterial) {
+      alert("Новые позиции добавляются только через базу материалов.");
+      return;
+    }
     if (!onSaveMaterial) {
-      emitLines([...lines, blankLine({ ...newForm, included: true })]);
+      emitLines([...normalizedLines, blankLine({ ...newForm, included: true })]);
       setNewOpen(false);
       setNewForm(emptyNew());
       return;
@@ -245,7 +415,7 @@ export default function SpecPickerTable({
       alert("Укажите название позиции.");
       return;
     }
-    const mod = catalogModule || newForm.module || "Общая закупка на ферму";
+    const mod = catalogModule || newForm.module || "";
     setSavingNew(true);
     try {
       const mat = await onSaveMaterial(
@@ -256,10 +426,9 @@ export default function SpecPickerTable({
         )
       );
       emitLines([
-        ...lines,
+        ...normalizedLines,
         lineFromMaterial(mat, {
           included: true,
-          price: newForm.price,
           ...(showQty ? { qty: 1, defaultQty: 1 } : {}),
         }),
       ]);
@@ -272,10 +441,27 @@ export default function SpecPickerTable({
     }
   };
 
-  const colSpan = (showQty ? 10 : 9) + (showRoom ? 1 : 0) + (showCompositionGroups ? 1 : 0);
+  const colSpan =
+    (showQty ? 10 : 9) +
+    (showRoom ? 1 : 0) +
+    (showCompositionGroups || showFarmLineGroups ? 1 : 0) +
+    1;
+  const virtualizePicker = flatPickerRows.length >= 24;
 
   return (
     <>
+      <SpecSectionToolbar
+        mode={sectionFilterMode}
+        filterId={lineFilter}
+        onFilterChange={setLineFilter}
+        selectedCount={selectedIds.size}
+        visibleCount={visibleLines.length}
+        onSelectAll={() => setSelectedIds(new Set(visibleLines.map((ln) => ln.id)))}
+        onClearSelection={() => setSelectedIds(new Set())}
+        onBulkPatch={applyBulk}
+        suppliers={suppliers}
+        responsibleOptions={responsibleOptions}
+      />
       <div className="toolbar" style={{ marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
         <input
           placeholder="Поиск по позициям…"
@@ -300,26 +486,38 @@ export default function SpecPickerTable({
           ＋ новая позиция в базу
         </button>
         <span className="muted" style={{ fontSize: 12 }}>
-          {countIncluded(lines)} / {lines.length} {showQty ? "в спецификации" : "отмечено"}
+          {countIncluded(normalizedLines)} / {normalizedLines.length} {showQty ? "в спецификации" : "отмечено"}
         </span>
       </div>
 
-      {lines.length === 0 ? (
+      {normalizedLines.length === 0 ? (
         <p className="muted" style={{ fontSize: 13, padding: "12px 0" }}>
           {emptyHint}
         </p>
       ) : (
-        <div className="card spec-picker-wrap" style={{ overflowX: "auto", padding: 0 }}>
+        <div
+          ref={pickerScrollRef}
+          className="card spec-picker-wrap"
+          style={{
+            overflowX: "auto",
+            padding: 0,
+            ...(virtualizePicker
+              ? { maxHeight: "min(68vh, 760px)", overflowY: "auto", WebkitOverflowScrolling: "touch" }
+              : {}),
+          }}
+        >
           <table className="spec spec-picker">
-            <thead>
+            <thead className="virtual-table-head">
               <tr>
+                <th style={{ width: 36 }} aria-label="Выбор" />
                 <th style={{ width: 112 }}>Фото</th>
                 <th style={{ width: 40 }} title="Включить в спецификацию">✓</th>
-                <th style={{ minWidth: 200 }}>Наименование</th>
+                <th style={{ minWidth: staticNames ? 220 : 200, maxWidth: staticNames ? 340 : undefined }}>Наименование</th>
                 <th style={{ width: 120 }}>Категория</th>
                 <th style={{ width: 110 }}>Поставщик</th>
                 <th style={{ width: 72 }}>Ед.</th>
-                {showCompositionGroups && <th style={{ width: 130 }}>Группа</th>}
+                {showCompositionGroups && <th style={{ width: 130 }}>Группа стеллажа</th>}
+                {showFarmLineGroups && <th style={{ width: 130 }}>Группа раздела</th>}
                 {showRoom && <th style={{ width: 130 }}>Комната</th>}
                 {showQty && <th className="right" style={{ width: 96 }}>{qtyLabel}</th>}
                 <th className="right" style={{ width: 110 }}>Цена, ₽</th>
@@ -328,196 +526,18 @@ export default function SpecPickerTable({
               </tr>
             </thead>
             <tbody>
-              {[...grouped.entries()].map(([g, grpLines]) => (
-                <React.Fragment key={g}>
-                  {g !== "other" && (
-                    <tr>
+              {flatPickerRows.map((row) => {
+                if (row.kind === "group") {
+                  return (
+                    <tr key={`g-${row.g}`}>
                       <td colSpan={colSpan} className="spec-group-head">
-                        {groupTitle(g)}
+                        {groupTitle(row.g)}
                       </td>
                     </tr>
-                  )}
-                  {grpLines.map((ln) => (
-                    <tr key={ln.id} className={ln.included ? "" : "spec-row-off"}>
-                      <td className="spec-photo">
-                        <PhotoUploadField
-                          compact
-                          showUrlInput={false}
-                          value={ln.imageUrl || ln.photoUrl || ""}
-                          onChange={(url) => emitLines(patchLine(lines, ln.id, { imageUrl: url, photoUrl: url }))}
-                        />
-                      </td>
-                      <td className="center">
-                        <input
-                          type="checkbox"
-                          checked={!!ln.included}
-                          onChange={(e) => toggleLine(ln, e.target.checked)}
-                          title="Включить позицию"
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="spec-cell-input"
-                          value={ln.name}
-                          placeholder="наименование"
-                          onChange={(e) => emitLines(patchLine(lines, ln.id, { name: e.target.value }))}
-                        />
-                        {!ln.materialId && ln.name?.trim() && (
-                          <span className="muted" style={{ fontSize: 10, display: "block", marginTop: 2 }}>
-                            не в базе
-                          </span>
-                        )}
-                        <StructuredSpecEditor
-                          compact
-                          name={ln.name}
-                          values={ln}
-                          disabled={!ln.included}
-                          onChange={(patch) => emitLines(patchLine(lines, ln.id, patch))}
-                        />
-                        {!hasStructuredSpecEditor(ln.name) && materialSpecSubtitle(ln) && (
-                          <span className="muted" style={{ fontSize: 10, display: "block", marginTop: 2 }}>
-                            {materialSpecSubtitle(ln)}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <select
-                          className="spec-cell-input"
-                          value={ln.category || "Прочее"}
-                          disabled={!ln.included}
-                          onChange={(e) => emitLines(patchLine(lines, ln.id, { category: e.target.value }))}
-                        >
-                          {categories.map((c) => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          className="spec-cell-input"
-                          value={ln.supplier || ""}
-                          disabled={!ln.included}
-                          onChange={(e) => emitLines(patchLine(lines, ln.id, { supplier: e.target.value }))}
-                        >
-                          <option value="">—</option>
-                          {suppliers.map((s) => (
-                            <option key={s.id} value={s.name}>{s.name}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        {unitOptions.length > 1 ? (
-                          <select
-                            className="spec-cell-input spec-cell-input--sm"
-                            value={ln.unit}
-                            disabled={!ln.included}
-                            onChange={(e) => emitLines(patchLine(lines, ln.id, { unit: e.target.value }))}
-                          >
-                            {unitOptions.map((u) => (
-                              <option key={u} value={u}>{u}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            className="spec-cell-input spec-cell-input--sm"
-                            value={ln.unit}
-                            onChange={(e) => emitLines(patchLine(lines, ln.id, { unit: e.target.value }))}
-                          />
-                        )}
-                      </td>
-                      {showCompositionGroups && (
-                        <td>
-                          <select
-                            className="spec-cell-input"
-                            value={ln.subcategory || ""}
-                            disabled={!ln.included}
-                            onChange={(e) =>
-                              emitLines(patchLine(lines, ln.id, { subcategory: e.target.value }))
-                            }
-                          >
-                            <option value="">—</option>
-                            {stellageGroups.map((g) => (
-                              <option key={g.id} value={g.id}>{g.label}</option>
-                            ))}
-                          </select>
-                        </td>
-                      )}
-                      {showRoom && (
-                        <td>
-                          <select
-                            className="spec-cell-input"
-                            value={ln.roomId || ""}
-                            disabled={!ln.included}
-                            onChange={(e) => emitLines(patchLine(lines, ln.id, { roomId: e.target.value }))}
-                          >
-                            <option value="">—</option>
-                            {rooms.map((r) => (
-                              <option key={r.id} value={r.id}>{roomLabel(rooms, r.id) || r.name}</option>
-                            ))}
-                          </select>
-                        </td>
-                      )}
-                      {showQty && (
-                      <td>
-                        <input
-                          className="spec-cell-input spec-cell-input--num"
-                          type="number"
-                          min={0}
-                          step="any"
-                          value={ln.qty}
-                          disabled={!ln.included}
-                          onChange={(e) => {
-                            const qty = Number(e.target.value) || 0;
-                            emitLines(patchLine(lines, ln.id, { qty, defaultQty: qty }));
-                          }}
-                        />
-                      </td>
-                      )}
-                      <td>
-                        <input
-                          className="spec-cell-input spec-cell-input--num"
-                          type="number"
-                          min={0}
-                          step="any"
-                          value={ln.price}
-                          disabled={!ln.included}
-                          onChange={(e) => emitLines(patchLine(lines, ln.id, { price: Number(e.target.value) || 0 }))}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="spec-cell-input"
-                          value={ln.link || ""}
-                          placeholder="ссылка"
-                          disabled={!ln.included}
-                          onChange={(e) => emitLines(patchLine(lines, ln.id, { link: e.target.value }))}
-                        />
-                      </td>
-                      <td className="row" style={{ gap: 2, justifyContent: "flex-end" }}>
-                        {!ln.materialId && onSaveMaterial && ln.name?.trim() && (
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            title="Сохранить в базу материалов"
-                            disabled={savingId === ln.id}
-                            onClick={() => saveLineToBase(ln)}
-                          >
-                            {savingId === ln.id ? "…" : "💾"}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          title="Удалить строку"
-                          onClick={() => emitLines(lines.filter((x) => x.id !== ln.id))}
-                        >
-                          ✕
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </React.Fragment>
-              ))}
+                  );
+                }
+                return <SpecPickerLineRow key={row.ln.id} ln={row.ln} {...lineRowProps} />;
+              })}
             </tbody>
           </table>
         </div>
@@ -635,86 +655,42 @@ export default function SpecPickerTable({
               Снять выбор
             </button>
           </div>
-          <div className="material-picker-list">
-            {catalogGrouped.length === 0 ? (
-              <p className="muted">Ничего не найдено</p>
+          <div ref={catalogScrollRef} className="material-picker-list">
+            {catalogFlatRows.length === 0 ? (
+              <p className="muted" style={{ padding: 12 }}>
+                Ничего не найдено
+              </p>
             ) : (
-              catalogGrouped.map(([catName, mats]) => (
-                <div key={catName} className="material-picker-group">
-                  <div className="material-picker-group__title">
-                    {catName}
-                    <span className="muted num" style={{ fontWeight: 400, marginLeft: 8 }}>
-                      {mats.length}
-                    </span>
-                  </div>
-                  <table className="spec material-picker-table">
-                    <tbody>
-                      {mats.map((m) => {
-                        const added = existingMaterialIds.has(m.id);
-                        const src = photoSrc(m.imageUrl || m.photoUrl);
-                        return (
-                          <tr
-                            key={m.id}
-                            className={
-                              (added ? "material-picker-row--added " : "") +
-                              (pickedIds.has(m.id) ? "material-picker-row--picked" : "")
-                            }
-                          >
-                            <td style={{ width: 36 }}>
-                              <input
-                                type="checkbox"
-                                checked={added || pickedIds.has(m.id)}
-                                disabled={added}
-                                onChange={() => togglePick(m.id)}
-                              />
-                            </td>
-                            <td style={{ width: 52 }}>
-                              {src ? (
-                                <img src={src} alt="" className="thumb-img" style={{ width: 48, height: 32, objectFit: "cover" }} />
-                              ) : (
-                                <div className="thumb" style={{ width: 40, height: 40, fontSize: 16 }}>
-                                  {(m.name || "?").charAt(0)}
-                                </div>
-                              )}
-                            </td>
-                            <td>
-                              <strong style={{ fontSize: 13 }}>{m.name}</strong>
-                              <div className="muted" style={{ fontSize: 11 }}>
-                                {formatMaterialModulesLabel(m) || "—"}
-                                {m.supplier ? ` · ${m.supplier}` : ""}
-                              </div>
-                              {materialSpecSubtitle(m) && (
-                                <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>
-                                  {materialSpecSubtitle(m)}
-                                </div>
-                              )}
-                            </td>
-                            <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-                              {m.unit}
-                              {m.basePrice ? ` · ${m.basePrice} ₽` : ""}
-                            </td>
-                            <td style={{ width: 88 }}>
-                              {added ? (
-                                <span className="chip chip--neutral" style={{ fontSize: 10 }}>
-                                  в списке
-                                </span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="btn btn-ghost btn-sm"
-                                  onClick={() => addFromCatalog(m)}
-                                >
-                                  ＋ один
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ))
+              <table className="spec material-picker-table" style={{ width: "100%" }}>
+                <tbody>
+                  {catalogFlatRows.map((row) => {
+                    if (row.kind === "cat") {
+                      return (
+                        <tr key={`cat-${row.catName}`} className="material-picker-cat-row">
+                          <td colSpan={5} className="material-picker-group__title">
+                            {row.catName}
+                            <span className="muted num" style={{ fontWeight: 400, marginLeft: 8 }}>
+                              {row.count}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    }
+                    const m = row.m;
+                    const added = existingMaterialIds.has(m.id);
+                    return (
+                      <CatalogPickerMaterialRow
+                        key={m.id}
+                        m={m}
+                        added={added}
+                        picked={pickedIds.has(m.id)}
+                        onTogglePick={togglePick}
+                        onAddOne={addFromCatalog}
+                      />
+                    );
+                  })}
+                </tbody>
+              </table>
             )}
           </div>
         </Modal>

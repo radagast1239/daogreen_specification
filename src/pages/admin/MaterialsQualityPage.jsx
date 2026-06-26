@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
-import { downloadCSV, downloadXlsx } from "../../lib/export.js";
+import { useToast } from "../../components/Toast.jsx";
+import { downloadCSV } from "../../lib/exportDownload.js";
 import {
   analyzeMaterialsQuality,
   QUALITY_CHECK_SECTIONS,
@@ -9,7 +11,7 @@ import {
   qualitySummaryRows,
 } from "../../../shared/materialQualityCheck.js";
 
-export function MaterialsQualityPanel({ materials, modules }) {
+export function MaterialsQualityPanel({ materials, modules, onEditMaterial, onPatchMaterial }) {
   const [openSection, setOpenSection] = useState(null);
 
   const activeModuleNames = useMemo(
@@ -30,7 +32,8 @@ export function MaterialsQualityPanel({ materials, modules }) {
     downloadCSV(`materials-quality-${new Date().toISOString().slice(0, 10)}`, rows);
   };
 
-  const exportXlsx = () => {
+  const exportXlsx = async () => {
+    const { downloadXlsx } = await import("../../lib/exportXlsx.js");
     const detail = qualityReportRows(report);
     const summary = qualitySummaryRows(report);
     const stamp = new Date().toISOString().slice(0, 10);
@@ -68,7 +71,16 @@ export function MaterialsQualityPanel({ materials, modules }) {
             onClick={() => setOpenSection(openSection === s.id ? null : s.id)}
           >
             <div className="k">{s.label}</div>
-            <div className="v num" style={{ color: s.count ? "var(--danger)" : "var(--ok)" }}>
+            <div
+              className="v num"
+              style={{
+                color: s.count
+                  ? QUALITY_CHECK_SECTIONS.find((x) => x.id === s.id)?.warning
+                    ? "var(--warn)"
+                    : "var(--danger)"
+                  : "var(--ok)",
+              }}
+            >
               {s.count}
             </div>
           </button>
@@ -119,6 +131,7 @@ export function MaterialsQualityPanel({ materials, modules }) {
                         <th>Модули</th>
                         {id === "duplicateCandidates" && <th>Дублей</th>}
                         {id === "archivedModules" && <th>Архивные</th>}
+                        <th style={{ width: 200 }}>Действия</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -138,6 +151,32 @@ export function MaterialsQualityPanel({ materials, modules }) {
                               {m.archivedModules}
                             </td>
                           )}
+                          <td>
+                            <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => onEditMaterial?.(m.id)}>
+                                Исправить
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => onPatchMaterial?.(m.id, { active: false, status: "archived" })}
+                              >
+                                Скрыть
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={() =>
+                                  onPatchMaterial?.(m.id, {
+                                    category: "Требует разбора",
+                                    clientSection: "requires_review",
+                                  })
+                                }
+                              >
+                                На проверку
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -158,7 +197,9 @@ export function MaterialsQualityPanel({ materials, modules }) {
 }
 
 export default function MaterialsQualityPage() {
-  const { state } = useStore();
+  const { state, actions } = useStore();
+  const navigate = useNavigate();
+  const { success } = useToast();
 
   return (
     <>
@@ -168,7 +209,15 @@ export default function MaterialsQualityPage() {
         back={{ to: "/materials", label: "Материалы" }}
       />
       <div className="content">
-        <MaterialsQualityPanel materials={state.materials} modules={state.modules} />
+        <MaterialsQualityPanel
+          materials={state.materials}
+          modules={state.modules}
+          onEditMaterial={(id) => navigate(`/materials?edit=${encodeURIComponent(id)}`)}
+          onPatchMaterial={async (id, patch) => {
+            await actions.materialUpdate(id, patch);
+            success("Изменения сохранены");
+          }}
+        />
       </div>
     </>
   );

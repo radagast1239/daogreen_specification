@@ -15,7 +15,7 @@ export default function LoginPage() {
     setErr("");
     setAdminKey(key.trim());
     try {
-      await api.getMaterials();
+      await api.getSettings();
       clearClientScope();
       nav("/", { replace: true });
       window.location.reload();

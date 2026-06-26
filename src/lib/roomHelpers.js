@@ -11,7 +11,22 @@ export const ROOM_NAME_HINTS = [
 
 export function newRoom(name = "") {
   const n = (name || "").trim();
-  return { id: uid("room"), name: n || "Комната", area: "" };
+  return {
+    id: uid("room"),
+    name: n || "Комната",
+    area: "",
+    height: "",
+    volume: "",
+    heatGainW: "",
+    lightingW: "",
+    peopleEquipW: "",
+    targetTempC: "",
+    reservePct: 15,
+    recommendedCoolingKw: "",
+    selectedItemId: "",
+    actualCoolingKw: "",
+    comment: "",
+  };
 }
 
 export function defaultRooms() {

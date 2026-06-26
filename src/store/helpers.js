@@ -4,13 +4,17 @@ import {
   lineVat,
   lineGross,
   clientVisibleItems,
+  projectBudgetItems,
+  clientPurchaseItems,
   buildMergedSourceText,
   summarizeMergedStatus,
 } from "../lib/itemHelpers.js";
+import { lineVisibleToClient } from "../../shared/itemTypes.js";
 import { resolveClientSection } from "../../shared/clientSections.js";
 
-export const uid = (p = "id") =>
-  p + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+import { uid as makeUid } from "../lib/ids.js";
+
+export const uid = makeUid;
 
 export const money = (n, currency = "₽") => {
   const v = Math.round(Number(n) || 0);
@@ -30,14 +34,16 @@ const factGross = (it) => {
 };
 
 export function projectTotals(project) {
-  const visible = clientVisibleItems(project);
-  const budgetNet = visible.reduce((s, i) => s + lineNet(i), 0);
-  const vatAmount = visible.reduce((s, i) => s + lineVat(i), 0);
+  const budgetItems = projectBudgetItems(project);
+  const budgetNet = budgetItems.reduce((s, i) => s + lineNet(i), 0);
+  const vatAmount = budgetItems.reduce((s, i) => s + lineVat(i), 0);
   const budget = budgetNet + vatAmount;
-  const done = visible.filter((i) => DONE_STATUSES.includes(i.status));
+  const visible = clientVisibleItems(project);
+  const purchasePool = clientPurchaseItems(project);
+  const done = purchasePool.filter((i) => DONE_STATUSES.includes(i.status));
   const spent = done.reduce((s, i) => s + factGross(i), 0);
   const doneCount = done.length;
-  const total = visible.length;
+  const total = purchasePool.length;
   const progress = total ? Math.round((doneCount / total) * 100) : 0;
   const remaining = Math.max(budget - spent, 0);
   const overrun = Math.max(spent - budget, 0);
@@ -54,9 +60,9 @@ export function projectStats(project) {
   const items = project.items || [];
   return {
     total: items.length,
-    approved: items.filter((i) => i.approved).length,
-    hidden: items.filter((i) => !i.visible).length,
-    disabled: items.filter((i) => !i.enabled || (Number(i.qty) || 0) === 0).length,
+    approved: items.filter((i) => lineVisibleToClient(i)).length,
+    hidden: items.filter((i) => i.includedInProject !== false && i.enabled !== false && !lineVisibleToClient(i)).length,
+    disabled: items.filter((i) => i.includedInProject === false || i.enabled === false || (Number(i.qty) || 0) === 0).length,
     noPrice: items.filter((i) => !i.price).length,
     noLink: items.filter((i) => !i.link).length,
     noImage: items.filter((i) => !i.imageUrl && !i.photoUrl).length,
@@ -74,8 +80,27 @@ export function groupBy(items, key) {
   return [...map.entries()];
 }
 
+import { purchaseMergeKey } from "../../shared/purchaseMerge.js";
+
+function resolveMergedSupplier(items) {
+  for (const it of items || []) {
+    const s = (it.supplier || "").trim();
+    if (s) return s;
+  }
+  return "";
+}
+
+function resolveMergedLink(items) {
+  for (const it of items || []) {
+    const u = (it.link || "").trim();
+    if (u) return u;
+  }
+  return "";
+}
 function finalizeMergedRow(row) {
   const rep = row.sourceItems?.[0];
+  row.supplier = resolveMergedSupplier(row.sourceItems) || row.supplier || "";
+  row.link = resolveMergedLink(row.sourceItems) || row.link || "";
   const resolved = resolveClientSection(rep || {});
   row.clientSection = resolved.section;
   row.clientSubsection = resolved.subsection || row.clientSubsection || "";
@@ -95,11 +120,7 @@ function finalizeMergedRow(row) {
 export function mergedPurchaseRows(items) {
   const map = new Map();
   for (const it of items || []) {
-    const normName = (it.name || "").trim().toLowerCase().replace(/\s+/g, " ");
-    const purchaseKey = (it.purchaseKey || it.purchase_key || "").trim();
-    const key =
-      purchaseKey ||
-      [normName, (it.unit || "").toLowerCase(), (it.supplier || "").trim(), (it.link || "").trim()].join("|");
+    const key = purchaseMergeKey(it);
     if (!map.has(key)) {
       map.set(key, {
         mergeKey: key,
@@ -133,7 +154,7 @@ export function mergedPurchaseRows(items) {
 
 /** Склеенные строки для клиентского UI / Excel / PDF */
 export function mergedItemsForClient(project, items) {
-  const pool = items ?? clientVisibleItems(project);
+  const pool = items ?? clientPurchaseItems(project);
   return mergedPurchaseRows(pool);
 }
 
