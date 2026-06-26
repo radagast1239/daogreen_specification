@@ -131,29 +131,40 @@ export function ObjectPalette({
 
         {active === "room" && (
           <div className="planner-side__section">
-            <div className="planner-side__title">Помещение, мм</div>
+            <div className="planner-side__title">Лист чертежа, мм</div>
+            <p className="planner-spec-intro" style={{ marginBottom: 10 }}>
+              Пустая сетка. Стены рисуйте инструментом <b>Стена</b> на листе «Перегородки».
+            </p>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Ширина</label>
+                <label>Ширина листа</label>
                 <input type="number" value={plan.room.w} onChange={(e) => onRoomPatch({ w: Math.max(500, +e.target.value || 0) })} />
               </div>
               <div className="planner-field">
-                <label>Глубина</label>
+                <label>Глубина листа</label>
                 <input type="number" value={plan.room.h} onChange={(e) => onRoomPatch({ h: Math.max(500, +e.target.value || 0) })} />
               </div>
             </div>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Наружная стена</label>
+                <label>Толщина стены</label>
                 <input type="number" value={plan.room.wallThk} onChange={(e) => onRoomPatch({ wallThk: Math.max(40, +e.target.value || 0) })} />
               </div>
               <div className="planner-field">
-                <label>Высота</label>
+                <label>Высота помещения</label>
                 <select value={plan.room.height || 3000} onChange={(e) => onRoomPatch({ height: +e.target.value })}>
                   {ROOM_HEIGHT_PRESETS.map((h) => <option key={h} value={h}>{h} мм</option>)}
                 </select>
               </div>
             </div>
+            <label className="planner-chk" style={{ marginTop: 8 }}>
+              <input
+                type="checkbox"
+                checked={!!plan.room.showBoundary}
+                onChange={(e) => onRoomPatch({ showBoundary: e.target.checked })}
+              />
+              Показать границу листа (пунктир)
+            </label>
           </div>
         )}
 

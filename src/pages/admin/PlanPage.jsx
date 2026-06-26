@@ -14,7 +14,7 @@ import {
 } from "../../planner/wallGeometry.js";
 import { usePlanHistory } from "../../planner/usePlanHistory.js";
 import {
-  PlanGrid, RoomShell, RoomDims, WallEl, ItemEl, ZoneEl, LabelEl, LineEl,
+  PlanGrid, SheetBackdrop, RoomDims, WallEl, ItemEl, ZoneEl, LabelEl, LineEl,
   DraftLine, SelectionDims, MeasureEl, TypedLengthHint, LinkEl,
 } from "../../planner/canvasPrimitives.jsx";
 import {
@@ -55,7 +55,7 @@ export default function PlanPage() {
   const [tool, setTool] = useState("select");
   const [pending, setPending] = useState(null);
   const [sel, setSel] = useState(null);
-  const [view, setView] = useState({ panX: 60, panY: 70, zoom: 0.1 });
+  const [view, setView] = useState({ panX: 0, panY: 0, zoom: 0.08 });
   const [display, setDisplay] = useState(DEFAULT_DISPLAY);
   const [unit] = useState("mm");
   const [vis, setVis] = useState(Object.fromEntries(LAYERS.map((l) => [l.id, true])));
@@ -86,6 +86,13 @@ export default function PlanPage() {
     actions.ensureMaterials().catch(() => {});
     actions.ensureModules().catch(() => {});
   }, [actions]);
+
+  useEffect(() => {
+    const t = requestAnimationFrame(() => {
+      if (svgRef.current) fitView();
+    });
+    return () => cancelAnimationFrame(t);
+  }, [project?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -866,9 +873,9 @@ export default function PlanPage() {
           >
             <rect width="100%" height="100%" fill="#f7f8f6" data-canvas-bg="1" />
             <g data-main transform={`translate(${view.panX},${view.panY}) scale(${z})`}>
+              <SheetBackdrop room={plan.room} k={k} showBoundary={plan.room.showBoundary} />
               <PlanGrid room={plan.room} zoom={z} showGrid={display.showGrid} showMinorGrid={display.showMinorGrid} />
               <g data-layer="room">
-                <RoomShell room={plan.room} k={k} />
                 {roomWalls.map((w) => (
                   <WallEl
                     key={w.id}
@@ -884,7 +891,7 @@ export default function PlanPage() {
                     onWallMove={startWallMove}
                   />
                 ))}
-                {display.showDims && active === "room" && <RoomDims room={plan.room} k={k} fmtU={fmtU} />}
+                {display.showDims && active === "room" && plan.room.showBoundary && <RoomDims room={plan.room} k={k} fmtU={fmtU} />}
                 {itemsByLayer("room").map((it) => itemProps(it, "room"))}
               </g>
               <g data-layer="partitions">
@@ -1053,7 +1060,7 @@ function withDefaults(plan) {
   return {
     ...d,
     ...plan,
-    room: { ...d.room, height: 3000, ...plan.room },
+    room: { ...d.room, height: 3000, showBoundary: false, ...plan.room },
     zones: plan.zones || [],
     labels: plan.labels || [],
     walls: (plan.walls || []).map((w) => ({ role: "partition", ...w })),

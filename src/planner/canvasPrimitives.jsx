@@ -9,15 +9,15 @@ const GRID_MAJOR = 1000;
 
 export function PlanGrid({ room, zoom, showGrid, showMinorGrid = true }) {
   if (!showGrid) return null;
-  const pad = 1500;
+  const pad = 2000;
   const x0 = -pad;
   const y0 = -pad;
   const x1 = room.w + pad;
   const y1 = room.h + pad;
-  const showMinor = showMinorGrid && zoom >= 0.06;
+  const showMinor = showMinorGrid && zoom >= 0.03;
   const L = [];
-  const minorColor = "rgba(25,45,38,0.045)";
-  const majorColor = "rgba(25,45,38,0.10)";
+  const minorColor = "rgba(25,45,38,0.14)";
+  const majorColor = "rgba(25,45,38,0.28)";
 
   for (let x = Math.ceil(x0 / GRID_MINOR) * GRID_MINOR; x <= x1; x += GRID_MINOR) {
     const major = x % GRID_MAJOR === 0;
@@ -30,7 +30,8 @@ export function PlanGrid({ room, zoom, showGrid, showMinorGrid = true }) {
         x2={x}
         y2={y1}
         stroke={major ? majorColor : minorColor}
-        strokeWidth={major ? 1.2 : 0.6}
+        strokeWidth={major ? 1.4 : 0.9}
+        vectorEffect="non-scaling-stroke"
       />
     );
   }
@@ -45,20 +46,38 @@ export function PlanGrid({ room, zoom, showGrid, showMinorGrid = true }) {
         x2={x1}
         y2={y}
         stroke={major ? majorColor : minorColor}
-        strokeWidth={major ? 1.2 : 0.6}
+        strokeWidth={major ? 1.4 : 0.9}
+        vectorEffect="non-scaling-stroke"
       />
     );
   }
-  return <g data-ui="grid">{L}</g>;
+  return <g data-ui="grid" pointerEvents="none">{L}</g>;
 }
 
-export function RoomShell({ room, k }) {
+/** Лист чертежа — без готовых стен. Опционально пунктир границы листа. */
+export function SheetBackdrop({ room, k, showBoundary }) {
+  if (!showBoundary) return null;
+  return (
+    <rect
+      x={0}
+      y={0}
+      width={room.w}
+      height={room.h}
+      fill="none"
+      stroke="rgba(25,45,38,0.2)"
+      strokeWidth={1.2 * k}
+      strokeDasharray={`${12 * k} ${8 * k}`}
+      pointerEvents="none"
+    />
+  );
+}
+
+/** @deprecated Используйте SheetBackdrop + рисование стен инструментом «Стена». */
+export function RoomShell({ room, k, showBoundary = false }) {
+  if (!showBoundary) return null;
   const t = room.wallThk;
   return (
     <g>
-      <rect x={0} y={0} width={room.w} height={room.h} fill="#fafaf8" />
-      {/* внешние стены — двойной контур */}
-      <rect x={t / 2} y={t / 2} width={room.w - t} height={room.h - t} fill="#f2f2f0" stroke="none" />
       <rect
         x={0}
         y={0}
@@ -66,8 +85,9 @@ export function RoomShell({ room, k }) {
         height={room.h}
         fill="none"
         stroke="#2f3431"
-        strokeWidth={t}
-        strokeLinejoin="miter"
+        strokeWidth={Math.max(2 * k, 2)}
+        strokeDasharray={`${10 * k} ${6 * k}`}
+        opacity={0.5}
       />
       <rect
         x={t * 0.75}
@@ -76,8 +96,8 @@ export function RoomShell({ room, k }) {
         height={room.h - t * 1.5}
         fill="none"
         stroke="#4b504d"
-        strokeWidth={1.2 * k}
-        opacity={0.35}
+        strokeWidth={1 * k}
+        opacity={0.25}
       />
     </g>
   );

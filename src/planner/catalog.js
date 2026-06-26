@@ -183,7 +183,7 @@ export const areaM2 = (w, h) => ((w / 1000) * (h / 1000)).toFixed(2);
 
 export const DEFAULT_PLAN = () => ({
   unit: "mm",
-  room: { w: 8000, h: 5000, wallThk: 120, height: 3000 },
+  room: { w: 12000, h: 8000, wallThk: 120, height: 3000, showBoundary: false },
   walls: [], items: [], lines: [], links: [], zones: [], labels: [],
 });
 
