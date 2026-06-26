@@ -168,6 +168,16 @@ export function ObjectPalette({
           </div>
         )}
 
+        {active === "zones" && (
+          <div className="planner-side__section">
+            <div className="planner-side__title">Зонирование</div>
+            <p className="planner-spec-intro">
+              Назначьте тип зоны в свойствах: <b>чистая</b>, <b>грязная</b> или <b>буфер</b>.
+              Между чистой и грязной — дизковрик у двери.
+            </p>
+          </div>
+        )}
+
         {active === "partitions" && (
           <div className="planner-side__section">
             <div className="planner-side__title">Перегородка</div>

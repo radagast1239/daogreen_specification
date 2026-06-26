@@ -205,6 +205,7 @@ export default function PlanPage() {
           name: `Помещение ${manual.length + i + 1}`,
           height: p.room.height || 3000,
           polygon: poly,
+          flow: "neutral",
           auto: true,
         };
       });
@@ -308,7 +309,7 @@ export default function PlanPage() {
   const addZoneAt = (mm) => {
     const zw = 2000;
     const zh = 1500;
-    const z = { id: uid("zn"), x: sn(mm.x - zw / 2), y: sn(mm.y - zh / 2), w: zw, h: zh, name: "Зона", height: plan.room.height || 3000 };
+    const z = { id: uid("zn"), x: sn(mm.x - zw / 2), y: sn(mm.y - zh / 2), w: zw, h: zh, name: "Зона", height: plan.room.height || 3000, flow: "neutral" };
     setPlan((p) => ({ ...p, zones: [...p.zones, z] }));
     setSel({ coll: "zones", id: z.id });
     setTool("select");
@@ -777,14 +778,15 @@ export default function PlanPage() {
     startMove(e, "items", it);
   };
 
-  const exportPDF = async () => {
+  const exportPDF = async (mode = "full") => {
     setBusy(true);
     try {
       await exportLayeredPDF(
         svgRef.current,
         plan.room,
         PDF_SHEETS.map((l) => ({ id: l.id, sheet: l.sheet })),
-        { projectName: project.name, projectId: project.id.replace(/\D/g, "").slice(0, 7), version: "1" }
+        { projectName: project.name, projectId: project.id.replace(/\D/g, "").slice(0, 7), version: "1" },
+        mode,
       );
     } catch (e) { alert("Не удалось собрать PDF: " + e.message); }
     setBusy(false);

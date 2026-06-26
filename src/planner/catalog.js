@@ -150,7 +150,7 @@ export const CATALOG = [
   // ── Дренаж ──
   { kind: "tank_waste",  label: "Бак отходов",        w: 600, h: 600, color: "#7a5c3e", icon: "tank_waste", layer: "drain" },
   // ── Электрика ──
-  { kind: "panel",       label: "Электрощит",         w: 600, h: 200, color: "#a5371f", icon: "panel",  layer: "power", wall: true },
+  { kind: "panel",       label: "Электрощит",         w: 600, h: 200, color: "#a5371f", icon: "panel",  layer: "power", wall: true, params: { ratedW: 22000 } },
   { kind: "socket",      label: "Розетка/блок",       w: 150, h: 80, color: "#c44a2f", icon: "socket",  layer: "sockets", wall: true },
   { kind: "light_panel", label: "Светильник",         w: 600, h: 120, color: "#d4a017", icon: "light",   layer: "light", wall: true },
   // ── Вентиляция ──
@@ -228,6 +228,7 @@ export const DEFAULT_DISPLAY = () => ({
   highlightSockets: false,
   highlightFurniture: false,
   highlightErrors: true,
+  showZoneFlow: true,
   showLinks: true,
   onlyInsideRooms: false,
 });

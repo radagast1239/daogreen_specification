@@ -1,5 +1,6 @@
 import React from "react";
 import { areaM2, LINE_STYLE, LINK_RULES } from "./catalog.js";
+import { ZONE_FLOW } from "./farmRules.js";
 import { ObjectIcon, DoorIcon } from "./icons.jsx";
 import { layerOpacity, labelsVisible } from "./geometry.js";
 import { linkLengthMm } from "./linkGeometry.js";
@@ -380,14 +381,17 @@ export function ZoneEl({ zn, k, selected, onDown, onResize, fmtU, activeLayer, s
   const detail = showDetail || activeLayer === "zones";
   const poly = zn.polygon?.length >= 3;
   const polyD = poly ? `M ${zn.polygon.map((p) => `${p.x} ${p.y}`).join(" L ")} Z` : null;
+  const flow = ZONE_FLOW[zn.flow] || ZONE_FLOW.neutral;
+  const stroke = flow.color;
+  const fillOp = selected ? flow.fill + 0.04 : flow.fill;
   return (
     <g>
       {poly ? (
         <path
           d={polyD}
-          fill="#8a7a9c"
-          fillOpacity={selected ? 0.1 : 0.06}
-          stroke="#8a7a9c"
+          fill={stroke}
+          fillOpacity={fillOp}
+          stroke={stroke}
           strokeWidth={(selected ? 2 : 1.2) * k}
           onPointerDown={onDown}
           style={{ cursor: "move" }}
@@ -399,9 +403,9 @@ export function ZoneEl({ zn, k, selected, onDown, onResize, fmtU, activeLayer, s
           width={zn.w}
           height={zn.h}
           rx={2 * k}
-          fill="#8a7a9c"
-          fillOpacity={selected ? 0.08 : 0.04}
-          stroke="#8a7a9c"
+          fill={stroke}
+          fillOpacity={fillOp}
+          stroke={stroke}
           strokeWidth={(selected ? 2 : 1.2) * k}
           strokeDasharray={detail ? "none" : `${10 * k} ${6 * k}`}
           onPointerDown={onDown}
@@ -410,10 +414,15 @@ export function ZoneEl({ zn, k, selected, onDown, onResize, fmtU, activeLayer, s
       )}
       {detail && (
         <>
-          <text x={cx} y={cy - 6 * k} fontSize={13 * k} textAnchor="middle" fill="#5a4a6a" fontWeight="600" pointerEvents="none">
+          <text x={cx} y={cy - 6 * k} fontSize={13 * k} textAnchor="middle" fill={stroke} fontWeight="600" pointerEvents="none">
             {zn.name}
           </text>
-          <text x={cx} y={cy + 12 * k} fontSize={11 * k} textAnchor="middle" fill="#8a7a9c" pointerEvents="none" style={{ fontFamily: "var(--mono)" }}>
+          {zn.flow && zn.flow !== "neutral" && (
+            <text x={cx} y={cy + 8 * k} fontSize={10 * k} textAnchor="middle" fill={stroke} pointerEvents="none" opacity={0.85}>
+              {flow.label}
+            </text>
+          )}
+          <text x={cx} y={cy + (zn.flow && zn.flow !== "neutral" ? 24 : 12) * k} fontSize={11 * k} textAnchor="middle" fill="#8a7a9c" pointerEvents="none" style={{ fontFamily: "var(--mono)" }}>
             S = {areaM2(zn.w, zn.h)} м²
           </text>
           {activeLayer === "zones" && (

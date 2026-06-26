@@ -1,9 +1,46 @@
-// Экспорт плана в многослойный PDF: одна страница на лист, рамка + штамп.
+// Экспорт плана в PDF: альбом, клиентский, монтажный, закупочный.
 import { jsPDF } from "jspdf";
 import { PDF_SHEETS } from "./catalog.js";
+import { PDF_LEGEND } from "./farmRules.js";
 
 const CSS_VARS = `<style>svg{--brand:#116355;--muted:#6b7d74;--danger:#a5371f;--amber:#b9741d;--line-strong:#c3d4cb;--mono:'Courier New',monospace;}</style>`;
 const EXPORT_W = 2200, EXPORT_H = 1500, MARGIN = 80;
+
+export const PDF_MODES = {
+  full: {
+    label: "Полный альбом",
+    suffix: "альбом",
+    sheets: null,
+  },
+  client: {
+    label: "Клиентский",
+    suffix: "клиент",
+    sheets: [
+      { id: "client", sheet: "Клиентский вид" },
+      { id: "legend", sheet: "Условные обозначения" },
+    ],
+  },
+  install: {
+    label: "Монтажный",
+    suffix: "монтаж",
+    sheets: [
+      { id: "install", sheet: "Монтажный вид" },
+      { id: "partitions", sheet: "Перегородки" },
+      { id: "racks", sheet: "Стеллажи" },
+      { id: "irrigation", sheet: "Полив" },
+      { id: "power", sheet: "Электрика" },
+      { id: "sockets", sheet: "Розетки" },
+      { id: "climate", sheet: "Климат" },
+      { id: "vent", sheet: "Вентиляция" },
+      { id: "legend", sheet: "Условные обозначения" },
+    ],
+  },
+  purchase: {
+    label: "Закупочный",
+    suffix: "закупка",
+    sheets: [{ id: "spec", sheet: "Спецификация" }],
+  },
+};
 
 function fitTransform(room) {
   const z = Math.min((EXPORT_W - 2 * MARGIN) / room.w, (EXPORT_H - 2 * MARGIN) / room.h);
@@ -63,9 +100,64 @@ function rasterize(svgStr, scale = 1.6) {
   });
 }
 
-// layers: [{id, sheet}] — порядок страниц; meta: {projectName, projectId, version}
-export async function exportLayeredPDF(svgEl, room, layers, meta) {
-  const sheets = layers?.length ? layers : PDF_SHEETS.map((l) => ({ id: l.id, sheet: l.sheet }));
+function hexRgb(hex) {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+function drawLegendPage(pdf, meta, pageNum, sheetTitle) {
+  const pw = pdf.internal.pageSize.getWidth();
+  const ph = pdf.internal.pageSize.getHeight();
+  const date = new Date().toLocaleDateString("ru-RU");
+
+  pdf.setFontSize(16); pdf.setTextColor(17, 99, 85);
+  pdf.text(sheetTitle, 14, 22);
+  pdf.setFontSize(11); pdf.setTextColor(60);
+  pdf.text("Условные обозначения объектов на плане", 14, 32);
+
+  let y = 48;
+  PDF_LEGEND.forEach((row) => {
+    const [r, g, b] = hexRgb(row.color);
+    pdf.setFillColor(r, g, b);
+    pdf.rect(16, y - 5, 10, 10, "F");
+    pdf.setDrawColor(120); pdf.rect(16, y - 5, 10, 10);
+    pdf.setTextColor(30);
+    pdf.setFontSize(11);
+    pdf.text(row.label, 32, y + 2);
+    y += 14;
+  });
+
+  pdf.setFontSize(10); pdf.setTextColor(90);
+  pdf.text("Линии трасс: сплошная — трубы, пунктир — кабели. Связи объектов — пунктир со стрелкой.", 14, y + 8);
+  pdf.text("Зоны: зелёный — чистая, коричневый — грязная, фиолетовый — буфер.", 14, y + 16);
+
+  pdf.setDrawColor(180); pdf.rect(8, 6, pw - 16, ph - 14);
+  pdf.setFontSize(9); pdf.setTextColor(90);
+  pdf.text(`№${meta.projectId || "—"} · ${meta.projectName || ""} · ${date} · v${meta.version || "1"}`, pw - 14, ph - 10, { align: "right" });
+  pdf.text(`Лист ${pageNum}. ${sheetTitle}`, 14, ph - 10);
+}
+
+function drawSpecPage(pdf, meta, pageNum, sheetTitle) {
+  const pw = pdf.internal.pageSize.getWidth();
+  const ph = pdf.internal.pageSize.getHeight();
+  const date = new Date().toLocaleDateString("ru-RU");
+  pdf.setFontSize(16); pdf.setTextColor(17, 99, 85);
+  pdf.text(`Лист ${pageNum}. ${sheetTitle}`, 14, 20);
+  pdf.setFontSize(11); pdf.setTextColor(60);
+  pdf.text("Спецификация формируется из объектов плана и синхронизируется с проектом.", 14, 32);
+  pdf.text(`Проект: ${meta.projectName || "—"}`, 14, 44);
+  pdf.text("Нажмите «В спецификацию» в планировщике для обновления позиций.", 14, 56);
+  pdf.setDrawColor(180); pdf.rect(8, 6, pw - 16, ph - 14);
+  pdf.setFontSize(9); pdf.setTextColor(90);
+  pdf.text(`№${meta.projectId || "—"} · ${date}`, pw - 14, ph - 10, { align: "right" });
+}
+
+export async function exportLayeredPDF(svgEl, room, layers, meta, mode = "full") {
+  const modeDef = PDF_MODES[mode] || PDF_MODES.full;
+  const sheets = modeDef.sheets?.length
+    ? modeDef.sheets
+    : (layers?.length ? layers : PDF_SHEETS.map((l) => ({ id: l.id, sheet: l.sheet })));
+
   const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a3" });
   const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
   const imgW = pw - 20, imgH = imgW * (EXPORT_H / EXPORT_W);
@@ -73,22 +165,27 @@ export async function exportLayeredPDF(svgEl, room, layers, meta) {
 
   for (let i = 0; i < sheets.length; i++) {
     if (i > 0) pdf.addPage();
-    if (sheets[i].id === "spec") {
-      pdf.setFontSize(16); pdf.setTextColor(17, 99, 85);
-      pdf.text(`Лист ${i + 1}. ${sheets[i].sheet}`, 14, 20);
-      pdf.setFontSize(11); pdf.setTextColor(60);
-      pdf.text("Спецификация формируется из объектов плана и синхронизируется с проектом.", 14, 32);
-      pdf.text(`Проект: ${meta.projectName || "—"}`, 14, 44);
-    } else {
-      const png = await rasterize(buildLayerSVG(svgEl, room, sheets[i].id));
-      pdf.addImage(png, "PNG", 10, 8, imgW, imgH);
+    const sheet = sheets[i];
+
+    if (sheet.id === "legend") {
+      drawLegendPage(pdf, meta, i + 1, sheet.sheet);
+      continue;
     }
+    if (sheet.id === "spec") {
+      drawSpecPage(pdf, meta, i + 1, sheet.sheet);
+      continue;
+    }
+
+    const png = await rasterize(buildLayerSVG(svgEl, room, sheet.id));
+    pdf.addImage(png, "PNG", 10, 8, imgW, imgH);
     pdf.setDrawColor(180); pdf.rect(8, 6, pw - 16, ph - 14);
     pdf.setFontSize(13); pdf.setTextColor(17, 99, 85);
-    pdf.text(`Лист ${i + 1}. ${sheets[i].sheet}`, 14, ph - 10);
+    pdf.text(`Лист ${i + 1}. ${sheet.sheet}`, 14, ph - 10);
     pdf.setFontSize(9); pdf.setTextColor(90);
     pdf.text(`№${meta.projectId || "—"} · ${meta.projectName || ""} · ${date} · v${meta.version || "1"}`, pw - 14, ph - 10, { align: "right" });
     pdf.text("Daogreen Planner", pw - 14, ph - 16, { align: "right" });
   }
-  pdf.save(`${meta.projectName || "план"}_альбом.pdf`);
+
+  const suffix = modeDef.suffix || "альбом";
+  pdf.save(`${meta.projectName || "план"}_${suffix}.pdf`);
 }

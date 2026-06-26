@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { areaM2, LINK_RULES } from "../catalog.js";
+import { ZONE_FLOW, itemPowerW, panelCapacityW } from "../farmRules.js";
 import { projectSectionTemplates } from "../specSync.js";
 import { collectPlannerWarnings } from "../geometry.js";
 import { linkLengthMm, linksForItem } from "../linkGeometry.js";
@@ -138,6 +139,14 @@ function SelFields({ sel, obj, plan, updateObj, rotateItem, delSel, fmtU, active
           <input readOnly value={`S = ${areaM2(obj.w, obj.h)} м²`} />
         </div>
         <div className="planner-field">
+          <label>Тип зоны</label>
+          <select value={obj.flow || "neutral"} onChange={(e) => updateObj("zones", obj.id, { flow: e.target.value })}>
+            {Object.entries(ZONE_FLOW).map(([id, f]) => (
+              <option key={id} value={id}>{f.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="planner-field">
           <label>Высота H, мм</label>
           <input type="number" value={obj.height} onChange={(e) => updateObj("zones", obj.id, { height: +e.target.value || 0 })} />
         </div>
@@ -262,6 +271,26 @@ function SelFields({ sel, obj, plan, updateObj, rotateItem, delSel, fmtU, active
           <div className="planner-field">
             <label>Ярусов</label>
             <input type="number" value={obj.params.tiers} onChange={(e) => updateObj("items", obj.id, { params: { ...obj.params, tiers: +e.target.value || 1 } })} />
+          </div>
+        )}
+        {obj.kind === "panel" && (
+          <div className="planner-field">
+            <label>Ёмкость щита, Вт</label>
+            <input
+              type="number"
+              value={obj.powerW ?? panelCapacityW(obj)}
+              onChange={(e) => updateObj("items", obj.id, { powerW: Math.max(1000, +e.target.value || 0) })}
+            />
+          </div>
+        )}
+        {(obj.kind === "rack" || obj.kind === "seed_rack" || obj.kind === "pump") && (
+          <div className="planner-field">
+            <label>Нагрузка, Вт</label>
+            <input
+              type="number"
+              value={obj.powerW ?? itemPowerW(obj)}
+              onChange={(e) => updateObj("items", obj.id, { powerW: Math.max(0, +e.target.value || 0) })}
+            />
           </div>
         )}
         <ItemLinksList itemId={obj.id} plan={plan} />

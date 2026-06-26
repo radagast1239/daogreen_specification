@@ -3,6 +3,7 @@ import {
   findWallIntersections, itemInAnyZone, nearestWallSegment,
 } from "./wallGeometry.js";
 import { itemHasLinkOfType } from "./linkGeometry.js";
+import { collectFarmWarnings } from "./farmRules.js";
 
 /** Привязка точки к горизонтали/вертикали относительно предыдущей (как в CAD). */
 export function orthogonalPoint(from, to, step = 50, snapOn = true) {
@@ -180,6 +181,8 @@ export function collectPlannerWarnings(plan, sel = null) {
       }
     }
   }
+
+  warnings.push(...collectFarmWarnings(plan));
 
   return warnings;
 }
