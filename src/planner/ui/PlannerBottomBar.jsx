@@ -55,6 +55,7 @@ export function PlannerBottomBar({
         <Toggle label="Магниты" on={display.snapOn} onClick={() => onToggle("snapOn")} />
         <Toggle label="Подсказки" on={display.showHints} onClick={() => onToggle("showHints")} />
         <Toggle label="Подписи" on={display.showLabels} onClick={() => onToggle("showLabels")} />
+        <Toggle label="Связи" on={display.showLinks} onClick={() => onToggle("showLinks")} />
         <Toggle label="Скрыть неактив." on={display.hideInactive} onClick={() => onToggle("hideInactive")} />
         <Toggle label="Только в помещ." on={display.onlyInsideRooms} onClick={() => onToggle("onlyInsideRooms")} />
         <button

@@ -29,12 +29,12 @@ export const LAYER_TOOLS = {
   zones:       ["select", "zone", "measure", "label", "pan"],
   partitions:  ["select", "wall", "measure", "label", "pan"],
   racks:       ["select", "measure", "label", "pan"],
-  irrigation:  ["select", "line", "measure", "label", "pan"],
-  drain:       ["select", "line", "measure", "label", "pan"],
-  water:       ["select", "measure", "label", "pan"],
-  power:       ["select", "line", "measure", "label", "pan"],
-  sockets:     ["select", "measure", "label", "pan"],
-  light:       ["select", "line", "measure", "label", "pan"],
+  irrigation:  ["select", "line", "link", "measure", "label", "pan"],
+  drain:       ["select", "line", "link", "measure", "label", "pan"],
+  water:       ["select", "link", "measure", "label", "pan"],
+  power:       ["select", "line", "link", "measure", "label", "pan"],
+  sockets:     ["select", "link", "measure", "label", "pan"],
+  light:       ["select", "line", "link", "measure", "label", "pan"],
   climate:     ["select", "measure", "label", "pan"],
   vent:        ["select", "line", "measure", "label", "pan"],
   staff:       ["select", "line", "measure", "label", "pan"],
@@ -184,8 +184,30 @@ export const areaM2 = (w, h) => ((w / 1000) * (h / 1000)).toFixed(2);
 export const DEFAULT_PLAN = () => ({
   unit: "mm",
   room: { w: 8000, h: 5000, wallThk: 120, height: 3000 },
-  walls: [], items: [], lines: [], zones: [], labels: [],
+  walls: [], items: [], lines: [], links: [], zones: [], labels: [],
 });
+
+/** Правила инженерных связей: от кого → к кому. */
+export const LINK_RULES = {
+  irrigation: {
+    label: "Полив",
+    color: "#1f6f8b",
+    from: new Set(["rack", "seed_rack", "pump"]),
+    to: new Set(["tank", "pump", "osmosis", "water_prep"]),
+  },
+  power: {
+    label: "Электрика",
+    color: "#a5371f",
+    from: new Set(["socket", "light_panel", "rack", "seed_rack", "pump"]),
+    to: new Set(["panel"]),
+  },
+  drain: {
+    label: "Дренаж",
+    color: "#7a5c3e",
+    from: new Set(["trap", "sink_susp", "sink_table", "sink_double", "shower_pan"]),
+    to: new Set(["tank_waste"]),
+  },
+};
 
 export const DEFAULT_DISPLAY = () => ({
   showDims: true,
@@ -206,5 +228,6 @@ export const DEFAULT_DISPLAY = () => ({
   highlightSockets: false,
   highlightFurniture: false,
   highlightErrors: true,
+  showLinks: true,
   onlyInsideRooms: false,
 });

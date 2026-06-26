@@ -1,6 +1,7 @@
 import { uid } from "../store/helpers.js";
 import { lineFromMaterial, lineToProjectItem } from "../lib/projectBuilder.js";
 import { materialInModule } from "../../shared/materialModules.js";
+import { linkLengthMm } from "./linkGeometry.js";
 
 const EXCLUDED_FROM_SPEC_BY_DEFAULT = new Set(["door", "door2", "window", "person"]);
 const KIT_BY_DEFAULT = new Set(["rack", "seed_rack"]);
@@ -331,6 +332,40 @@ function mergeLineItem(line, existingByKey) {
   };
 }
 
+function mergeLinkItem(link, items, room, existingByKey) {
+  const preset = LINE_PRESETS[link.type];
+  if (!preset) return null;
+  const { total } = linkLengthMm(link, items, room);
+  if (!total) return null;
+  const qty = roundQty(total / 1000);
+  const sourceKey = `planner:link:${link.type}`;
+  const prev = existingByKey.get(sourceKey);
+  return {
+    id: prev?.id || uid("it"),
+    materialId: prev?.materialId || "",
+    module: prev?.module || preset.module,
+    section: prev?.section || prev?.module || preset.module,
+    name: prev?.name || `${preset.name} (связи)`,
+    unit: prev?.unit || preset.unit,
+    category: prev?.category || preset.category,
+    link: prev?.link || "",
+    comment: prev?.comment || "Длина по связям объектов на плане",
+    qty,
+    price: prev?.price ?? 0,
+    visible: prev?.visible ?? true,
+    approved: prev?.approved ?? false,
+    includedInProject: true,
+    visibleToClient: prev?.visibleToClient ?? true,
+    status: prev?.status || "not_bought",
+    actualPrice: prev?.actualPrice ?? null,
+    clientComment: prev?.clientComment || "",
+    source: "planner",
+    sourceType: "link",
+    sourceKey,
+    sourceObjectIds: [link.id],
+  };
+}
+
 export function createPlannerSpecItems({ plan, materials = [], modules = [], existingItems = [] }) {
   const existingByKey = new Map(existingItems.filter((it) => it.source === "planner" && it.sourceKey).map((it) => [it.sourceKey, it]));
   const manual = existingItems.filter((it) => it.source !== "planner");
@@ -367,6 +402,18 @@ export function createPlannerSpecItems({ plan, materials = [], modules = [], exi
     }
   }
 
+  for (const link of plan.links || []) {
+    const row = mergeLinkItem(link, plan.items || [], plan.room || {}, existingByKey);
+    if (!row) continue;
+    const prev = groups.get(row.sourceKey);
+    if (prev) {
+      prev.qty = roundQty(prev.qty + row.qty);
+      prev.sourceObjectIds.push(...row.sourceObjectIds);
+    } else {
+      groups.set(row.sourceKey, row);
+    }
+  }
+
   const generated = [...groups.values()]
     .map((it, sortOrder) => ({ ...it, sortOrder: (manual.length || 0) + sortOrder }))
     .sort((a, b) => (a.module || "").localeCompare(b.module || "", "ru") || (a.name || "").localeCompare(b.name || "", "ru"));
@@ -376,6 +423,7 @@ export function createPlannerSpecItems({ plan, materials = [], modules = [], exi
     generatedCount: generated.length,
     objectCount: (plan.items || []).filter((it) => ({ ...defaultObjectSpecSettings(it.kind), ...it }).includedInProject).length,
     lineCount: generated.filter((it) => it.sourceType === "line").length,
+    linkCount: generated.filter((it) => it.sourceType === "link").length,
     kitCount: generated.filter((it) => it.sourceType === "projectSection" || it.sourceType === "module").length,
   };
 }
@@ -386,5 +434,6 @@ export function plannerSpecSummary(plan) {
   const linked = (plan.items || []).filter((it) => it.linkedMaterialId).length;
   const kitObjects = (plan.items || []).filter((it) => ["projectSection", "module"].includes(({ ...defaultObjectSpecSettings(it.kind), ...it }).specMode)).length;
   const lines = (plan.lines || []).filter((l) => LINE_PRESETS[l.layer] && lineLenM(l.pts) > 0).length;
-  return { objects, hidden, linked, lines, kitObjects };
+  const links = (plan.links || []).length;
+  return { objects, hidden, linked, lines, links, kitObjects };
 }

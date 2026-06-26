@@ -10,7 +10,8 @@ const TOOL_DEFS = {
   zone:    { icon: "▢", label: "Помещение" },
   measure: { icon: "⊢", label: "Размер" },
   label:   { icon: "T", label: "Подпись" },
-  line:    { icon: "／", label: "Трасса" },
+  line:    { icon: "⤳", label: "Трасса" },
+  link:    { icon: "⇄", label: "Связь" },
   pan:     { icon: "✥", label: "Рука" },
 };
 
@@ -55,6 +56,7 @@ export function ObjectPalette({
                 <li>Объектов в спецификации: {specSummary.objects ?? "—"}</li>
                 <li>Комплектных строк: {specSummary.kitObjects ?? "—"}</li>
                 <li>Линейных трасс: {specSummary.lines ?? "—"}</li>
+                <li>Связей: {specSummary.links ?? "—"}</li>
               </ul>
             )}
             <button type="button" className="planner-btn planner-btn--primary" style={{ width: "100%", marginTop: 12 }} onClick={onSync}>

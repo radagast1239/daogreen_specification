@@ -1,7 +1,8 @@
 import React from "react";
-import { areaM2, LINE_STYLE } from "./catalog.js";
+import { areaM2, LINE_STYLE, LINK_RULES } from "./catalog.js";
 import { ObjectIcon, DoorIcon } from "./icons.jsx";
 import { layerOpacity, labelsVisible } from "./geometry.js";
+import { linkLengthMm } from "./linkGeometry.js";
 
 const GRID_MINOR = 100;
 const GRID_MAJOR = 1000;
@@ -557,6 +558,64 @@ export function DraftLine({ pts, cursor, k, wall, thk, color, fmtU, snapPt }) {
         >
           {fmtU(Math.hypot(cursor.x - pts[pts.length - 1].x, cursor.y - pts[pts.length - 1].y))}
         </text>
+      )}
+    </g>
+  );
+}
+
+export function LinkEl({ link, items, room, k, selected, showLabel, onDown, onDel }) {
+  const rule = LINK_RULES[link.type] || { color: "#5a5f5c", label: "Связь" };
+  const { pts, total } = linkLengthMm(link, items, room);
+  if (pts.length < 2) return null;
+  const d = pts.map((p) => `${p.x},${p.y}`).join(" ");
+  const mid = pts[Math.floor(pts.length / 2)];
+  const sw = (selected ? 2.4 : 1.6) * k;
+  const last = pts[pts.length - 1];
+  const prev = pts[pts.length - 2];
+  const ang = Math.atan2(last.y - prev.y, last.x - prev.x) * 180 / Math.PI;
+
+  return (
+    <g>
+      <polyline
+        points={d}
+        fill="none"
+        stroke={rule.color}
+        strokeWidth={sw}
+        strokeDasharray={`${8 * k} ${5 * k}`}
+        opacity={selected ? 1 : 0.85}
+        onPointerDown={onDown}
+        style={{ cursor: "pointer" }}
+      />
+      <g transform={`translate(${last.x},${last.y}) rotate(${ang})`} pointerEvents="none">
+        <polygon
+          points={`0,0 ${-10 * k},${-5 * k} ${-10 * k},${5 * k}`}
+          fill={rule.color}
+        />
+      </g>
+      {showLabel && (
+        <text
+          x={mid.x}
+          y={mid.y - 8 * k}
+          fontSize={9 * k}
+          textAnchor="middle"
+          fill={rule.color}
+          pointerEvents="none"
+          style={{ fontFamily: "var(--mono)" }}
+        >
+          {Math.round(total)} мм
+        </text>
+      )}
+      {selected && onDel && (
+        <circle
+          cx={mid.x}
+          cy={mid.y}
+          r={8 * k}
+          fill="#fff"
+          stroke="#a5371f"
+          strokeWidth={1.5 * k}
+          onPointerDown={(e) => { e.stopPropagation(); onDel(); }}
+          style={{ cursor: "pointer" }}
+        />
       )}
     </g>
   );

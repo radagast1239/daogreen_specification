@@ -15,8 +15,11 @@ import {
 import { usePlanHistory } from "../../planner/usePlanHistory.js";
 import {
   PlanGrid, RoomShell, RoomDims, WallEl, ItemEl, ZoneEl, LabelEl, LineEl,
-  DraftLine, SelectionDims, MeasureEl, TypedLengthHint,
+  DraftLine, SelectionDims, MeasureEl, TypedLengthHint, LinkEl,
 } from "../../planner/canvasPrimitives.jsx";
+import {
+  linkTypeForLayer, canCreateLink, normalizeLinkEnds, linkLengthMm,
+} from "../../planner/linkGeometry.js";
 import { PlannerTopBar } from "../../planner/ui/PlannerTopBar.jsx";
 import { LayerTabs } from "../../planner/ui/LayerTabs.jsx";
 import { ObjectPalette } from "../../planner/ui/ObjectPalette.jsx";
@@ -64,6 +67,7 @@ export default function PlanPage() {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(true);
   const [spacePan, setSpacePan] = useState(false);
+  const [linkFrom, setLinkFrom] = useState(null);
   const [ctxMenu, setCtxMenu] = useState(null);
   const ctxMenuRef = useRef(null);
   ctxMenuRef.current = ctxMenu;
@@ -211,7 +215,42 @@ export default function PlanPage() {
   };
 
   const updateObj = (coll, oid, patch) => setPlan((p) => ({ ...p, [coll]: p[coll].map((o) => (o.id === oid ? { ...o, ...patch } : o)) }));
-  const delSel = () => { if (!sel) return; setPlan((p) => ({ ...p, [sel.coll]: p[sel.coll].filter((o) => o.id !== sel.id) })); setSel(null); };
+  const delSel = () => {
+    if (!sel) return;
+    setPlan((p) => {
+      const next = { ...p };
+      if (sel.coll === "items") {
+        next.items = p.items.filter((o) => o.id !== sel.id);
+        next.links = (p.links || []).filter((l) => l.fromId !== sel.id && l.toId !== sel.id);
+      } else if (sel.coll === "links") {
+        next.links = (p.links || []).filter((l) => l.id !== sel.id);
+      } else {
+        next[sel.coll] = p[sel.coll].filter((o) => o.id !== sel.id);
+      }
+      return next;
+    });
+    setSel(null);
+  };
+
+  const createLink = (fromId, toId, type) => {
+    const fromItem = plan.items.find((i) => i.id === fromId);
+    const toItem = plan.items.find((i) => i.id === toId);
+    const ends = normalizeLinkEnds(type, fromItem, toItem);
+    const dup = (plan.links || []).some(
+      (l) => l.type === type && l.fromId === ends.from.id && l.toId === ends.to.id,
+    );
+    if (dup) return;
+    const link = {
+      id: uid("lk"),
+      type,
+      fromId: ends.from.id,
+      toId: ends.to.id,
+      ortho: true,
+      riseMm: null,
+    };
+    setPlan((p) => ({ ...p, links: [...(p.links || []), link] }));
+    setSel({ coll: "links", id: link.id });
+  };
 
   const addItemAt = (mm) => {
     const c = catalogByKind(pending);
@@ -311,6 +350,7 @@ export default function PlanPage() {
 
   const handleTool = (t) => {
     setTool(t);
+    setLinkFrom(null);
     if (t === "wall" || t === "line") setDraft([]);
     if (t === "add" && !pending && catalogForLayer(active).length) setPending(catalogForLayer(active)[0].kind);
   };
@@ -693,6 +733,28 @@ export default function PlanPage() {
   };
 
   const onItemDown = (e, it) => {
+    if (tool === "link") {
+      e.stopPropagation();
+      const type = linkTypeForLayer(active);
+      if (!type) return;
+      if (!linkFrom) {
+        setLinkFrom(it.id);
+        setSel({ coll: "items", id: it.id });
+        return;
+      }
+      if (linkFrom === it.id) {
+        setLinkFrom(null);
+        return;
+      }
+      const fromItem = plan.items.find((i) => i.id === linkFrom);
+      if (!canCreateLink(type, fromItem, it)) {
+        window.alert("Нельзя связать эти объекты. Проверьте типы (напр. стеллаж→бак, розетка→щит).");
+        return;
+      }
+      createLink(linkFrom, it.id, type);
+      setLinkFrom(null);
+      return;
+    }
     if (tool === "label") { e.stopPropagation(); addLabelAt({ x: it.x + it.w / 2, y: it.y + it.h / 2 }, it.id); return; }
     startMove(e, "items", it);
   };
@@ -717,7 +779,7 @@ export default function PlanPage() {
       const modules = state.modulesLoaded ? state.modules : await actions.ensureModules();
       const res = createPlannerSpecItems({ plan, materials, modules, existingItems: project.items || [] });
       await actions.projectUpdate(project.id, { items: res.items, plan, plannerSyncAt: new Date().toISOString() });
-      alert(`Спецификация обновлена из плана.\nПозиции: ${res.generatedCount}\nКомплекты: ${res.kitCount || 0}\nОбъекты: ${res.objectCount}\nТрассы: ${res.lineCount}`);
+      alert(`Спецификация обновлена из плана.\nПозиции: ${res.generatedCount}\nКомплекты: ${res.kitCount || 0}\nОбъекты: ${res.objectCount}\nТрассы: ${res.lineCount}\nСвязи: ${res.linkCount || 0}`);
     } catch (e) {
       alert("Не удалось обновить спецификацию: " + (e?.message || e));
     } finally {
@@ -730,6 +792,16 @@ export default function PlanPage() {
     return plan.items.filter((it) => it.layer === lid);
   };
   const linesByLayer = (lid) => plan.lines.filter((l) => l.layer === lid || migrateLayerId(l.layer) === lid);
+
+  const visibleLinks = () => {
+    if (!display.showLinks) return [];
+    const links = plan.links || [];
+    if (active === "install" || active === "client") return links;
+    const t = linkTypeForLayer(active);
+    if (t) return links.filter((l) => l.type === t);
+    if (active === "racks") return links.filter((l) => l.type === "irrigation" || l.type === "power");
+    return [];
+  };
 
   const warnList = collectPlannerWarnings(plan, sel);
   const warnIds = new Set(warnList.flatMap((w) => w.objectIds || []));
@@ -760,7 +832,7 @@ export default function PlanPage() {
     />
   );
 
-  const cursorStyle = spacePan || tool === "pan" ? "grab" : tool === "add" || tool === "zone" || tool === "label" ? "copy" : "default";
+  const cursorStyle = spacePan || tool === "pan" ? "grab" : tool === "add" || tool === "zone" || tool === "label" ? "copy" : tool === "link" ? "crosshair" : "default";
 
   return (
     <div className="planner-app">
@@ -868,6 +940,24 @@ export default function PlanPage() {
                   ))}
                 </g>
               ))}
+              <g data-layer="links">
+                {visibleLinks().map((link) => (
+                  <LinkEl
+                    key={link.id}
+                    link={link}
+                    items={plan.items}
+                    room={plan.room}
+                    k={k}
+                    selected={sel?.coll === "links" && sel.id === link.id}
+                    showLabel={display.showDims || display.showHints}
+                    onDown={(e) => {
+                      e.stopPropagation();
+                      if (tool === "select" || tool === "link") setSel({ coll: "links", id: link.id });
+                    }}
+                    onDel={() => { setSel({ coll: "links", id: link.id }); delSel(); }}
+                  />
+                ))}
+              </g>
               {ITEM_LAYER_IDS.map((lid) => (
                 <g key={lid} data-layer={lid}>
                   {itemsByLayer(lid).map((it) => itemProps(it, lid))}
@@ -915,6 +1005,9 @@ export default function PlanPage() {
           </svg>
           <div className="planner-coords no-print">
             {cursor ? `${Math.round(cursor.x)}, ${Math.round(cursor.y)} мм` : "—"}
+            {linkFrom && (
+              <span style={{ marginLeft: 10, color: "#1f6f8b" }}>Связь: выберите второй объект</span>
+            )}
             {measure.length === 2 && (
               <span style={{ marginLeft: 10, color: "#116355" }}>
                 Δ {fmtU(Math.hypot(measure[1].x - measure[0].x, measure[1].y - measure[0].y))}
@@ -968,6 +1061,7 @@ function withDefaults(plan) {
       ...l,
       layer: migrateLayerId(l.layer, null),
     })),
+    links: (plan.links || []).map((l) => ({ ortho: true, riseMm: null, ...l })),
     items: (plan.items || []).map((i) => {
       const base = { angle: 0, ...defaultObjectSpecSettings(i.kind), ...i };
       const layer = migrateLayerId(base.layer, base.kind);

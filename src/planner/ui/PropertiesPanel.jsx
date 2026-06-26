@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { areaM2 } from "../catalog.js";
+import { areaM2, LINK_RULES } from "../catalog.js";
 import { projectSectionTemplates } from "../specSync.js";
 import { collectPlannerWarnings } from "../geometry.js";
+import { linkLengthMm, linksForItem } from "../linkGeometry.js";
 
 export function PropertiesPanel({
   sel,
@@ -56,6 +57,7 @@ export function PropertiesPanel({
             <div style={{ fontSize: 12, color: "var(--pl-text-muted)", marginBottom: 12 }}>
               <div>Объекты: <b>{specSummary.objects}</b></div>
               <div>Трассы: <b>{specSummary.lines}</b></div>
+              <div>Связи: <b>{specSummary.links ?? 0}</b></div>
               <div>Связано с базой: <b>{specSummary.linked}</b></div>
             </div>
             <button type="button" className="planner-btn planner-btn--primary" style={{ width: "100%" }} onClick={onSync}>
@@ -87,6 +89,7 @@ export function PropertiesPanel({
           <SelFields
             sel={sel}
             obj={selObj}
+            plan={plan}
             updateObj={updateObj}
             rotateItem={rotateItem}
             delSel={delSel}
@@ -99,7 +102,7 @@ export function PropertiesPanel({
   );
 }
 
-function SelFields({ sel, obj, updateObj, rotateItem, delSel, fmtU, active }) {
+function SelFields({ sel, obj, plan, updateObj, rotateItem, delSel, fmtU, active }) {
   if (sel.coll === "labels") {
     return (
       <>
@@ -139,6 +142,48 @@ function SelFields({ sel, obj, updateObj, rotateItem, delSel, fmtU, active }) {
           <input type="number" value={obj.height} onChange={(e) => updateObj("zones", obj.id, { height: +e.target.value || 0 })} />
         </div>
         <button type="button" className="planner-btn" onClick={delSel}>Удалить</button>
+      </>
+    );
+  }
+  if (sel.coll === "links") {
+    const rule = LINK_RULES[obj.type] || { label: "Связь" };
+    const from = plan.items.find((i) => i.id === obj.fromId);
+    const to = plan.items.find((i) => i.id === obj.toId);
+    const len = linkLengthMm(obj, plan.items, plan.room);
+    return (
+      <>
+        <div className="planner-side__title">{rule.label}</div>
+        <div className="planner-field">
+          <label>От</label>
+          <input readOnly value={from?.label || "—"} />
+        </div>
+        <div className="planner-field">
+          <label>К</label>
+          <input readOnly value={to?.label || "—"} />
+        </div>
+        <div className="planner-field">
+          <label>План, мм</label>
+          <input readOnly value={Math.round(len.plan2d)} />
+        </div>
+        <div className="planner-field">
+          <label>Подъём, мм</label>
+          <input
+            type="number"
+            value={obj.riseMm ?? len.vertical}
+            onChange={(e) => updateObj("links", obj.id, { riseMm: Math.max(0, +e.target.value || 0) })}
+          />
+        </div>
+        <div className="planner-field">
+          <label>Итого</label>
+          <input readOnly value={fmtU(len.total)} />
+        </div>
+        <div className="planner-field">
+          <label>
+            <input type="checkbox" checked={obj.ortho !== false} onChange={(e) => updateObj("links", obj.id, { ortho: e.target.checked })} />
+            {" "}Ортогональный маршрут
+          </label>
+        </div>
+        <button type="button" className="planner-btn" onClick={delSel}>Удалить связь</button>
       </>
     );
   }
@@ -219,6 +264,7 @@ function SelFields({ sel, obj, updateObj, rotateItem, delSel, fmtU, active }) {
             <input type="number" value={obj.params.tiers} onChange={(e) => updateObj("items", obj.id, { params: { ...obj.params, tiers: +e.target.value || 1 } })} />
           </div>
         )}
+        <ItemLinksList itemId={obj.id} plan={plan} />
         <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
           <button type="button" className="planner-btn" onClick={() => rotateItem(obj, 90)}>↻ 90°</button>
           <button type="button" className="planner-btn" onClick={delSel}>Удалить</button>
@@ -227,6 +273,36 @@ function SelFields({ sel, obj, updateObj, rotateItem, delSel, fmtU, active }) {
     );
   }
   return null;
+}
+
+function ItemLinksList({ itemId, plan }) {
+  const links = linksForItem(plan.links, itemId);
+  if (!links.length) {
+    return (
+      <p style={{ fontSize: 12, color: "var(--pl-text-muted)", marginTop: 12 }}>
+        Связей нет. Инструмент «Связь» на листе полива/электрики.
+      </p>
+    );
+  }
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="planner-side__title">Связи</div>
+      <ul style={{ fontSize: 12, paddingLeft: 16, margin: 0 }}>
+        {links.map((l) => {
+          const otherId = l.fromId === itemId ? l.toId : l.fromId;
+          const other = plan.items.find((i) => i.id === otherId);
+          const rule = LINK_RULES[l.type];
+          const len = linkLengthMm(l, plan.items, plan.room);
+          return (
+            <li key={l.id} style={{ marginBottom: 4 }}>
+              {rule?.label || l.type}: {l.fromId === itemId ? "→" : "←"} {other?.label || "?"}{" "}
+              <span style={{ color: "var(--pl-text-muted)" }}>({Math.round(len.total)} мм)</span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
 
 function polyLen(pts) {

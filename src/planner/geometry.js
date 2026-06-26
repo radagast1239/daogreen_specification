@@ -1,7 +1,8 @@
-import { snap } from "./catalog.js";
+import { snap, LINK_RULES } from "./catalog.js";
 import {
   findWallIntersections, itemInAnyZone, nearestWallSegment,
 } from "./wallGeometry.js";
+import { itemHasLinkOfType } from "./linkGeometry.js";
 
 /** Привязка точки к горизонтали/вертикали относительно предыдущей (как в CAD). */
 export function orthogonalPoint(from, to, step = 50, snapOn = true) {
@@ -127,6 +128,34 @@ export function collectPlannerWarnings(plan, sel = null) {
   }
 
   const supplyTanks = plan.items.filter((i) => i.kind === "tank" || i.kind === "tank_waste");
+  const links = plan.links || [];
+  const hasIrrTarget = plan.items.some((i) => LINK_RULES.irrigation.to.has(i.kind));
+  const hasPanel = plan.items.some((i) => i.kind === "panel");
+
+  if (hasIrrTarget) {
+    racks.forEach((r) => {
+      if (!itemHasLinkOfType(links, r.id, "irrigation")) {
+        warnings.push({
+          id: `link-irr-${r.id}`,
+          objectIds: [r.id],
+          text: `${r.label}: нет связи с баком/поливом`,
+        });
+      }
+    });
+  }
+
+  if (hasPanel) {
+    plan.items.filter((i) => i.kind === "socket" || i.kind === "light_panel").forEach((s) => {
+      if (!itemHasLinkOfType(links, s.id, "power", "from")) {
+        warnings.push({
+          id: `link-pwr-${s.id}`,
+          objectIds: [s.id],
+          text: `${s.label}: не подключён к щиту`,
+        });
+      }
+    });
+  }
+
   racks.forEach((r) => {
     const nearTank = supplyTanks.some((t) => {
       const cx = t.x + t.w / 2;
