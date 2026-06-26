@@ -144,6 +144,7 @@ export function RoomDims({ room, k, fmtU }) {
 }
 
 export function WallEl({ wall, k, editable, selected, fmtU, showDims, onSel, onNode, onDel, onWallMove }) {
+  if (!wall?.pts || wall.pts.length < 2) return null;
   const d = wall.pts.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ");
   const outer = selected ? "#116355" : "#2f3431";
   const inner = "#e8e6e3";

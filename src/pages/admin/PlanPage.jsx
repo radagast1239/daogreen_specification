@@ -180,31 +180,39 @@ export default function PlanPage() {
     return { x: sn(x), y: sn(y), angle: 0 };
   };
 
-  const snapDraftPt = (raw, from) => {
+  const computeDraftPt = (raw, from) => {
     let pt = from ? orthoPt(from, raw, snapOn, shiftRef.current) : { x: sn(raw.x), y: sn(raw.y) };
+    let snap = null;
     if (tool === "wall" && display.snapOn) {
       const s = snapWallPoint(pt, plan.walls, plan.room, view.zoom, true, SNAP_STEP);
-      if (s.snapped) { pt = { x: s.x, y: s.y }; setDraftSnap(s); }
-      else setDraftSnap(null);
+      if (s.snapped) {
+        pt = { x: s.x, y: s.y };
+        snap = s;
+      }
     }
-    return pt;
+    return { pt, snap };
   };
 
   const syncAutoZones = (p) => {
-    const loops = findClosedLoops(p.walls.filter((w) => w.role !== "outer"));
-    const manual = (p.zones || []).filter((z) => !z.auto);
-    const auto = loops.map((poly, i) => {
-      const b = polygonBounds(poly);
-      return {
-        id: uid("zn"),
-        ...b,
-        name: `Помещение ${manual.length + i + 1}`,
-        height: p.room.height || 3000,
-        polygon: poly,
-        auto: true,
-      };
-    });
-    return { ...p, zones: [...manual, ...auto] };
+    try {
+      const loops = findClosedLoops(p.walls.filter((w) => w.role !== "outer"));
+      const manual = (p.zones || []).filter((z) => !z.auto);
+      const auto = loops.map((poly, i) => {
+        const b = polygonBounds(poly);
+        return {
+          id: uid("zn"),
+          ...b,
+          name: `Помещение ${manual.length + i + 1}`,
+          height: p.room.height || 3000,
+          polygon: poly,
+          auto: true,
+        };
+      });
+      return { ...p, zones: [...manual, ...auto] };
+    } catch (e) {
+      console.error("syncAutoZones failed", e);
+      return p;
+    }
   };
 
   const applyTypedLength = () => {
@@ -608,7 +616,8 @@ export default function PlanPage() {
     if (tool === "label") return addLabelAt(mm, null);
     if (tool === "line" || tool === "wall") {
       const last = draft[draft.length - 1];
-      const pt = snapDraftPt(mm, last);
+      const { pt, snap } = computeDraftPt(mm, last);
+      setDraftSnap(snap);
       setDraft((d) => [...d, pt]);
       return;
     }
@@ -622,11 +631,13 @@ export default function PlanPage() {
 
   const onMove = (e) => {
     const raw = toMM(e.clientX, e.clientY);
-    let mm = orthoTools && draft.length > 0
-      ? snapDraftPt(raw, draft[draft.length - 1])
-      : raw;
-    if (orthoTools && draft.length > 0 && tool !== "wall") {
-      mm = orthoPt(draft[draft.length - 1], raw, snapOn, shiftRef.current);
+    let mm = raw;
+    if (orthoTools && draft.length > 0) {
+      const { pt, snap } = computeDraftPt(raw, draft[draft.length - 1]);
+      setDraftSnap(snap);
+      mm = pt;
+    } else {
+      setDraftSnap(null);
     }
     setCursor(mm);
     const d = dragRef.current;
@@ -816,9 +827,7 @@ export default function PlanPage() {
   const partitionWalls = wallsForLayer(plan.walls, "partitions");
   const roomWalls = wallsForLayer(plan.walls, "room");
 
-  const draftCursor = orthoTools && draft.length > 0 && cursor
-    ? (tool === "wall" ? snapDraftPt(cursor, draft[draft.length - 1]) : orthoPt(draft[draft.length - 1], cursor, snapOn, shiftRef.current))
-    : cursor;
+  const draftCursor = orthoTools && draft.length > 0 ? cursor : null;
 
   const showLabelFor = (lid) => display.showLabels && (active === lid || active === "install" || active === "client");
   const itemProps = (it, lid, extra = {}) => (

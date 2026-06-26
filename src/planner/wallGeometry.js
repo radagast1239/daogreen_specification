@@ -142,12 +142,15 @@ function buildWallGraph(walls, thr = SNAP_DIST) {
 }
 
 /** Найти замкнутые контуры (простые циклы). */
-export function findClosedLoops(walls) {
+export function findClosedLoops(walls, maxLoops = 48) {
   const nodes = buildWallGraph(walls);
   const loops = [];
   const seen = new Set();
+  let steps = 0;
+  const maxSteps = 8000;
 
   const walk = (start, cur, path, visitedEdges) => {
+    if (loops.length >= maxLoops || steps++ > maxSteps) return;
     if (path.length > 2 && cur === start) {
       const sig = path.map((n) => n.key).sort().join("|");
       if (!seen.has(sig)) {
@@ -163,10 +166,14 @@ export function findClosedLoops(walls) {
       visitedEdges.add(eid);
       walk(start, e.to, [...path, e.to], visitedEdges);
       visitedEdges.delete(eid);
+      if (loops.length >= maxLoops || steps > maxSteps) return;
     }
   };
 
-  nodes.forEach((n) => walk(n, n, [n], new Set()));
+  for (const n of nodes) {
+    walk(n, n, [n], new Set());
+    if (loops.length >= maxLoops || steps > maxSteps) break;
+  }
   return loops;
 }
 
