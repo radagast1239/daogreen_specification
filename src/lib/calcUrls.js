@@ -33,10 +33,10 @@ export function berryCalculatorUrl() {
 
 /** Калькулятор салатов (посадка, каналы, поддоны). */
 export function economicCalculatorUrl() {
-  return `${calcOrigin()}/salad/calculator-110x55_12.html`;
+  return `${calcOrigin()}/salad/calculator-110x55_12.html?from=spec`;
 }
 
 /** Только финмодель (вкладка «Экономика»). */
 export function saladEconomicsUrl() {
-  return `${calcOrigin()}/finmodel/calculator-110x55_12.html`;
+  return `${calcOrigin()}/finmodel/calculator-110x55_12.html?from=spec`;
 }
