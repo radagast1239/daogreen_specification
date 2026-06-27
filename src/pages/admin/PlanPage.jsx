@@ -21,7 +21,8 @@ import { isStrictWallItem, isDoorKind } from "../../planner/doorTypes.js";
 import {
   snapWallPoint, placeOnWall, pointInPolygon, breakWallAt,
   syncZonesFromWalls, applyWallNodeMove, refreshWallMountedItems,
-  tryMergeWall, straightenWall, setWallSegmentLength, alignWallToNeighbor, weldWallNodes,
+  tryMergeWall, straightenWall, setWallSegmentLength, setWallSegmentLengthAt,
+  wallSegmentLengthAt, wallSegmentIndexForNode, alignWallToNeighbor, weldWallNodes,
 } from "../../planner/wallGeometry.js";
 import { validateOpeningPlacement, nextDoorNumber, nextOpeningNumber } from "../../planner/doorGeometry.js";
 import { attachItemZoneFields } from "../../planner/roomZones.js";
@@ -45,6 +46,7 @@ import {
 } from "../../planner/canvasPrimitives.jsx";
 import { layerDisplayState } from "../../planner/canvasLayers.js";
 import { snapLineDraftPoint, snapRackNeighbor } from "../../planner/plannerSnap.js";
+import { snapObjectPosition, constrainAxisDelta, constrainAxisPoint, snapDistanceMm } from "../../planner/objectSnap.js";
 import {
   itemsInMarquee, boundsOfItems, groupMemberIds,
 } from "../../planner/selectionHelpers.js";
@@ -81,6 +83,10 @@ const ITEM_LAYER_IDS = LAYERS.map((l) => l.id).filter(
 function draftPt(from, to, opts) {
   const { point, angleSnap } = resolveDraftPoint(from, to, opts);
   return { point, angleSnap };
+}
+
+function dragShiftOn(shiftHeld, altHeld) {
+  return shiftHeld && !altHeld;
 }
 
 export default function PlanPage() {
@@ -236,52 +242,39 @@ export default function PlanPage() {
   const innerB = plan.room.h - plan.room.wallThk / 2;
 
   const snapObj = useCallback((coll, obj, x, y) => {
-    if (!snapOn) return { x: sn(x), y: sn(y), guides: [] };
-    const thr = 10 / view.zoom;
-    const V = [0, innerL, innerR, plan.room.w];
-    const H = [0, innerT, innerB, plan.room.h];
-    plan.walls.forEach((w) => w.pts.forEach((p, i) => {
-      if (!i) return;
-      const a = w.pts[i - 1];
-      if (Math.abs(p.x - a.x) < 1) V.push(p.x);
-      if (Math.abs(p.y - a.y) < 1) H.push(p.y);
-    }));
-    if (display.snapObjects) {
-      plan.items.forEach((it) => {
-        if (it.id === obj.id) return;
-        V.push(it.x, it.x + it.w / 2, it.x + it.w);
-        H.push(it.y, it.y + it.h / 2, it.y + it.h);
-      });
+    const gridSnap = (v) => roundMm(snap(v, snapStep, snapOn && display.snapGrid !== false), display.snapRoundMm || 1);
+    if (!snapOn || altSnapRef.current) {
+      return { x: gridSnap(x), y: gridSnap(y), guides: [] };
     }
-    const g = [];
-    const fix = (lines, edges) => {
-      let best = null;
-      for (const e of edges) for (const L of lines) {
-        const d = Math.abs(e.val - L);
-        if (d < thr && (!best || d < best.d)) best = { d, off: L - e.val, at: L };
-      }
-      return best;
-    };
-    const vb = fix(V, [{ val: x }, { val: x + obj.w / 2 }, { val: x + obj.w }]);
-    const hb = fix(H, [{ val: y }, { val: y + obj.h / 2 }, { val: y + obj.h }]);
-    let nx = x;
-    let ny = y;
-    if (vb) {
-      nx = x + vb.off;
-      g.push({ type: "V", at: vb.at, y0: Math.max(0, y - 80), y1: Math.min(plan.room.h, y + obj.h + 80) });
-    } else nx = sn(x);
-    if (hb) {
-      ny = y + hb.off;
-      g.push({ type: "H", at: hb.at, x0: Math.max(0, x - 80), x1: Math.min(plan.room.w, x + obj.w + 80) });
-    } else ny = sn(y);
+    const innerBounds = { l: innerL, t: innerT, r: innerR, b: innerB };
+    const base = snapObjectPosition({
+      obj,
+      x,
+      y,
+      items: plan.items,
+      walls: plan.walls,
+      room: plan.room,
+      zoom: view.zoom,
+      snapOn: true,
+      snapGrid: display.snapGrid !== false,
+      snapObjects: display.snapObjects !== false,
+      snapWalls: display.snapWalls !== false,
+      snapGuides: display.snapGuides !== false,
+      snapDistancePx: display.snapDistancePx ?? 10,
+      innerBounds,
+      gridSnap,
+    });
+    let nx = base.x;
+    let ny = base.y;
+    const g = [...base.guides];
     if (coll === "items" && isRackKind(obj.kind) && display.snapObjects) {
-      const rackSnap = snapRackNeighbor(obj, nx, ny, plan.items, 10 / view.zoom);
+      const rackSnap = snapRackNeighbor(obj, nx, ny, plan.items, snapDistanceMm(view.zoom, display.snapDistancePx ?? 10));
       nx = rackSnap.x;
       ny = rackSnap.y;
       g.push(...rackSnap.guides);
     }
     return { x: nx, y: ny, guides: g };
-  }, [snapOn, view.zoom, plan.walls, plan.items, display.snapObjects, innerL, innerR, innerT, innerB, plan.room.w, plan.room.h]);
+  }, [snapOn, snapStep, view.zoom, plan.walls, plan.items, plan.room, display.snapObjects, display.snapGrid, display.snapWalls, display.snapGuides, display.snapDistancePx, display.snapRoundMm, innerL, innerR, innerT, innerB]);
 
   const attachWall = (obj, x, y) => {
     const maxDist = isStrictWallItem(obj.kind) ? 220 : 350;
@@ -1079,14 +1072,39 @@ export default function PlanPage() {
       if (pick && THICKNESS_SIDES.some((s) => s.id === pick)) updateObj("walls", obj.id, { thicknessSide: pick });
     }
     else if (actionId === "wall-length" && sel.coll === "walls") {
-      const segLen = obj.pts?.length >= 2
-        ? Math.hypot(obj.pts[obj.pts.length - 1].x - obj.pts[obj.pts.length - 2].x, obj.pts[obj.pts.length - 1].y - obj.pts[obj.pts.length - 2].y)
-        : 0;
-      const len = prompt("Длина последнего сегмента, мм:", String(Math.round(segLen)));
+      const segIdx = wallSegmentIndexForNode(obj, selection?.nodeIdx);
+      const segLen = wallSegmentLengthAt(obj, selection?.nodeIdx)
+        || (obj.pts?.length >= 2
+          ? Math.hypot(obj.pts[obj.pts.length - 1].x - obj.pts[obj.pts.length - 2].x, obj.pts[obj.pts.length - 1].y - obj.pts[obj.pts.length - 2].y)
+          : 0);
+      const len = prompt(`Длина сегмента ${segIdx + 1}, мм:`, String(Math.round(segLen)));
       if (len) {
-        const nw = setWallSegmentLength(obj, Math.max(100, +len || 0));
+        const nw = setWallSegmentLengthAt(obj, segIdx, Math.max(100, +len || 0));
         updateObj("walls", obj.id, { pts: nw.pts });
       }
+    }
+    else if (actionId === "wall-length-total" && sel.coll === "walls") {
+      const pts = obj.pts || [];
+      let sumOther = 0;
+      for (let i = 0; i < pts.length - 2; i++) {
+        sumOther += Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+      }
+      const total = polyLength(pts);
+      const len = prompt(
+        `Суммарная длина стены, мм (сейчас ${Math.round(total)}). Будет изменён последний сегмент:`,
+        String(Math.round(total)),
+      );
+      if (len) {
+        const lastLen = Math.max(100, (+len || 0) - sumOther);
+        const nw = setWallSegmentLength(obj, lastLen);
+        updateObj("walls", obj.id, { pts: nw.pts });
+      }
+    }
+    else if (actionId === "wall-role-outer" && sel.coll === "walls") {
+      updateObj("walls", obj.id, { role: "outer", kind: obj.kind || "existing" });
+    }
+    else if (actionId === "wall-role-partition" && sel.coll === "walls") {
+      updateObj("walls", obj.id, { role: "partition", kind: obj.kind || "new" });
     }
     else if (actionId === "wall-straight-h" && sel.coll === "walls") {
       const nw = straightenWall(obj, "h");
@@ -1453,8 +1471,13 @@ export default function PlanPage() {
     } else if (d.mode === "move") {
       const obj = plan[d.coll].find((o) => o.id === d.id);
       if (!obj || obj.locked) return;
-      let x = d.ox + (mm.x - d.dx);
-      let y = d.oy + (mm.y - d.dy);
+      let dx = mm.x - d.dx;
+      let dy = mm.y - d.dy;
+      if (dragShiftOn(shiftRef.current, altSnapRef.current)) {
+        ({ dx, dy } = constrainAxisDelta(dx, dy, true));
+      }
+      let x = d.ox + dx;
+      let y = d.oy + dy;
       if (d.coll === "items" && obj.wall) {
         const placed = attachWall({ ...obj, kind: obj.kind }, x, y);
         if (!placed || placed.error) return;
@@ -1472,7 +1495,18 @@ export default function PlanPage() {
         x = s.x; y = s.y;
         setGuides(s.guides);
         if (d.coll === "items") {
-          updateObj(d.coll, d.id, attachItemZoneFields(plan, { ...obj, x, y }));
+          const ldx = x - obj.x;
+          const ldy = y - obj.y;
+          setPlan((p) => ({
+            ...p,
+            items: p.items.map((it) => (
+              it.id === d.id ? attachItemZoneFields(p, { ...it, x, y }) : it
+            )),
+            labels: p.labels.map((lb) => {
+              if (lb.pinned || lb.targetId !== d.id) return lb;
+              return { ...lb, x: (lb.x || 0) + ldx, y: (lb.y || 0) + ldy };
+            }),
+          }));
         } else {
           updateObj(d.coll, d.id, { x, y });
         }
@@ -1481,8 +1515,11 @@ export default function PlanPage() {
       const anchorX = d.mode === "move-pending" ? d.mm.x : d.dx;
       const anchorY = d.mode === "move-pending" ? d.mm.y : d.dy;
       if (d.mode === "move-pending" && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) <= 5) return;
-      const dx = mm.x - anchorX;
-      const dy = mm.y - anchorY;
+      let dx = mm.x - anchorX;
+      let dy = mm.y - anchorY;
+      if (dragShiftOn(shiftRef.current, altSnapRef.current)) {
+        ({ dx, dy } = constrainAxisDelta(dx, dy, true));
+      }
       let origins = d.origins;
       let ids = d.ids;
       if (d.mode === "move-pending") {
@@ -1490,11 +1527,17 @@ export default function PlanPage() {
           ? [...selection.ids]
           : [d.triggerId];
         origins = {};
+        const labelOrigins = {};
         ids.forEach((id) => {
           const o = plan.items.find((i) => i.id === id);
           if (o) origins[id] = { x: o.x, y: o.y };
         });
-        dragRef.current = { mode: "move-items", ids, origins, dx: d.mm.x, dy: d.mm.y };
+        plan.labels.forEach((lb) => {
+          if (!lb.pinned && lb.targetId && ids.includes(lb.targetId)) {
+            labelOrigins[lb.id] = { x: lb.x || 0, y: lb.y || 0 };
+          }
+        });
+        dragRef.current = { mode: "move-items", ids, origins, labelOrigins, dx: d.mm.x, dy: d.mm.y };
       }
       setPlan((p) => {
         const lead = ids.map((id) => p.items.find((i) => i.id === id)).find(Boolean);
@@ -1508,8 +1551,14 @@ export default function PlanPage() {
           snapGuides = s.guides;
         }
         setGuides(snapGuides);
+        const labelOrigins = d.labelOrigins || {};
         return {
           ...p,
+          labels: p.labels.map((lb) => {
+            const lo = labelOrigins[lb.id];
+            if (!lo) return lb;
+            return { ...lb, x: lo.x + dx + snapDx, y: lo.y + dy + snapDy };
+          }),
           items: p.items.map((it) => {
             const o = origins[it.id];
             if (!o) return it;
@@ -1541,8 +1590,11 @@ export default function PlanPage() {
     } else if (d.mode === "marquee") {
       setMarquee({ x1: d.x1, y1: d.y1, x2: mm.x, y2: mm.y });
     } else if (d.mode === "wall-move") {
-      const dx = mm.x - d.dx;
-      const dy = mm.y - d.dy;
+      let dx = mm.x - d.dx;
+      let dy = mm.y - d.dy;
+      if (dragShiftOn(shiftRef.current, altSnapRef.current)) {
+        ({ dx, dy } = constrainAxisDelta(dx, dy, true));
+      }
       setPlan((p) => {
         const walls = p.walls.map((w) => (w.id !== d.id ? w : {
           ...w,
@@ -1569,7 +1621,14 @@ export default function PlanPage() {
       }
     } else if (d.mode === "node") {
       if (d.coll === "walls") {
-        const snapped = snapWallPoint({ x: mm.x, y: mm.y }, plan.walls, plan.room, view.zoom, snapOn && display.snapWalls !== false, snapStep);
+        const wall = plan.walls.find((w) => w.id === d.id);
+        let pt = { x: mm.x, y: mm.y };
+        if (wall?.pts?.length >= 2) {
+          const anchorIdx = d.idx > 0 ? d.idx - 1 : 1;
+          const anchor = wall.pts[anchorIdx];
+          pt = constrainAxisPoint(anchor, pt, dragShiftOn(shiftRef.current, altSnapRef.current));
+        }
+        const snapped = snapWallPoint(pt, plan.walls, plan.room, view.zoom, snapOn && display.snapWalls !== false && !altSnapRef.current, snapStep);
         setPlan((p) => {
           let walls = weldWallNodes(applyWallNodeMove(p.walls, d.id, d.idx, { x: snapped.x, y: snapped.y }));
           return syncAutoZones({
@@ -1650,11 +1709,17 @@ export default function PlanPage() {
     const movable = ids.filter((id) => !plan.items.find((i) => i.id === id)?.locked);
     if (!movable.length) return;
     const origins = {};
+    const labelOrigins = {};
     movable.forEach((id) => {
       const o = plan.items.find((i) => i.id === id);
       if (o) origins[id] = { x: o.x, y: o.y };
     });
-    dragRef.current = { mode: "move-items", ids: movable, origins, dx: mm.x, dy: mm.y };
+    plan.labels.forEach((lb) => {
+      if (!lb.pinned && lb.targetId && movable.includes(lb.targetId)) {
+        labelOrigins[lb.id] = { x: lb.x || 0, y: lb.y || 0 };
+      }
+    });
+    dragRef.current = { mode: "move-items", ids: movable, origins, labelOrigins, dx: mm.x, dy: mm.y };
   };
 
   const startMove = (e, coll, obj) => {
@@ -2034,7 +2099,7 @@ export default function PlanPage() {
       )}
       {tool === "select" && (
         <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
-          ЛКМ — панорама · Shift+ЛКМ — рамка
+          ЛКМ — панорама · Shift+ЛКМ — рамка · Shift+drag — по оси
         </span>
       )}
       {linkFrom && (

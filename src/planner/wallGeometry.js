@@ -565,15 +565,40 @@ export function straightenWall(wall, mode = "h") {
 /** Задать точную длину последнего сегмента стены. */
 export function setWallSegmentLength(wall, lenMm) {
   if (!wall?.pts || wall.pts.length < 2 || lenMm < 100) return wall;
+  return setWallSegmentLengthAt(wall, wall.pts.length - 2, lenMm);
+}
+
+/** Задать точную длину сегмента wall.pts[i] → wall.pts[i+1]. */
+export function setWallSegmentLengthAt(wall, segIndex, lenMm) {
+  if (!wall?.pts || wall.pts.length < 2 || lenMm < 100) return wall;
+  if (segIndex < 0 || segIndex >= wall.pts.length - 1) return wall;
   const pts = wall.pts.map((p) => ({ ...p }));
-  const a = pts[pts.length - 2];
-  const b = pts[pts.length - 1];
+  const a = pts[segIndex];
+  const b = pts[segIndex + 1];
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const d = Math.hypot(dx, dy);
   if (d < 1) return wall;
-  pts[pts.length - 1] = { x: a.x + (dx / d) * lenMm, y: a.y + (dy / d) * lenMm };
+  pts[segIndex + 1] = { x: a.x + (dx / d) * lenMm, y: a.y + (dy / d) * lenMm };
   return { ...wall, pts };
+}
+
+/** Длина сегмента стены по индексу узла (сегмент до или после узла). */
+export function wallSegmentLengthAt(wall, nodeIdx) {
+  if (!wall?.pts || wall.pts.length < 2 || nodeIdx == null) return 0;
+  const seg = nodeIdx > 0 ? nodeIdx - 1 : 0;
+  if (seg >= wall.pts.length - 1) return 0;
+  const a = wall.pts[seg];
+  const b = wall.pts[seg + 1];
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+/** Индекс сегмента для редактирования длины по выбранному узлу. */
+export function wallSegmentIndexForNode(wall, nodeIdx) {
+  if (!wall?.pts || wall.pts.length < 2 || nodeIdx == null) return wall.pts.length - 2;
+  if (nodeIdx <= 0) return 0;
+  if (nodeIdx >= wall.pts.length - 1) return wall.pts.length - 2;
+  return nodeIdx - 1;
 }
 
 /** Выровнять стену параллельно соседней по общему узлу. */

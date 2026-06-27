@@ -62,12 +62,17 @@ export function buildObjectMenu(obj, coll, opts = {}) {
     ];
   }
   if (coll === "walls") {
+    const segHint = opts.nodeIdx != null ? ` (узел ${opts.nodeIdx + 1})` : "";
     return [
+      { id: "wall-role-outer", label: obj.role === "outer" ? "✓ Наружная стена" : "Сделать наружной" },
+      { id: "wall-role-partition", label: obj.role === "partition" ? "✓ Перегородка" : "Сделать перегородкой" },
+      { sep: true, id: "s-role" },
       { id: "wall-kind", label: "Тип стены…" },
       { id: "wall-thk", label: "Толщина стены…" },
       { id: "wall-height", label: "Высота стены…" },
       { id: "wall-side", label: "Сторона толщины…" },
-      { id: "wall-length", label: "Точная длина сегмента…" },
+      { id: "wall-length", label: `Точная длина сегмента${segHint}…` },
+      { id: "wall-length-total", label: "Длина всей стены…" },
       { sep: true, id: "s0" },
       { id: "wall-straight-h", label: "Горизонтально" },
       { id: "wall-straight-v", label: "Вертикально" },
