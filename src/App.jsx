@@ -79,6 +79,7 @@ export default function App() {
           <Route path="/project/:id" element={<Lazy><SpecEditorPage /></Lazy>} />
           <Route path="/project/:id/plan" element={<Lazy><PlanPage /></Lazy>} />
           <Route path="/planner" element={<Lazy><PlannerHubPage /></Lazy>} />
+          <Route path="/planner/draft/:draftId" element={<Lazy><PlanPage /></Lazy>} />
         </Route>
       </Route>
 

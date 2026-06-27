@@ -61,8 +61,8 @@ export function PropertiesPanel({
               <div>Связи: <b>{specSummary.links ?? 0}</b></div>
               <div>Связано с базой: <b>{specSummary.linked}</b></div>
             </div>
-            <button type="button" className="planner-btn planner-btn--primary" style={{ width: "100%" }} onClick={onSync}>
-              Обновить спецификацию из плана
+            <button type="button" className="planner-btn planner-btn--primary" style={{ width: "100%" }} onClick={onSync} disabled={!onSync}>
+              {onSync ? "Обновить спецификацию из плана" : "Нужен план проекта"}
             </button>
             {selObj && sel.coll === "items" && (
               <ItemSpecFields

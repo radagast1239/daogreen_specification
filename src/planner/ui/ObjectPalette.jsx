@@ -49,7 +49,9 @@ export function ObjectPalette({
           <div className="planner-side__section">
             <div className="planner-side__title">Спецификация</div>
             <p className="planner-spec-intro">
-              Лист спецификации формируется из объектов плана. Синхронизируйте с проектом, чтобы обновить позиции и комплекты.
+              {onSync
+                ? "Лист спецификации формируется из объектов плана. Синхронизируйте с проектом, чтобы обновить позиции и комплекты."
+                : "Черновик без проекта — спецификацию можно посмотреть, но синхронизация доступна только в плане проекта."}
             </p>
             {specSummary && (
               <ul className="planner-spec-stats">
@@ -59,9 +61,11 @@ export function ObjectPalette({
                 <li>Связей: {specSummary.links ?? "—"}</li>
               </ul>
             )}
-            <button type="button" className="planner-btn planner-btn--primary" style={{ width: "100%", marginTop: 12 }} onClick={onSync}>
-              Синхронизировать спецификацию
-            </button>
+            {onSync && (
+              <button type="button" className="planner-btn planner-btn--primary" style={{ width: "100%", marginTop: 12 }} onClick={onSync}>
+                Синхронизировать спецификацию
+              </button>
+            )}
           </div>
         </div>
       </aside>

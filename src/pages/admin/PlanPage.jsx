@@ -3,6 +3,10 @@ import { Link, useParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { uid } from "../../store/helpers.js";
 import {
+  getStandalonePlan, saveStandalonePlan, downloadPlanFile,
+  readPlanFile, renameStandalonePlan,
+} from "../../planner/standalonePlans.js";
+import {
   LAYERS, LINE_STYLE, PDF_SHEETS, catalogByKind, catalogForLayer, layerById,
   clamp, snap, fmt, DEFAULT_PLAN, DEFAULT_DISPLAY, migrateLayerId,
 } from "../../planner/catalog.js";
@@ -46,11 +50,18 @@ function orthoPt(from, to, snapOn, shiftHeld) {
 }
 
 export default function PlanPage() {
-  const { id } = useParams();
+  const { id, draftId } = useParams();
+  const standalone = !!draftId;
   const { state, actions } = useStore();
-  const project = state.projects.find((p) => p.id === id);
+  const project = standalone ? null : state.projects.find((p) => p.id === id);
+  const [draftMeta, setDraftMeta] = useState(() => (standalone ? getStandalonePlan(draftId) : null));
 
-  const { plan, setPlan, undo, redo, resetHistory } = usePlanHistory(() => withDefaults(project?.plan));
+  const initialPlan = () => {
+    if (standalone) return withDefaults(draftMeta?.plan || getStandalonePlan(draftId)?.plan);
+    return withDefaults(project?.plan);
+  };
+
+  const { plan, setPlan, undo, redo, resetHistory } = usePlanHistory(initialPlan);
   const [active, setActive] = useState("room");
   const [tool, setTool] = useState("select");
   const [pending, setPending] = useState(null);
@@ -92,17 +103,35 @@ export default function PlanPage() {
       if (svgRef.current) fitView();
     });
     return () => cancelAnimationFrame(t);
-  }, [project?.id]);
+  }, [standalone ? draftId : project?.id]);
 
   useEffect(() => {
+    if (standalone) {
+      const d = getStandalonePlan(draftId);
+      if (d) {
+        setDraftMeta(d);
+        resetHistory(withDefaults(d.plan));
+      }
+      return;
+    }
     let cancelled = false;
     actions.loadProject(id).then((p) => {
       if (!cancelled && p?.plan && Object.keys(p.plan).length) resetHistory(withDefaults(p.plan));
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [id, actions, resetHistory]);
+  }, [id, draftId, standalone, actions, resetHistory]);
 
   useEffect(() => {
+    if (standalone) {
+      if (!draftMeta?.id) return;
+      setSaved(false);
+      const t = window.setTimeout(() => {
+        const saved = saveStandalonePlan({ ...draftMeta, plan });
+        setDraftMeta(saved);
+        setSaved(true);
+      }, 700);
+      return () => window.clearTimeout(t);
+    }
     if (!project?.id) return;
     setSaved(false);
     const t = window.setTimeout(() => {
@@ -111,7 +140,7 @@ export default function PlanPage() {
         .catch((e) => console.error("Planner autosave failed", e));
     }, 700);
     return () => window.clearTimeout(t);
-  }, [plan, project?.id, actions]);
+  }, [plan, standalone, draftMeta?.id, draftMeta?.name, project?.id, actions]);
 
   const snapOn = display.snapOn && !altSnapRef.current;
   const fmtU = (mm) => fmt(mm, unit);
@@ -589,7 +618,17 @@ export default function PlanPage() {
     return () => { window.removeEventListener("keydown", onKeyDown); window.removeEventListener("keyup", onKeyUp); };
   });
 
-  if (!project) {
+  if (standalone && !draftMeta) {
+    return (
+      <div className="content">
+        <Empty title="Черновик не найден">
+          <Link className="btn btn-primary" to="/planner">К планировщику</Link>
+        </Empty>
+      </div>
+    );
+  }
+
+  if (!standalone && !project) {
     return (
       <div className="content">
         <Empty title="Проект не найден">
@@ -598,6 +637,28 @@ export default function PlanPage() {
       </div>
     );
   }
+
+  const planTitle = standalone ? draftMeta.name : project.name;
+  const planMetaId = standalone ? draftMeta.id : project.id.replace(/\D/g, "").slice(0, 7);
+
+  const handleRenameDraft = (name) => {
+    const next = renameStandalonePlan(draftId, name);
+    if (next) setDraftMeta(next);
+  };
+
+  const handleExportJson = () => {
+    downloadPlanFile({ ...draftMeta, plan });
+  };
+
+  const handleImportJson = async (file) => {
+    try {
+      const { plan: imported } = await readPlanFile(file);
+      resetHistory(withDefaults(imported));
+      setSaved(false);
+    } catch (e) {
+      alert("Не удалось импортировать: " + (e?.message || e));
+    }
+  };
 
   const specSummary = plannerSpecSummary(plan);
 
@@ -785,7 +846,7 @@ export default function PlanPage() {
         svgRef.current,
         plan.room,
         PDF_SHEETS.map((l) => ({ id: l.id, sheet: l.sheet })),
-        { projectName: project.name, projectId: project.id.replace(/\D/g, "").slice(0, 7), version: "1" },
+        { projectName: planTitle, projectId: planMetaId, version: "1" },
         mode,
       );
     } catch (e) { alert("Не удалось собрать PDF: " + e.message); }
@@ -793,6 +854,7 @@ export default function PlanPage() {
   };
 
   const syncSpec = async () => {
+    if (standalone) return;
     setBusy(true);
     try {
       const materials = state.materialsLoaded ? state.materials : await actions.ensureMaterials();
@@ -854,7 +916,18 @@ export default function PlanPage() {
 
   return (
     <div className="planner-app">
-      <PlannerTopBar projectName={project.name} saved={saved} busy={busy} onPdf={exportPDF} onSync={syncSpec} projectId={project.id} />
+      <PlannerTopBar
+        mode={standalone ? "standalone" : "project"}
+        title={planTitle}
+        saved={saved}
+        busy={busy}
+        onPdf={exportPDF}
+        onSync={syncSpec}
+        onExportJson={handleExportJson}
+        onImportJson={handleImportJson}
+        onRename={handleRenameDraft}
+        projectId={project?.id}
+      />
       <LayerTabs active={active} vis={vis} onPick={pickLayer} onToggleVis={(lid) => setVis((v) => ({ ...v, [lid]: !v[lid] }))} />
       <div className="planner-workspace">
         <ObjectPalette
@@ -868,7 +941,7 @@ export default function PlanPage() {
           onPending={handlePending}
           onWallThk={setWallThk}
           onRoomPatch={(patch) => setPlan((p) => ({ ...p, room: { ...p.room, ...patch } }))}
-          onSync={syncSpec}
+          onSync={standalone ? undefined : syncSpec}
         />
         <div className="planner-canvas-wrap">
           <svg
@@ -1048,7 +1121,7 @@ export default function PlanPage() {
           sel={sel}
           selObj={selObj}
           plan={plan}
-          project={project}
+          project={standalone ? { name: planTitle, items: [] } : project}
           active={active}
           materials={state.materials}
           modules={state.modules}
@@ -1056,7 +1129,7 @@ export default function PlanPage() {
           rotateItem={rotateItem}
           delSel={delSel}
           fmtU={fmtU}
-          onSync={syncSpec}
+          onSync={standalone ? undefined : syncSpec}
           specSummary={specSummary}
         />
       </div>
