@@ -801,24 +801,29 @@ export function LabelEl({ lb, items, k, zoom, selected, onDown, activeLayer, dis
 export function ZoneEl({
   zn, k, selected, onDown, onResize, fmtU, activeLayer, showDetail,
   showFlow = true, showZoneAreas = true, showZoneFill = true, zoneContoursOnly = false, room,
-  vis, display,
+  vis, display, interactive = false, showRoomLabels = true,
 }) {
   const zoneOpacity = vis && display
     ? layerOpacity("zones", activeLayer, vis.zones !== false, display, display?.sheet)
     : 1;
   if (zoneOpacity === 0) return null;
-  const cx = zn.x + zn.w / 2;
-  const cy = zn.y + zn.h / 2;
-  const detail = showDetail || activeLayer === "zones";
+
   const poly = zn.polygon?.length >= 3;
   const polyD = poly ? `M ${zn.polygon.map((p) => `${p.x} ${p.y}`).join(" L ")} Z` : null;
+  const cx = poly
+    ? zn.polygon.reduce((s, p) => s + p.x, 0) / zn.polygon.length
+    : zn.x + zn.w / 2;
+  const cy = poly
+    ? zn.polygon.reduce((s, p) => s + p.y, 0) / zn.polygon.length
+    : zn.y + zn.h / 2;
+  const detail = interactive && (showDetail || activeLayer === "zones");
   const flow = showFlow ? (ZONE_FLOW[zn.flow] || ZONE_FLOW.neutral) : ZONE_FLOW.neutral;
   const stroke = zn.zoneColor || flow.color;
   const fillColor = zn.zoneColor || flow.color;
   const contoursOnly = zn.contoursOnly || zoneContoursOnly;
   const hideFill = zn.hideFill || !showZoneFill || contoursOnly;
   let fillOp = hideFill ? 0 : (selected ? flow.fill + 0.04 : flow.fill);
-  if (!hideFill && zn.auto) fillOp = Math.max(fillOp, flow.fill);
+  if (!hideFill && zn.auto && interactive) fillOp = Math.max(fillOp, flow.fill);
   const areaMm2 = zoneAreaMm2(zn);
   const small = areaMm2 < 2_500_000;
   const rcx = room?.w ? room.w / 2 : cx;
@@ -830,28 +835,62 @@ export function ZoneEl({
   const labelY = small ? cy + (dy / distC) * Math.max(zn.w, zn.h) * 0.55 : cy;
   const showArea = zn.showArea !== false && showZoneAreas;
   const showName = zn.showName !== false;
-  const showHeightLbl = zn.showHeight !== false && activeLayer === "zones";
+  const showHeightLbl = zn.showHeight !== false && interactive && activeLayer === "zones";
   const locked = zn.locked === true;
   const dash = contoursOnly ? `${8 * k} ${5 * k}` : (detail ? "none" : `${10 * k} ${6 * k}`);
   const zoneLabels = display ? labelsVisible("zones", activeLayer, display, display?.sheet) : true;
   const labelLines = [];
   if (showName && zn.name) labelLines.push(zn.name);
-  if (showFlow && zn.flow && zn.flow !== "neutral") labelLines.push(flow.label);
+  if (interactive && showFlow && zn.flow && zn.flow !== "neutral") labelLines.push(flow.label);
   if (showArea) labelLines.push(`S = ${formatZoneAreaM2(zn)} м²`);
   if (showHeightLbl && zn.height) labelLines.push(`H = ${(zn.height / 1000).toFixed(2)} м`);
+
+  const handleDown = locked || !interactive ? undefined : onDown;
+  const hitCursor = locked || !interactive ? "default" : "pointer";
+
+  if (!interactive) {
+    if (!showRoomLabels || !zoneLabels || !showName) return null;
+    return (
+      <g pointerEvents="none" data-ui="room-label">
+        <text
+          x={cx}
+          y={cy - (showArea ? 6 * k : 0)}
+          fontSize={11 * k}
+          textAnchor="middle"
+          fill="#6b7d74"
+          fontWeight="500"
+          opacity={0.85}
+        >
+          {zn.name}
+        </text>
+        {showArea && (
+          <text
+            x={cx}
+            y={cy + 12 * k}
+            fontSize={9 * k}
+            textAnchor="middle"
+            fill="#8f9a94"
+            style={{ fontFamily: "var(--mono)" }}
+          >
+            {formatZoneAreaM2(zn)} м²
+          </text>
+        )}
+      </g>
+    );
+  }
 
   return (
     <g opacity={zoneOpacity < 1 ? zoneOpacity : undefined}>
       {poly ? (
         <path
           d={polyD}
-          fill={fillColor}
-          fillOpacity={fillOp}
+          fill={hideFill ? "transparent" : fillColor}
+          fillOpacity={hideFill ? 0 : fillOp}
           stroke={stroke}
           strokeWidth={(selected ? 2 : 1.2) * k}
           strokeDasharray={dash}
-          onPointerDown={locked ? undefined : onDown}
-          style={{ cursor: locked ? "default" : "move" }}
+          onPointerDown={handleDown}
+          style={{ cursor: hitCursor }}
         />
       ) : (
         <rect
@@ -860,13 +899,13 @@ export function ZoneEl({
           width={zn.w}
           height={zn.h}
           rx={2 * k}
-          fill={fillColor}
-          fillOpacity={fillOp}
+          fill={hideFill ? "transparent" : fillColor}
+          fillOpacity={hideFill ? 0 : fillOp}
           stroke={stroke}
           strokeWidth={(selected ? 2 : 1.2) * k}
           strokeDasharray={dash}
-          onPointerDown={locked ? undefined : onDown}
-          style={{ cursor: locked ? "default" : "move" }}
+          onPointerDown={handleDown}
+          style={{ cursor: hitCursor }}
         />
       )}
       {detail && zoneLabels && labelLines.length > 0 && (
@@ -900,6 +939,41 @@ export function ZoneEl({
         />
       )}
     </g>
+  );
+}
+
+/** Белая заливка пола помещения (как RemPlanner) — под стенами, без кликов. */
+export function RoomFloorEl({ zn, k, enabled = true }) {
+  if (!enabled || zn.hideFill) return null;
+  const poly = zn.polygon?.length >= 3;
+  const polyD = poly ? `M ${zn.polygon.map((p) => `${p.x} ${p.y}`).join(" L ")} Z` : null;
+  const stroke = "rgba(168, 176, 171, 0.45)";
+  if (poly) {
+    return (
+      <path
+        d={polyD}
+        fill="#ffffff"
+        fillOpacity={1}
+        stroke={stroke}
+        strokeWidth={0.6 * k}
+        pointerEvents="none"
+        data-room-floor={zn.id}
+      />
+    );
+  }
+  return (
+    <rect
+      x={zn.x}
+      y={zn.y}
+      width={zn.w}
+      height={zn.h}
+      fill="#ffffff"
+      fillOpacity={1}
+      stroke={stroke}
+      strokeWidth={0.6 * k}
+      pointerEvents="none"
+      data-room-floor={zn.id}
+    />
   );
 }
 

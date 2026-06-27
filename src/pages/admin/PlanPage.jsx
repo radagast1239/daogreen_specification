@@ -19,7 +19,7 @@ import { PlacementGhost } from "../../planner/objectOverlays.jsx";
 import { normalizeDisplay, roundMm, fmtCoord, fmtCoordMm, coordUnitLabel } from "../../planner/gridSettings.js";
 import { isStrictWallItem, isDoorKind } from "../../planner/doorTypes.js";
 import {
-  snapWallPoint, placeOnWall, pointInPolygon, breakWallAt,
+  snapWallPoint, placeOnWall, pointInPolygon, pointInZone, breakWallAt,
   syncZonesFromWalls, applyWallNodeMove, refreshWallMountedItems,
   tryMergeWall, straightenWall, setWallSegmentLength, setWallSegmentLengthAt,
   wallSegmentLengthAt, wallSegmentIndexForNode, alignWallToNeighbor, weldWallNodes,
@@ -42,7 +42,7 @@ import { usePlanHistory } from "../../planner/usePlanHistory.js";
 import {
   PlanGridScreen, PlanAxesScreen, SheetBackdrop, RoomDims, WallEl, WallsTopOverlay, ItemEl, ZoneEl, LabelEl, LineEl,
   DraftLine, SelectionDims, WallSelectionDims, MeasureEl, TypedLengthHint, LinkEl,
-  SelectionMarquee, MultiSelectBounds, PlanLayerGroup,
+  SelectionMarquee, MultiSelectBounds, PlanLayerGroup, RoomFloorEl,
 } from "../../planner/canvasPrimitives.jsx";
 import { layerDisplayState } from "../../planner/canvasLayers.js";
 import { snapLineDraftPoint, snapRackNeighbor } from "../../planner/plannerSnap.js";
@@ -599,6 +599,7 @@ export default function PlanPage() {
     setPendingSize(st.pendingSize);
     setLineDraftMeta({ layer: st.lineLayer, tag: st.lineTag });
     setActiveToolId(def?.id || "select");
+    setSelection((sel) => (layerId !== "zones" && sel?.coll === "zones" ? null : sel));
     clearWallChain();
     setSel(null);
     setGuides([]);
@@ -1227,9 +1228,9 @@ export default function PlanPage() {
         }
       }
     }
-    if (!hit) {
+    if (!hit && (active === "zones" || activeSheetId === "zones")) {
       for (const z of plan.zones) {
-        if (mm.x >= z.x && mm.x <= z.x + z.w && mm.y >= z.y && mm.y <= z.y + z.h) {
+        if (pointInZone(mm, z)) {
           hit = { coll: "zones", id: z.id };
           break;
         }
@@ -1952,6 +1953,12 @@ export default function PlanPage() {
 
   const showLabelFor = (lid) => layerState(lid).showLabels;
   const showDimsFor = (lid) => layerState(lid).showDims;
+  const selectZone = (e, zn) => {
+    e.stopPropagation();
+    setSel({ coll: "zones", id: zn.id });
+    if (!zn.auto && !zn.locked) startMove(e, "zones", zn);
+  };
+
   const itemProps = (it, lid, extra = {}) => (
     <ItemEl
       key={extra.key || it.id}
@@ -2045,8 +2052,13 @@ export default function PlanPage() {
   const drawerTitle = activeCategoryId
     ? (categoryById(activeCategoryId)?.label || layerById(active).name)
     : layerById(active).name;
+  const zonesEditMode = active === "zones" || activeSheetId === "zones";
   const hasSelection = !!(selection?.ids?.length);
-  const showProperties = hasSelection || pinnedProperties || warningsPanelOpen;
+  const showProperties = (
+    (hasSelection && (selection?.coll !== "zones" || zonesEditMode))
+    || pinnedProperties
+    || warningsPanelOpen
+  );
 
   const statusBar = (
     <div className="planner-coords no-print">
@@ -2097,9 +2109,19 @@ export default function PlanPage() {
           Выбрано: {selection.ids.length} · Shift+рамка · Ctrl+G
         </span>
       )}
-      {tool === "select" && (
+      {tool === "select" && zonesEditMode && (
         <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
           ЛКМ — панорама · Shift+ЛКМ — рамка · Shift+drag — по оси
+        </span>
+      )}
+      {tool === "select" && !zonesEditMode && (
+        <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
+          Свободная расстановка · помещения — лист «Помещения»
+        </span>
+      )}
+      {tool === "add" && pending && (
+        <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
+          Клик по полу — поставить объект
         </span>
       )}
       {linkFrom && (
@@ -2271,6 +2293,13 @@ export default function PlanPage() {
             <PlanAxesScreen view={view} width={svgSize.w} height={svgSize.h} display={canvasDisplay} />
             <g data-main transform={`translate(${view.panX},${view.panY}) scale(${z})`}>
               <SheetBackdrop room={plan.room} k={k} showBoundary={plan.room.showBoundary} />
+              {display.roomWhiteFill !== false && (
+                <g data-room-floors pointerEvents="none">
+                  {plan.zones.map((zn) => (
+                    <RoomFloorEl key={`fl-${zn.id}`} zn={zn} k={k} enabled={display.roomWhiteFill !== false} />
+                  ))}
+                </g>
+              )}
               <PlanLayerGroup layerId="room" activeLayer={active} vis={vis} display={canvasDisplay}>
                 {itemsByLayer("room").map((it) => itemProps(it, "room"))}
                 {roomWalls.map((w) => (
@@ -2297,28 +2326,6 @@ export default function PlanPage() {
                 ))}
                 {showDimsFor("room") && plan.room.showBoundary && <RoomDims room={plan.room} k={k} fmtU={fmtU} />}
               </PlanLayerGroup>
-              <PlanLayerGroup layerId="zones" activeLayer={active} vis={vis} display={canvasDisplay}>
-                {plan.zones.map((zn) => (
-                  <ZoneEl
-                    key={zn.id}
-                    zn={zn}
-                    k={k}
-                    room={plan.room}
-                    selected={selection?.coll === "zones" && selection.ids[0] === zn.id}
-                    activeLayer={active}
-                    vis={vis}
-                    display={canvasDisplay}
-                    showDetail={layerState("zones").showZoneDetail && display.showZoneNames}
-                    showFlow={display.showZoneFlow}
-                    showZoneAreas={display.showZoneAreas}
-                    showZoneFill={display.showZoneFill}
-                    zoneContoursOnly={display.zoneContoursOnly}
-                    onDown={(e) => startMove(e, "zones", zn)}
-                    onResize={(e) => startResize(e, "zones", zn)}
-                    fmtU={fmtU}
-                  />
-                ))}
-              </PlanLayerGroup>
               <PlanLayerGroup layerId="partitions" activeLayer={active} vis={vis} display={canvasDisplay}>
                 {partitionWalls.map((w) => (
                   <WallEl
@@ -2340,6 +2347,30 @@ export default function PlanPage() {
                     onWallMove={startWallMove}
                     openings={plan.items}
                     room={plan.room}
+                  />
+                ))}
+              </PlanLayerGroup>
+              <PlanLayerGroup layerId="zones" activeLayer={active} vis={vis} display={canvasDisplay}>
+                {plan.zones.map((zn) => (
+                  <ZoneEl
+                    key={zn.id}
+                    zn={zn}
+                    k={k}
+                    room={plan.room}
+                    selected={zonesEditMode && selection?.coll === "zones" && selection.ids[0] === zn.id}
+                    activeLayer={active}
+                    vis={vis}
+                    display={canvasDisplay}
+                    interactive={zonesEditMode}
+                    showRoomLabels={display.showZoneNames !== false}
+                    showDetail={layerState("zones").showZoneDetail && display.showZoneNames}
+                    showFlow={display.showZoneFlow}
+                    showZoneAreas={display.showZoneAreas}
+                    showZoneFill={display.showZoneFill}
+                    zoneContoursOnly={display.zoneContoursOnly}
+                    onDown={(e) => selectZone(e, zn)}
+                    onResize={(e) => startResize(e, "zones", zn)}
+                    fmtU={fmtU}
                   />
                 ))}
               </PlanLayerGroup>

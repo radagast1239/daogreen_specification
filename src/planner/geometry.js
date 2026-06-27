@@ -97,7 +97,7 @@ export function layerOpacity(layerId, activeId, visible, display = {}, sheet = n
   }
 
   if (layerId === "zones" && (activeId === "room" || activeId === "partitions" || sheetActive === "room")) {
-    return 0.3;
+    return 1;
   }
 
   return dimInactive ? 0.25 : 0.35;

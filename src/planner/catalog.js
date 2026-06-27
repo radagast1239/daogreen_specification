@@ -219,6 +219,7 @@ export const DEFAULT_DISPLAY = () => ({
   showZoneNames: true,
   showZoneAreas: true,
   showZoneFill: true,
+  roomWhiteFill: true,
   zoneContoursOnly: false,
   snapOn: true,
   snapWalls: true,

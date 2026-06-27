@@ -253,7 +253,7 @@ export function syncZonesFromWalls(plan) {
     : 100;
 
   const auto = loops.map((poly, i) => {
-    const innerPoly = insetPolygon(poly, avgThk * 0.45);
+    const innerPoly = insetPolygon(poly, avgThk * 0.5);
     const b = polygonBounds(innerPoly);
     const cen = polygonCentroid(innerPoly);
     const prev = prevAuto.find((z) => {

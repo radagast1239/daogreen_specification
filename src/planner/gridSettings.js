@@ -196,6 +196,7 @@ export function normalizeDisplay(saved) {
     showZoneNames: true,
     showZoneAreas: true,
     showZoneFill: true,
+    roomWhiteFill: true,
     zoneContoursOnly: false,
     snapOn: true,
     snapWalls: true,

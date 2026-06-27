@@ -25,6 +25,7 @@ const LAYER_TOGGLES = [
   { key: "showZoneFlow", label: "Типы зон" },
   { key: "showZoneAreas", label: "Площади помещений" },
   { key: "showZoneFill", label: "Заливка помещений" },
+  { key: "roomWhiteFill", label: "Белый пол" },
   { key: "zoneContoursOnly", label: "Только контуры" },
 ];
 
