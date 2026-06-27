@@ -8,6 +8,9 @@ import {
   ZONE_VIS,
 } from "./objectProperties.js";
 import { SEL_COLORS } from "./selectionVisuals.js";
+import { glyphRenderProps } from "./objectGlyphs.js";
+import { isDoorKind, isOpeningKind } from "./doorTypes.js";
+import { ObjectIcon } from "./icons.jsx";
 
 export function ServiceZoneEl({ it, k }) {
   const zones = serviceZoneElements(it);
@@ -173,4 +176,51 @@ export function ItemStateIcons({
 
   if (!icons.length) return null;
   return <g data-ui="state-icons">{icons}</g>;
+}
+
+/** Ghost-preview объекта при установке на план. */
+export function PlacementGhost({ item, k, valid, warning }) {
+  if (!item) return null;
+  const stroke = valid ? "#116355" : "#c45c4a";
+  const fill = valid ? "rgba(17, 99, 85, 0.12)" : "rgba(196, 92, 74, 0.14)";
+  const a = item.angle || 0;
+  const cx = item.x + item.w / 2;
+  const cy = item.y + item.h / 2;
+  const door = isDoorKind(item.kind);
+  const opening = isOpeningKind(item.kind);
+  const glyph = !door && !opening ? glyphRenderProps(item, {}) : { hasGlyph: false };
+  const transform = a ? `translate(${cx},${cy}) rotate(${a}) translate(${-cx},${-cy})` : undefined;
+
+  return (
+    <g pointerEvents="none" data-ui="placement-ghost" opacity={0.92} transform={transform}>
+      <rect
+        x={item.x}
+        y={item.y}
+        width={item.w}
+        height={item.h}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={1.8 * k}
+        strokeDasharray={valid ? undefined : `${5 * k} ${4 * k}`}
+        rx={door || opening ? 0 : 2 * k}
+      />
+      {glyph.hasGlyph && (
+        <g transform={`translate(${item.x} ${item.y})`} opacity={0.8}>
+          <ObjectIcon it={item} k={k} stroke={stroke} fillOpacity={0.35} icon={glyph.icon} />
+        </g>
+      )}
+      {warning && (
+        <text
+          x={cx}
+          y={item.y - 10 * k}
+          fontSize={10 * k}
+          textAnchor="middle"
+          fill={stroke}
+          fontWeight="600"
+        >
+          {warning}
+        </text>
+      )}
+    </g>
+  );
 }

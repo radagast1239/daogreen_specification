@@ -239,6 +239,7 @@ export const DEFAULT_DISPLAY = () => ({
   snapAngles: true,
   angleTolerance: 5,
   snapDistancePx: 10,
+  snapGuides: true,
   arrowStepMm: 10,
   arrowStepShiftMm: 100,
   arrowStepAltMm: 1,

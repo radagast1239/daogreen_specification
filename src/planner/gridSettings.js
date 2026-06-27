@@ -12,6 +12,7 @@ export const GRID_MINOR_STEP_LEGACY = GRID_MINOR_STEP;
 
 export const SNAP_STEPS = [10, 50, 100, 250, 500, 1000];
 export const SNAP_ROUND_OPTIONS = [1, 5, 10, 50];
+export const ARROW_STEP_OPTIONS = [1, 5, 10, 50, 100];
 
 export const COORD_UNITS = [
   { id: "mm", label: "мм", factor: 1 },
@@ -215,6 +216,7 @@ export function normalizeDisplay(saved) {
     snapAngles: true,
     angleTolerance: 5,
     snapDistancePx: 10,
+    snapGuides: true,
     arrowStepMm: 10,
     arrowStepShiftMm: 100,
     arrowStepAltMm: 1,

@@ -14,6 +14,8 @@ import { exportLayeredPDF } from "../../planner/exportPdf.js";
 import { createPlannerSpecItems, defaultObjectSpecSettings, plannerSpecSummary } from "../../planner/specSync.js";
 import { collectPlannerWarnings, wallsForLayer, boundsForActiveLayer } from "../../planner/geometry.js";
 import { resolveDraftPoint, angleBetweenDeg } from "../../planner/draftSnap.js";
+import { computeItemPlacement, placementZoneLabel } from "../../planner/placementPreview.js";
+import { PlacementGhost } from "../../planner/objectOverlays.jsx";
 import { normalizeDisplay, roundMm, fmtCoord, fmtCoordMm, coordUnitLabel } from "../../planner/gridSettings.js";
 import { isStrictWallItem, isDoorKind } from "../../planner/doorTypes.js";
 import {
@@ -453,49 +455,37 @@ export default function PlanPage() {
   };
 
   const addItemAt = (mm) => {
-    const c = catalogByKind(pending);
-    const iw = pendingSize?.w ?? c.w;
-    const ih = pendingSize?.h ?? c.h;
-    let x = mm.x - iw / 2;
-    let y = mm.y - ih / 2;
-    let angle = 0;
-    if (c.wall) {
-      const placed = attachWall({ w: iw, h: ih, kind: c.kind }, x, y);
-      if (!placed) {
+    const preview = computeItemPlacement({
+      mm,
+      kind: pending,
+      size: pendingSize,
+      plan,
+      display,
+      snapObj,
+      attachWall,
+      innerL,
+      innerR,
+      innerT,
+      innerB,
+    });
+    if (!preview.valid) {
+      if (preview.blocking && preview.warning) {
+        const c = catalogByKind(pending);
         window.alert(
-          isStrictWallItem(c.kind)
+          isStrictWallItem(c?.kind)
             ? "Дверь или окно можно ставить только на стену. Сначала нарисуйте перегородки на листе «Перегородки»."
-            : "Не найдена стена рядом — подведите объект к стене или перегородке.",
+            : preview.warning,
         );
-        return;
       }
-      if (placed.error) {
-        window.alert(placed.error);
-        return;
-      }
-      x = placed.x;
-      y = placed.y;
-      angle = placed.angle || 0;
-    } else if (display.onlyInsideRooms && plan.zones.length > 0) {
-      const inside = plan.zones.some((z) => pointInPolygon({ x: mm.x, y: mm.y }, z.polygon?.length >= 3 ? z.polygon : [
-        { x: z.x, y: z.y }, { x: z.x + z.w, y: z.y },
-        { x: z.x + z.w, y: z.y + z.h }, { x: z.x, y: z.y + z.h },
-      ]));
-      if (!inside) {
-        alert("Объект можно ставить только внутри помещения");
-        return;
-      }
-      const s = snapObj("items", { id: "_new", w: iw, h: ih }, x, y);
-      x = clamp(s.x, innerL, innerR - iw);
-      y = clamp(s.y, innerT, innerB - ih);
-    } else {
-      const s = snapObj("items", { id: "_new", w: iw, h: ih }, x, y);
-      x = clamp(s.x, innerL, innerR - iw);
-      y = clamp(s.y, innerT, innerB - ih);
+      return;
     }
+    const base = preview.item;
+    const c = catalogByKind(pending);
     const item = {
-      id: uid("eq"), kind: c.kind, icon: c.icon, layer: c.layer, label: c.label, color: c.color,
-      w: iw, h: ih, x, y, angle, wall: !!c.wall, wallId: null, doorSwing: "left", doorOpenIn: true,
+      ...base,
+      id: uid("eq"),
+      doorSwing: "left",
+      doorOpenIn: true,
       doorNum: isDoorKind(c.kind) ? nextDoorNumber(plan.items) : null,
       doorHeightMm: isDoorKind(c.kind) ? 2100 : null,
       openingNum: isOpeningKind(c.kind) ? nextOpeningNumber(plan.items) : null,
@@ -504,24 +494,7 @@ export default function PlanPage() {
       params: c.params ? { ...c.params } : null,
       ...defaultObjectSpecSettings(c.kind),
     };
-    if (c.wall) {
-      const again = attachWall(item, x, y);
-      if (again?.error) {
-        window.alert(again.error);
-        return;
-      }
-      if (again) {
-        item.wallId = again.wallId;
-        item.wallSeg = again.wallSeg;
-        item.x = again.x;
-        item.y = again.y;
-        item.angle = again.angle ?? item.angle;
-      }
-    }
-    setPlan((p) => {
-      const placed = attachItemZoneFields(p, item);
-      return { ...p, items: [...p.items, placed] };
-    });
+    setPlan((p) => ({ ...p, items: [...p.items, item] }));
     setSel({ coll: "items", id: item.id });
     setTool("select");
     setGuides([]);
@@ -1889,6 +1862,29 @@ export default function PlanPage() {
 
   const draftCursor = orthoTools && draft.length > 0 ? cursor : null;
 
+  const itemPlacementPreview = useMemo(() => {
+    if (tool !== "add" || !pending || !cursor) return null;
+    return computeItemPlacement({
+      mm: cursor,
+      kind: pending,
+      size: pendingSize,
+      plan,
+      display,
+      snapObj,
+      attachWall,
+      innerL,
+      innerR,
+      innerT,
+      innerB,
+    });
+  }, [tool, pending, cursor, pendingSize, plan, display, snapObj, attachWall, innerL, innerR, innerT, innerB]);
+
+  useEffect(() => {
+    if (tool === "add" && pending && itemPlacementPreview) {
+      setGuides(itemPlacementPreview.guides || []);
+    }
+  }, [tool, pending, itemPlacementPreview]);
+
   const showLabelFor = (lid) => layerState(lid).showLabels;
   const showDimsFor = (lid) => layerState(lid).showDims;
   const itemProps = (it, lid, extra = {}) => (
@@ -2011,13 +2007,24 @@ export default function PlanPage() {
         <span className="planner-coords__sel">
           · {sel.coll === "items" ? (
             <>
-              W {fmtCoordMm(selObj.w)} · D {fmtCoordMm(selObj.h)}
+              <b>X</b> {fmtCoordU(selObj.x)} · <b>Y</b> {fmtCoordU(selObj.y)}
+              · W {fmtCoordMm(selObj.w)} · D {fmtCoordMm(selObj.h)}
               {selObj.height ? ` · H ${fmtCoordMm(selObj.height)}` : ""}
               {!isDoorKind(selObj.kind) ? ` · ∠ ${selObj.angle || 0}°` : ""}
+              {placementZoneLabel(plan, selObj) ? ` · ${placementZoneLabel(plan, selObj)}` : ""}
             </>
           ) : sel.coll === "walls" ? (
             <>длина {fmtU(polyLength(selObj.pts || []))}</>
+          ) : sel.coll === "zones" ? (
+            <>{selObj.name || "Помещение"} · {fmtCoordU(selObj.x)}, {fmtCoordU(selObj.y)}</>
+          ) : sel.coll === "labels" ? (
+            <><b>X</b> {fmtCoordU(selObj.x)} · <b>Y</b> {fmtCoordU(selObj.y)}</>
           ) : null}
+        </span>
+      )}
+      {tool === "add" && pending && itemPlacementPreview?.item && (
+        <span className="planner-coords__sel" style={{ color: itemPlacementPreview.valid ? "#116355" : "#c45c4a" }}>
+          · {itemPlacementPreview.valid ? "Можно поставить" : (itemPlacementPreview.warning || "Нельзя поставить")}
         </span>
       )}
       {selection?.coll === "items" && selection.ids.length > 1 && (
@@ -2373,6 +2380,14 @@ export default function PlanPage() {
                 {multiBounds && <MultiSelectBounds bounds={multiBounds} k={k} />}
                 {measure.length > 0 && (
                   <MeasureEl pts={measure} cursor={measure.length === 1 && cursor ? draftPt(measure[0], cursor, draftSnapOpts()).point : cursor} k={k} fmtU={fmtU} />
+                )}
+                {itemPlacementPreview?.item && (
+                  <PlacementGhost
+                    item={itemPlacementPreview.item}
+                    k={k}
+                    valid={itemPlacementPreview.valid}
+                    warning={itemPlacementPreview.warning}
+                  />
                 )}
               </g>
             </g>

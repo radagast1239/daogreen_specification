@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import {
   SNAP_STEPS,
   SNAP_ROUND_OPTIONS,
+  ARROW_STEP_OPTIONS,
   COORD_UNITS,
   GRID_FINE_STEP,
   GRID_MINOR_STEP,
@@ -104,12 +105,28 @@ export function PlannerBottomBar({
             <Toggle label="Привязка к сетке" on={display.snapGrid !== false} onClick={() => onToggle("snapGrid")} />
             <Toggle label="К стенам" on={display.snapWalls !== false} onClick={() => onToggle("snapWalls")} />
             <Toggle label="К объектам" on={display.snapObjects !== false} onClick={() => onToggle("snapObjects")} />
+            <Toggle label="Углы 0/45/90" on={display.snapAngles !== false} onClick={() => onToggle("snapAngles")} />
+            <Toggle label="Направляющие" on={display.snapGuides !== false} onClick={() => onToggle("snapGuides")} />
+            <Toggle label="Только внутри помещений" on={!!display.onlyInsideRooms} onClick={() => onToggle("onlyInsideRooms")} />
+            <div className="planner-display-pop__hint">Шаг сетки (мм)</div>
             {SNAP_STEPS.map((step) => (
               <button
                 key={step}
                 type="button"
                 className={"planner-bottom-btn" + (snapStep === step ? " planner-bottom-btn--on" : "")}
                 onClick={() => onSetDisplay({ snapStep: step, gridStep: step })}
+              >
+                {step}
+              </button>
+            ))}
+            <div className="planner-display-pop__section">Шаг стрелок (мм)</div>
+            {ARROW_STEP_OPTIONS.map((step) => (
+              <button
+                key={`arr-${step}`}
+                type="button"
+                className={"planner-bottom-btn" + ((display.arrowStepMm ?? 10) === step ? " planner-bottom-btn--on" : "")}
+                onClick={() => onSetDisplay({ arrowStepMm: step })}
+                title={`Базовый шаг перемещения: ${step} мм`}
               >
                 {step}
               </button>
