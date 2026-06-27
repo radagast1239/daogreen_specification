@@ -1,6 +1,8 @@
 import { snap } from "./catalog.js";
+import { isDoorKind, isWallOpeningKind } from "./doorTypes.js";
 
 const SNAP_DIST = 80;
+const NODE_LINK_THR = 85;
 
 export function dist(a, b) {
   return Math.hypot(b.x - a.x, b.y - a.y);
@@ -35,6 +37,12 @@ export function snapWallPoint(pt, walls, room, zoom, snapOn, gridStep = 50) {
 
   if (snapOn) {
     walls.forEach((w) => w.pts.forEach((p) => trySnap(p)));
+    walls.forEach((w) => {
+      for (let i = 1; i < w.pts.length; i++) {
+        const proj = projectOnSegment(pt, w.pts[i - 1], w.pts[i]);
+        trySnap(proj, "wall-seg");
+      }
+    });
     if (room) {
       const t = room.wallThk / 2;
       [
@@ -185,6 +193,95 @@ export function polygonBounds(pts) {
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
 
+export function polygonArea(poly) {
+  if (!poly?.length) return 0;
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const j = (i + 1) % poly.length;
+    a += poly[i].x * poly[j].y - poly[j].x * poly[i].y;
+  }
+  return Math.abs(a) / 2;
+}
+
+export function polygonCentroid(poly) {
+  if (!poly?.length) return { x: 0, y: 0 };
+  let x = 0;
+  let y = 0;
+  poly.forEach((p) => { x += p.x; y += p.y; });
+  return { x: x / poly.length, y: y / poly.length };
+}
+
+/** Сжать полигон к центру — внутренняя граница помещения внутри линии осей стен. */
+export function insetPolygon(poly, insetMm) {
+  if (!poly?.length || poly.length < 3 || insetMm <= 0) return poly;
+  const cen = polygonCentroid(poly);
+  return poly.map((p) => {
+    const dx = p.x - cen.x;
+    const dy = p.y - cen.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const move = Math.min(insetMm, d * 0.38);
+    return { x: p.x - (dx / d) * move, y: p.y - (dy / d) * move };
+  });
+}
+
+const MIN_ROOM_AREA_MM2 = 600000; // ~0.6 м²
+
+/** Оставить «комнаты», убрать внешние контуры, внутри которых есть меньшие помещения. */
+export function filterRoomLoops(loops) {
+  const meta = loops
+    .map((poly) => ({ poly, area: polygonArea(poly), cen: polygonCentroid(poly) }))
+    .filter((l) => l.area >= MIN_ROOM_AREA_MM2);
+
+  return meta
+    .filter((l) => !meta.some((other) => (
+      other.poly !== l.poly &&
+      other.area < l.area * 0.98 &&
+      pointInPolygon(other.cen, l.poly)
+    )))
+    .sort((a, b) => a.area - b.area)
+    .map((l) => l.poly);
+}
+
+/** Автопомещения из замкнутых перегородок с сохранением имён/типов зон. */
+export function syncZonesFromWalls(plan) {
+  const partitionWalls = (plan.walls || []).filter((w) => w.role !== "outer");
+  const loops = filterRoomLoops(findClosedLoops(partitionWalls));
+  const manual = (plan.zones || []).filter((z) => !z.auto);
+  const prevAuto = (plan.zones || []).filter((z) => z.auto);
+  const avgThk = partitionWalls.length
+    ? partitionWalls.reduce((s, w) => s + (w.thk || 100), 0) / partitionWalls.length
+    : 100;
+
+  const auto = loops.map((poly, i) => {
+    const innerPoly = insetPolygon(poly, avgThk * 0.45);
+    const b = polygonBounds(innerPoly);
+    const cen = polygonCentroid(innerPoly);
+    const prev = prevAuto.find((z) => {
+      const zc = z.polygon?.length >= 3 ? polygonCentroid(z.polygon) : { x: z.x + z.w / 2, y: z.y + z.h / 2 };
+      return dist(cen, zc) < 500;
+    });
+    return {
+      prevId: prev?.id || null,
+      ...b,
+      name: prev?.name || `Помещение ${manual.length + i + 1}`,
+      height: prev?.height || plan.room?.height || 3000,
+      polygon: innerPoly,
+      flow: prev?.flow || "neutral",
+      purpose: prev?.purpose || "",
+      zoneColor: prev?.zoneColor,
+      locked: prev?.locked,
+      showName: prev?.showName,
+      showArea: prev?.showArea,
+      showHeight: prev?.showHeight,
+      hideFill: prev?.hideFill,
+      contoursOnly: prev?.contoursOnly,
+      auto: true,
+    };
+  });
+
+  return { manual, auto };
+}
+
 /** Точка внутри полигона (ray cast). */
 export function pointInPolygon(p, poly) {
   let inside = false;
@@ -244,11 +341,11 @@ function projectOnSegment(p, a, b) {
 }
 
 /** Разместить настенный объект на ближайшей стене. */
-export function placeOnWall(item, pt, walls, room) {
-  const seg = nearestWallSegment({ x: pt.x + item.w / 2, y: pt.y + item.h / 2 }, walls, room, 350);
+export function placeOnWall(item, pt, walls, room, maxDist = 350) {
+  const seg = nearestWallSegment({ x: pt.x + item.w / 2, y: pt.y + item.h / 2 }, walls, room, maxDist);
   if (!seg) return null;
 
-  const { proj, horiz, thk } = seg;
+  const { proj, horiz } = seg;
   let x = proj.x - item.w / 2;
   let y = proj.y - item.h / 2;
   let angle = 0;
@@ -263,7 +360,14 @@ export function placeOnWall(item, pt, walls, room) {
     angle = seg.b.y >= seg.a.y ? 90 : 270;
   }
 
-  return { x, y, angle, wallSeg: seg };
+  return {
+    x,
+    y,
+    angle,
+    wallSeg: seg,
+    wallId: seg.wallId,
+    onWall: true,
+  };
 }
 
 function clampAlong(pos, size, a, b) {
@@ -296,5 +400,210 @@ export function breakWallAt(wall, clickPt) {
     { ...wall, pts: pts1 },
     { ...wall, pts: pts2, id: null },
   ];
+}
+
+/** Сдвинуть узел и потянуть совпадающие узлы соседних стен. */
+export function applyWallNodeMove(walls, wallId, nodeIdx, newPt, thr = NODE_LINK_THR) {
+  const wall = walls.find((w) => w.id === wallId);
+  if (!wall?.pts?.[nodeIdx]) return walls;
+  const oldPt = wall.pts[nodeIdx];
+  return walls.map((w) => ({
+    ...w,
+    pts: w.pts.map((p) => (dist(p, oldPt) <= thr ? { x: newPt.x, y: newPt.y } : p)),
+  }));
+}
+
+/** Обновить позиции дверей/окон на стене после её изменения. */
+export function refreshWallMountedItems(items, walls, room, wallId = null) {
+  return items.map((it) => {
+    const onWall = it.wall || isDoorKind(it.kind) || isWallOpeningKind(it.kind);
+    if (!onWall) return it;
+    if (wallId && it.wallId !== wallId && it.wallId != null) return it;
+    const cx = it.x + it.w / 2;
+    const cy = it.y + it.h / 2;
+    const placed = placeOnWall(it, { x: cx, y: cy }, walls, room, 400);
+    if (!placed) return it;
+    return { ...it, x: placed.x, y: placed.y, angle: placed.angle ?? it.angle, wallId: placed.wallId };
+  });
+}
+
+function sameLine(a, b, c, d, eps = 8) {
+  const cross1 = Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+  const cross2 = Math.abs((b.x - a.x) * (d.y - a.y) - (b.y - a.y) * (d.x - a.x));
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  return len > 1 && cross1 / len < eps && cross2 / len < eps;
+}
+
+function overlap1D(a1, a2, b1, b2) {
+  const lo = Math.max(Math.min(a1, a2), Math.min(b1, b2));
+  const hi = Math.min(Math.max(a1, a2), Math.max(b1, b2));
+  return hi - lo > 40;
+}
+
+/** Наложение коллинеарных сегментов разных стен. */
+export function findWallOverlaps(walls) {
+  const segs = wallSegments(walls);
+  const hits = [];
+  for (let i = 0; i < segs.length; i++) {
+    for (let j = i + 1; j < segs.length; j++) {
+      const s1 = segs[i];
+      const s2 = segs[j];
+      if (s1.wallId === s2.wallId) continue;
+      const shared =
+        near(s1.a, s2.a, 8) || near(s1.a, s2.b, 8) ||
+        near(s1.b, s2.a, 8) || near(s1.b, s2.b, 8);
+      if (shared) continue;
+      if (!sameLine(s1.a, s1.b, s2.a, s2.b)) continue;
+      const horiz = Math.abs(s1.b.x - s1.a.x) >= Math.abs(s1.b.y - s1.a.y);
+      const ok = horiz
+        ? overlap1D(s1.a.x, s1.b.x, s2.a.x, s2.b.x)
+        : overlap1D(s1.a.y, s1.b.y, s2.a.y, s2.b.y);
+      if (ok) hits.push({ id: `wo-${s1.wallId}-${s2.wallId}`, wallIds: [s1.wallId, s2.wallId] });
+    }
+  }
+  return hits;
+}
+
+function segHitsRect(a, b, rx, ry, rw, rh) {
+  const edges = [
+    [{ x: rx, y: ry }, { x: rx + rw, y: ry }],
+    [{ x: rx + rw, y: ry }, { x: rx + rw, y: ry + rh }],
+    [{ x: rx + rw, y: ry + rh }, { x: rx, y: ry + rh }],
+    [{ x: rx, y: ry + rh }, { x: rx, y: ry }],
+  ];
+  return edges.some(([e1, e2]) => segmentsIntersectProper(a, b, e1, e2));
+}
+
+/** Стена проходит поверх напольной мебели/оборудования. */
+export function findWallsOverItems(walls, items) {
+  const hits = [];
+  walls.forEach((w) => {
+    for (let i = 1; i < w.pts.length; i++) {
+      const a = w.pts[i - 1];
+      const b = w.pts[i];
+      items.forEach((it) => {
+        if (it.wall || isDoorKind(it.kind) || isWallOpeningKind(it.kind)) return;
+        if (it.layer === "room") return;
+        if (segHitsRect(a, b, it.x, it.y, it.w, it.h)) {
+          hits.push({ id: `wov-${w.id}-${it.id}`, wallIds: [w.id], objectIds: [it.id] });
+        }
+      });
+    }
+  });
+  return hits;
+}
+
+/** Сварить близкие узлы стен в одну точку. */
+export function weldWallNodes(walls, thr = NODE_LINK_THR) {
+  if (!walls?.length) return walls;
+  const clusters = [];
+
+  const clusterFor = (p) => {
+    let c = clusters.find((cl) => dist(cl.center, p) <= thr);
+    if (!c) {
+      c = { center: { x: p.x, y: p.y }, n: 1 };
+      clusters.push(c);
+    } else {
+      c.center = {
+        x: (c.center.x * c.n + p.x) / (c.n + 1),
+        y: (c.center.y * c.n + p.y) / (c.n + 1),
+      };
+      c.n += 1;
+    }
+    return c.center;
+  };
+
+  walls.forEach((w) => w.pts.forEach((p) => clusterFor(p)));
+
+  return walls.map((w) => ({
+    ...w,
+    pts: w.pts.map((p) => {
+      const c = clusters.find((cl) => dist(cl.center, p) <= thr);
+      return c ? { x: c.center.x, y: c.center.y } : { ...p };
+    }),
+  }));
+}
+
+/** Объединить стену с соседней по общему узлу. */
+export function tryMergeWall(walls, wallId) {
+  const w = walls.find((x) => x.id === wallId);
+  if (!w || w.pts.length < 2) return null;
+
+  for (const other of walls) {
+    if (other.id === wallId) continue;
+    const tries = [
+      { a: w.pts[w.pts.length - 1], b: other.pts[0], pts: [...w.pts, ...other.pts.slice(1)] },
+      { a: w.pts[w.pts.length - 1], b: other.pts[other.pts.length - 1], pts: [...w.pts, ...[...other.pts].reverse().slice(1)] },
+      { a: w.pts[0], b: other.pts[other.pts.length - 1], pts: [...other.pts, ...w.pts.slice(1)] },
+      { a: w.pts[0], b: other.pts[0], pts: [...[...other.pts].reverse(), ...w.pts.slice(1)] },
+    ];
+    for (const t of tries) {
+      if (near(t.a, t.b, NODE_LINK_THR)) {
+        return {
+          walls: walls
+            .filter((x) => x.id !== other.id)
+            .map((x) => (x.id === wallId ? { ...w, pts: t.pts } : x)),
+          mergedId: wallId,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/** Выровнять сегмент стены строго по горизонтали или вертикали. */
+export function straightenWall(wall, mode = "h") {
+  if (!wall?.pts || wall.pts.length < 2) return wall;
+  const pts = wall.pts.map((p) => ({ ...p }));
+  const a = pts[pts.length - 2];
+  const b = pts[pts.length - 1];
+  if (mode === "h") pts[pts.length - 1] = { x: b.x, y: a.y };
+  else pts[pts.length - 1] = { x: a.x, y: b.y };
+  return { ...wall, pts };
+}
+
+/** Задать точную длину последнего сегмента стены. */
+export function setWallSegmentLength(wall, lenMm) {
+  if (!wall?.pts || wall.pts.length < 2 || lenMm < 100) return wall;
+  const pts = wall.pts.map((p) => ({ ...p }));
+  const a = pts[pts.length - 2];
+  const b = pts[pts.length - 1];
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const d = Math.hypot(dx, dy);
+  if (d < 1) return wall;
+  pts[pts.length - 1] = { x: a.x + (dx / d) * lenMm, y: a.y + (dy / d) * lenMm };
+  return { ...wall, pts };
+}
+
+/** Выровнять стену параллельно соседней по общему узлу. */
+export function alignWallToNeighbor(walls, wallId) {
+  const w = walls.find((x) => x.id === wallId);
+  if (!w || w.pts.length < 2) return null;
+
+  for (const other of walls) {
+    if (other.id === wallId || other.pts.length < 2) continue;
+    for (const pt of [w.pts[0], w.pts[w.pts.length - 1]]) {
+      for (let i = 1; i < other.pts.length; i++) {
+        const oa = other.pts[i - 1];
+        const ob = other.pts[i];
+        if (!near(pt, oa, NODE_LINK_THR) && !near(pt, ob, NODE_LINK_THR)) continue;
+        const odx = ob.x - oa.x;
+        const ody = ob.y - oa.y;
+        const len = Math.hypot(odx, ody);
+        if (len < 1) continue;
+        const endIdx = near(pt, w.pts[0], NODE_LINK_THR) ? 1 : w.pts.length - 1;
+        const startIdx = endIdx === 1 ? 0 : w.pts.length - 2;
+        const segLen = dist(w.pts[startIdx], w.pts[endIdx]);
+        const pts = w.pts.map((p) => ({ ...p }));
+        pts[endIdx] = {
+          x: pts[startIdx].x + (odx / len) * segLen,
+          y: pts[startIdx].y + (ody / len) * segLen,
+        };
+        return walls.map((x) => (x.id === wallId ? { ...w, pts } : x));
+      }
+    }
+  }
+  return null;
 }
 

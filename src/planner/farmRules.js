@@ -1,12 +1,16 @@
 import { pointInZone } from "./wallGeometry.js";
 import { itemHasLinkOfType, linksForItem } from "./linkGeometry.js";
+import { isDoorKind } from "./doorTypes.js";
 
 /** Типы зонирования по чистоте потока. */
 export const ZONE_FLOW = {
-  neutral: { label: "Обычная", color: "#8a7a9c", fill: 0.05 },
-  clean:   { label: "Чистая зона", color: "#116355", fill: 0.07 },
-  dirty:   { label: "Грязная зона", color: "#7a5c3e", fill: 0.07 },
-  buffer:  { label: "Буфер / санпропускник", color: "#9c6b9c", fill: 0.08 },
+  neutral: { label: "Обычная", color: "#116355", fill: 0.09 },
+  dirty:   { label: "Грязная зона", color: "#7a5c3e", fill: 0.045 },
+  semi:    { label: "Условно чистая", color: "#6b8a7a", fill: 0.04 },
+  clean:   { label: "Чистая", color: "#1f6f8b", fill: 0.045 },
+  sterile: { label: "Стерильная / санитарная", color: "#1f6f8b", fill: 0.045 },
+  technical: { label: "Техническая", color: "#6b7d74", fill: 0.045 },
+  buffer:  { label: "Буфер / санпропускник", color: "#9c6b9c", fill: 0.04 },
 };
 
 const DIRTY_KINDS = new Set([
@@ -106,7 +110,7 @@ export function collectFarmWarnings(plan) {
       });
     }
 
-    const doors = items.filter((i) => i.kind === "door" || i.kind === "door2");
+    const doors = items.filter((i) => isDoorKind(i.kind));
     if (cleanZones.length && dirtyZones.length && dezmats.length) {
       const doorOnBoundary = doors.some((door) => {
         const c = itemCenter(door);
@@ -175,10 +179,13 @@ export function collectFarmWarnings(plan) {
 export const PDF_LEGEND = [
   { icon: "rack_nft", label: "Стеллаж NFT", color: "#116355" },
   { icon: "tank_round", label: "Ёмкость полива", color: "#1f6f8b" },
-  { icon: "pump_inline", label: "Насос", color: "#b9741d" },
+  { icon: "pump_inline", label: "Насос", color: "#1f6f8b" },
   { icon: "panel", label: "Электрощит", color: "#a5371f" },
-  { icon: "socket", label: "Розетка", color: "#c44a2f" },
+  { icon: "socket", label: "Розетка", color: "#a5371f" },
   { icon: "dezmat", label: "Дизковрик", color: "#9c6b9c" },
-  { icon: "door", label: "Дверь", color: "#2f3431" },
-  { icon: "sink_single", label: "Раковина", color: "#2f6f8f" },
+  { icon: "tank_waste", label: "Бак для мусора", color: "#6d5c52" },
+  { icon: "door", label: "Дверь / проём", color: "#2f3431" },
+  { icon: "sink_single", label: "Раковина", color: "#1f6f8b" },
+  { icon: "vent", label: "Вентиляция", color: "#6b7d74" },
+  { icon: "ac_indoor", label: "Кондиционер", color: "#5b7c9d" },
 ];

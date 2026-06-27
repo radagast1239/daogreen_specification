@@ -37,9 +37,9 @@ export default function PublishRulesTab({ settings, onSaved }) {
         позиции; для клиента дополнительно нужны утверждение и количество.
       </p>
 
-      <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+      <div className="card publish-rules-card" style={{ padding: 20, marginBottom: 16 }}>
         <h3 style={{ marginTop: 0 }}>Обязательные поля</h3>
-        <div className="publish-rules-grid">
+        <div className="publish-rules-list">
           {PUBLISH_RULE_OPTIONS.map((opt) => (
             <label key={opt.id} className="publish-rule-row">
               <input
@@ -52,32 +52,34 @@ export default function PublishRulesTab({ settings, onSaved }) {
           ))}
         </div>
 
-        <label className="publish-rule-row" style={{ marginTop: 14 }}>
-          <input
-            type="checkbox"
-            checked={!!form.rules.requireMinClientItems}
-            onChange={(e) => patchRule("requireMinClientItems", e.target.checked)}
-          />
-          <span>
-            Минимум позиций для клиента:{" "}
+        <div className="publish-rules-extra">
+          <label className="publish-rule-row">
             <input
-              type="number"
-              min={0}
-              style={{ width: 56, marginLeft: 6 }}
-              value={form.rules.minClientItems ?? 1}
-              onChange={(e) => patchRule("minClientItems", Number(e.target.value) || 0)}
+              type="checkbox"
+              checked={!!form.rules.requireMinClientItems}
+              onChange={(e) => patchRule("requireMinClientItems", e.target.checked)}
             />
-          </span>
-        </label>
+            <span className="publish-rule-row__text">
+              Минимум позиций для клиента:{" "}
+              <input
+                type="number"
+                min={0}
+                className="publish-rule-row__num"
+                value={form.rules.minClientItems ?? 1}
+                onChange={(e) => patchRule("minClientItems", Number(e.target.value) || 0)}
+              />
+            </span>
+          </label>
 
-        <label className="publish-rule-row" style={{ marginTop: 10 }}>
-          <input
-            type="checkbox"
-            checked={form.rules.allowForcePublish !== false}
-            onChange={(e) => patchRule("allowForcePublish", e.target.checked)}
-          />
-          <span>Разрешить «Всё равно отправить», если чеклист не пройден</span>
-        </label>
+          <label className="publish-rule-row">
+            <input
+              type="checkbox"
+              checked={form.rules.allowForcePublish !== false}
+              onChange={(e) => patchRule("allowForcePublish", e.target.checked)}
+            />
+            <span>Разрешить «Всё равно отправить», если чеклист не пройден</span>
+          </label>
+        </div>
       </div>
 
       <div className="card" style={{ padding: 20, marginBottom: 16 }}>

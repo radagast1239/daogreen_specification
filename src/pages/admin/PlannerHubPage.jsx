@@ -10,6 +10,8 @@ import {
   readPlanFile,
   importStandalonePlan,
 } from "../../planner/standalonePlans.js";
+import { AttachPlanModal } from "../../planner/ui/AttachPlanModal.jsx";
+import "../../planner/planner.css";
 
 export default function PlannerHubPage() {
   const { state, actions } = useStore();
@@ -17,6 +19,8 @@ export default function PlannerHubPage() {
   const importRef = useRef(null);
   const [q, setQ] = useState("");
   const [drafts, setDrafts] = useState(() => listStandalonePlans());
+  const [attachDraft, setAttachDraft] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     actions.refreshProjects?.();
@@ -56,6 +60,36 @@ export default function PlannerHubPage() {
       navigate(`/planner/draft/${d.id}`);
     } catch (e) {
       alert("Не удалось импортировать: " + (e?.message || e));
+    }
+  };
+
+  const handleAttachToProject = async (project) => {
+    if (!attachDraft) return;
+    const itemCount = project.plan?.items?.length ?? 0;
+    const wallCount = project.plan?.walls?.length ?? 0;
+    if ((itemCount > 0 || wallCount > 0) && !window.confirm(
+      `У проекта «${project.name}» уже есть план (${itemCount} объектов). Заменить черновиком?`,
+    )) return;
+    setBusy(true);
+    try {
+      await actions.projectUpdate(project.id, {
+        plan: attachDraft.plan,
+        plannerAttachedAt: new Date().toISOString(),
+        plannerAttachedFrom: attachDraft.id,
+      });
+      setAttachDraft(null);
+      const del = window.confirm(
+        `План привязан к «${project.name}». Удалить черновик из браузера?`,
+      );
+      if (del) {
+        deleteStandalonePlan(attachDraft.id);
+        refreshDrafts();
+      }
+      navigate(`/project/${project.id}/plan`);
+    } catch (e) {
+      window.alert("Не удалось привязать: " + (e?.message || e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -125,6 +159,14 @@ export default function PlannerHubPage() {
                         <Link className="btn btn-sm btn-primary" to={`/planner/draft/${d.id}`}>
                           ▦ Открыть
                         </Link>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          style={{ marginLeft: 6 }}
+                          onClick={() => setAttachDraft(d)}
+                        >
+                          К проекту
+                        </button>
                         <button
                           type="button"
                           className="btn btn-sm"
@@ -205,6 +247,14 @@ export default function PlannerHubPage() {
           )}
         </div>
       </div>
+      <AttachPlanModal
+        open={!!attachDraft}
+        projects={state.projects}
+        draftName={attachDraft?.name}
+        busy={busy}
+        onClose={() => setAttachDraft(null)}
+        onAttach={handleAttachToProject}
+      />
     </>
   );
 }

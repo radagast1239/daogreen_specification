@@ -86,6 +86,18 @@ const ICONS = {
       <path d="M4 6h16M4 12h16M4 18h10" />
     </svg>
   ),
+  "panel-close": (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 8v8M15 12H9" />
+    </svg>
+  ),
+  "panel-open": (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 8v8M13 12h4" />
+    </svg>
+  ),
   planner: (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
       <rect x="3" y="3" width="18" height="18" rx="2" />

@@ -1,4 +1,21 @@
-import { LINK_RULES } from "./catalog.js";
+import { LINK_RULES } from "./linkRules.js";
+
+export { LINK_RULES } from "./linkRules.js";
+export {
+  linkTypeForLayer,
+  linkTypesForLayer,
+  canCreateLink,
+  normalizeLinkEnds,
+  resolveLinkColor,
+  linksVisibleOnLayer,
+  findNearestLinkTarget,
+  defaultLinkFields,
+  buildLinkPayload,
+  collectLinkWarnings,
+  findRackLinkTarget,
+  RACK_LINK_ACTIONS,
+  LAYER_LINK_TYPE,
+} from "./linkRules.js";
 
 export function itemCenter(it) {
   return { x: it.x + it.w / 2, y: it.y + it.h / 2 };
@@ -36,31 +53,6 @@ export function linkLengthMm(link, items, room = {}) {
   return { plan2d, vertical, total, pts };
 }
 
-export function linkTypeForLayer(layerId) {
-  if (layerId === "sockets" || layerId === "light") return "power";
-  if (layerId === "water") return "irrigation";
-  if (LINK_RULES[layerId]) return layerId;
-  return null;
-}
-
-export function canCreateLink(type, fromItem, toItem) {
-  const rule = LINK_RULES[type];
-  if (!rule || !fromItem || !toItem) return false;
-  if (fromItem.id === toItem.id) return false;
-  const fromOk = rule.from.has(fromItem.kind);
-  const toOk = rule.to.has(toItem.kind);
-  if (fromOk && toOk) return true;
-  return rule.from.has(toItem.kind) && rule.to.has(fromItem.kind);
-}
-
-export function normalizeLinkEnds(type, fromItem, toItem) {
-  const rule = LINK_RULES[type];
-  if (!rule) return { from: fromItem, to: toItem };
-  if (rule.from.has(fromItem.kind) && rule.to.has(toItem.kind)) return { from: fromItem, to: toItem };
-  if (rule.from.has(toItem.kind) && rule.to.has(fromItem.kind)) return { from: toItem, to: fromItem };
-  return { from: fromItem, to: toItem };
-}
-
 export function linksForItem(links, itemId) {
   return (links || []).filter((l) => l.fromId === itemId || l.toId === itemId);
 }
@@ -72,4 +64,11 @@ export function itemHasLinkOfType(links, itemId, type, role = "any") {
     if (role === "to") return l.toId === itemId;
     return l.fromId === itemId || l.toId === itemId;
   });
+}
+
+export function linkLabel(link, items) {
+  const rule = LINK_RULES[link.type] || { label: "Связь" };
+  const from = items.find((i) => i.id === link.fromId);
+  const to = items.find((i) => i.id === link.toId);
+  return `${rule.label}: ${from?.label || "?"} → ${to?.label || "?"}`;
 }

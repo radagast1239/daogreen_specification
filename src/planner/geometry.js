@@ -1,9 +1,18 @@
-import { snap, LINK_RULES } from "./catalog.js";
+import { snap, LINK_RULES, LAYERS, migrateLayerId } from "./catalog.js";
 import {
   findWallIntersections, itemInAnyZone, nearestWallSegment,
+  findWallOverlaps, findWallsOverItems,
 } from "./wallGeometry.js";
 import { itemHasLinkOfType } from "./linkGeometry.js";
+import { collectLinkWarnings } from "./linkRules.js";
 import { collectFarmWarnings } from "./farmRules.js";
+import { collectRoomPurposeWarnings } from "./roomZones.js";
+import { collectRackWarnings } from "./rackProperties.js";
+import { collectLineWarnings } from "./lineProperties.js";
+import { collectLabelWarnings } from "./labelProperties.js";
+import { findServiceZoneCollisions } from "./objectProperties.js";
+import { isDoorKind, isWallOpeningKind, doorStyle } from "./doorTypes.js";
+import { doorSwingCollisions } from "./doorGeometry.js";
 
 /** Привязка точки к горизонтали/вертикали относительно предыдущей (как в CAD). */
 export function orthogonalPoint(from, to, step = 50, snapOn = true) {
@@ -15,49 +24,86 @@ export function orthogonalPoint(from, to, step = 50, snapOn = true) {
   return { x: s(from.x), y: s(to.y) };
 }
 
+const SNAP_ANGLES = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4, Math.PI, -Math.PI / 4, -Math.PI / 2, (-3 * Math.PI) / 4];
+
+/** Shift: ограничение 0° / 45° / 90° от предыдущей точки. */
+export function constrainedOrthoPoint(from, to, step = 50, snapOn = true) {
+  const s = (v) => snap(v, step, snapOn);
+  if (!from) return { x: s(to.x), y: s(to.y) };
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return { x: s(from.x), y: s(from.y) };
+  const ang = Math.atan2(dy, dx);
+  let best = SNAP_ANGLES[0];
+  let bestDiff = Infinity;
+  SNAP_ANGLES.forEach((a) => {
+    let diff = Math.abs(ang - a);
+    if (diff > Math.PI) diff = 2 * Math.PI - diff;
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = a;
+    }
+  });
+  return { x: s(from.x + Math.cos(best) * len), y: s(from.y + Math.sin(best) * len) };
+}
+
 const BASE_LAYERS = new Set(["room", "zones", "partitions"]);
 const COMPOSITE_LAYERS = new Set(["client", "install"]);
+const LINE_LAYER_IDS = ["drain", "irrigation", "supply", "power", "vent", "climate", "ac", "light", "staff"];
+const ITEM_LAYER_IDS = LAYERS.map((l) => l.id).filter(
+  (id) => !["room", "zones", "partitions", "client", "install", "spec"].includes(id),
+);
+const CLIENT_HIDDEN = new Set([
+  "drain", "irrigation", "supply", "power", "vent", "climate", "ac", "light", "staff", "sockets", "spec", "furn",
+]);
 
 /**
  * Прозрачность слоя на холсте.
- * Стены (room) всегда видны. Активный слой — полный цвет. Остальные приглушены или скрыты.
+ * Стены (room/partitions) всегда видны. Активный слой — полный цвет. Остальные 0.18–0.35.
  */
-export function layerOpacity(layerId, activeId, visible, display = {}) {
+export function layerOpacity(layerId, activeId, visible, display = {}, sheet = null) {
   if (!visible) return 0;
   const { dimInactive = true, hideInactive = false, highlightActive = true } = display;
+  const sheetActive = sheet?.activeLayer || activeId;
 
   if (layerId === "room" || layerId === "partitions") return 1;
 
+  if (sheet?.hiddenLayers?.includes(layerId)) return 0;
+
   if (activeId === "client") {
+    if (CLIENT_HIDDEN.has(layerId)) return 0;
     if (layerId === "zones") return 0.25;
-    if (COMPOSITE_LAYERS.has(layerId) || layerId === "spec" || layerId === "furn") return 0;
     return layerId === "room" ? 1 : 0.35;
   }
 
   if (activeId === "install") {
     if (layerId === "spec") return 0;
-    return dimInactive ? 0.72 : 0.9;
+    return dimInactive && layerId !== sheetActive ? 0.72 : 0.9;
   }
 
   if (activeId === "spec") {
-    if (BASE_LAYERS.has(layerId)) return 0.4;
-    return dimInactive ? 0.2 : 0.35;
+    if (BASE_LAYERS.has(layerId)) return 0.35;
+    return dimInactive ? 0.22 : 0.35;
   }
 
-  if (layerId === activeId) return highlightActive ? 1 : 0.95;
+  const isActive = layerId === sheetActive || layerId === activeId;
+  if (isActive) return highlightActive ? 1 : 0.95;
 
   if (hideInactive && !BASE_LAYERS.has(layerId) && layerId !== "zones") return 0;
 
-  if (layerId === "zones" && (activeId === "room" || activeId === "partitions")) return 0.35;
+  if (sheet?.mutedLayers?.includes(layerId)) {
+    return dimInactive ? 0.22 : 0.32;
+  }
 
-  return dimInactive ? 0.22 : 0.45;
+  if (layerId === "zones" && (activeId === "room" || activeId === "partitions" || sheetActive === "room")) {
+    return 0.3;
+  }
+
+  return dimInactive ? 0.25 : 0.35;
 }
 
-export function labelsVisible(layerId, activeId, display = {}) {
-  if (display.showLabels === false) return false;
-  if (activeId === "install" || activeId === "client") return true;
-  return layerId === activeId || layerId === "room";
-}
+export { labelsVisible } from "./labelProperties.js";
 
 export function wallsForLayer(walls, activeId) {
   if (activeId === "partitions") return walls.filter((w) => w.role !== "outer");
@@ -65,8 +111,64 @@ export function wallsForLayer(walls, activeId) {
   return walls;
 }
 
+/** Границы содержимого активного листа для «Вместить слой». */
+export function boundsForActiveLayer(plan, activeId) {
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  let has = false;
+
+  const add = (x, y) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    has = true;
+    x1 = Math.min(x1, x);
+    y1 = Math.min(y1, y);
+    x2 = Math.max(x2, x);
+    y2 = Math.max(y2, y);
+  };
+  const addRect = (x, y, w, h) => {
+    add(x, y);
+    add(x + w, y + h);
+  };
+
+  const includeWalls = ["room", "partitions", "zones", "client", "install"].includes(activeId)
+    || ITEM_LAYER_IDS.includes(activeId)
+    || LINE_LAYER_IDS.includes(activeId);
+
+  if (includeWalls) {
+    wallsForLayer(plan.walls || [], activeId).forEach((w) => {
+      (w.pts || []).forEach((p) => add(p.x, p.y));
+    });
+  }
+
+  if (activeId === "zones" || activeId === "client") {
+    (plan.zones || []).forEach((z) => addRect(z.x, z.y, z.w, z.h));
+  }
+
+  (plan.lines || []).forEach((l) => {
+    const lid = migrateLayerId(l.layer);
+    const onLayer = lid === activeId;
+    const onInstall = activeId === "install" && !CLIENT_HIDDEN.has(lid);
+    if (onLayer || onInstall) (l.pts || []).forEach((p) => add(p.x, p.y));
+  });
+
+  (plan.items || []).forEach((it) => {
+    const lid = migrateLayerId(it.layer);
+    let vis = false;
+    if (ITEM_LAYER_IDS.includes(activeId)) vis = lid === activeId;
+    else if (activeId === "client") vis = !CLIENT_HIDDEN.has(lid);
+    else if (activeId === "install") vis = lid !== "spec";
+    if (vis) addRect(it.x, it.y, it.w, it.h);
+  });
+
+  if (!has) return null;
+  const pad = 500;
+  return { x: x1 - pad, y: y1 - pad, w: x2 - x1 + pad * 2, h: y2 - y1 + pad * 2 };
+}
+
 /** Простые предупреждения для панели «Ошибки». */
-export function collectPlannerWarnings(plan, sel = null) {
+export function collectPlannerWarnings(plan, sel = null, display = {}) {
   const warnings = [];
   const racks = plan.items.filter((i) => i.layer === "racks");
   const minPass = 600;
@@ -75,8 +177,30 @@ export function collectPlannerWarnings(plan, sel = null) {
   findWallIntersections(plan.walls || []).forEach((h) => {
     warnings.push({
       id: h.id,
+      severity: "critical",
+      wallIds: h.wallIds,
       objectIds: [],
       text: "Перегородки пересекаются — проверьте стыковку стен",
+    });
+  });
+
+  findWallOverlaps(plan.walls || []).forEach((h) => {
+    warnings.push({
+      id: h.id,
+      severity: "critical",
+      wallIds: h.wallIds,
+      objectIds: [],
+      text: "Стены наложены друг на друга",
+    });
+  });
+
+  findWallsOverItems(plan.walls || [], plan.items || []).forEach((h) => {
+    warnings.push({
+      id: h.id,
+      severity: "warning",
+      wallIds: h.wallIds,
+      objectIds: h.objectIds,
+      text: "Стена проходит поверх оборудования",
     });
   });
 
@@ -84,17 +208,31 @@ export function collectPlannerWarnings(plan, sel = null) {
   if (partitionWalls.length >= 2 && zones.length === 0) {
     warnings.push({
       id: "no-zones",
+      severity: "warning",
       objectIds: [],
       text: "Нет замкнутых помещений — замкните контур перегородок",
     });
   }
 
-  const wallItems = ["door", "door2", "window"];
   plan.items.forEach((it) => {
-    if (!wallItems.includes(it.kind) && !it.wall) return;
+    if (!isDoorKind(it.kind)) return;
+    const hits = doorSwingCollisions(it, plan.items);
+    hits.forEach((obj) => {
+      warnings.push({
+        id: `door-swing-${it.id}-${obj.id}`,
+        severity: "warning",
+        objectIds: [it.id, obj.id],
+        text: `${it.doorNum || it.label}: открывание пересекает «${obj.label}»`,
+      });
+    });
+  });
+
+  plan.items.forEach((it) => {
+    if (!it.wall && !isDoorKind(it.kind) && !isWallOpeningKind(it.kind)) return;
     const cx = it.x + it.w / 2;
     const cy = it.y + it.h / 2;
-    const seg = nearestWallSegment({ x: cx, y: cy }, plan.walls || [], plan.room, 180);
+    const maxDist = isDoorKind(it.kind) || isWallOpeningKind(it.kind) ? 160 : 180;
+    const seg = nearestWallSegment({ x: cx, y: cy }, plan.walls || [], plan.room, maxDist);
     if (!seg) {
       warnings.push({ id: `nowall-${it.id}`, objectIds: [it.id], text: `${it.label}: не на стене` });
     }
@@ -102,7 +240,7 @@ export function collectPlannerWarnings(plan, sel = null) {
 
   if (zones.length > 0) {
     plan.items.forEach((it) => {
-      if (it.wall || wallItems.includes(it.kind)) return;
+      if (it.wall || isDoorKind(it.kind) || isWallOpeningKind(it.kind)) return;
       if (it.layer === "room") return;
       if (!itemInAnyZone(it, zones)) {
         warnings.push({ id: `outside-${it.id}`, objectIds: [it.id], text: `${it.label}: вне помещения` });
@@ -128,22 +266,9 @@ export function collectPlannerWarnings(plan, sel = null) {
     }
   }
 
-  const supplyTanks = plan.items.filter((i) => i.kind === "tank" || i.kind === "tank_waste");
+  const supplyTanks = plan.items.filter((i) => i.kind === "tank");
   const links = plan.links || [];
-  const hasIrrTarget = plan.items.some((i) => LINK_RULES.irrigation.to.has(i.kind));
   const hasPanel = plan.items.some((i) => i.kind === "panel");
-
-  if (hasIrrTarget) {
-    racks.forEach((r) => {
-      if (!itemHasLinkOfType(links, r.id, "irrigation")) {
-        warnings.push({
-          id: `link-irr-${r.id}`,
-          objectIds: [r.id],
-          text: `${r.label}: нет связи с баком/поливом`,
-        });
-      }
-    });
-  }
 
   if (hasPanel) {
     plan.items.filter((i) => i.kind === "socket" || i.kind === "light_panel").forEach((s) => {
@@ -182,6 +307,15 @@ export function collectPlannerWarnings(plan, sel = null) {
     }
   }
 
+  findServiceZoneCollisions(plan).forEach((w) => {
+    warnings.push({ ...w, severity: "warning" });
+  });
+
+  warnings.push(...collectRoomPurposeWarnings(plan));
+  warnings.push(...collectRackWarnings(plan));
+  warnings.push(...collectLineWarnings(plan));
+  warnings.push(...collectLinkWarnings(plan));
+  warnings.push(...collectLabelWarnings(plan, display));
   warnings.push(...collectFarmWarnings(plan));
 
   return warnings;

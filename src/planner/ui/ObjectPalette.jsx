@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   catalogForLayer, catalogByKind, RACK_PRESETS, LINE_STYLE,
   layerById, LAYER_TOOLS, WALL_THK_PRESETS, ROOM_HEIGHT_PRESETS,
@@ -27,6 +28,10 @@ export function ObjectPalette({
   onRoomPatch,
   specSummary,
   onSync,
+  onSyncZones,
+  onSelectPlanItem,
+  projectId,
+  embedded = false,
 }) {
   const [q, setQ] = useState("");
   const lay = layerById(active);
@@ -41,10 +46,19 @@ export function ObjectPalette({
 
   const allowedTools = LAYER_TOOLS[active] || ["select", "pan"];
   const visibleTools = allowedTools.map((id) => TOOL_DEFS[id]).filter(Boolean);
+  const specObjects = useMemo(
+    () => (plan.items || []).filter((it) => it.includedInProject !== false),
+    [plan.items],
+  );
+
+  const Shell = embedded ? "div" : "aside";
+  const shellClass = embedded
+    ? "planner-palette-embedded"
+    : "planner-side planner-side--left no-print";
 
   if (active === "spec") {
     return (
-      <aside className="planner-side planner-side--left no-print">
+      <Shell className={shellClass}>
         <div className="planner-side__scroll">
           <div className="planner-side__section">
             <div className="planner-side__title">Спецификация</div>
@@ -66,16 +80,42 @@ export function ObjectPalette({
                 Синхронизировать спецификацию
               </button>
             )}
+            {projectId && (
+              <Link className="planner-btn" style={{ width: "100%", marginTop: 8, textAlign: "center", display: "block" }} to={`/project/${projectId}`}>
+                Открыть таблицу спецификации
+              </Link>
+            )}
+            {specObjects.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div className="planner-side__title">Объекты плана ({specObjects.length})</div>
+                <div className="planner-spec-list">
+                  {specObjects.map((it) => (
+                    <button
+                      key={it.id}
+                      type="button"
+                      className="planner-spec-list__item"
+                      onClick={() => onSelectPlanItem?.(it.id)}
+                    >
+                      <span className="planner-spec-list__dot" style={{ background: it.color }} />
+                      <span>{it.label}</span>
+                      {it.visibleToClient === false && (
+                        <span className="planner-spec-list__tag">скрыт</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
-      </aside>
+      </Shell>
     );
   }
 
   if (active === "client" || active === "install") {
     const allowedTools = LAYER_TOOLS[active] || ["select", "pan"];
     return (
-      <aside className="planner-side planner-side--left no-print">
+      <Shell className={shellClass}>
         <div className="planner-side__scroll">
           <div className="planner-side__section">
             <div className="planner-side__title">{lay.name}</div>
@@ -103,12 +143,12 @@ export function ObjectPalette({
             </div>
           </div>
         </div>
-      </aside>
+      </Shell>
     );
   }
 
   return (
-    <aside className="planner-side planner-side--left no-print">
+    <Shell className={shellClass}>
       <div className="planner-side__scroll">
         <div className="planner-side__section">
           <div className="planner-side__title">Инструменты · {lay.name}</div>
@@ -196,6 +236,22 @@ export function ObjectPalette({
               </div>
               <input type="number" value={wallThk} onChange={(e) => onWallThk(Math.max(40, +e.target.value || 0))} style={{ marginTop: 8 }} />
             </div>
+            {onSyncZones && (
+              <button type="button" className="planner-btn" style={{ width: "100%", marginTop: 10 }} onClick={onSyncZones}>
+                Обновить помещения
+              </button>
+            )}
+            <p className="planner-spec-intro" style={{ marginTop: 10 }}>
+              Замкните контур перегородок — помещения появятся на листе «Помещения».
+            </p>
+          </div>
+        )}
+
+        {active === "room" && (
+          <div className="planner-side__section">
+            <p className="planner-spec-intro">
+              Двери и окна ставятся <b>только на стену</b>. Сначала нарисуйте перегородки.
+            </p>
           </div>
         )}
 
@@ -258,6 +314,6 @@ export function ObjectPalette({
           </div>
         )}
       </div>
-    </aside>
+    </Shell>
   );
 }

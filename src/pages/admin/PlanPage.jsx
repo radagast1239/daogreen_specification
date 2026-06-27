@@ -1,56 +1,89 @@
-﻿import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { uid } from "../../store/helpers.js";
 import {
   getStandalonePlan, saveStandalonePlan, downloadPlanFile,
-  readPlanFile, renameStandalonePlan,
+  readPlanFile, renameStandalonePlan, deleteStandalonePlan,
 } from "../../planner/standalonePlans.js";
 import {
   LAYERS, LINE_STYLE, PDF_SHEETS, catalogByKind, catalogForLayer, layerById,
-  clamp, snap, fmt, DEFAULT_PLAN, DEFAULT_DISPLAY, migrateLayerId,
+  clamp, snap, fmt, DEFAULT_PLAN, DEFAULT_DISPLAY, migrateLayerId, polyLength,
 } from "../../planner/catalog.js";
 import { exportLayeredPDF } from "../../planner/exportPdf.js";
 import { createPlannerSpecItems, defaultObjectSpecSettings, plannerSpecSummary } from "../../planner/specSync.js";
-import { orthogonalPoint, collectPlannerWarnings, wallsForLayer } from "../../planner/geometry.js";
+import { collectPlannerWarnings, wallsForLayer, boundsForActiveLayer } from "../../planner/geometry.js";
+import { resolveDraftPoint, angleBetweenDeg } from "../../planner/draftSnap.js";
+import { normalizeDisplay, roundMm, fmtCoord, fmtCoordMm, coordUnitLabel } from "../../planner/gridSettings.js";
+import { isStrictWallItem, isDoorKind } from "../../planner/doorTypes.js";
 import {
-  snapWallPoint, pointAtLength, placeOnWall, findClosedLoops, polygonBounds, pointInPolygon, breakWallAt,
+  snapWallPoint, placeOnWall, pointInPolygon, breakWallAt,
+  syncZonesFromWalls, applyWallNodeMove, refreshWallMountedItems,
+  tryMergeWall, straightenWall, setWallSegmentLength, alignWallToNeighbor, weldWallNodes,
 } from "../../planner/wallGeometry.js";
+import { validateOpeningPlacement, nextDoorNumber, nextOpeningNumber } from "../../planner/doorGeometry.js";
+import { attachItemZoneFields } from "../../planner/roomZones.js";
+import {
+  defaultLineFields, attachLineEndpoints, snapLinePoint,
+  insertPointOnLine, removeLineNode, reverseLine, hitTestLine,
+} from "../../planner/lineProperties.js";
+import {
+  isRackKind, defaultRackFields, nextRackNumber, nextRowLabel,
+  autoNumberRacks, buildRackGrid,
+} from "../../planner/rackProperties.js";
+import { isOpeningKind, defaultOpeningFields } from "../../planner/openingTypes.js";
+import { isDoorItem } from "../../planner/doorTypes.js";
+import { defaultWallFields, WALL_KINDS, THICKNESS_SIDES } from "../../planner/wallTypes.js";
+import { wallFieldsFromTool } from "../../planner/wallToolPresets.js";
 import { usePlanHistory } from "../../planner/usePlanHistory.js";
 import {
-  PlanGrid, SheetBackdrop, RoomDims, WallEl, ItemEl, ZoneEl, LabelEl, LineEl,
-  DraftLine, SelectionDims, MeasureEl, TypedLengthHint, LinkEl,
+  PlanGridScreen, PlanAxesScreen, SheetBackdrop, RoomDims, WallEl, WallsTopOverlay, ItemEl, ZoneEl, LabelEl, LineEl,
+  DraftLine, SelectionDims, WallSelectionDims, MeasureEl, TypedLengthHint, LinkEl,
+  SelectionMarquee, MultiSelectBounds, PlanLayerGroup,
 } from "../../planner/canvasPrimitives.jsx";
+import { layerDisplayState } from "../../planner/canvasLayers.js";
+import { snapLineDraftPoint, snapRackNeighbor } from "../../planner/plannerSnap.js";
 import {
-  linkTypeForLayer, canCreateLink, normalizeLinkEnds, linkLengthMm,
+  itemsInMarquee, boundsOfItems, groupMemberIds,
+} from "../../planner/selectionHelpers.js";
+import { warningIdsFromList } from "../../planner/selectionVisuals.js";
+import {
+  buildItemLabelLines, defaultFreeLabelFields, autoItemLabelPlacement,
+  resolveFreeLabelPosition,
+} from "../../planner/labelProperties.js";
+import {
+  linkTypeForLayer, canCreateLink, linkLengthMm, linksVisibleOnLayer,
+  buildLinkPayload, findRackLinkTarget, RACK_LINK_ACTIONS,
 } from "../../planner/linkGeometry.js";
-import { PlannerTopBar } from "../../planner/ui/PlannerTopBar.jsx";
-import { LayerTabs } from "../../planner/ui/LayerTabs.jsx";
+import { PlannerLayout } from "../../planner/ui/PlannerLayout.jsx";
+import {
+  sheetById, sheetByLayerId, defaultToolForSheet, buildVisibilityFromSheet, sheetDisplayPatch,
+} from "../../planner/plannerSheets.js";
+import { categoryById } from "../../planner/plannerCategories.js";
+import { PlannerToolMenu } from "../../planner/ui/PlannerToolMenu.jsx";
 import { ObjectPalette } from "../../planner/ui/ObjectPalette.jsx";
+import { toolStateFromDef, isItemVisibleOnSheet, isLineVisibleOnSheet } from "../../planner/plannerSheetUtils.js";
+import { resolveTool } from "../../planner/plannerTools.js";
+import { sheetAllowedInViewMode, viewModeForSheet } from "../../planner/plannerViewModes.js";
 import { PropertiesPanel } from "../../planner/ui/PropertiesPanel.jsx";
-import { PlannerBottomBar } from "../../planner/ui/PlannerBottomBar.jsx";
 import { ContextMenu, buildObjectMenu } from "../../planner/ui/ContextMenu.jsx";
+import { AttachPlanModal } from "../../planner/ui/AttachPlanModal.jsx";
 import "../../planner/planner.css";
 import { Empty } from "../../components/ui.jsx";
 
-const SNAP_STEP = 50;
 const LINE_LAYER_IDS = ["drain", "irrigation", "supply", "power", "vent", "climate", "ac", "light", "staff"];
 const ITEM_LAYER_IDS = LAYERS.map((l) => l.id).filter(
   (id) => !["room", "zones", "partitions", "client", "install", "spec"].includes(id)
 );
 
-function orthoPt(from, to, snapOn, shiftHeld) {
-  if (shiftHeld && from) {
-    const dx = Math.abs(to.x - from.x);
-    const dy = Math.abs(to.y - from.y);
-    if (dx > dy * 1.4) return orthogonalPoint(from, { x: to.x, y: from.y }, SNAP_STEP, snapOn);
-    if (dy > dx * 1.4) return orthogonalPoint(from, { x: from.x, y: to.y }, SNAP_STEP, snapOn);
-  }
-  return orthogonalPoint(from, to, SNAP_STEP, snapOn);
+function draftPt(from, to, opts) {
+  const { point, angleSnap } = resolveDraftPoint(from, to, opts);
+  return { point, angleSnap };
 }
 
 export default function PlanPage() {
   const { id, draftId } = useParams();
+  const navigate = useNavigate();
   const standalone = !!draftId;
   const { state, actions } = useStore();
   const project = standalone ? null : state.projects.find((p) => p.id === id);
@@ -65,9 +98,17 @@ export default function PlanPage() {
   const [active, setActive] = useState("room");
   const [tool, setTool] = useState("select");
   const [pending, setPending] = useState(null);
-  const [sel, setSel] = useState(null);
+  const [pendingSize, setPendingSize] = useState(null);
+  const [lineDraftMeta, setLineDraftMeta] = useState({ layer: null, tag: null });
+  const [activeToolId, setActiveToolId] = useState("select");
+  const [sheetFilters, setSheetFilters] = useState({});
+  const [toolSearch, setToolSearch] = useState("");
+  const [selection, setSelection] = useState(null);
+  const [marquee, setMarquee] = useState(null);
+  const setSel = (v) => setSelection(v ? { coll: v.coll, ids: [v.id] } : null);
+  const clearSelection = () => setSelection(null);
   const [view, setView] = useState({ panX: 0, panY: 0, zoom: 0.08 });
-  const [display, setDisplay] = useState(DEFAULT_DISPLAY);
+  const [display, setDisplay] = useState(() => normalizeDisplay(DEFAULT_DISPLAY()));
   const [unit] = useState("mm");
   const [vis, setVis] = useState(Object.fromEntries(LAYERS.map((l) => [l.id, true])));
   const [draft, setDraft] = useState([]);
@@ -75,28 +116,63 @@ export default function PlanPage() {
   const [measure, setMeasure] = useState([]);
   const [guides, setGuides] = useState([]);
   const [wallThk, setWallThk] = useState(100);
+  const [hoverWallNode, setHoverWallNode] = useState(null);
+  const [hoverHit, setHoverHit] = useState(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(true);
   const [spacePan, setSpacePan] = useState(false);
+  const [altSnapOff, setAltSnapOff] = useState(false);
   const [linkFrom, setLinkFrom] = useState(null);
   const [ctxMenu, setCtxMenu] = useState(null);
   const ctxMenuRef = useRef(null);
   ctxMenuRef.current = ctxMenu;
   const [typedLength, setTypedLength] = useState("");
   const [draftSnap, setDraftSnap] = useState(null);
+  const [draftAngleSnap, setDraftAngleSnap] = useState(null);
+  const wallChainStartRef = useRef(null);
+  const wallPrevAngleRef = useRef(null);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [activeSheetId, setActiveSheetId] = useState("source");
+  const [activeCategoryId, setActiveCategoryId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [planLevel, setPlanLevel] = useState("Этаж 1");
+  const [planVariant, setPlanVariant] = useState("Планировка 1");
+  const [pinnedProperties, setPinnedProperties] = useState(false);
+  const [propsTab, setPropsTab] = useState("props");
+  const [warningsPanelOpen, setWarningsPanelOpen] = useState(false);
+  const [viewMode, setViewMode] = useState("2d");
 
+  const criticalWarnIdsRef = useRef(new Set());
+
+  const openWarningsPanel = useCallback(() => {
+    setPropsTab("errors");
+    setWarningsPanelOpen(true);
+  }, []);
   const svgRef = useRef(null);
+  const [svgSize, setSvgSize] = useState({ w: 1200, h: 800 });
   const dragRef = useRef(null);
   const clipboardRef = useRef(null);
   const shiftRef = useRef(false);
   const altSnapRef = useRef(false);
+  altSnapRef.current = altSnapOff;
   const typedLengthRef = useRef("");
   typedLengthRef.current = typedLength;
 
   useEffect(() => {
     actions.ensureMaterials().catch(() => {});
     actions.ensureModules().catch(() => {});
-  }, [actions]);
+    if (standalone) actions.refreshProjects?.().catch(() => {});
+  }, [actions, standalone]);
+
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return undefined;
+    const sync = () => setSvgSize({ w: el.clientWidth || 1200, h: el.clientHeight || 800 });
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const t = requestAnimationFrame(() => {
@@ -142,13 +218,15 @@ export default function PlanPage() {
     return () => window.clearTimeout(t);
   }, [plan, standalone, draftMeta?.id, draftMeta?.name, project?.id, actions]);
 
-  const snapOn = display.snapOn && !altSnapRef.current;
+  const snapOn = display.snapOn && !altSnapOff;
+  const snapStep = display.snapStep ?? display.gridStep ?? 50;
   const fmtU = (mm) => fmt(mm, unit);
+  const fmtCoordU = (mm) => fmtCoord(mm, display.coordUnit || "mm");
   const toMM = (cx, cy) => {
     const r = svgRef.current.getBoundingClientRect();
     return { x: (cx - r.left - view.panX) / view.zoom, y: (cy - r.top - view.panY) / view.zoom };
   };
-  const sn = (v) => snap(v, SNAP_STEP, snapOn && display.snapGrid);
+  const sn = (v) => roundMm(snap(v, snapStep, snapOn && display.snapGrid), display.snapRoundMm || 1);
 
   const innerL = plan.room.wallThk / 2;
   const innerT = plan.room.wallThk / 2;
@@ -186,59 +264,119 @@ export default function PlanPage() {
     const hb = fix(H, [{ val: y }, { val: y + obj.h / 2 }, { val: y + obj.h }]);
     let nx = x;
     let ny = y;
-    if (vb) { nx = x + vb.off; g.push({ type: "V", at: vb.at }); } else nx = sn(x);
-    if (hb) { ny = y + hb.off; g.push({ type: "H", at: hb.at }); } else ny = sn(y);
+    if (vb) {
+      nx = x + vb.off;
+      g.push({ type: "V", at: vb.at, y0: Math.max(0, y - 80), y1: Math.min(plan.room.h, y + obj.h + 80) });
+    } else nx = sn(x);
+    if (hb) {
+      ny = y + hb.off;
+      g.push({ type: "H", at: hb.at, x0: Math.max(0, x - 80), x1: Math.min(plan.room.w, x + obj.w + 80) });
+    } else ny = sn(y);
+    if (coll === "items" && isRackKind(obj.kind) && display.snapObjects) {
+      const rackSnap = snapRackNeighbor(obj, nx, ny, plan.items, 10 / view.zoom);
+      nx = rackSnap.x;
+      ny = rackSnap.y;
+      g.push(...rackSnap.guides);
+    }
     return { x: nx, y: ny, guides: g };
   }, [snapOn, view.zoom, plan.walls, plan.items, display.snapObjects, innerL, innerR, innerT, innerB, plan.room.w, plan.room.h]);
 
   const attachWall = (obj, x, y) => {
-    const placed = placeOnWall(obj, { x, y }, plan.walls, plan.room);
-    if (placed) return { x: placed.x, y: placed.y, angle: placed.angle };
-    const cx = x + obj.w / 2;
-    const cy = y + obj.h / 2;
-    const d = [
-      { k: "T", v: Math.abs(cy - innerT) },
-      { k: "B", v: Math.abs(cy - innerB) },
-      { k: "L", v: Math.abs(cx - innerL) },
-      { k: "R", v: Math.abs(cx - innerR) },
-    ].sort((a, b) => a.v - b.v)[0];
-    if (d.k === "T") y = innerT;
-    else if (d.k === "B") y = innerB - obj.h;
-    else if (d.k === "L") x = innerL;
-    else x = innerR - obj.w;
-    return { x: sn(x), y: sn(y), angle: 0 };
+    const maxDist = isStrictWallItem(obj.kind) ? 220 : 350;
+    const placed = placeOnWall(obj, { x, y }, plan.walls, plan.room, maxDist);
+    if (!placed) return null;
+    const check = validateOpeningPlacement(
+      obj,
+      { x: placed.x, y: placed.y, wallSeg: placed.wallSeg, wallId: placed.wallId },
+      plan.walls,
+    );
+    if (!check.ok && isStrictWallItem(obj.kind)) {
+      return { error: check.message };
+    }
+    return {
+      x: placed.x,
+      y: placed.y,
+      angle: placed.angle,
+      wallId: placed.wallId,
+      wallSeg: placed.wallSeg,
+    };
+  };
+
+  const draftSnapOpts = useCallback(() => ({
+    shiftHard: shiftRef.current,
+    snapOn: snapOn && !altSnapRef.current,
+    angleSnapOn: display.snapAngles !== false,
+    toleranceDeg: display.angleTolerance ?? 5,
+    snapStep,
+    gridSnap: display.snapGrid !== false,
+    walls: plan.walls,
+    prevSegAngleDeg: wallPrevAngleRef.current,
+  }), [snapOn, snapStep, display.snapAngles, display.angleTolerance, display.snapGrid, plan.walls]);
+
+  const clearWallChain = () => {
+    wallChainStartRef.current = null;
+    wallPrevAngleRef.current = null;
+    setDraft([]);
+    setDraftSnap(null);
+    setDraftAngleSnap(null);
+    setTypedLength("");
   };
 
   const computeDraftPt = (raw, from) => {
-    let pt = from ? orthoPt(from, raw, snapOn, shiftRef.current) : { x: sn(raw.x), y: sn(raw.y) };
+    const { point: draftPoint, angleSnap } = from
+      ? draftPt(from, raw, draftSnapOpts())
+      : { point: { x: sn(raw.x), y: sn(raw.y) }, angleSnap: null };
+    let pt = draftPoint;
     let snap = null;
-    if (tool === "wall" && display.snapOn) {
-      const s = snapWallPoint(pt, plan.walls, plan.room, view.zoom, true, SNAP_STEP);
+    if (tool === "wall" && snapOn && display.snapWalls !== false) {
+      const chainStart = wallChainStartRef.current;
+      if (chainStart && from) {
+        const thr = (display.snapDistancePx ?? 10) / Math.max(view.zoom, 0.05);
+        const away = Math.hypot(from.x - chainStart.x, from.y - chainStart.y);
+        if (away > 200 && Math.hypot(pt.x - chainStart.x, pt.y - chainStart.y) <= thr) {
+          return { pt: { x: chainStart.x, y: chainStart.y }, snap: { snapped: true, kind: "close" }, angleSnap };
+        }
+      }
+      const s = snapWallPoint(pt, plan.walls, plan.room, view.zoom, true, snapStep);
       if (s.snapped) {
         pt = { x: s.x, y: s.y };
         snap = s;
       }
     }
-    return { pt, snap };
+    if (tool === "line" && snapOn) {
+      const s = snapLineDraftPoint(pt, {
+        items: plan.items,
+        walls: plan.walls,
+        room: plan.room,
+        lines: plan.lines,
+        zoom: view.zoom,
+        snapOn: true,
+        snapGrid: display.snapGrid !== false,
+        snapWalls: display.snapWalls !== false,
+        snapObjects: display.snapObjects !== false,
+        snapStep,
+      });
+      if (s.snapped || s.kind === "grid") {
+        pt = { x: s.x, y: s.y };
+        if (s.snapped) snap = s;
+      }
+    }
+    return { pt, snap, angleSnap };
   };
 
   const syncAutoZones = (p) => {
     try {
-      const loops = findClosedLoops(p.walls.filter((w) => w.role !== "outer"));
-      const manual = (p.zones || []).filter((z) => !z.auto);
-      const auto = loops.map((poly, i) => {
-        const b = polygonBounds(poly);
-        return {
-          id: uid("zn"),
-          ...b,
-          name: `Помещение ${manual.length + i + 1}`,
-          height: p.room.height || 3000,
-          polygon: poly,
-          flow: "neutral",
-          auto: true,
-        };
-      });
-      return { ...p, zones: [...manual, ...auto] };
+      const { manual, auto } = syncZonesFromWalls(p);
+      return {
+        ...p,
+        zones: [
+          ...manual,
+          ...auto.map((z) => {
+            const { prevId, ...rest } = z;
+            return { ...rest, id: prevId || uid("zn") };
+          }),
+        ],
+      };
     } catch (e) {
       console.error("syncAutoZones failed", e);
       return p;
@@ -249,61 +387,92 @@ export default function PlanPage() {
     const len = parseInt(typedLengthRef.current, 10);
     if (!len || draft.length < 1 || !cursor) return false;
     const from = draft[draft.length - 1];
-    const to = orthoPt(from, cursor, snapOn, shiftRef.current);
-    let axis = null;
-    if (Math.abs(to.x - from.x) > Math.abs(to.y - from.y)) axis = "h";
-    else axis = "v";
-    const pt = pointAtLength(from, to, len, axis);
-    setDraft((d) => [...d, pt]);
+    const { pt, angleSnap } = computeDraftPt(cursor, from);
+    const ang = angleSnap?.snappedAngle ?? angleBetweenDeg(from, pt);
+    const end = { x: from.x + Math.cos((ang * Math.PI) / 180) * len, y: from.y + Math.sin((ang * Math.PI) / 180) * len };
+    if (tool === "wall") {
+      commitWallSegment(from, end);
+      setDraft([end]);
+      wallPrevAngleRef.current = ang;
+    } else {
+      setDraft((d) => [...d, end]);
+    }
     setTypedLength("");
     return true;
   };
 
-  const updateObj = (coll, oid, patch) => setPlan((p) => ({ ...p, [coll]: p[coll].map((o) => (o.id === oid ? { ...o, ...patch } : o)) }));
-  const delSel = () => {
-    if (!sel) return;
+  const updateObj = (coll, oid, patch) => {
     setPlan((p) => {
-      const next = { ...p };
-      if (sel.coll === "items") {
-        next.items = p.items.filter((o) => o.id !== sel.id);
-        next.links = (p.links || []).filter((l) => l.fromId !== sel.id && l.toId !== sel.id);
-      } else if (sel.coll === "links") {
-        next.links = (p.links || []).filter((l) => l.id !== sel.id);
-      } else {
-        next[sel.coll] = p[sel.coll].filter((o) => o.id !== sel.id);
+      let next = {
+        ...p,
+        [coll]: p[coll].map((o) => (o.id === oid ? { ...o, ...patch } : o)),
+      };
+      if (coll === "walls") {
+        next = {
+          ...next,
+          items: refreshWallMountedItems(next.items, next.walls, next.room, oid),
+        };
+        next = syncAutoZones(next);
       }
       return next;
     });
-    setSel(null);
+  };
+  const delSel = () => {
+    if (!selection?.ids?.length) return;
+    setPlan((p) => {
+      const next = { ...p };
+      if (selection.coll === "items") {
+        const ids = new Set(selection.ids);
+        next.items = p.items.filter((o) => !ids.has(o.id));
+        next.links = (p.links || []).filter((l) => !ids.has(l.fromId) && !ids.has(l.toId));
+      } else {
+        const id = selection.ids[0];
+        if (selection.coll === "links") {
+          next.links = (p.links || []).filter((l) => l.id !== id);
+        } else {
+          next[selection.coll] = p[selection.coll].filter((o) => o.id !== id);
+        }
+      }
+      return next;
+    });
+    clearSelection();
   };
 
   const createLink = (fromId, toId, type) => {
     const fromItem = plan.items.find((i) => i.id === fromId);
     const toItem = plan.items.find((i) => i.id === toId);
-    const ends = normalizeLinkEnds(type, fromItem, toItem);
+    const payload = buildLinkPayload(type, fromItem, toItem, uid("lk"));
+    if (!payload) return false;
     const dup = (plan.links || []).some(
-      (l) => l.type === type && l.fromId === ends.from.id && l.toId === ends.to.id,
+      (l) => l.type === type && l.fromId === payload.fromId && l.toId === payload.toId,
     );
-    if (dup) return;
-    const link = {
-      id: uid("lk"),
-      type,
-      fromId: ends.from.id,
-      toId: ends.to.id,
-      ortho: true,
-      riseMm: null,
-    };
-    setPlan((p) => ({ ...p, links: [...(p.links || []), link] }));
-    setSel({ coll: "links", id: link.id });
+    if (dup) return false;
+    setPlan((p) => ({ ...p, links: [...(p.links || []), payload] }));
+    setSel({ coll: "links", id: payload.id });
+    return true;
   };
 
   const addItemAt = (mm) => {
     const c = catalogByKind(pending);
-    let x = mm.x - c.w / 2;
-    let y = mm.y - c.h / 2;
+    const iw = pendingSize?.w ?? c.w;
+    const ih = pendingSize?.h ?? c.h;
+    let x = mm.x - iw / 2;
+    let y = mm.y - ih / 2;
     let angle = 0;
     if (c.wall) {
-      const placed = attachWall({ w: c.w, h: c.h }, x, y);
+      const placed = attachWall({ w: iw, h: ih, kind: c.kind }, x, y);
+      if (!placed) {
+        window.alert(
+          isStrictWallItem(c.kind)
+            ? "Дверь или окно можно ставить только на стену. Сначала нарисуйте перегородки на листе «Перегородки»."
+            : "Не найдена стена рядом — подведите объект к стене или перегородке.",
+        );
+        return;
+      }
+      if (placed.error) {
+        window.alert(placed.error);
+        return;
+      }
       x = placed.x;
       y = placed.y;
       angle = placed.angle || 0;
@@ -316,20 +485,43 @@ export default function PlanPage() {
         alert("Объект можно ставить только внутри помещения");
         return;
       }
-      const s = snapObj("items", { id: "_new", w: c.w, h: c.h }, x, y);
-      x = clamp(s.x, innerL, innerR - c.w);
-      y = clamp(s.y, innerT, innerB - c.h);
+      const s = snapObj("items", { id: "_new", w: iw, h: ih }, x, y);
+      x = clamp(s.x, innerL, innerR - iw);
+      y = clamp(s.y, innerT, innerB - ih);
     } else {
-      const s = snapObj("items", { id: "_new", w: c.w, h: c.h }, x, y);
-      x = clamp(s.x, innerL, innerR - c.w);
-      y = clamp(s.y, innerT, innerB - c.h);
+      const s = snapObj("items", { id: "_new", w: iw, h: ih }, x, y);
+      x = clamp(s.x, innerL, innerR - iw);
+      y = clamp(s.y, innerT, innerB - ih);
     }
     const item = {
       id: uid("eq"), kind: c.kind, icon: c.icon, layer: c.layer, label: c.label, color: c.color,
-      w: c.w, h: c.h, x, y, angle, wall: !!c.wall, params: c.params ? { ...c.params } : null,
+      w: iw, h: ih, x, y, angle, wall: !!c.wall, wallId: null, doorSwing: "left", doorOpenIn: true,
+      doorNum: isDoorKind(c.kind) ? nextDoorNumber(plan.items) : null,
+      doorHeightMm: isDoorKind(c.kind) ? 2100 : null,
+      openingNum: isOpeningKind(c.kind) ? nextOpeningNumber(plan.items) : null,
+      ...(isOpeningKind(c.kind) ? defaultOpeningFields(c.kind) : {}),
+      ...(isRackKind(c.kind) ? defaultRackFields(c.kind, plan.items) : {}),
+      params: c.params ? { ...c.params } : null,
       ...defaultObjectSpecSettings(c.kind),
     };
-    setPlan((p) => ({ ...p, items: [...p.items, item] }));
+    if (c.wall) {
+      const again = attachWall(item, x, y);
+      if (again?.error) {
+        window.alert(again.error);
+        return;
+      }
+      if (again) {
+        item.wallId = again.wallId;
+        item.wallSeg = again.wallSeg;
+        item.x = again.x;
+        item.y = again.y;
+        item.angle = again.angle ?? item.angle;
+      }
+    }
+    setPlan((p) => {
+      const placed = attachItemZoneFields(p, item);
+      return { ...p, items: [...p.items, placed] };
+    });
     setSel({ coll: "items", id: item.id });
     setTool("select");
     setGuides([]);
@@ -345,27 +537,77 @@ export default function PlanPage() {
   };
 
   const addLabelAt = (mm, targetId) => {
+    const tgt = targetId ? plan.items.find((i) => i.id === targetId) : null;
+    const place = tgt
+      ? autoItemLabelPlacement(tgt, plan.room)
+      : { x: sn(mm.x + 300), y: sn(mm.y - 300), anchor: { x: mm.x, y: mm.y } };
+    const text = tgt
+      ? buildItemLabelLines(tgt, plan, "full").join("\n")
+      : "Подпись";
     const l = {
-      id: uid("lb"), x: sn(mm.x + 300), y: sn(mm.y - 300),
-      text: targetId ? catalogByKind(plan.items.find((i) => i.id === targetId)?.kind)?.label || "Подпись" : "Подпись",
-      targetId: targetId || null,
+      id: uid("lb"),
+      ...defaultFreeLabelFields(tgt, { x: sn(place.x), y: sn(place.y) }, text),
     };
     setPlan((p) => ({ ...p, labels: [...p.labels, l] }));
     setSel({ coll: "labels", id: l.id });
     setTool("select");
   };
 
-  const finishDraft = () => {
-    if (draft.length >= 2) {
-      if (tool === "wall") {
-        setPlan((p) => syncAutoZones({
-          ...p,
-          walls: [...p.walls, { id: uid("wl"), pts: draft, thk: wallThk, role: "partition" }],
-        }));
-      } else {
-        const layer = migrateLayerId(active, null);
-        setPlan((p) => ({ ...p, lines: [...p.lines, { id: uid("ln"), layer, pts: draft }] }));
-      }
+  const commitWallDraft = (pts) => {
+    if (!pts || pts.length < 2) return;
+    let clean = pts.map((pt) => ({ x: pt.x, y: pt.y }));
+    if (clean.length >= 2) {
+      const f = clean[0];
+      const l = clean[clean.length - 1];
+      if (Math.hypot(f.x - l.x, f.y - l.y) < 5) clean = clean.slice(0, -1);
+    }
+    if (clean.length < 2) return;
+    const role = active === "room" ? "outer" : "partition";
+    const wallId = uid("wl");
+    setPlan((p) => {
+      const toolFields = wallFieldsFromTool(activeToolId, role, p.room, wallThk);
+      let walls = weldWallNodes([
+        ...p.walls,
+        {
+          id: wallId,
+          pts: clean,
+          ...defaultWallFields(toolFields.role || role, p.room),
+          ...toolFields,
+          thk: toolFields.thk ?? (role === "outer" ? (p.room.wallThk || wallThk) : wallThk),
+        },
+      ]);
+      const merged = tryMergeWall(walls, wallId);
+      if (merged) walls = weldWallNodes(merged.walls);
+      return syncAutoZones({ ...p, walls });
+    });
+  };
+
+  const commitWallSegment = (from, to) => {
+    if (!from || !to) return;
+    if (Math.hypot(to.x - from.x, to.y - from.y) < 50) return;
+    commitWallDraft([from, to]);
+    wallPrevAngleRef.current = angleBetweenDeg(from, to);
+  };
+
+  const finishDraft = (ptsOverride = null) => {
+    const pts = ptsOverride || draft;
+    if (tool === "wall") {
+      clearWallChain();
+      return;
+    }
+    if (pts.length >= 2) {
+      const layer = lineDraftMeta.layer || migrateLayerId(active, null);
+      const line = attachLineEndpoints(
+        {
+          id: uid("ln"),
+          layer,
+          pts,
+          ...defaultLineFields(layer),
+          ...(lineDraftMeta.tag ? { lineTag: lineDraftMeta.tag } : {}),
+        },
+        plan.items,
+      );
+      setPlan((p) => ({ ...p, lines: [...p.lines, line] }));
     }
     setDraft([]);
     setDraftSnap(null);
@@ -377,32 +619,123 @@ export default function PlanPage() {
     updateObj("items", it.id, { angle: next < 0 ? next + 360 : next });
   };
 
-  const pickLayer = (lid) => {
-    setActive(lid);
-    setDraft([]);
+  const applySheet = (sheet, categoryId) => {
+    const layerId = sheet.activeLayer || sheet.layerId;
+    setActive(layerId);
+    setActiveSheetId(sheet.id);
+    if (categoryId) setActiveCategoryId(categoryId);
+    setVis(buildVisibilityFromSheet(sheet));
+    setDisplay((d) => normalizeDisplay({ ...d, ...sheetDisplayPatch(sheet) }));
+    const def = defaultToolForSheet(sheet);
+    const st = toolStateFromDef(def);
+    setTool(st.tool);
+    setPending(st.pending);
+    setPendingSize(st.pendingSize);
+    setLineDraftMeta({ layer: st.lineLayer, tag: st.lineTag });
+    setActiveToolId(def?.id || "select");
+    clearWallChain();
     setSel(null);
     setGuides([]);
-    if (lid === "client" || lid === "install" || lid === "spec") setTool("select");
-    else if (lid === "zones") setTool("zone");
-    else if (lid === "partitions") setTool("wall");
-    else if (lid === "room") setTool("select");
-    else if (catalogForLayer(lid).length) {
-      setPending(catalogForLayer(lid)[0].kind);
-      setTool("add");
-    } else if (LINE_STYLE[lid]) setTool("line");
-    else setTool("select");
+    setSheetFilters((prev) => (
+      prev[sheet.id] ? prev : { ...prev, [sheet.id]: sheet.filters?.[0]?.id || "all" }
+    ));
+  };
+
+  const pickLayer = (lid, sheetId) => {
+    const sheet = sheetId ? sheetById(sheetId) : sheetByLayerId(lid);
+    applySheet(sheet);
+  };
+
+  const handleSheetPick = (sheet) => {
+    applySheet(sheet);
+    setDrawerOpen(false);
+    setViewMode(viewModeForSheet(sheet.id));
+  };
+
+  const handleViewModePick = (mode) => {
+    if (mode.disabled) return;
+    setViewMode(mode.id);
+    if (sheetAllowedInViewMode(activeSheetId, mode.id)) return;
+    const sheet = sheetById(mode.defaultSheetId || "source");
+    if (sheet) applySheet(sheet);
+  };
+
+  const handleCategoryPick = (cat) => {
+    if (cat.id === "search") {
+      const q = prompt("Поиск инструмента или объекта:", toolSearch);
+      if (q != null) setToolSearch(q);
+    }
+    const sheet = sheetById(cat.sheetId);
+    applySheet(sheet, cat.id);
+    setDrawerOpen(true);
+  };
+
+  const handleFilterPick = (filterId) => {
+    setSheetFilters((prev) => ({ ...prev, [activeSheetId]: filterId }));
+  };
+
+  const handleToolPick = (toolDef) => {
+    if (!toolDef) return;
+    setActiveToolId(toolDef.id);
+    if (toolDef.mode === "placeholder") {
+      window.alert(toolDef.hint || "Инструмент будет доступен на следующем этапе.");
+      return;
+    }
+    if (toolDef.mode === "view-toggle") {
+      toggleDisplay(toolDef.displayKey);
+      return;
+    }
+    if (toolDef.mode === "action") {
+      if (toolDef.action === "sync_spec") syncSpec();
+      else if (toolDef.action === "rack_number") setPlan((p) => ({ ...p, items: autoNumberRacks(p.items) }));
+      else if (toolDef.action === "rack_grid" || toolDef.action === "rack_row") {
+        const obj = selObj && isRackKind(selObj.kind) ? selObj : plan.items.find((i) => isRackKind(i.kind));
+        if (!obj) { window.alert("Выберите стеллаж на плане"); return; }
+        const cols = toolDef.action === "rack_row" ? 1 : +(prompt("Колонок:", "3") || 0);
+        const rows = toolDef.action === "rack_row" ? +(prompt("Стеллажей в ряду:", "5") || 0) : +(prompt("Рядов:", "2") || 0);
+        const gap = +(prompt("Зазор, мм:", "800") || 800);
+        if (cols > 0 && rows > 0) {
+          setPlan((p) => placeRackCopies(p, obj, buildRackGrid(obj, { cols, rows, gapMm: gap })));
+        }
+      }
+      return;
+    }
+    const st = toolStateFromDef(toolDef);
+    setTool(st.tool);
+    setPending(st.pending);
+    setPendingSize(st.pendingSize);
+    setLineDraftMeta({ layer: st.lineLayer, tag: st.lineTag });
+    setLinkFrom(null);
+    if (st.tool === "wall" || st.tool === "line") clearWallChain();
+  };
+
+  useEffect(() => {
+    applySheet(sheetById(activeSheetId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial sheet visibility
+  }, []);
+
+  const panView = (dir) => {
+    const step = 80;
+    setView((v) => {
+      if (dir === "left") return { ...v, panX: v.panX + step };
+      if (dir === "right") return { ...v, panX: v.panX - step };
+      if (dir === "up") return { ...v, panY: v.panY + step };
+      if (dir === "down") return { ...v, panY: v.panY - step };
+      return v;
+    });
   };
 
   const handleTool = (t) => {
     setTool(t);
     setLinkFrom(null);
-    if (t === "wall" || t === "line") setDraft([]);
+    if (t === "wall" || t === "line") clearWallChain();
     if (t === "add" && !pending && catalogForLayer(active).length) setPending(catalogForLayer(active)[0].kind);
   };
 
   const handlePending = (kind) => { setPending(kind); setTool("add"); };
 
-  const toggleDisplay = (key) => setDisplay((d) => ({ ...d, [key]: !d[key] }));
+  const toggleDisplay = (key) => setDisplay((d) => normalizeDisplay({ ...d, [key]: !d[key] }));
+  const patchDisplay = (patch) => setDisplay((d) => normalizeDisplay({ ...d, ...patch }));
 
   const fitView = () => {
     const r = svgRef.current?.getBoundingClientRect();
@@ -410,6 +743,23 @@ export default function PlanPage() {
     const m = 160;
     const z = clamp(Math.min((r.width - m) / plan.room.w, (r.height - m) / plan.room.h), 0.015, 3);
     setView({ zoom: z, panX: (r.width - plan.room.w * z) / 2, panY: (r.height - plan.room.h * z) / 2 });
+  };
+
+  const fitActiveLayer = () => {
+    const b = boundsForActiveLayer(plan, active);
+    const r = svgRef.current?.getBoundingClientRect();
+    if (!r) return;
+    if (!b) {
+      fitView();
+      return;
+    }
+    const m = 120;
+    const z = clamp(Math.min((r.width - m) / b.w, (r.height - m) / b.h), 0.015, 3);
+    setView({
+      zoom: z,
+      panX: (r.width - b.w * z) / 2 - b.x * z,
+      panY: (r.height - b.h * z) / 2 - b.y * z,
+    });
   };
 
   const centerView = () => {
@@ -449,29 +799,134 @@ export default function PlanPage() {
   };
 
   const copySel = () => {
-    if (!sel || sel.coll !== "items") return;
-    const it = plan.items.find((o) => o.id === sel.id);
-    if (it) clipboardRef.current = { ...it };
+    if (!selection || selection.coll !== "items") return;
+    const items = plan.items.filter((o) => selection.ids.includes(o.id));
+    if (items.length) clipboardRef.current = items.map((it) => ({ ...it }));
   };
 
   const pasteSel = () => {
     const src = clipboardRef.current;
     if (!src) return;
-    const item = { ...src, id: uid("eq"), x: src.x + 200, y: src.y + 200 };
-    setPlan((p) => ({ ...p, items: [...p.items, item] }));
-    setSel({ coll: "items", id: item.id });
+    const list = Array.isArray(src) ? src : [src];
+    const newItems = list.map((it) => ({
+      ...it,
+      id: uid("eq"),
+      x: it.x + 200,
+      y: it.y + 200,
+      groupId: null,
+    }));
+    const gid = newItems.length > 1 ? uid("grp") : null;
+    if (gid) newItems.forEach((it) => { it.groupId = gid; });
+    setPlan((p) => ({ ...p, items: [...p.items, ...newItems] }));
+    setSelection({ coll: "items", ids: newItems.map((it) => it.id) });
   };
 
   const moveSelByKeys = (e) => {
-    if (!sel || !["items", "zones", "labels"].includes(sel.coll)) return;
-    const step = e.shiftKey ? 500 : e.altKey ? 10 : 50;
+    if (!selection?.ids?.length) return;
+    const baseStep = display.arrowStepMm ?? 10;
+    const step = e.shiftKey ? (display.arrowStepShiftMm ?? 100) : e.altKey ? (display.arrowStepAltMm ?? 1) : baseStep;
     const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
     const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
     if (!dx && !dy) return;
     e.preventDefault();
-    const obj = plan[sel.coll].find((o) => o.id === sel.id);
+
+    if (selection.coll === "walls" && selection.ids.length === 1) {
+      const wid = selection.ids[0];
+      const nidx = selection.nodeIdx;
+      setPlan((p) => {
+        let walls = p.walls.map((w) => {
+          if (w.id !== wid) return w;
+          if (nidx != null) {
+            return {
+              ...w,
+              pts: w.pts.map((pt, i) => (i === nidx ? { x: sn(pt.x + dx), y: sn(pt.y + dy) } : pt)),
+            };
+          }
+          return { ...w, pts: w.pts.map((pt) => ({ x: sn(pt.x + dx), y: sn(pt.y + dy) })) };
+        });
+        if (nidx != null) {
+          const w = walls.find((x) => x.id === wid);
+          const moved = w?.pts[nidx];
+          if (moved) walls = applyWallNodeMove(walls, wid, nidx, moved);
+        }
+        walls = weldWallNodes(walls);
+        return syncAutoZones({
+          ...p,
+          walls,
+          items: refreshWallMountedItems(p.items, walls, p.room, wid),
+        });
+      });
+      return;
+    }
+
+    if (selection.coll === "lines" && selection.ids.length === 1) {
+      const lid = selection.ids[0];
+      const nidx = selection.nodeIdx;
+      setPlan((p) => ({
+        ...p,
+        lines: p.lines.map((l) => {
+          if (l.id !== lid) return l;
+          if (nidx != null) {
+            return {
+              ...l,
+              pts: l.pts.map((pt, i) => (i === nidx ? { x: sn(pt.x + dx), y: sn(pt.y + dy) } : pt)),
+            };
+          }
+          return { ...l, pts: l.pts.map((pt) => ({ x: sn(pt.x + dx), y: sn(pt.y + dy) })) };
+        }),
+      }));
+      return;
+    }
+
+    if (selection.coll === "items") {
+      const ids = new Set(selection.ids);
+      setPlan((p) => ({
+        ...p,
+        items: p.items.map((it) => (
+          ids.has(it.id) ? { ...it, x: it.x + dx, y: it.y + dy } : it
+        )),
+        labels: p.labels.map((lb) => {
+          if (lb.pinned || !lb.targetId || !ids.has(lb.targetId)) return lb;
+          return { ...lb, x: (lb.x || 0) + dx, y: (lb.y || 0) + dy };
+        }),
+      }));
+      return;
+    }
+
+    if (selection.coll === "labels" && selection.ids.length) {
+      const ids = new Set(selection.ids);
+      setPlan((p) => ({
+        ...p,
+        labels: p.labels.map((lb) => (
+          ids.has(lb.id) ? { ...lb, x: (lb.x || 0) + dx, y: (lb.y || 0) + dy, pinned: true } : lb
+        )),
+      }));
+      return;
+    }
+
+    if (selection.ids.length !== 1) return;
+    const obj = plan[selection.coll].find((o) => o.id === selection.ids[0]);
     if (!obj) return;
-    updateObj(sel.coll, sel.id, { x: (obj.x || 0) + dx, y: (obj.y || 0) + dy });
+    updateObj(selection.coll, obj.id, { x: (obj.x || 0) + dx, y: (obj.y || 0) + dy });
+  };
+
+  const groupSelection = () => {
+    if (!selection || selection.coll !== "items" || selection.ids.length < 2) return;
+    const gid = uid("grp");
+    const ids = new Set(selection.ids);
+    setPlan((p) => ({
+      ...p,
+      items: p.items.map((it) => (ids.has(it.id) ? { ...it, groupId: gid } : it)),
+    }));
+  };
+
+  const ungroupSelection = () => {
+    if (!selection || selection.coll !== "items") return;
+    const ids = new Set(selection.ids);
+    setPlan((p) => ({
+      ...p,
+      items: p.items.map((it) => (ids.has(it.id) ? { ...it, groupId: null } : it)),
+    }));
   };
 
   const mirrorItem = (it, axis) => {
@@ -480,12 +935,78 @@ export default function PlanPage() {
   };
 
   const duplicateItem = (it) => {
-    const copy = { ...it, id: uid("eq"), x: it.x + 200, y: it.y + 200 };
-    setPlan((p) => ({ ...p, items: [...p.items, copy] }));
+    const copy = { ...it, id: uid("eq"), x: it.x + 200, y: it.y + 200, groupId: null };
+    if (isDoorKind(it.kind)) copy.doorNum = nextDoorNumber(plan.items);
+    if (isOpeningKind(it.kind)) copy.openingNum = nextOpeningNumber(plan.items);
+    if (isRackKind(it.kind)) copy.rackNum = nextRackNumber(plan.items);
+    setPlan((p) => ({ ...p, items: [...p.items, attachItemZoneFields(p, copy)] }));
     setSel({ coll: "items", id: copy.id });
   };
 
+  const duplicateItems = () => {
+    if (!selection || selection.coll !== "items") return;
+    const copies = [];
+    const newIds = [];
+    selection.ids.forEach((id) => {
+      const it = plan.items.find((i) => i.id === id);
+      if (!it) return;
+      const copy = { ...it, id: uid("eq"), x: it.x + 200, y: it.y + 200, groupId: null };
+      copies.push(copy);
+      newIds.push(copy.id);
+    });
+    if (!copies.length) return;
+    const gid = copies.length > 1 ? uid("grp") : null;
+    if (gid) copies.forEach((c) => { c.groupId = gid; });
+    setPlan((p) => ({ ...p, items: [...p.items, ...copies] }));
+    setSelection({ coll: "items", ids: newIds });
+  };
+
+  const placeRackCopies = (planState, source, grid) => {
+    const row = source.rowNum || nextRowLabel(planState.items);
+    const base = {
+      ...source,
+      rowNum: grid[0]?.rowNum || row,
+      rackNum: source.rackNum || nextRackNumber(planState.items, source.id, grid[0]?.rowNum || row),
+    };
+    let items = planState.items.map((it) => (it.id === source.id ? base : it));
+    const placed = [];
+    grid.forEach((pos, idx) => {
+      if (idx === 0) {
+        const updated = { ...base, ...pos };
+        delete updated._gridIdx;
+        items = items.map((it) => (it.id === source.id
+          ? attachItemZoneFields({ ...planState, items }, updated)
+          : it));
+        return;
+      }
+      const copy = {
+        ...base,
+        ...pos,
+        id: uid("eq"),
+        rackNum: nextRackNumber([...items, ...placed], null, pos.rowNum),
+        groupId: null,
+      };
+      delete copy._gridIdx;
+      placed.push(attachItemZoneFields({ ...planState, items: [...items, ...placed] }, copy));
+    });
+    return { ...planState, items: [...items, ...placed] };
+  };
+
   const handleCtxAction = (actionId) => {
+    if (actionId === "group") { groupSelection(); return; }
+    if (actionId === "ungroup") { ungroupSelection(); return; }
+
+    if (selection?.coll === "items" && selection.ids.length > 1) {
+      if (actionId === "delete") delSel();
+      else if (actionId === "rotate90") {
+        selection.ids.forEach((id) => {
+          const it = plan.items.find((i) => i.id === id);
+          if (it) rotateItem(it, 90);
+        });
+      } else if (actionId === "duplicate") duplicateItems();
+      return;
+    }
+
     if (!sel) return;
     const obj = plan[sel.coll]?.find((o) => o.id === sel.id);
     if (!obj) return;
@@ -494,10 +1015,84 @@ export default function PlanPage() {
     else if (actionId === "mirror-h" && sel.coll === "items") mirrorItem(obj, "h");
     else if (actionId === "mirror-v" && sel.coll === "items") mirrorItem(obj, "v");
     else if (actionId === "duplicate" && sel.coll === "items") duplicateItem(obj);
+    else if (actionId === "door-swing" && sel.coll === "items") {
+      updateObj("items", obj.id, { doorSwing: obj.doorSwing === "right" ? "left" : "right" });
+    }
+    else if (actionId === "door-open-in" && sel.coll === "items") {
+      updateObj("items", obj.id, { doorOpenIn: obj.doorOpenIn === false });
+    }
+    else if (actionId === "door-num" && sel.coll === "items") {
+      const num = prompt("Номер двери:", obj.doorNum || nextDoorNumber(plan.items));
+      if (num != null) updateObj("items", obj.id, { doorNum: num.trim() });
+    }
+    else if (actionId === "opening-shape" && sel.coll === "items") {
+      updateObj("items", obj.id, { openingShape: obj.openingShape === "arch" ? "rect" : "arch" });
+    }
+    else if (actionId === "opening-num" && sel.coll === "items") {
+      const num = prompt("Номер проёма:", obj.openingNum || nextOpeningNumber(plan.items));
+      if (num != null) updateObj("items", obj.id, { openingNum: num.trim() });
+    }
     else if (actionId === "hide-client" && sel.coll === "items") {
       updateObj("items", obj.id, { visibleToClient: obj.visibleToClient === false });
     }
     else if (actionId === "spec" && sel.coll === "items") syncSpec();
+    else if (actionId === "add-label" && sel.coll === "items") {
+      addLabelAt({ x: obj.x + obj.w / 2, y: obj.y + obj.h / 2 }, obj.id);
+    }
+    else if (actionId === "item-lock" && sel.coll === "items") {
+      updateObj("items", obj.id, { locked: !obj.locked });
+    }
+    else if (actionId === "rack-num" && sel.coll === "items" && isRackKind(obj.kind)) {
+      const num = prompt("Номер стеллажа:", obj.rackNum || nextRackNumber(plan.items, obj.id));
+      if (num != null) updateObj("items", obj.id, { rackNum: num.trim() });
+    }
+    else if (actionId === "rack-auto-num" && sel.coll === "items") {
+      setPlan((p) => ({ ...p, items: autoNumberRacks(p.items) }));
+    }
+    else if (actionId === "rack-row" && sel.coll === "items" && isRackKind(obj.kind)) {
+      const count = parseInt(prompt("Сколько стеллажей в ряду?", "4"), 10);
+      if (!count || count < 2) return;
+      const gap = parseInt(prompt("Зазор между стеллажами, мм:", "800"), 10) || 800;
+      setPlan((p) => placeRackCopies(p, obj, buildRackGrid(obj, { cols: count, rows: 1, gapMm: gap })));
+    }
+    else if (actionId === "rack-link-tank" && sel.coll === "items" && isRackKind(obj.kind)) {
+      const target = findRackLinkTarget(plan.items, obj, RACK_LINK_ACTIONS[0]);
+      if (!target) { window.alert("Не найден бак или водоподготовка рядом."); return; }
+      if (!createLink(obj.id, target.id, "irrigation")) window.alert("Не удалось создать связь полива.");
+    }
+    else if (actionId === "rack-link-pump" && sel.coll === "items" && isRackKind(obj.kind)) {
+      const target = findRackLinkTarget(plan.items, obj, RACK_LINK_ACTIONS[1]);
+      if (!target) { window.alert("Не найден насос рядом."); return; }
+      if (!createLink(obj.id, target.id, "irrigation")) window.alert("Не удалось создать связь.");
+    }
+    else if (actionId === "rack-link-socket" && sel.coll === "items" && isRackKind(obj.kind)) {
+      const target = findRackLinkTarget(plan.items, obj, RACK_LINK_ACTIONS[2]);
+      if (!target) { window.alert("Не найдена розетка или щит рядом."); return; }
+      if (!createLink(obj.id, target.id, "power")) window.alert("Не удалось создать связь.");
+    }
+    else if (actionId === "rack-link-light" && sel.coll === "items" && isRackKind(obj.kind)) {
+      const target = findRackLinkTarget(plan.items, obj, RACK_LINK_ACTIONS[3]);
+      if (!target) { window.alert("Не найдено освещение или розетка рядом."); return; }
+      if (!createLink(obj.id, target.id, "light")) window.alert("Не удалось создать связь.");
+    }
+    else if (actionId === "rack-grid" && sel.coll === "items" && isRackKind(obj.kind)) {
+      const cols = parseInt(prompt("Стеллажей в ряду (по горизонтали)?", "4"), 10);
+      const rows = parseInt(prompt("Количество рядов?", "2"), 10);
+      if (!cols || !rows || cols < 1 || rows < 1) return;
+      const gap = parseInt(prompt("Зазор между стеллажами, мм:", "800"), 10) || 800;
+      const rowGap = parseInt(prompt("Проход между рядами, мм:", "1200"), 10) || 1200;
+      const dir = prompt("Направление рядов (h — горизонтально, v — вертикально):", "h");
+      setPlan((p) => placeRackCopies(p, obj, buildRackGrid(obj, {
+        cols, rows, gapMm: gap, rowGapMm: rowGap, direction: dir === "v" ? "v" : "h",
+      })));
+    }
+    else if (actionId === "wall-kind" && sel.coll === "walls") {
+      const pick = prompt(
+        "Тип стены (existing, new, demolish, technical, sandwich, brick, drywall, cold_panel):",
+        obj.kind || "new",
+      );
+      if (pick && WALL_KINDS[pick]) updateObj("walls", obj.id, { kind: pick });
+    }
     else if (actionId === "wall-thk" && sel.coll === "walls") {
       const thk = prompt("Толщина стены, мм:", String(obj.thk || 100));
       if (thk) updateObj("walls", obj.id, { thk: Math.max(40, +thk || 100) });
@@ -506,9 +1101,54 @@ export default function PlanPage() {
       const h = prompt("Высота стены, мм:", String(obj.height || 2700));
       if (h) updateObj("walls", obj.id, { height: Math.max(500, +h || 2700) });
     }
-    else if (actionId === "wall-material" && sel.coll === "walls") {
-      const mat = prompt("Материал стены:", obj.material || "ГКЛ / профиль");
-      if (mat != null) updateObj("walls", obj.id, { material: mat });
+    else if (actionId === "wall-side" && sel.coll === "walls") {
+      const pick = prompt("Сторона толщины (center, in, out):", obj.thicknessSide || "center");
+      if (pick && THICKNESS_SIDES.some((s) => s.id === pick)) updateObj("walls", obj.id, { thicknessSide: pick });
+    }
+    else if (actionId === "wall-length" && sel.coll === "walls") {
+      const segLen = obj.pts?.length >= 2
+        ? Math.hypot(obj.pts[obj.pts.length - 1].x - obj.pts[obj.pts.length - 2].x, obj.pts[obj.pts.length - 1].y - obj.pts[obj.pts.length - 2].y)
+        : 0;
+      const len = prompt("Длина последнего сегмента, мм:", String(Math.round(segLen)));
+      if (len) {
+        const nw = setWallSegmentLength(obj, Math.max(100, +len || 0));
+        updateObj("walls", obj.id, { pts: nw.pts });
+      }
+    }
+    else if (actionId === "wall-straight-h" && sel.coll === "walls") {
+      const nw = straightenWall(obj, "h");
+      updateObj("walls", obj.id, { pts: nw.pts });
+    }
+    else if (actionId === "wall-straight-v" && sel.coll === "walls") {
+      const nw = straightenWall(obj, "v");
+      updateObj("walls", obj.id, { pts: nw.pts });
+    }
+    else if (actionId === "wall-align" && sel.coll === "walls") {
+      setPlan((p) => {
+        const walls = alignWallToNeighbor(p.walls, obj.id);
+        if (!walls) {
+          window.alert("Нет соседней стены с общим узлом для выравнивания.");
+          return p;
+        }
+        return syncAutoZones({
+          ...p,
+          walls,
+          items: refreshWallMountedItems(p.items, walls, p.room, obj.id),
+        });
+      });
+    }
+    else if (actionId === "wall-merge" && sel.coll === "walls") {
+      const res = tryMergeWall(plan.walls, obj.id);
+      if (!res) {
+        window.alert("Не найдена соседняя стена с общим узлом для объединения.");
+        return;
+      }
+      setPlan((p) => syncAutoZones({
+        ...p,
+        walls: res.walls,
+        items: refreshWallMountedItems(p.items, res.walls, p.room),
+      }));
+      setSel({ coll: "walls", id: res.mergedId });
     }
     else if (actionId === "wall-break" && sel.coll === "walls") {
       const mm = ctxMenuRef.current?.mm;
@@ -519,8 +1159,8 @@ export default function PlanPage() {
         return;
       }
       const [w1, w2] = parts;
-      w2.id = uid("w");
-      setPlan((p) => ({
+      w2.id = uid("wl");
+      setPlan((p) => syncAutoZones({
         ...p,
         walls: p.walls.flatMap((w) => (w.id === obj.id ? [w1, w2] : [w])),
       }));
@@ -529,6 +1169,29 @@ export default function PlanPage() {
     else if (actionId === "rename" && sel.coll === "zones") {
       const name = prompt("Название помещения:", obj.name || "Помещение");
       if (name) updateObj("zones", obj.id, { name });
+    }
+    else if (sel.coll === "lines") {
+      const mm = ctxMenuRef.current?.mm;
+      if (actionId === "line-insert-node" && mm) {
+        updateObj("lines", obj.id, insertPointOnLine(obj, mm));
+      } else if (actionId === "line-delete-node" && selection?.nodeIdx != null) {
+        updateObj("lines", obj.id, removeLineNode(obj, selection.nodeIdx));
+      } else if (actionId === "line-reverse") {
+        updateObj("lines", obj.id, reverseLine(obj));
+      } else if (actionId === "line-attach") {
+        updateObj("lines", obj.id, attachLineEndpoints(obj, plan.items));
+      } else if (actionId === "line-toggle-arrows") {
+        updateObj("lines", obj.id, { showArrows: obj.showArrows === false });
+      } else if (actionId === "line-ortho") {
+        updateObj("lines", obj.id, { orthoRoute: obj.orthoRoute === false });
+      }
+    }
+    else if (sel.coll === "links") {
+      if (actionId === "link-toggle-visible") {
+        updateObj("links", obj.id, { visible: obj.visible === false });
+      } else if (actionId === "link-ortho") {
+        updateObj("links", obj.id, { ortho: obj.ortho === false });
+      }
     }
   };
 
@@ -557,6 +1220,23 @@ export default function PlanPage() {
       }
     }
     if (!hit) {
+      for (const ln of plan.lines) {
+        if (hitTestLine(mm, ln, 140 / Math.max(view.zoom, 0.2))) {
+          hit = { coll: "lines", id: ln.id };
+          break;
+        }
+      }
+    }
+    if (!hit) {
+      for (const link of linksVisibleOnLayer(plan.links, active, display)) {
+        const { pts } = linkLengthMm(link, plan.items, plan.room);
+        if (pts.length >= 2 && hitTestLine(mm, { pts }, 120 / Math.max(view.zoom, 0.2))) {
+          hit = { coll: "links", id: link.id };
+          break;
+        }
+      }
+    }
+    if (!hit) {
       for (const z of plan.zones) {
         if (mm.x >= z.x && mm.x <= z.x + z.w && mm.y >= z.y && mm.y <= z.y + z.h) {
           hit = { coll: "zones", id: z.id };
@@ -564,12 +1244,23 @@ export default function PlanPage() {
         }
       }
     }
-    if (!hit && sel) hit = sel;
+    if (!hit && selection?.ids?.length === 1) {
+      hit = { coll: selection.coll, id: selection.ids[0] };
+    }
     if (!hit) return;
     e.preventDefault();
+    if (selection?.coll === "items" && selection.ids.length > 1 && hit.coll === "items" && selection.ids.includes(hit.id)) {
+      setCtxMenu({
+        x: e.clientX,
+        y: e.clientY,
+        mm,
+        items: buildObjectMenu({}, "items", { multiCount: selection.ids.length }),
+      });
+      return;
+    }
     setSel(hit);
     const obj = plan[hit.coll]?.find((o) => o.id === hit.id);
-    setCtxMenu({ x: e.clientX, y: e.clientY, mm, items: buildObjectMenu(obj || {}, hit.coll) });
+    setCtxMenu({ x: e.clientX, y: e.clientY, mm, items: buildObjectMenu(obj || {}, hit.coll, { nodeIdx: selection?.nodeIdx }) });
   };
 
   const orthoTools = tool === "line" || tool === "wall" || tool === "measure";
@@ -578,11 +1269,12 @@ export default function PlanPage() {
     const onKeyDown = (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       if (e.key === "Shift") shiftRef.current = true;
-      if (e.key === "Alt") altSnapRef.current = true;
+      if (e.key === "Alt") { altSnapRef.current = true; setAltSnapOff(true); }
       if (e.key === " " && document.activeElement === document.body) { e.preventDefault(); setSpacePan(true); }
       if (e.key === "Escape") {
-        setDraft([]); setMeasure([]); setSel(null); setGuides([]);
+        clearWallChain(); setMeasure([]); clearSelection(); setGuides([]);
         setTool("select"); setPending(null); setTypedLength(""); setDraftSnap(null);
+        setMarquee(null);
       }
       if (e.key === "Enter") {
         if (typedLengthRef.current && (tool === "wall" || tool === "line") && draft.length >= 1) {
@@ -591,8 +1283,9 @@ export default function PlanPage() {
           return;
         }
         if (draft.length >= 2) finishDraft();
+        else if (tool === "wall" && draft.length >= 1) finishDraft();
       }
-      if ((e.key === "Delete" || e.key === "Backspace") && sel && document.activeElement === document.body && !typedLengthRef.current) delSel();
+      if ((e.key === "Delete" || e.key === "Backspace") && selection?.ids?.length && document.activeElement === document.body && !typedLengthRef.current) delSel();
       if (/^\d$/.test(e.key) && (tool === "wall" || tool === "line") && draft.length >= 1) {
         e.preventDefault();
         setTypedLength((s) => s + e.key);
@@ -606,11 +1299,22 @@ export default function PlanPage() {
       if (e.ctrlKey && (e.key === "y" || (e.shiftKey && e.key === "z"))) { e.preventDefault(); redo(); }
       if (e.ctrlKey && e.key === "c") { e.preventDefault(); copySel(); }
       if (e.ctrlKey && e.key === "v") { e.preventDefault(); pasteSel(); }
+      if (e.ctrlKey && !e.shiftKey && (e.key === "g" || e.key === "G")) { e.preventDefault(); groupSelection(); }
+      if (e.ctrlKey && e.shiftKey && (e.key === "g" || e.key === "G")) { e.preventDefault(); ungroupSelection(); }
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) && document.activeElement === document.body) moveSelByKeys(e);
+      if ((e.key === "[" || e.key === "]") && selection?.coll === "items" && selection.ids.length) {
+        e.preventDefault();
+        const step = e.shiftKey ? 90 : e.altKey ? 1 : 15;
+        const sign = e.key === "]" ? 1 : -1;
+        selection.ids.forEach((id) => {
+          const it = plan.items.find((i) => i.id === id);
+          if (it && !isDoorKind(it.kind)) rotateItem(it, sign * step);
+        });
+      }
     };
     const onKeyUp = (e) => {
       if (e.key === "Shift") shiftRef.current = false;
-      if (e.key === "Alt") altSnapRef.current = false;
+      if (e.key === "Alt") { altSnapRef.current = false; setAltSnapOff(false); }
       if (e.key === " ") setSpacePan(false);
     };
     window.addEventListener("keydown", onKeyDown);
@@ -660,6 +1364,33 @@ export default function PlanPage() {
     }
   };
 
+  const handleAttachToProject = async (targetProject) => {
+    const itemCount = targetProject.plan?.items?.length ?? 0;
+    const wallCount = targetProject.plan?.walls?.length ?? 0;
+    if ((itemCount > 0 || wallCount > 0) && !window.confirm(
+      `У проекта «${targetProject.name}» уже есть план (${itemCount} объектов). Заменить черновиком?`,
+    )) return;
+    setBusy(true);
+    try {
+      const snapshot = withDefaults(plan);
+      await actions.projectUpdate(targetProject.id, {
+        plan: snapshot,
+        plannerAttachedAt: new Date().toISOString(),
+        plannerAttachedFrom: draftId,
+      });
+      setAttachOpen(false);
+      const del = window.confirm(
+        `План привязан к «${targetProject.name}». Удалить черновик из браузера?`,
+      );
+      if (del) deleteStandalonePlan(draftId);
+      navigate(`/project/${targetProject.id}/plan`);
+    } catch (e) {
+      window.alert("Не удалось привязать: " + (e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const specSummary = plannerSpecSummary(plan);
 
   const onDown = (e) => {
@@ -668,7 +1399,7 @@ export default function PlanPage() {
     const panTool = tool === "pan" || spacePan || e.button === 1;
     const bgClick = e.target === svgRef.current || e.target.getAttribute("data-canvas-bg") === "1";
 
-    if (panTool || (tool === "select" && bgClick && e.button === 0)) {
+    if (panTool) {
       dragRef.current = { mode: "pan", sx: e.clientX, sy: e.clientY, px: view.panX, py: view.panY };
       return;
     }
@@ -678,28 +1409,64 @@ export default function PlanPage() {
     if (tool === "label") return addLabelAt(mm, null);
     if (tool === "line" || tool === "wall") {
       const last = draft[draft.length - 1];
-      const { pt, snap } = computeDraftPt(mm, last);
+      const { pt, snap, angleSnap } = computeDraftPt(mm, last);
+      setDraftAngleSnap(angleSnap);
+      if (tool === "wall") {
+        if (!last) {
+          wallChainStartRef.current = pt;
+          setDraft([pt]);
+          setDraftSnap(snap);
+          return;
+        }
+        if (snap?.kind === "close" && wallChainStartRef.current) {
+          commitWallSegment(last, wallChainStartRef.current);
+          clearWallChain();
+          return;
+        }
+        commitWallSegment(last, pt);
+        setDraft([pt]);
+        setDraftSnap(snap);
+        return;
+      }
       setDraftSnap(snap);
       setDraft((d) => [...d, pt]);
       return;
     }
     if (tool === "measure") {
-      const pt = measure.length === 1 ? orthoPt(measure[0], mm, snapOn, shiftRef.current) : { x: sn(mm.x), y: sn(mm.y) };
+      const pt = measure.length === 1
+        ? draftPt(measure[0], mm, { ...draftSnapOpts(), snapOn: snapOn && !altSnapRef.current }).point
+        : { x: sn(mm.x), y: sn(mm.y) };
       setMeasure((m) => (m.length >= 2 ? [pt] : [...m, pt]));
       return;
     }
-    if (bgClick) setSel(null);
+    if (tool === "select" && bgClick && e.button === 0) {
+      if (e.shiftKey) {
+        dragRef.current = {
+          mode: "marquee",
+          x1: mm.x,
+          y1: mm.y,
+          additive: e.ctrlKey || e.metaKey,
+        };
+        if (!e.ctrlKey && !e.metaKey) clearSelection();
+        return;
+      }
+      dragRef.current = { mode: "pan", sx: e.clientX, sy: e.clientY, px: view.panX, py: view.panY };
+      return;
+    }
+    if (bgClick) clearSelection();
   };
 
   const onMove = (e) => {
     const raw = toMM(e.clientX, e.clientY);
     let mm = raw;
     if (orthoTools && draft.length > 0) {
-      const { pt, snap } = computeDraftPt(raw, draft[draft.length - 1]);
+      const { pt, snap, angleSnap } = computeDraftPt(raw, draft[draft.length - 1]);
       setDraftSnap(snap);
+      setDraftAngleSnap(angleSnap);
       mm = pt;
     } else {
       setDraftSnap(null);
+      setDraftAngleSnap(null);
     }
     setCursor(mm);
     const d = dragRef.current;
@@ -712,50 +1479,180 @@ export default function PlanPage() {
       updateObj("items", d.id, { angle: next });
     } else if (d.mode === "move") {
       const obj = plan[d.coll].find((o) => o.id === d.id);
-      if (!obj) return;
+      if (!obj || obj.locked) return;
       let x = d.ox + (mm.x - d.dx);
       let y = d.oy + (mm.y - d.dy);
       if (d.coll === "items" && obj.wall) {
-        const placed = attachWall(obj, x, y);
+        const placed = attachWall({ ...obj, kind: obj.kind }, x, y);
+        if (!placed || placed.error) return;
         x = placed.x;
         y = placed.y;
-        updateObj(d.coll, d.id, { x, y, angle: placed.angle || obj.angle || 0 });
+        updateObj(d.coll, d.id, attachItemZoneFields(plan, {
+          ...obj, x, y,
+          angle: placed.angle || obj.angle || 0,
+          wallId: placed.wallId,
+          wallSeg: placed.wallSeg,
+        }));
         setGuides([]);
       } else {
         const s = snapObj(d.coll, obj, x, y);
         x = s.x; y = s.y;
         setGuides(s.guides);
-        updateObj(d.coll, d.id, { x, y });
+        if (d.coll === "items") {
+          updateObj(d.coll, d.id, attachItemZoneFields(plan, { ...obj, x, y }));
+        } else {
+          updateObj(d.coll, d.id, { x, y });
+        }
       }
+    } else if (d.mode === "move-items" || d.mode === "move-pending") {
+      const anchorX = d.mode === "move-pending" ? d.mm.x : d.dx;
+      const anchorY = d.mode === "move-pending" ? d.mm.y : d.dy;
+      if (d.mode === "move-pending" && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) <= 5) return;
+      const dx = mm.x - anchorX;
+      const dy = mm.y - anchorY;
+      let origins = d.origins;
+      let ids = d.ids;
+      if (d.mode === "move-pending") {
+        ids = selection?.coll === "items" && selection.ids.includes(d.triggerId)
+          ? [...selection.ids]
+          : [d.triggerId];
+        origins = {};
+        ids.forEach((id) => {
+          const o = plan.items.find((i) => i.id === id);
+          if (o) origins[id] = { x: o.x, y: o.y };
+        });
+        dragRef.current = { mode: "move-items", ids, origins, dx: d.mm.x, dy: d.mm.y };
+      }
+      setPlan((p) => {
+        const lead = ids.map((id) => p.items.find((i) => i.id === id)).find(Boolean);
+        let snapDx = 0;
+        let snapDy = 0;
+        let snapGuides = [];
+        if (lead && !lead.wall) {
+          const s = snapObj("items", lead, lead.x + dx, lead.y + dy);
+          snapDx = s.x - (lead.x + dx);
+          snapDy = s.y - (lead.y + dy);
+          snapGuides = s.guides;
+        }
+        setGuides(snapGuides);
+        return {
+          ...p,
+          items: p.items.map((it) => {
+            const o = origins[it.id];
+            if (!o) return it;
+            let x = o.x + dx + snapDx;
+            let y = o.y + dy + snapDy;
+          if (display.onlyInsideRooms && p.zones.length > 0) {
+            const inside = p.zones.some((z) => {
+              const poly = z.polygon?.length >= 3 ? z.polygon : [
+                { x: z.x, y: z.y }, { x: z.x + z.w, y: z.y },
+                { x: z.x + z.w, y: z.y + z.h }, { x: z.x, y: z.y + z.h },
+              ];
+              return pointInPolygon({ x: x + it.w / 2, y: y + it.h / 2 }, poly);
+            });
+            if (!inside) return it;
+          }
+          if (it.wall) {
+            const placed = attachWall({ ...it, kind: it.kind }, x, y);
+            if (!placed || placed.error) return it;
+            return { ...it, x: placed.x, y: placed.y, angle: placed.angle || it.angle || 0, wallId: placed.wallId };
+          }
+          if (snapDx || snapDy) {
+            return attachItemZoneFields(p, { ...it, x, y });
+          }
+          const s = snapObj("items", it, x, y);
+          return attachItemZoneFields(p, { ...it, x: s.x, y: s.y });
+        }),
+        };
+      });
+    } else if (d.mode === "marquee") {
+      setMarquee({ x1: d.x1, y1: d.y1, x2: mm.x, y2: mm.y });
     } else if (d.mode === "wall-move") {
       const dx = mm.x - d.dx;
       const dy = mm.y - d.dy;
-      setPlan((p) => ({
-        ...p,
-        walls: p.walls.map((w) => (w.id !== d.id ? w : {
+      setPlan((p) => {
+        const walls = p.walls.map((w) => (w.id !== d.id ? w : {
           ...w,
           pts: d.origPts.map((pt) => ({ x: sn(pt.x + dx), y: sn(pt.y + dy) })),
-        })),
-      }));
+        }));
+        return syncAutoZones({
+          ...p,
+          walls,
+          items: refreshWallMountedItems(p.items, walls, p.room, d.id),
+        });
+      });
     } else if (d.mode === "resize") {
       const obj = plan[d.coll].find((o) => o.id === d.id);
       if (!obj) return;
-      updateObj(d.coll, d.id, { w: Math.max(50, sn(mm.x - obj.x)), h: Math.max(50, sn(mm.y - obj.y)) });
+      if (d.coll === "zones" && (obj.locked || obj.auto)) return;
+      if (obj.locked) return;
+      const axis = d.axis || "corner";
+      if (axis === "w") {
+        updateObj(d.coll, d.id, { w: Math.max(50, sn(mm.x - obj.x)) });
+      } else if (axis === "h") {
+        updateObj(d.coll, d.id, { h: Math.max(50, sn(mm.y - obj.y)) });
+      } else {
+        updateObj(d.coll, d.id, { w: Math.max(50, sn(mm.x - obj.x)), h: Math.max(50, sn(mm.y - obj.y)) });
+      }
     } else if (d.mode === "node") {
-      const snapped = d.coll === "walls"
-        ? snapWallPoint({ x: mm.x, y: mm.y }, plan.walls, plan.room, view.zoom, snapOn, SNAP_STEP)
-        : { x: sn(mm.x), y: sn(mm.y) };
-      setPlan((p) => ({
-        ...p,
-        [d.coll]: p[d.coll].map((l) => (l.id !== d.id ? l : {
-          ...l,
-          pts: l.pts.map((pt, i) => (i === d.idx ? { x: snapped.x, y: snapped.y } : pt)),
-        })),
-      }));
+      if (d.coll === "walls") {
+        const snapped = snapWallPoint({ x: mm.x, y: mm.y }, plan.walls, plan.room, view.zoom, snapOn && display.snapWalls !== false, snapStep);
+        setPlan((p) => {
+          let walls = weldWallNodes(applyWallNodeMove(p.walls, d.id, d.idx, { x: snapped.x, y: snapped.y }));
+          return syncAutoZones({
+            ...p,
+            walls,
+            items: refreshWallMountedItems(p.items, walls, p.room),
+          });
+        });
+      } else {
+        const snapped = snapLinePoint(
+          { x: mm.x, y: mm.y },
+          plan.items,
+          snapOn && display.snapObjects !== false,
+        );
+        setPlan((p) => {
+          const lines = p.lines.map((l) => {
+            if (l.id !== d.id || l.locked) return l;
+            const pts = l.pts.map((pt, i) => (i === d.idx ? { x: snapped.x, y: snapped.y } : pt));
+            const patch = { pts };
+            if (d.idx === 0 && snapped.itemId) {
+              patch.fromItemId = snapped.itemId;
+              patch.fromPortIndex = snapped.portIndex ?? null;
+            }
+            if (d.idx === l.pts.length - 1 && snapped.itemId) {
+              patch.toItemId = snapped.itemId;
+              patch.toPortIndex = snapped.portIndex ?? null;
+            }
+            return { ...l, ...patch };
+          });
+          return { ...p, lines };
+        });
+      }
     }
   };
 
-  const onUp = (e) => { dragRef.current = null; setGuides([]); try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} };
+  const onUp = (e) => {
+    const d = dragRef.current;
+    if (d?.mode === "marquee") {
+      const mm = toMM(e.clientX, e.clientY);
+      const ids = itemsInMarquee(plan.items, d.x1, d.y1, mm.x, mm.y);
+      if (d.additive && selection?.coll === "items") {
+        const merged = new Set([...selection.ids, ...ids]);
+        setSelection(merged.size ? { coll: "items", ids: [...merged] } : null);
+      } else {
+        setSelection(ids.length ? { coll: "items", ids } : null);
+      }
+    } else if (d?.mode === "move" && d.coll === "labels") {
+      const obj = plan.labels.find((o) => o.id === d.id);
+      if (obj && !obj.pinned) updateObj("labels", obj.id, { pinned: true });
+    }
+    dragRef.current = null;
+    setMarquee(null);
+    setGuides([]);
+    setHoverWallNode(null);
+    try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
 
   const onWheel = (e) => {
     e.preventDefault();
@@ -770,14 +1667,42 @@ export default function PlanPage() {
 
   const z = view.zoom;
   const k = 1 / z;
+  const sel = selection?.ids?.length === 1 ? { coll: selection.coll, id: selection.ids[0] } : null;
   const selObj = sel ? plan[sel.coll]?.find((o) => o.id === sel.id) : null;
+  const multiBounds = selection?.coll === "items" && selection.ids.length > 1
+    ? boundsOfItems(plan.items, selection.ids)
+    : null;
+
+  const startMoveItems = (ids, mm) => {
+    const movable = ids.filter((id) => !plan.items.find((i) => i.id === id)?.locked);
+    if (!movable.length) return;
+    const origins = {};
+    movable.forEach((id) => {
+      const o = plan.items.find((i) => i.id === id);
+      if (o) origins[id] = { x: o.x, y: o.y };
+    });
+    dragRef.current = { mode: "move-items", ids: movable, origins, dx: mm.x, dy: mm.y };
+  };
 
   const startMove = (e, coll, obj) => {
+    if (coll === "zones" && obj.locked) return;
+    if (coll === "items" && obj.locked) return;
     e.stopPropagation();
     svgRef.current.setPointerCapture(e.pointerId);
     const mm = toMM(e.clientX, e.clientY);
+    let ox = obj.x;
+    let oy = obj.y;
+    if (coll === "labels" && obj.targetId && !obj.pinned) {
+      const tgt = plan.items.find((i) => i.id === obj.targetId);
+      if (tgt) {
+        const pos = resolveFreeLabelPosition(obj, tgt);
+        ox = pos.x;
+        oy = pos.y;
+        updateObj("labels", obj.id, { x: ox, y: oy, pinned: true });
+      }
+    }
     setSel({ coll, id: obj.id });
-    dragRef.current = { mode: "move", coll, id: obj.id, ox: obj.x, oy: obj.y, dx: mm.x, dy: mm.y };
+    dragRef.current = { mode: "move", coll, id: obj.id, ox, oy, dx: mm.x, dy: mm.y };
   };
   const startRotate = (e, it) => {
     e.stopPropagation();
@@ -792,17 +1717,20 @@ export default function PlanPage() {
       baseAngle: it.angle || 0,
     };
   };
-  const startResize = (e, coll, obj) => {
+  const startResize = (e, coll, obj, axis = "corner") => {
+    if (coll === "zones" && (obj.locked || obj.auto)) return;
+    if (coll === "items" && obj.locked) return;
     e.stopPropagation();
     svgRef.current.setPointerCapture(e.pointerId);
     setSel({ coll, id: obj.id });
-    dragRef.current = { mode: "resize", coll, id: obj.id };
+    dragRef.current = { mode: "resize", coll, id: obj.id, axis };
   };
   const startNode = (e, coll, oid, idx) => {
     e.stopPropagation();
     svgRef.current.setPointerCapture(e.pointerId);
-    setSel({ coll, id: oid });
+    setSelection({ coll, ids: [oid], nodeIdx: idx });
     dragRef.current = { mode: "node", coll, id: oid, idx };
+    if (coll === "walls") setHoverWallNode({ wallId: oid, idx });
   };
   const startWallMove = (e, wall) => {
     e.stopPropagation();
@@ -813,6 +1741,11 @@ export default function PlanPage() {
   };
 
   const onItemDown = (e, it) => {
+    if (it.locked) {
+      e.stopPropagation();
+      setSel({ coll: "items", id: it.id });
+      return;
+    }
     if (tool === "link") {
       e.stopPropagation();
       const type = linkTypeForLayer(active);
@@ -836,7 +1769,38 @@ export default function PlanPage() {
       return;
     }
     if (tool === "label") { e.stopPropagation(); addLabelAt({ x: it.x + it.w / 2, y: it.y + it.h / 2 }, it.id); return; }
-    startMove(e, "items", it);
+
+    e.stopPropagation();
+    svgRef.current.setPointerCapture(e.pointerId);
+    const mm = toMM(e.clientX, e.clientY);
+    const add = (e.ctrlKey || e.metaKey) && tool === "select";
+
+    if (add) {
+      setSelection((prev) => {
+        const ids = prev?.coll === "items" ? [...prev.ids] : [];
+        const idx = ids.indexOf(it.id);
+        if (idx >= 0) ids.splice(idx, 1);
+        else ids.push(it.id);
+        return ids.length ? { coll: "items", ids } : null;
+      });
+      dragRef.current = {
+        mode: "move-pending",
+        triggerId: it.id,
+        sx: e.clientX,
+        sy: e.clientY,
+        mm,
+      };
+      return;
+    }
+
+    let moveIds;
+    if (selection?.coll === "items" && selection.ids.includes(it.id)) {
+      moveIds = selection.ids;
+    } else {
+      moveIds = groupMemberIds(plan.items, it);
+      setSelection({ coll: "items", ids: moveIds });
+    }
+    startMoveItems(moveIds, mm);
   };
 
   const exportPDF = async (mode = "full") => {
@@ -848,6 +1812,7 @@ export default function PlanPage() {
         PDF_SHEETS.map((l) => ({ id: l.id, sheet: l.sheet })),
         { projectName: planTitle, projectId: planMetaId, version: "1" },
         mode,
+        { pdfGridInstall: display.pdfGridInstall, pdfGridTechnical: display.pdfGridTechnical, pdfGridMajorOnly: display.pdfGridMajorOnly },
       );
     } catch (e) { alert("Не удалось собрать PDF: " + e.message); }
     setBusy(false);
@@ -869,81 +1834,355 @@ export default function PlanPage() {
     }
   };
 
+  const activeSheet = sheetById(activeSheetId);
+  const activeFilterId = sheetFilters[activeSheetId] || activeSheet.filters?.[0]?.id || "all";
+  const canvasDisplay = useMemo(() => ({ ...display, sheet: activeSheet }), [display, activeSheet]);
+  const layerState = useCallback(
+    (lid) => layerDisplayState(lid, active, vis, canvasDisplay, activeSheet),
+    [active, vis, canvasDisplay, activeSheet],
+  );
+
   const itemsByLayer = (lid) => {
-    if (lid === "sockets") return plan.items.filter((it) => it.layer === "sockets" || (it.kind === "socket" && it.layer === "power"));
-    return plan.items.filter((it) => it.layer === lid);
+    let items;
+    if (lid === "sockets") items = plan.items.filter((it) => it.layer === "sockets" || (it.kind === "socket" && it.layer === "power"));
+    else items = plan.items.filter((it) => it.layer === lid);
+    if (activeSheet.filters?.length && lid === active) {
+      items = items.filter((it) => isItemVisibleOnSheet(it, activeSheetId, activeFilterId, active));
+    }
+    return items;
   };
-  const linesByLayer = (lid) => plan.lines.filter((l) => l.layer === lid || migrateLayerId(l.layer) === lid);
-
-  const visibleLinks = () => {
-    if (!display.showLinks) return [];
-    const links = plan.links || [];
-    if (active === "install" || active === "client") return links;
-    const t = linkTypeForLayer(active);
-    if (t) return links.filter((l) => l.type === t);
-    if (active === "racks") return links.filter((l) => l.type === "irrigation" || l.type === "power");
-    return [];
+  const linesByLayer = (lid) => {
+    let lines = plan.lines.filter((l) => l.layer === lid || migrateLayerId(l.layer) === lid);
+    if (activeSheet.filters?.length && LINE_LAYER_IDS.includes(lid)) {
+      lines = lines.filter((l) => isLineVisibleOnSheet(l, activeSheetId, activeFilterId));
+    }
+    return lines;
   };
 
-  const warnList = collectPlannerWarnings(plan, sel);
-  const warnIds = new Set(warnList.flatMap((w) => w.objectIds || []));
+  const visibleLinks = () => linksVisibleOnLayer(plan.links, active, display);
+
+  const warnList = collectPlannerWarnings(plan, sel, display);
+  const { critical: criticalWarnIds, warning: warningWarnIds } = useMemo(
+    () => warningIdsFromList(warnList),
+    [warnList],
+  );
+  const warnIds = useMemo(() => {
+    const s = new Set([...criticalWarnIds, ...warningWarnIds]);
+    return s;
+  }, [criticalWarnIds, warningWarnIds]);
+  const warnWallIds = useMemo(() => {
+    const s = new Set();
+    warnList.forEach((w) => (w.wallIds || []).forEach((id) => s.add(id)));
+    return s;
+  }, [warnList]);
+
+  useEffect(() => {
+    const critical = warnList.filter((w) => w.severity === "critical");
+    const hasNew = critical.some((w) => !criticalWarnIdsRef.current.has(w.id));
+    if (hasNew) openWarningsPanel();
+    criticalWarnIdsRef.current = new Set(critical.map((w) => w.id));
+  }, [warnList, openWarningsPanel]);
+
   const clientItems = plan.items.filter((it) => it.visibleToClient !== false);
   const partitionWalls = wallsForLayer(plan.walls, "partitions");
   const roomWalls = wallsForLayer(plan.walls, "room");
 
   const draftCursor = orthoTools && draft.length > 0 ? cursor : null;
 
-  const showLabelFor = (lid) => display.showLabels && (active === lid || active === "install" || active === "client");
+  const showLabelFor = (lid) => layerState(lid).showLabels;
+  const showDimsFor = (lid) => layerState(lid).showDims;
   const itemProps = (it, lid, extra = {}) => (
     <ItemEl
       key={extra.key || it.id}
       it={it}
       k={k}
-      selected={sel?.id === it.id}
-      showDims={display.showDims}
+      selected={selection?.coll === "items" && selection.ids.includes(it.id)}
+      hovered={hoverHit?.coll === "items" && hoverHit.id === it.id}
+      showDims={showDimsFor(lid)}
       showLabel={showLabelFor(lid)}
       activeLayer={active}
       vis={vis}
-      display={display}
-      hasError={warnIds.has(it.id)}
+      display={canvasDisplay}
+      hasError={criticalWarnIds.has(it.id)}
+      hasWarning={warningWarnIds.has(it.id)}
+      plan={plan}
+      zoom={view.zoom}
+      onHover={(id) => setHoverHit(id ? { coll: "items", id } : null)}
       onDown={(e) => onItemDown(e, it)}
-      onResize={(e) => startResize(e, "items", it)}
+      onResize={(e) => startResize(e, "items", it, "corner")}
+      onResizeW={(e) => startResize(e, "items", it, "w")}
+      onResizeH={(e) => startResize(e, "items", it, "h")}
       onRotateStart={(e) => startRotate(e, it)}
     />
   );
 
+  const handlePickPlanItem = (itemId) => {
+    const it = plan.items.find((i) => i.id === itemId);
+    if (!it) return;
+    const lid = it.layer;
+    if (lid && lid !== active && lid !== "client") {
+      setActive(lid);
+      setTool("select");
+      setPending(null);
+      clearWallChain();
+    }
+    setSelection({ coll: "items", ids: [itemId] });
+  };
+
+  const centerOnMm = (cx, cy, minZoom = 0.2) => {
+    const r = svgRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const targetZoom = Math.max(view.zoom, minZoom);
+    setView({
+      zoom: targetZoom,
+      panX: r.width / 2 - cx * targetZoom,
+      panY: r.height / 2 - cy * targetZoom,
+    });
+  };
+
+  const focusPlanWarning = (w) => {
+    if (!w) return;
+    if (w.objectIds?.[0]) {
+      const id = w.objectIds[0];
+      const it = plan.items.find((i) => i.id === id);
+      if (!it) return;
+      handlePickPlanItem(id);
+      centerOnMm(it.x + it.w / 2, it.y + it.h / 2);
+      return;
+    }
+    if (w.wallIds?.[0]) {
+      const wall = plan.walls.find((x) => x.id === w.wallIds[0]);
+      if (!wall?.pts?.length) return;
+      const cx = wall.pts.reduce((s, p) => s + p.x, 0) / wall.pts.length;
+      const cy = wall.pts.reduce((s, p) => s + p.y, 0) / wall.pts.length;
+      setSel({ coll: "walls", id: wall.id });
+      centerOnMm(cx, cy);
+    }
+  };
+
+  const handleSelectLink = (linkId, itemId) => {
+    if (itemId) handlePickPlanItem(itemId);
+    else setSel({ coll: "links", id: linkId });
+    const link = plan.links?.find((l) => l.id === linkId);
+    if (link) {
+      const from = plan.items.find((i) => i.id === link.fromId);
+      const to = plan.items.find((i) => i.id === link.toId);
+      const cx = from && to ? (from.x + from.w / 2 + to.x + to.w / 2) / 2 : null;
+      const cy = from && to ? (from.y + from.h / 2 + to.y + to.h / 2) / 2 : null;
+      if (cx != null) centerOnMm(cx, cy, 0.15);
+    }
+  };
+
+  const closePropertiesPanel = () => {
+    if (!pinnedProperties) {
+      clearSelection();
+      setWarningsPanelOpen(false);
+    }
+  };
+
   const cursorStyle = spacePan || tool === "pan" ? "grab" : tool === "add" || tool === "zone" || tool === "label" ? "copy" : tool === "link" ? "crosshair" : "default";
+  const drawerTitle = activeCategoryId
+    ? (categoryById(activeCategoryId)?.label || layerById(active).name)
+    : layerById(active).name;
+  const hasSelection = !!(selection?.ids?.length);
+  const showProperties = hasSelection || pinnedProperties || warningsPanelOpen;
+
+  const statusBar = (
+    <div className="planner-coords no-print">
+      {cursor ? (
+        <span>
+          <b>X:</b> {fmtCoordU(cursor.x)}
+          <span style={{ margin: "0 12px" }} />
+          <b>Y:</b> {fmtCoordU(cursor.y)}
+          <span className="planner-coords__unit"> · {coordUnitLabel(display.coordUnit)}</span>
+        </span>
+      ) : "—"}
+      {warnList.length > 0 && (
+        <button
+          type="button"
+          className="planner-coords__warn"
+          title="Открыть список предупреждений"
+          onClick={openWarningsPanel}
+        >
+          · ⚠ {warnList.length}
+        </button>
+      )}
+      {selObj && selection?.ids?.length === 1 && (
+        <span className="planner-coords__sel">
+          · {sel.coll === "items" ? (
+            <>
+              W {fmtCoordMm(selObj.w)} · D {fmtCoordMm(selObj.h)}
+              {selObj.height ? ` · H ${fmtCoordMm(selObj.height)}` : ""}
+              {!isDoorKind(selObj.kind) ? ` · ∠ ${selObj.angle || 0}°` : ""}
+            </>
+          ) : sel.coll === "walls" ? (
+            <>длина {fmtU(polyLength(selObj.pts || []))}</>
+          ) : null}
+        </span>
+      )}
+      {selection?.coll === "items" && selection.ids.length > 1 && (
+        <span style={{ marginLeft: 10, color: "#116355" }}>
+          Выбрано: {selection.ids.length} · Shift+рамка · Ctrl+G
+        </span>
+      )}
+      {tool === "select" && (
+        <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
+          ЛКМ — панорама · Shift+ЛКМ — рамка
+        </span>
+      )}
+      {linkFrom && (
+        <span style={{ marginLeft: 10, color: "#1f6f8b" }}>Связь: выберите второй объект</span>
+      )}
+      {measure.length === 2 && (
+        <span style={{ marginLeft: 10, color: "#116355" }}>
+          Δ {fmtU(Math.hypot(measure[1].x - measure[0].x, measure[1].y - measure[0].y))}
+        </span>
+      )}
+    </div>
+  );
 
   return (
-    <div className="planner-app">
-      <PlannerTopBar
-        mode={standalone ? "standalone" : "project"}
-        title={planTitle}
-        saved={saved}
-        busy={busy}
-        onPdf={exportPDF}
-        onSync={syncSpec}
-        onExportJson={handleExportJson}
-        onImportJson={handleImportJson}
-        onRename={handleRenameDraft}
-        projectId={project?.id}
-      />
-      <LayerTabs active={active} vis={vis} onPick={pickLayer} onToggleVis={(lid) => setVis((v) => ({ ...v, [lid]: !v[lid] }))} />
-      <div className="planner-workspace">
-        <ObjectPalette
-          active={active}
-          tool={tool}
-          pending={pending}
-          wallThk={wallThk}
-          plan={plan}
-          specSummary={specSummary}
-          onTool={handleTool}
-          onPending={handlePending}
-          onWallThk={setWallThk}
-          onRoomPatch={(patch) => setPlan((p) => ({ ...p, room: { ...p.room, ...patch } }))}
-          onSync={standalone ? undefined : syncSpec}
-        />
-        <div className="planner-canvas-wrap">
+    <>
+      <PlannerLayout
+        topBarProps={{
+          mode: standalone ? "standalone" : "project",
+          title: planTitle,
+          saved,
+          busy,
+          onPdf: exportPDF,
+          onSync: syncSpec,
+          onExportJson: handleExportJson,
+          onImportJson: handleImportJson,
+          onRename: handleRenameDraft,
+          onAttach: standalone ? () => setAttachOpen(true) : undefined,
+          projectId: project?.id,
+        }}
+        activeSheetId={activeSheetId}
+        onSheetPick={handleSheetPick}
+        viewMode={viewMode}
+        onViewModePick={handleViewModePick}
+        planLevel={planLevel}
+        planVariant={planVariant}
+        onPlanLevel={setPlanLevel}
+        onPlanVariant={setPlanVariant}
+        activeCategoryId={activeCategoryId}
+        onCategoryPick={handleCategoryPick}
+        drawerOpen={drawerOpen}
+        drawerTitle={drawerTitle}
+        onDrawerClose={() => setDrawerOpen(false)}
+        sheetFilters={activeSheet.filters}
+        activeFilterId={activeFilterId}
+        onFilterPick={handleFilterPick}
+        toolDrawerContent={(
+          <>
+            <ObjectPalette
+              embedded
+              active={active}
+              tool={tool}
+              pending={pending}
+              wallThk={wallThk}
+              plan={plan}
+              onTool={handleTool}
+              onPending={handlePending}
+              onWallThk={setWallThk}
+              onRoomPatch={(patch) => setPlan((p) => ({ ...p, room: { ...p.room, ...patch } }))}
+              specSummary={specSummary}
+              onSync={standalone ? undefined : syncSpec}
+              onSyncZones={() => setPlan((p) => syncAutoZones(p))}
+              onSelectPlanItem={handlePickPlanItem}
+              projectId={project?.id}
+            />
+            <div className="planner-drawer-advanced">
+              <PlannerToolMenu
+                embedded
+                sheetId={activeSheetId}
+                categoryId={activeCategoryId}
+                activeToolId={activeToolId}
+                tool={tool}
+                pending={pending}
+                wallThk={wallThk}
+                plan={plan}
+                specSummary={specSummary}
+                searchQuery={toolSearch}
+                onPick={handleToolPick}
+                onWallThk={setWallThk}
+                onRoomPatch={(patch) => setPlan((p) => ({ ...p, room: { ...p.room, ...patch } }))}
+                onSync={standalone ? undefined : syncSpec}
+                onSyncZones={() => setPlan((p) => syncAutoZones(p))}
+                onSelectPlanItem={handlePickPlanItem}
+                projectId={project?.id}
+              />
+            </div>
+          </>
+        )}
+        bottomBarProps={{
+          zoom: z,
+          display,
+          unit,
+          onZoomPreset: setZoomTo,
+          onToggle: toggleDisplay,
+          onSetDisplay: patchDisplay,
+          onFit: fitView,
+          onFitLayer: fitActiveLayer,
+          onCenter: centerView,
+          onClearSheet: clearSheet,
+          activeLayerName: activeSheet.name,
+          onUndo: undo,
+          onRedo: redo,
+          onDelete: delSel,
+          onCopy: copySel,
+          onGroup: groupSelection,
+          onMeasure: () => handleToolPick(resolveTool("measure")),
+          onLabel: () => handleToolPick(resolveTool("label")),
+          onComment: () => handleToolPick(resolveTool("comment")),
+          onExportPdf: () => exportPDF("full"),
+        }}
+        zoomProps={{
+          zoom: z,
+          onZoomIn: () => setZoomTo(z * 1.15),
+          onZoomOut: () => setZoomTo(z / 1.15),
+          onZoomSlider: setZoomTo,
+          onFit: fitView,
+          onCenter: centerView,
+          onPan: panView,
+        }}
+        statusBar={statusBar}
+        footerLeft={(
+          <>
+            <button type="button" className="planner-bottom-btn" onClick={() => window.open("https://daogreen.ru", "_blank")}>Помощь</button>
+            <button type="button" className="planner-bottom-btn" disabled title="Скоро">По картинке</button>
+          </>
+        )}
+        showProperties={showProperties}
+        pinnedProperties={pinnedProperties}
+        onTogglePinProperties={() => setPinnedProperties((p) => !p)}
+        propertiesPanel={(
+          <PropertiesPanel
+            tab={propsTab}
+            onTabChange={setPropsTab}
+            sel={sel}
+            selObj={selObj}
+            selection={selection}
+            plan={plan}
+            project={standalone ? { name: planTitle, items: [] } : project}
+            active={active}
+            materials={state.materials}
+            modules={state.modules}
+            updateObj={updateObj}
+            rotateItem={rotateItem}
+            delSel={delSel}
+            onGroup={groupSelection}
+            onUngroup={ungroupSelection}
+            fmtU={fmtU}
+            onSync={standalone ? undefined : syncSpec}
+            specSummary={specSummary}
+            allWarnings={warnList}
+            onFocusWarning={focusPlanWarning}
+            onClose={closePropertiesPanel}
+            onSelectLink={handleSelectLink}
+          />
+        )}
+        canvas={(
           <svg
             ref={svgRef}
             className="plan-svg"
@@ -956,82 +2195,106 @@ export default function PlanPage() {
             style={{ cursor: cursorStyle }}
           >
             <rect width="100%" height="100%" fill="#f7f8f6" data-canvas-bg="1" />
+            <PlanGridScreen view={view} width={svgSize.w} height={svgSize.h} display={canvasDisplay} />
+            <PlanAxesScreen view={view} width={svgSize.w} height={svgSize.h} display={canvasDisplay} />
             <g data-main transform={`translate(${view.panX},${view.panY}) scale(${z})`}>
               <SheetBackdrop room={plan.room} k={k} showBoundary={plan.room.showBoundary} />
-              <PlanGrid room={plan.room} zoom={z} showGrid={display.showGrid} showMinorGrid={display.showMinorGrid} />
-              <g data-layer="room">
+              <PlanLayerGroup layerId="room" activeLayer={active} vis={vis} display={canvasDisplay}>
+                {itemsByLayer("room").map((it) => itemProps(it, "room"))}
                 {roomWalls.map((w) => (
                   <WallEl
                     key={w.id}
                     wall={w}
                     k={k}
                     editable={active === "room" && (tool === "select" || tool === "wall")}
-                    selected={sel?.coll === "walls" && sel?.id === w.id}
+                    selected={selection?.coll === "walls" && selection.ids[0] === w.id}
+                    hovered={hoverHit?.coll === "walls" && hoverHit.id === w.id}
+                    hasError={warnWallIds.has(w.id)}
+                    hoverNodeIdx={hoverWallNode?.wallId === w.id ? hoverWallNode.idx : null}
                     fmtU={fmtU}
-                    showDims={display.showDims && active === "room"}
+                    showDims={showDimsFor("room")}
                     onSel={() => setSel({ coll: "walls", id: w.id })}
+                    onHover={(id) => setHoverHit(id ? { coll: "walls", id } : null)}
+                    onNodeHover={(idx) => setHoverWallNode(idx == null ? null : { wallId: w.id, idx })}
                     onNode={startNode}
                     onDel={delSel}
                     onWallMove={startWallMove}
+                    openings={plan.items}
+                    room={plan.room}
                   />
                 ))}
-                {display.showDims && active === "room" && plan.room.showBoundary && <RoomDims room={plan.room} k={k} fmtU={fmtU} />}
-                {itemsByLayer("room").map((it) => itemProps(it, "room"))}
-              </g>
-              <g data-layer="partitions">
+                {showDimsFor("room") && plan.room.showBoundary && <RoomDims room={plan.room} k={k} fmtU={fmtU} />}
+              </PlanLayerGroup>
+              <PlanLayerGroup layerId="zones" activeLayer={active} vis={vis} display={canvasDisplay}>
+                {plan.zones.map((zn) => (
+                  <ZoneEl
+                    key={zn.id}
+                    zn={zn}
+                    k={k}
+                    room={plan.room}
+                    selected={selection?.coll === "zones" && selection.ids[0] === zn.id}
+                    activeLayer={active}
+                    vis={vis}
+                    display={canvasDisplay}
+                    showDetail={layerState("zones").showZoneDetail && display.showZoneNames}
+                    showFlow={display.showZoneFlow}
+                    showZoneAreas={display.showZoneAreas}
+                    showZoneFill={display.showZoneFill}
+                    zoneContoursOnly={display.zoneContoursOnly}
+                    onDown={(e) => startMove(e, "zones", zn)}
+                    onResize={(e) => startResize(e, "zones", zn)}
+                    fmtU={fmtU}
+                  />
+                ))}
+              </PlanLayerGroup>
+              <PlanLayerGroup layerId="partitions" activeLayer={active} vis={vis} display={canvasDisplay}>
                 {partitionWalls.map((w) => (
                   <WallEl
                     key={`pt-${w.id}`}
                     wall={w}
                     k={k}
                     editable={active === "partitions" && (tool === "select" || tool === "wall")}
-                    selected={sel?.coll === "walls" && sel?.id === w.id}
+                    selected={selection?.coll === "walls" && selection.ids[0] === w.id}
+                    hovered={hoverHit?.coll === "walls" && hoverHit.id === w.id}
+                    hasError={warnWallIds.has(w.id)}
+                    hoverNodeIdx={hoverWallNode?.wallId === w.id ? hoverWallNode.idx : null}
                     fmtU={fmtU}
-                    showDims={display.showDims && active === "partitions"}
+                    showDims={showDimsFor("partitions")}
                     onSel={() => setSel({ coll: "walls", id: w.id })}
+                    onHover={(id) => setHoverHit(id ? { coll: "walls", id } : null)}
+                    onNodeHover={(idx) => setHoverWallNode(idx == null ? null : { wallId: w.id, idx })}
                     onNode={startNode}
                     onDel={delSel}
                     onWallMove={startWallMove}
+                    openings={plan.items}
+                    room={plan.room}
                   />
                 ))}
-              </g>
-              <g data-layer="zones">
-                {plan.zones.map((zn) => (
-                  <ZoneEl
-                    key={zn.id}
-                    zn={zn}
-                    k={k}
-                    selected={sel?.id === zn.id}
-                    activeLayer={active}
-                    showDetail={active === "zones" && display.showZoneNames}
-                    onDown={(e) => startMove(e, "zones", zn)}
-                    onResize={(e) => startResize(e, "zones", zn)}
-                    fmtU={fmtU}
-                  />
-                ))}
-              </g>
+              </PlanLayerGroup>
               {LINE_LAYER_IDS.map((lid) => (
-                <g key={lid} data-layer={lid}>
+                <PlanLayerGroup key={lid} layerId={lid} activeLayer={active} vis={vis} display={canvasDisplay}>
                   {linesByLayer(lid).map((l) => (
                     <LineEl
                       key={l.id}
                       line={l}
                       k={k}
-                      showDims={display.showDims}
+                      showDims={showDimsFor(lid)}
                       editable={tool === "select" && active === lid}
-                      selected={sel?.id === l.id}
+                      selected={selection?.coll === "lines" && selection.ids[0] === l.id}
+                      hovered={hoverHit?.coll === "lines" && hoverHit.id === l.id}
                       activeLayer={active}
                       vis={vis}
-                      display={display}
+                      display={canvasDisplay}
                       onSel={() => setSel({ coll: "lines", id: l.id })}
+                      onHover={(id) => setHoverHit(id ? { coll: "lines", id } : null)}
                       onNode={startNode}
                       onDel={delSel}
                       fmtU={fmtU}
                     />
                   ))}
-                </g>
+                </PlanLayerGroup>
               ))}
-              <g data-layer="links">
+              <PlanLayerGroup layerId="links" activeLayer={active} vis={vis} display={canvasDisplay}>
                 {visibleLinks().map((link) => (
                   <LinkEl
                     key={link.id}
@@ -1039,8 +2302,10 @@ export default function PlanPage() {
                     items={plan.items}
                     room={plan.room}
                     k={k}
-                    selected={sel?.coll === "links" && sel.id === link.id}
+                    selected={selection?.coll === "links" && selection.ids[0] === link.id}
+                    hovered={hoverHit?.coll === "links" && hoverHit.id === link.id}
                     showLabel={display.showDims || display.showHints}
+                    onHover={(id) => setHoverHit(id ? { coll: "links", id } : null)}
                     onDown={(e) => {
                       e.stopPropagation();
                       if (tool === "select" || tool === "link") setSel({ coll: "links", id: link.id });
@@ -1048,27 +2313,47 @@ export default function PlanPage() {
                     onDel={() => { setSel({ coll: "links", id: link.id }); delSel(); }}
                   />
                 ))}
-              </g>
+              </PlanLayerGroup>
               {ITEM_LAYER_IDS.map((lid) => (
-                <g key={lid} data-layer={lid}>
+                <PlanLayerGroup key={lid} layerId={lid} activeLayer={active} vis={vis} display={canvasDisplay}>
                   {itemsByLayer(lid).map((it) => itemProps(it, lid))}
-                </g>
+                </PlanLayerGroup>
               ))}
               {active === "client" && (
-                <g data-layer="client">
+                <PlanLayerGroup layerId="client" activeLayer={active} vis={vis} display={canvasDisplay}>
                   {clientItems.map((it) => itemProps(it, "client", { key: `cl-${it.id}` }))}
-                </g>
+                </PlanLayerGroup>
               )}
-              <g data-layer="labels">
+              <PlanLayerGroup layerId="labels" activeLayer={active} vis={vis} display={canvasDisplay}>
                 {plan.labels.map((lb) => (
-                  <LabelEl key={lb.id} lb={lb} items={plan.items} k={k} selected={sel?.id === lb.id} activeLayer={active} onDown={(e) => startMove(e, "labels", lb)} />
+                  <LabelEl
+                    key={lb.id}
+                    lb={lb}
+                    items={plan.items}
+                    k={k}
+                    zoom={view.zoom}
+                    display={canvasDisplay}
+                    selected={selection?.coll === "labels" && selection.ids[0] === lb.id}
+                    activeLayer={active}
+                    onDown={(e) => startMove(e, "labels", lb)}
+                  />
                 ))}
+              </PlanLayerGroup>
+              <WallsTopOverlay walls={plan.walls} k={k} warnWallIds={warnWallIds} openings={plan.items} room={plan.room} />
+              <g data-ui="dims-top" pointerEvents="none">
+                {selObj && sel.coll === "items" && display.showDims && selection?.ids?.length === 1 && (
+                  <SelectionDims it={selObj} plan={plan} k={k} fmtU={fmtU} display={display} />
+                )}
+                {selection?.coll === "walls" && selection?.ids?.length === 1 && display.showDims && (() => {
+                  const w = plan.walls.find((wl) => wl.id === selection.ids[0]);
+                  return w ? <WallSelectionDims wall={w} room={plan.room} k={k} fmtU={fmtU} /> : null;
+                })()}
               </g>
               <g data-ui="overlay">
                 {guides.map((g, i) => (g.type === "V" ? (
-                  <line key={i} x1={g.at} y1={-600} x2={g.at} y2={plan.room.h + 600} stroke="#116355" strokeWidth={1 * k} strokeDasharray={`${5 * k} ${4 * k}`} opacity={0.5} />
+                  <line key={i} x1={g.at} y1={g.y0 ?? 0} x2={g.at} y2={g.y1 ?? plan.room.h} stroke="#116355" strokeWidth={1 * k} strokeDasharray={`${5 * k} ${4 * k}`} opacity={0.45} />
                 ) : (
-                  <line key={i} x1={-600} y1={g.at} x2={plan.room.w + 600} y2={g.at} stroke="#116355" strokeWidth={1 * k} strokeDasharray={`${5 * k} ${4 * k}`} opacity={0.5} />
+                  <line key={i} x1={g.x0 ?? 0} y1={g.at} x2={g.x1 ?? plan.room.w} y2={g.at} stroke="#116355" strokeWidth={1 * k} strokeDasharray={`${5 * k} ${4 * k}`} opacity={0.45} />
                 )))}
                 {draft.length > 0 && (
                   <DraftLine
@@ -1077,16 +2362,17 @@ export default function PlanPage() {
                     k={k}
                     wall={tool === "wall"}
                     thk={wallThk}
-                    color={tool === "wall" ? "#2f3431" : (LINE_STYLE[active] || LINE_STYLE.irrigation)?.color || "#1f6f8b"}
+                    color={tool === "wall" ? "#116355" : (LINE_STYLE[active] || LINE_STYLE.irrigation)?.color || "#1f6f8b"}
                     fmtU={fmtU}
                     snapPt={draftSnap}
+                    angleSnap={draftAngleSnap}
+                    room={plan.room}
                   />
                 )}
-                {selObj && sel.coll === "items" && display.showDims && (
-                  <SelectionDims it={selObj} room={plan.room} k={k} fmtU={fmtU} />
-                )}
+                {marquee && <SelectionMarquee rect={marquee} k={k} />}
+                {multiBounds && <MultiSelectBounds bounds={multiBounds} k={k} />}
                 {measure.length > 0 && (
-                  <MeasureEl pts={measure} cursor={measure.length === 1 && cursor ? orthoPt(measure[0], cursor, snapOn, shiftRef.current) : cursor} k={k} fmtU={fmtU} />
+                  <MeasureEl pts={measure} cursor={measure.length === 1 && cursor ? draftPt(measure[0], cursor, draftSnapOpts()).point : cursor} k={k} fmtU={fmtU} />
                 )}
               </g>
             </g>
@@ -1094,47 +2380,20 @@ export default function PlanPage() {
               <TypedLengthHint value={typedLength} k={k} />
             </g>
           </svg>
-          <div className="planner-coords no-print">
-            {cursor ? `${Math.round(cursor.x)}, ${Math.round(cursor.y)} мм` : "—"}
-            {linkFrom && (
-              <span style={{ marginLeft: 10, color: "#1f6f8b" }}>Связь: выберите второй объект</span>
-            )}
-            {measure.length === 2 && (
-              <span style={{ marginLeft: 10, color: "#116355" }}>
-                Δ {fmtU(Math.hypot(measure[1].x - measure[0].x, measure[1].y - measure[0].y))}
-              </span>
-            )}
-          </div>
-          <PlannerBottomBar
-            zoom={z}
-            display={display}
-            activeLayerName={layerById(active).name}
-            onZoomPreset={setZoomTo}
-            onZoomSlider={setZoomTo}
-            onToggle={toggleDisplay}
-            onFit={fitView}
-            onCenter={centerView}
-            onClearSheet={clearSheet}
-          />
-        </div>
-        <PropertiesPanel
-          sel={sel}
-          selObj={selObj}
-          plan={plan}
-          project={standalone ? { name: planTitle, items: [] } : project}
-          active={active}
-          materials={state.materials}
-          modules={state.modules}
-          updateObj={updateObj}
-          rotateItem={rotateItem}
-          delSel={delSel}
-          fmtU={fmtU}
-          onSync={standalone ? undefined : syncSpec}
-          specSummary={specSummary}
-        />
-      </div>
+        )}
+      />
       <ContextMenu menu={ctxMenu} onClose={() => setCtxMenu(null)} onAction={handleCtxAction} />
-    </div>
+      {standalone && (
+        <AttachPlanModal
+          open={attachOpen}
+          projects={state.projects}
+          draftName={planTitle}
+          busy={busy}
+          onClose={() => setAttachOpen(false)}
+          onAttach={handleAttachToProject}
+        />
+      )}
+    </>
   );
 }
 
@@ -1147,7 +2406,14 @@ function withDefaults(plan) {
     room: { ...d.room, height: 3000, showBoundary: false, ...plan.room },
     zones: plan.zones || [],
     labels: plan.labels || [],
-    walls: (plan.walls || []).map((w) => ({ role: "partition", ...w })),
+    walls: (plan.walls || []).map((w) => ({
+      role: "partition",
+      kind: "new",
+      thicknessSide: "center",
+      height: plan.room?.height || 3000,
+      material: "",
+      ...w,
+    })),
     lines: (plan.lines || []).map((l) => ({
       ...l,
       layer: migrateLayerId(l.layer, null),

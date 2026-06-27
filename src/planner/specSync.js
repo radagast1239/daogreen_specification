@@ -2,8 +2,14 @@ import { uid } from "../store/helpers.js";
 import { lineFromMaterial, lineToProjectItem } from "../lib/projectBuilder.js";
 import { materialInModule } from "../../shared/materialModules.js";
 import { linkLengthMm } from "./linkGeometry.js";
+import { defaultObjectPropertyFields } from "./objectProperties.js";
+import { isRackKind, rackSpecNote } from "./rackProperties.js";
+import { lineTotalLengthMm } from "./lineProperties.js";
 
-const EXCLUDED_FROM_SPEC_BY_DEFAULT = new Set(["door", "door2", "window", "person"]);
+const EXCLUDED_FROM_SPEC_BY_DEFAULT = new Set([
+  "door", "door2", "door_slide", "door_pivot", "door_cold", "door_sanitary", "door_wash", "door_tech", "door_gate",
+  "window", "opening", "opening_vent", "opening_tech", "opening_serve", "opening_arch", "person",
+]);
 const KIT_BY_DEFAULT = new Set(["rack", "seed_rack"]);
 
 const OBJECT_KIND_HINTS = {
@@ -12,7 +18,7 @@ const OBJECT_KIND_HINTS = {
   osmosis: ["водоподготов", "осмос"],
   water_prep: ["водоподготов"],
   tank: ["водоподготов", "ёмкости", "емкости", "полив"],
-  tank_waste: ["водоподготов", "дренаж", "слив"],
+  tank_waste: ["мусор", "отходы", "бак"],
   pump: ["насос", "водоподготов", "полив"],
   table_sow: ["манипуляц", "посев"],
   table_recv: ["манипуляц", "прием", "приём"],
@@ -36,7 +42,6 @@ export function defaultObjectSpecSettings(kind) {
     includedInProject: included,
     visibleToClient: true,
     approved: false,
-    // custom | material | module | projectSection
     specMode: KIT_BY_DEFAULT.has(kind) ? "projectSection" : "custom",
     linkedMaterialId: "",
     specModuleName: "",
@@ -45,6 +50,7 @@ export function defaultObjectSpecSettings(kind) {
     specQty: 1,
     specPrice: "",
     specComment: "",
+    ...defaultObjectPropertyFields(kind),
   };
 }
 
@@ -84,7 +90,7 @@ const OBJECT_PRESETS = {
   trap:        { module: "Сантехника", category: "Полив и сантехника", unit: "шт.", name: "Трап" },
   mirror:      { module: "Сантехника", category: "Прочее", unit: "шт.", name: "Зеркало" },
   tank:        { module: "Водоподготовка", category: "Полив и сантехника", unit: "шт.", name: "Ёмкость" },
-  tank_waste:  { module: "Водоподготовка", category: "Полив и сантехника", unit: "шт.", name: "Бак отходов" },
+  tank_waste:  { module: "Манипуляционная зона", category: "Прочее", unit: "шт.", name: "Бак для мусора" },
   pump:        { module: "Водоподготовка", category: "Полив и сантехника", unit: "шт.", name: "Насос" },
   panel:       { module: "Электрика и щит", category: "Электрика и свет", unit: "шт.", name: "Электрощит" },
   socket:      { module: "Электрика и щит", category: "Электрика и свет", unit: "шт.", name: "Розетка/блок" },
@@ -102,6 +108,7 @@ const LINE_PRESETS = {
   supply:     { module: "Полив", category: "Полив и сантехника", unit: "м.п.", name: "Трасса полива" },
   power:      { module: "Электрика и щит", category: "Электрика и свет", unit: "м.п.", name: "Кабельная линия" },
   light:      { module: "Электрика и щит", category: "Электрика и свет", unit: "м.п.", name: "Линия освещения" },
+  water_supply: { module: "Полив", category: "Полив и сантехника", unit: "м.п.", name: "Трасса водоснабжения" },
   vent:       { module: "Вентиляция", category: "Климат и вентиляция", unit: "м.п.", name: "Воздуховод" },
   climate:    { module: "Кондиционеры", category: "Климат и вентиляция", unit: "м.п.", name: "Трасса кондиционера" },
   ac:         { module: "Кондиционеры", category: "Климат и вентиляция", unit: "м.п.", name: "Трасса кондиционера" },
@@ -165,11 +172,13 @@ function outputSectionForObject(obj, sourceSection = "") {
 }
 
 function baseFlags(obj) {
+  const approved = obj.objectStatus === "approved" || !!obj.approved;
+  const excluded = obj.objectStatus === "excluded" || obj.includedInProject === false;
   return {
-    visible: obj.visibleToClient !== false,
-    approved: !!obj.approved,
-    enabled: obj.includedInProject !== false,
-    includedInProject: obj.includedInProject !== false,
+    visible: obj.visibleToClient !== false && obj.objectStatus !== "excluded",
+    approved,
+    enabled: !excluded,
+    includedInProject: !excluded,
     visibleToClient: obj.visibleToClient !== false,
   };
 }
@@ -216,12 +225,13 @@ function itemBaseFromObject(obj, materials) {
   const preset = getPreset(obj.kind);
   const qty = roundQty(obj.specQty || 1);
   const size = `${Math.round(obj.w)}×${Math.round(obj.h)} мм`;
+  const rackNote = isRackKind(obj.kind) ? rackSpecNote(obj) : "";
   if (linked) {
     const section = obj.specOutputSection || linked.module || preset.module;
     const key = ["planner:material", linked.id, section, obj.visibleToClient ? "client" : "hidden", obj.approved ? "approved" : "draft"].join(":");
     const item = itemFromMaterialRow(linked, obj, qty, 0, { section, sourceKey: key, sourceType: "material" });
     item.price = obj.specPrice !== "" && obj.specPrice != null ? Number(obj.specPrice) || 0 : Number(linked.basePrice) || 0;
-    item.techNote = [item.techNote, `Из плана: ${obj.label || preset.name}, ${size}`].filter(Boolean).join(" · ");
+    item.techNote = [item.techNote, `Из плана: ${obj.label || preset.name}, ${size}`, rackNote].filter(Boolean).join(" · ");
     return { key, item, qty };
   }
   const section = outputSectionForObject(obj);
@@ -238,8 +248,8 @@ function itemBaseFromObject(obj, materials) {
       unit: preset.unit,
       category: obj.specCategory || preset.category,
       link: "",
-      comment: [`Из плана: ${size}`, preset.comment, obj.specComment].filter(Boolean).join(" · "),
-      techNote: obj.specComment || "",
+      comment: [`Из плана: ${size}`, rackNote, preset.comment, obj.specComment, obj.commentClient].filter(Boolean).join(" · "),
+      techNote: [obj.specComment, obj.commentInternal, obj.commentInstall].filter(Boolean).join(" · "),
       price: obj.specPrice !== "" && obj.specPrice != null ? Number(obj.specPrice) || 0 : 0,
       status: "not_bought",
       actualPrice: null,
@@ -302,7 +312,7 @@ function addObjectAsModule({ obj, materials, modules, existingByKey, groups }) {
 function mergeLineItem(line, existingByKey) {
   const preset = LINE_PRESETS[line.layer];
   if (!preset || line.layer === "staff") return null;
-  const qty = lineLenM(line.pts);
+  const qty = roundQty(lineTotalLengthMm(line) / 1000);
   if (!qty) return null;
   const sourceKey = `planner:line:${line.layer}`;
   const prev = existingByKey.get(sourceKey);

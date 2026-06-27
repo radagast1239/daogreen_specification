@@ -1,0 +1,47 @@
+/**
+ * Daogreen Planner — дизайн-токены CAD-интерфейса.
+ * Не копировать стили сторонних планировщиков; только фирменная палитра Daogreen.
+ */
+:root {
+  --dg-brand: #116355;
+  --dg-brand-dark: #0b463c;
+  --dg-brand-soft: #e8f2ef;
+
+  --dg-bg-app: #eef2ef;
+  --dg-bg-canvas: #f7f8f6;
+  --dg-bg-panel: #ffffff;
+  --dg-bg-dark-panel: #303735;
+  --dg-bg-dark-menu: #2f3533;
+  --dg-bg-header: #f8faf9;
+
+  --dg-text-main: #2f3431;
+  --dg-text-muted: #6f7a75;
+  --dg-text-light: #e8eeeb;
+
+  --dg-border: #d9e0dc;
+  --dg-border-dark: rgba(0, 0, 0, 0.25);
+
+  --dg-wall: #2f3431;
+  --dg-wall-inner: #4b504d;
+  --dg-wall-fill: #ecefed;
+
+  --dg-rack: #116355;
+  --dg-water: #1f6f8b;
+  --dg-drain: #7a5c3e;
+  --dg-electric: #a5371f;
+  --dg-vent: #6b7d74;
+  --dg-ac: #5b7c9d;
+  --dg-route: #b9741d;
+
+  --dg-warning: #d08a22;
+  --dg-error: #a5371f;
+  --dg-info: #5b7c9d;
+  --dg-select-alt: #2563eb;
+
+  --dg-grid-minor: rgba(40, 50, 45, 0.035);
+  --dg-grid-medium: rgba(40, 50, 45, 0.06);
+  --dg-grid-major: rgba(40, 50, 45, 0.11);
+
+  --dg-dim: #8f9a94;
+  --dg-label-leader: #8f9a94;
+}

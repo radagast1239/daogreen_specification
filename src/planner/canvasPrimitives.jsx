@@ -1,59 +1,165 @@
 import React from "react";
 import { areaM2, LINE_STYLE, LINK_RULES } from "./catalog.js";
+import {
+  resolveLineVisual, linePlanLengthMm, lineTotalLengthMm, arrowPointsAlongLine,
+} from "./lineProperties.js";
+import { formatZoneAreaM2, zoneAreaMm2 } from "./roomZones.js";
 import { ZONE_FLOW } from "./farmRules.js";
 import { ObjectIcon, DoorIcon } from "./icons.jsx";
-import { layerOpacity, labelsVisible } from "./geometry.js";
-import { linkLengthMm } from "./linkGeometry.js";
+import { layerOpacity } from "./geometry.js";
+import { layerDisplayState } from "./canvasLayers.js";
+import {
+  buildItemLabelLines, autoItemLabelPlacement, labelModeForItem,
+  labelsVisible, labelAudienceVisible, resolveFreeLabelPosition, labelFontSize,
+} from "./labelProperties.js";
+import { LabelPlaque } from "./LabelPlaque.jsx";
+import { wallVisualStyle, wallFaceStrokeWidth, WALL_KINDS } from "./wallTypes.js";
+import { wallFaceSegment } from "./wallParallelGeometry.js";
+import { DG_THEME } from "./plannerVisualTheme.js";
+import { linkLengthMm, resolveLinkColor } from "./linkGeometry.js";
+import { isDoorItem, isOpeningKind, isWindowKind, doorStyle, doorShowsSwing } from "./doorTypes.js";
+import { openingStyle } from "./openingTypes.js";
+import { OpeningIcon } from "./icons.jsx";
+import { openingRangesOnSegment, wallDrawRanges, lerpPt, doorSwingPolygon } from "./doorGeometry.js";
+import { resolveGrid, gridLineLevel, buildScreenGridLines, buildScreenAxes, fmtCoordMm, GRID_COLORS, GRID_STROKE } from "./gridSettings.js";
+import { SegDim, wallSegmentOffsetSide, RectDims, WallMountedDim, RoomOutlineDims, ClearanceDims, WallSelectionDims } from "./dimensionMarkers.jsx";
+import { isWallMountedItem } from "./clearanceDims.js";
+import { DEFAULT_PASSAGE_WARN_MM, DEFAULT_PASSAGE_ERROR_MM } from "./dimensionProperties.js";
+import { ServiceZoneEl, PortMarkers, StatusBadge, ItemStateIcons } from "./objectOverlays.jsx";
+import { resolveItemVisual, SEL_COLORS } from "./selectionVisuals.js";
+import { glyphRenderProps } from "./objectGlyphs.js";
+import { SelectionHandles } from "./selectionHandles.jsx";
 
-const GRID_MINOR = 100;
-const GRID_MAJOR = 1000;
+export { RectDims, WallMountedDim, RoomOutlineDims, WallSelectionDims };
 
-export function PlanGrid({ room, zoom, showGrid, showMinorGrid = true }) {
-  if (!showGrid) return null;
-  const pad = 2000;
-  const x0 = -pad;
-  const y0 = -pad;
-  const x1 = room.w + pad;
-  const y1 = room.h + pad;
-  const showMinor = showMinorGrid && zoom >= 0.03;
+/** Обёртка слоя: скрывает невидимые листы, помечает активный/приглушённый. */
+export function PlanLayerGroup({ layerId, activeLayer, vis, display, children }) {
+  const st = layerDisplayState(layerId, activeLayer, vis, display, display?.sheet);
+  if (!st.visible) return null;
+  return (
+    <g
+      data-layer={layerId}
+      data-layer-active={st.isActive ? "1" : undefined}
+      data-layer-muted={st.isMuted ? "1" : undefined}
+    >
+      {children}
+    </g>
+  );
+}
+
+/** Сетка на весь холст (экранные координаты, привязка к мировой сетке). */
+export function PlanGridScreen({ view, width, height, display }) {
+  const lines = buildScreenGridLines(view, width, height, display);
+  if (!lines.length) return null;
+  return (
+    <g data-ui="grid" pointerEvents="none">
+      {lines.map((ln) => (
+        <line
+          key={ln.key}
+          x1={ln.x1}
+          y1={ln.y1}
+          x2={ln.x2}
+          y2={ln.y2}
+          stroke={GRID_COLORS[ln.level]}
+          strokeWidth={GRID_STROKE[ln.level]}
+          shapeRendering="crispEdges"
+          data-grid-level={ln.level}
+        />
+      ))}
+    </g>
+  );
+}
+
+/** Оси X/Y (экранные координаты). */
+export function PlanAxesScreen({ view, width, height, display }) {
+  if (!display?.showAxes) return null;
+  const axes = buildScreenAxes(view, width, height);
+  if (!axes.length) return null;
+  const stroke = "rgba(40, 50, 45, 0.22)";
+  return (
+    <g data-ui="axes" pointerEvents="none">
+      {axes.map((a) => (
+        <line
+          key={a.key}
+          x1={a.x1}
+          y1={a.y1}
+          x2={a.x2}
+          y2={a.y2}
+          stroke={stroke}
+          strokeWidth={1.4}
+          shapeRendering="crispEdges"
+        />
+      ))}
+    </g>
+  );
+}
+
+/** @deprecated — use PlanGridScreen */
+export function PlanGrid({ bounds, zoom, display }) {
+  const cfg = resolveGrid({
+    showGrid: display?.showGrid !== false,
+    showMinorGrid: display?.showMinorGrid !== false,
+    showMediumGrid: display?.showMediumGrid !== false,
+    showMajorGrid: display?.showMajorGrid !== false,
+    zoom,
+  });
+  if (!cfg.visible || !bounds) return null;
+
+  const { x0, y0, x1, y1 } = bounds;
+  const { iterStep } = cfg;
   const L = [];
-  const minorColor = "rgba(25,45,38,0.14)";
-  const majorColor = "rgba(25,45,38,0.28)";
+  const startX = Math.floor(x0 / iterStep) * iterStep;
+  const startY = Math.floor(y0 / iterStep) * iterStep;
 
-  for (let x = Math.ceil(x0 / GRID_MINOR) * GRID_MINOR; x <= x1; x += GRID_MINOR) {
-    const major = x % GRID_MAJOR === 0;
-    if (!showMinor && !major) continue;
+  const pushLine = (key, lx1, ly1, lx2, ly2, level) => {
+    if (!level) return;
     L.push(
       <line
-        key={"x" + x}
-        x1={x}
-        y1={y0}
-        x2={x}
-        y2={y1}
-        stroke={major ? majorColor : minorColor}
-        strokeWidth={major ? 1.4 : 0.9}
+        key={key}
+        x1={lx1}
+        y1={ly1}
+        x2={lx2}
+        y2={ly2}
+        stroke={GRID_COLORS[level]}
+        strokeWidth={GRID_STROKE[level]}
         vectorEffect="non-scaling-stroke"
-      />
+        data-grid-level={level}
+      />,
     );
+  };
+
+  for (let x = startX; x <= x1; x += iterStep) {
+    const level = gridLineLevel(x, cfg);
+    pushLine(`x${x}`, x, y0, x, y1, level);
   }
-  for (let y = Math.ceil(y0 / GRID_MINOR) * GRID_MINOR; y <= y1; y += GRID_MINOR) {
-    const major = y % GRID_MAJOR === 0;
-    if (!showMinor && !major) continue;
-    L.push(
-      <line
-        key={"y" + y}
-        x1={x0}
-        y1={y}
-        x2={x1}
-        y2={y}
-        stroke={major ? majorColor : minorColor}
-        strokeWidth={major ? 1.4 : 0.9}
-        vectorEffect="non-scaling-stroke"
-      />
-    );
+  for (let y = startY; y <= y1; y += iterStep) {
+    const level = gridLineLevel(y, cfg);
+    pushLine(`y${y}`, x0, y, x1, y, level);
   }
   return <g data-ui="grid" pointerEvents="none">{L}</g>;
 }
+
+/** Оси X/Y от нулевой точки (0,0). */
+export function PlanAxes({ bounds, display }) {
+  if (!display?.showAxes || !bounds) return null;
+  const { x0, y0, x1, y1 } = bounds;
+  const stroke = "rgba(40, 50, 45, 0.22)";
+  const L = [];
+  if (y0 <= 0 && y1 >= 0) {
+    L.push(
+      <line key="axis-x" x1={x0} y1={0} x2={x1} y2={0} stroke={stroke} strokeWidth={1.4} vectorEffect="non-scaling-stroke" data-ui="axis" />,
+    );
+  }
+  if (x0 <= 0 && x1 >= 0) {
+    L.push(
+      <line key="axis-y" x1={0} y1={y0} x2={0} y2={y1} stroke={stroke} strokeWidth={1.4} vectorEffect="non-scaling-stroke" data-ui="axis" />,
+    );
+  }
+  if (!L.length) return null;
+  return <g data-ui="axes" pointerEvents="none">{L}</g>;
+}
+
+export { buildScreenGridLines };
 
 /** Лист чертежа — без готовых стен. Опционально пунктир границы листа. */
 export function SheetBackdrop({ room, k, showBoundary }) {
@@ -104,104 +210,164 @@ export function RoomShell({ room, k, showBoundary = false }) {
   );
 }
 
-export function DimLine({ x1, y1, x2, y2, label, k, horizontal, active }) {
-  const t = 60 * k;
-  const fs = 11 * k;
-  const mx = (x1 + x2) / 2;
-  const my = (y1 + y2) / 2;
-  const stroke = active ? "#116355" : "#8f9a94";
-  return (
-    <g stroke={stroke} strokeWidth={1.1 * k} fill="none">
-      <line x1={x1} y1={y1} x2={x2} y2={y2} />
-      {horizontal ? (
-        <>
-          <line x1={x1} y1={y1 - t / 2} x2={x1} y2={y1 + t / 2} />
-          <line x1={x2} y1={y2 - t / 2} x2={x2} y2={y2 + t / 2} />
-        </>
-      ) : (
-        <>
-          <line x1={x1 - t / 2} y1={y1} x2={x1 + t / 2} y2={y1} />
-          <line x1={x2 - t / 2} y1={y2} x2={x2 + t / 2} y2={y2} />
-        </>
-      )}
-      <g stroke="none">
-        <rect x={mx - 38 * k} y={my - 9 * k} width={76 * k} height={15 * k} rx={3 * k} fill="#fff" stroke="#d9e0dc" strokeWidth={0.5 * k} />
-        <text x={mx} y={my + 4 * k} fontSize={fs} textAnchor="middle" fill={stroke} fontWeight="600" style={{ fontFamily: "var(--mono)" }}>
-          {label}
-        </text>
-      </g>
-    </g>
-  );
-}
-
 export function RoomDims({ room, k, fmtU }) {
-  const o = 240 * k;
-  return (
-    <g>
-      <DimLine horizontal x1={0} y1={-o} x2={room.w} y2={-o} label={fmtU(room.w)} k={k} />
-      <DimLine x1={-o} y1={0} x2={-o} y2={room.h} label={fmtU(room.h)} k={k} />
-    </g>
-  );
+  return <RoomOutlineDims room={room} k={k} fmtU={fmtU} />;
 }
 
-export function WallEl({ wall, k, editable, selected, fmtU, showDims, onSel, onNode, onDel, onWallMove }) {
-  if (!wall?.pts || wall.pts.length < 2) return null;
-  const d = wall.pts.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ");
-  const outer = selected ? "#116355" : "#2f3431";
-  const inner = "#e8e6e3";
-  const cx = wall.pts.reduce((s, p) => s + p.x, 0) / wall.pts.length;
-  const cy = wall.pts.reduce((s, p) => s + p.y, 0) / wall.pts.length;
-  return (
-    <g>
+function WallBodySegments({
+  wall, openings, stroke, strokeW, dash, face = null, room = null,
+}) {
+  const segs = [];
+  for (let i = 1; i < wall.pts.length; i++) {
+    const a = wall.pts[i - 1];
+    const b = wall.pts[i];
+    const op = openingRangesOnSegment(a, b, wall.id, openings || []);
+    wallDrawRanges(op).forEach(([t0, t1], j) => {
+      let p0 = lerpPt(a, b, t0);
+      let p1 = lerpPt(a, b, t1);
+      if (face && room) {
+        const seg = wallFaceSegment(a, b, face, wall, room);
+        p0 = lerpPt(seg.a, seg.b, t0);
+        p1 = lerpPt(seg.a, seg.b, t1);
+      }
+      segs.push({ key: `${i}-${j}`, p0, p1 });
+    });
+  }
+  if (!segs.length) {
+    const d = wall.pts.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ");
+    return (
       <path
         d={d}
         fill="none"
-        stroke={outer}
-        strokeWidth={wall.thk}
+        stroke={stroke}
+        strokeWidth={strokeW}
         strokeLinejoin="miter"
-        strokeLinecap="butt"
-        onPointerDown={(e) => {
-          if (editable) {
-            e.stopPropagation();
-            onSel();
-          }
-        }}
-        style={{ cursor: editable ? "pointer" : "default" }}
-      />
-      <path
-        d={d}
-        fill="none"
-        stroke={inner}
-        strokeWidth={Math.max(wall.thk - 12, 20)}
-        strokeLinejoin="miter"
+        strokeLinecap="square"
+        strokeDasharray={dash || undefined}
         pointerEvents="none"
       />
+    );
+  }
+  return (
+    <g pointerEvents="none">
+      {segs.map(({ key, p0, p1 }) => (
+        <line
+          key={key}
+          x1={p0.x}
+          y1={p0.y}
+          x2={p1.x}
+          y2={p1.y}
+          stroke={stroke}
+          strokeWidth={strokeW}
+          strokeLinecap="square"
+          strokeDasharray={dash || undefined}
+        />
+      ))}
+    </g>
+  );
+}
+
+export function WallEl({
+  wall, k, editable, selected, hovered = false, fmtU, showDims, onSel, onNode, onDel, onWallMove,
+  hoverNodeIdx = null, hasError = false, openings = [], room = null, onHover, onNodeHover,
+}) {
+  if (!wall?.pts || wall.pts.length < 2) return null;
+  const d = wall.pts.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ");
+  const vs = wallVisualStyle(wall);
+  const faceW = wallFaceStrokeWidth(k, wall);
+  const hitW = Math.max(wall.thk || 100, 80);
+  const isDemolish = wall.kind === "demolish";
+  const outerColor = hasError ? DG_THEME.dimError : (selected ? DG_THEME.brand : hovered ? "#5a9d8f" : (isDemolish ? DG_THEME.demolish : (wall.role === "outer" ? DG_THEME.wall : DG_THEME.wallInner)));
+  const innerStroke = wall.role === "outer" ? "#8a8580" : "#9a9a96";
+  const cx = wall.pts.reduce((s, p) => s + p.x, 0) / wall.pts.length;
+  const cy = wall.pts.reduce((s, p) => s + p.y, 0) / wall.pts.length;
+  const roleLabel = wall.role === "outer" ? "Наружная" : "Перегородка";
+  const showNodes = editable && (selected || hovered || hoverNodeIdx != null);
+  const onWallDown = (e) => {
+    if (editable) {
+      e.stopPropagation();
+      onSel();
+    }
+  };
+  return (
+    <g>
+      <path
+        d={d}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={hitW + 80}
+        onPointerDown={onWallDown}
+        onPointerEnter={onHover ? () => onHover(wall.id) : undefined}
+        onPointerLeave={onHover ? () => onHover(null) : undefined}
+        style={{ cursor: editable ? "pointer" : "default" }}
+      />
+      {!isDemolish && (
+        <path
+          d={d}
+          fill="none"
+          stroke={DG_THEME.wallFill}
+          strokeWidth={wall.thk || 100}
+          strokeLinejoin="miter"
+          strokeLinecap="butt"
+          strokeOpacity={DG_THEME.wallFillAlpha}
+          pointerEvents="none"
+        />
+      )}
+      <WallBodySegments
+        wall={wall}
+        openings={openings}
+        stroke={outerColor}
+        strokeW={faceW * (wall.role === "outer" ? 1.15 : 1)}
+        dash={vs.dash}
+        face="outer"
+        room={room}
+      />
+      <WallBodySegments
+        wall={wall}
+        openings={openings}
+        stroke={innerStroke}
+        strokeW={faceW * 0.92}
+        dash={vs.dash}
+        face="inner"
+        room={room}
+      />
+      {selected && editable && (
+        <text x={cx} y={cy - (wall.thk || 100) * 0.35} fontSize={9 * k} textAnchor="middle" fill="#6b7d74" pointerEvents="none">
+          {WALL_KINDS[wall.kind]?.label || roleLabel}
+        </text>
+      )}
       {showDims &&
         wall.pts.map((p, i) => {
           if (!i) return null;
           const a = wall.pts[i - 1];
-          const mx = (a.x + p.x) / 2;
-          const my = (a.y + p.y) / 2;
+          const side = wallSegmentOffsetSide(a, p, room);
           return (
-            <g key={i} pointerEvents="none">
-              <rect x={mx - 34 * k} y={my - 8 * k} width={68 * k} height={14 * k} rx={3 * k} fill="#fff" stroke="#d9e0dc" strokeWidth={0.5 * k} />
-              <text x={mx} y={my + 3.5 * k} fontSize={10 * k} textAnchor="middle" fill="#4b504d" style={{ fontFamily: "var(--mono)" }}>
-                {fmtU(Math.hypot(p.x - a.x, p.y - a.y))}
-              </text>
-            </g>
+            <SegDim
+              key={i}
+              a={a}
+              b={p}
+              label={fmtU(Math.hypot(p.x - a.x, p.y - a.y))}
+              k={k}
+              offset={selected ? 130 : 100}
+              offsetSide={side}
+              state={selected ? "active" : "normal"}
+            />
           );
         })}
       {editable &&
+        showNodes &&
         wall.pts.map((p, i) => (
           <circle
             key={i}
             cx={p.x}
             cy={p.y}
-            r={6 * k}
-            fill="#fff"
-            stroke={outer}
-            strokeWidth={1.5 * k}
+            r={(hoverNodeIdx === i ? 8 : 6) * k}
+            fill={hoverNodeIdx === i ? "#e8f4ef" : "#fff"}
+            stroke={hoverNodeIdx === i ? "#116355" : outerColor}
+            strokeWidth={(hoverNodeIdx === i ? 2.2 : 1.5) * k}
             onPointerDown={(e) => onNode(e, "walls", wall.id, i)}
+            onPointerEnter={() => onNodeHover?.(i)}
+            onPointerLeave={() => onNodeHover?.(null)}
             style={{ cursor: "move" }}
           />
         ))}
@@ -229,172 +395,463 @@ export function WallEl({ wall, k, editable, selected, fmtU, showDims, onSel, onN
   );
 }
 
+/** Обводка стен поверх объектов (без интерактива). */
+export function WallsTopOverlay({ walls, k, warnWallIds = new Set(), openings = [], room = null }) {
+  return (
+    <g data-ui="walls-top" pointerEvents="none">
+      {walls.map((wall) => {
+        if (!wall?.pts || wall.pts.length < 2) return null;
+        const vs = wallVisualStyle(wall);
+        const faceW = wallFaceStrokeWidth(k, wall);
+        const err = warnWallIds.has(wall.id);
+        const stroke = err ? "#c44" : vs.color;
+        return (
+          <g key={`top-${wall.id}`}>
+            <WallBodySegments
+              wall={wall}
+              openings={openings}
+              stroke={stroke}
+              strokeW={faceW}
+              dash={vs.dash}
+              face="outer"
+              room={room}
+            />
+            <WallBodySegments
+              wall={wall}
+              openings={openings}
+              stroke={wall.role === "outer" ? "#8a8580" : "#9a9a96"}
+              strokeW={faceW * 0.92}
+              face="inner"
+              room={room}
+            />
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
 export function ItemEl({
   it,
   k,
   selected,
+  hovered = false,
   onDown,
   onResize,
+  onResizeW,
+  onResizeH,
   onRotateStart,
+  onHover,
   showDims,
   activeLayer,
   vis,
   hasError,
+  hasWarning,
   showLabel,
   display,
+  plan,
+  zoom,
 }) {
-  const opacity = layerOpacity(it.layer, activeLayer, vis[it.layer] !== false, display);
+  const opacity = layerOpacity(it.layer, activeLayer, vis[it.layer] !== false, display, display?.sheet);
   if (opacity === 0) return null;
 
-  const small = Math.min(it.w, it.h) < 500;
   const a = it.angle || 0;
   const cx = it.x + it.w / 2;
   const cy = it.y + it.h / 2;
-  const door = it.icon === "door" || it.icon === "door2";
-  const win = it.icon === "window";
-  const excluded = it.includedInProject === false;
-  const hiddenClient = it.visibleToClient === false;
-  const stroke = hasError && display.highlightErrors !== false ? "#a5371f" : selected ? "#116355" : it.color;
-  const sw = (selected ? 2.2 : 1.4) * k;
+  const door = isDoorItem(it);
+  const opening = isOpeningKind(it.kind);
+  const oStyle = opening ? openingStyle(it.kind) : null;
+  const dStyle = doorStyle(it.kind);
+  const visState = resolveItemVisual(it, {
+    selected,
+    hovered,
+    hasError,
+    hasWarning,
+    highlightErrors: display.highlightErrors,
+  });
   const layerHighlight =
     (display.highlightRacks && it.layer === "racks") ||
     (display.highlightSockets && it.layer === "sockets") ||
     (display.highlightFurniture && (it.layer === "furn" || it.layer === "staff"));
-  const strokeW = layerHighlight && !selected ? sw * 1.6 : sw;
+  const strokeW = (layerHighlight && !selected ? visState.strokeW * 1.4 : visState.strokeW) * k;
+  const dashArr = visState.dash ? visState.dash.map((v) => v * k).join(" ") : undefined;
   const sx = it.mirrorH ? -1 : 1;
   const sy = it.mirrorV ? -1 : 1;
   const itemTransform = (sx !== 1 || sy !== 1 || a)
     ? `translate(${cx},${cy}) rotate(${a}) scale(${sx},${sy}) translate(${-cx},${-cy})`
     : undefined;
+  const pointerProps = {
+    onPointerEnter: onHover ? () => onHover(it.id) : undefined,
+    onPointerLeave: onHover ? () => onHover(null) : undefined,
+  };
+  const itemOpacity = visState.excluded ? opacity * 0.5 : opacity;
+  const glyph = !door && !opening ? glyphRenderProps(it, visState) : { hasGlyph: false };
 
   return (
-    <g transform={itemTransform} opacity={excluded ? opacity * 0.5 : opacity}>
+    <g transform={itemTransform} opacity={itemOpacity}>
+      {(display.showServiceZones || selected) && !opening && (
+        <ServiceZoneEl it={it} k={k} />
+      )}
       {door ? (
         <g onPointerDown={onDown} style={{ cursor: "move" }}>
-          <line x1={it.x} y1={cy} x2={it.x + it.w} y2={cy} stroke="#f7f8f6" strokeWidth={it.h + 4} />
-          <line x1={it.x} y1={cy} x2={it.x + it.w} y2={cy} stroke="#2f3431" strokeWidth={2 * k} />
-          <g transform={`translate(${it.x} ${cy})`}>
-            <DoorIcon it={{ ...it, color: "#2f3431" }} k={k} swing={it.icon === "door2"} />
-          </g>
+          {!display.doorOpeningsOnly && (
+            <>
+              <line x1={it.x} y1={cy} x2={it.x + it.w} y2={cy} stroke={dStyle.color} strokeWidth={2 * k} />
+              {dStyle.accent && (
+                <line x1={it.x + 4 * k} y1={cy} x2={it.x + it.w - 4 * k} y2={cy} stroke={dStyle.accent} strokeWidth={3 * k} opacity={0.85} />
+              )}
+            </>
+          )}
+          {!display.doorOpeningsOnly && doorShowsSwing(it.kind, display) && (
+            <path
+              d={`M ${doorSwingPolygon(it).map((p) => `${p.x} ${p.y}`).join(" L ")} Z`}
+              fill={DG_THEME.doorArc}
+              fillOpacity={0.04}
+              stroke={DG_THEME.doorArc}
+              strokeWidth={0.75 * k}
+              strokeDasharray={`${4 * k} ${3 * k}`}
+              pointerEvents="none"
+            />
+          )}
+          {!display.doorOpeningsOnly && (
+            <g transform={`translate(${it.x} ${cy}) scale(${it.doorSwing === "right" ? -1 : 1}, 1)`}>
+              <DoorIcon
+                it={{ ...it, color: dStyle.color }}
+                k={k}
+                swing={dStyle.double}
+                pivot={dStyle.pivot}
+                slide={it.kind === "door_slide"}
+                accent={dStyle.accent}
+                showArc={doorShowsSwing(it.kind, display)}
+              />
+            </g>
+          )}
+          {display.doorOpeningsOnly && (
+            <line x1={it.x} y1={cy} x2={it.x + it.w} y2={cy} stroke={dStyle.color} strokeWidth={3 * k} strokeDasharray={`${8 * k} ${4 * k}`} />
+          )}
+          {showLabel && labelsVisible(it.layer, activeLayer, display) && (
+            <text x={cx} y={cy - it.h - 4 * k} fontSize={10 * k} textAnchor="middle" fill={dStyle.accent || dStyle.color} pointerEvents="none" fontWeight="600">
+              {it.doorNum || dStyle.label}
+            </text>
+          )}
         </g>
-      ) : win ? (
+      ) : opening ? (
         <g onPointerDown={onDown} style={{ cursor: "move" }}>
-          <line x1={it.x} y1={cy} x2={it.x + it.w} y2={cy} stroke="#f7f8f6" strokeWidth={it.h + 6} />
-          <line x1={it.x} y1={cy - it.h * 0.2} x2={it.x + it.w} y2={cy - it.h * 0.2} stroke="#5b7c9d" strokeWidth={1.2 * k} />
-          <line x1={it.x} y1={cy} x2={it.x + it.w} y2={cy} stroke="#5b7c9d" strokeWidth={1.8 * k} />
-          <line x1={it.x} y1={cy + it.h * 0.2} x2={it.x + it.w} y2={cy + it.h * 0.2} stroke="#5b7c9d" strokeWidth={1.2 * k} />
+          {!display.doorOpeningsOnly ? (
+            <>
+              {isWindowKind(it.kind) ? (
+                <>
+                  <line x1={it.x} y1={cy - it.h * 0.5} x2={it.x + it.w} y2={cy - it.h * 0.5} stroke={DG_THEME.window} strokeWidth={1.1 * k} opacity={0.85} />
+                  <line x1={it.x} y1={cy} x2={it.x + it.w} y2={cy} stroke={DG_THEME.window} strokeWidth={0.9 * k} opacity={0.7} />
+                  <line x1={it.x} y1={cy + it.h * 0.5} x2={it.x + it.w} y2={cy + it.h * 0.5} stroke={DG_THEME.window} strokeWidth={1.1 * k} opacity={0.85} />
+                </>
+              ) : (
+                <line
+                  x1={it.x}
+                  y1={cy}
+                  x2={it.x + it.w}
+                  y2={cy}
+                  stroke={oStyle.color}
+                  strokeWidth={2.2 * k}
+                  strokeDasharray={oStyle.dash ? `${6 * k} ${4 * k}` : undefined}
+                />
+              )}
+              {oStyle.glass && !isWindowKind(it.kind) && (
+                <rect
+                  x={it.x + 6 * k}
+                  y={cy - it.h * 0.32}
+                  width={it.w - 12 * k}
+                  height={it.h * 0.64}
+                  fill={oStyle.accent || oStyle.color}
+                  fillOpacity={0.18}
+                  stroke={oStyle.color}
+                  strokeWidth={0.7 * k}
+                  rx={oStyle.arch || it.openingShape === "arch" ? it.w * 0.2 : 2 * k}
+                />
+              )}
+              {oStyle.vents && (
+                <>
+                  <line x1={it.x + it.w * 0.25} y1={cy - 3 * k} x2={it.x + it.w * 0.25} y2={cy + 3 * k} stroke={oStyle.color} strokeWidth={1 * k} />
+                  <line x1={it.x + it.w * 0.5} y1={cy - 3 * k} x2={it.x + it.w * 0.5} y2={cy + 3 * k} stroke={oStyle.color} strokeWidth={1 * k} />
+                  <line x1={it.x + it.w * 0.75} y1={cy - 3 * k} x2={it.x + it.w * 0.75} y2={cy + 3 * k} stroke={oStyle.color} strokeWidth={1 * k} />
+                </>
+              )}
+              <g transform={`translate(${it.x} ${cy})`}>
+                <OpeningIcon
+                  w={it.w}
+                  k={k}
+                  style={oStyle}
+                  shape={it.openingShape}
+                  thk={it.h}
+                  triple={isWindowKind(it.kind)}
+                />
+              </g>
+            </>
+          ) : (
+            <line
+              x1={it.x}
+              y1={cy}
+              x2={it.x + it.w}
+              y2={cy}
+              stroke={oStyle.color}
+              strokeWidth={3 * k}
+              strokeDasharray={`${8 * k} ${4 * k}`}
+            />
+          )}
+          {showLabel && labelsVisible(it.layer, activeLayer, display) && (
+            <text x={cx} y={cy - it.h - 4 * k} fontSize={10 * k} textAnchor="middle" fill={oStyle.color} pointerEvents="none" fontWeight="600">
+              {it.openingNum || oStyle.short}
+            </text>
+          )}
+          {selected && (
+            <text x={cx} y={cy + it.h + 14 * k} fontSize={8 * k} textAnchor="middle" fill="#6b7d74" pointerEvents="none" style={{ fontFamily: "var(--mono)" }}>
+              ↑{it.openingSillMm ?? 900} · H{it.openingHeightMm ?? 1200}
+            </text>
+          )}
         </g>
-      ) : (
-        <rect
-          x={it.x}
-          y={it.y}
-          width={it.w}
-          height={it.h}
-          rx={4 * k}
-          fill={it.color}
-          fillOpacity={hiddenClient ? 0.03 : 0.06}
-          stroke={stroke}
-          strokeWidth={strokeW}
-          strokeDasharray={excluded || hiddenClient ? `${8 * k} ${5 * k}` : "none"}
-          onPointerDown={onDown}
-          style={{ cursor: "move" }}
-        />
-      )}
-      <g transform={`translate(${it.x} ${it.y})`}>{!door && !win && <ObjectIcon it={it} k={k} />}</g>
-      {showLabel && !door && !win && labelsVisible(it.layer, activeLayer, display) && (
-        <LabelBadge it={it} k={k} small={small} cx={cx} cy={cy} />
-      )}
-      {showDims && selected && !door && !win && (
-        <g pointerEvents="none" style={{ fontFamily: "var(--mono)" }}>
-          <text x={cx} y={it.y - 8 * k} fontSize={9 * k} textAnchor="middle" fill="#8f9a94">
-            {Math.round(it.w)}
-          </text>
-          <text x={it.x - 6 * k} y={cy + 3 * k} fontSize={9 * k} textAnchor="end" fill="#8f9a94">
-            {Math.round(it.h)}
-          </text>
-        </g>
-      )}
-      {selected && !door && !win && (
+      ) : glyph.hasGlyph ? (
         <>
+          {visState.hoverFill && (
+            <rect
+              x={it.x}
+              y={it.y}
+              width={it.w}
+              height={it.h}
+              rx={4 * k}
+              fill={visState.hoverFill}
+              stroke="none"
+              pointerEvents="none"
+            />
+          )}
+          {hasError && display.highlightErrors !== false && (
+            <rect
+              x={it.x - 2.5 * k}
+              y={it.y - 2.5 * k}
+              width={it.w + 5 * k}
+              height={it.h + 5 * k}
+              rx={5 * k}
+              fill="none"
+              stroke={SEL_COLORS.error}
+              strokeWidth={1 * k}
+              pointerEvents="none"
+            />
+          )}
           <rect
-            x={it.x - 2 * k}
-            y={it.y - 2 * k}
-            width={it.w + 4 * k}
-            height={it.h + 4 * k}
-            fill="none"
-            stroke="#116355"
-            strokeWidth={1 * k}
-            strokeDasharray={`${4 * k} ${3 * k}`}
-            pointerEvents="none"
+            x={it.x}
+            y={it.y}
+            width={it.w}
+            height={it.h}
+            rx={4 * k}
+            fill={glyph.stroke}
+            fillOpacity={glyph.hitFillOpacity}
+            stroke="none"
+            onPointerDown={visState.locked ? undefined : onDown}
+            {...pointerProps}
+            style={{ cursor: visState.locked ? "not-allowed" : "move" }}
           />
+          {selected && (
+            <rect
+              x={it.x}
+              y={it.y}
+              width={it.w}
+              height={it.h}
+              rx={4 * k}
+              fill="none"
+              stroke={visState.stroke}
+              strokeWidth={strokeW}
+              strokeDasharray={dashArr}
+              pointerEvents="none"
+            />
+          )}
+          <g transform={`translate(${it.x} ${it.y})`}>
+            <ObjectIcon
+              it={it}
+              k={k}
+              stroke={glyph.stroke}
+              fillOpacity={glyph.fillOpacity}
+              icon={glyph.icon}
+            />
+          </g>
+        </>
+      ) : (
+        <>
+          {visState.hoverFill && (
+            <rect
+              x={it.x}
+              y={it.y}
+              width={it.w}
+              height={it.h}
+              rx={4 * k}
+              fill={visState.hoverFill}
+              stroke="none"
+              pointerEvents="none"
+            />
+          )}
+          {hasError && display.highlightErrors !== false && (
+            <rect
+              x={it.x - 2.5 * k}
+              y={it.y - 2.5 * k}
+              width={it.w + 5 * k}
+              height={it.h + 5 * k}
+              rx={5 * k}
+              fill="none"
+              stroke={SEL_COLORS.error}
+              strokeWidth={1 * k}
+              pointerEvents="none"
+            />
+          )}
           <rect
-            x={it.x + it.w - 6 * k}
-            y={it.y + it.h - 6 * k}
-            width={12 * k}
-            height={12 * k}
-            fill="#fff"
-            stroke="#116355"
-            strokeWidth={1.5 * k}
-            onPointerDown={onResize}
-            style={{ cursor: "nwse-resize" }}
+            x={it.x}
+            y={it.y}
+            width={it.w}
+            height={it.h}
+            rx={4 * k}
+            fill={glyph.stroke || it.color}
+            fillOpacity={visState.hiddenClient ? 0.03 : (glyph.fillOpacity || 0.05)}
+            stroke={visState.stroke}
+            strokeWidth={strokeW}
+            strokeDasharray={dashArr}
+            onPointerDown={visState.locked ? undefined : onDown}
+            {...pointerProps}
+            style={{ cursor: visState.locked ? "not-allowed" : "move" }}
           />
-          <circle
-            cx={cx}
-            cy={it.y - 28 * k}
-            r={6 * k}
-            fill="#fff"
-            stroke="#116355"
-            strokeWidth={1.5 * k}
-            onPointerDown={onRotateStart}
-            style={{ cursor: "grab" }}
-          />
-          <line x1={cx} y1={it.y} x2={cx} y2={it.y - 22 * k} stroke="#116355" strokeWidth={1 * k} pointerEvents="none" />
         </>
       )}
+      {!door && !opening && !glyph.hasGlyph && (
+        <g transform={`translate(${it.x} ${it.y})`}>
+          <ObjectIcon it={{ ...it, color: glyph.stroke || it.color }} k={k} />
+        </g>
+      )}
+      {showLabel && !door && !opening && labelsVisible(it.layer, activeLayer, display) && (
+        <ItemLabelBadge it={it} plan={plan} k={k} zoom={zoom} display={display} room={plan?.room} />
+      )}
+      <StatusBadge it={it} k={k} cx={cx} cy={it.y - 6 * k} />
+      <ItemStateIcons
+        it={it}
+        k={k}
+        locked={visState.locked}
+        hiddenClient={visState.hiddenClient}
+        inSpec={visState.inSpec}
+        hasWarning={hasWarning}
+        hasError={hasError && display.highlightErrors !== false}
+        showReview={visState.showReview}
+        display={display}
+      />
+      {(display.showPorts || selected) && !door && !opening && (
+        <PortMarkers it={it} k={k} show />
+      )}
+      {selected && !door && !opening && (
+        <SelectionHandles
+          it={it}
+          k={k}
+          locked={visState.locked}
+          onResizeCorner={onResize}
+          onResizeW={onResizeW}
+          onResizeH={onResizeH}
+          onRotateStart={onRotateStart}
+        />
+      )}
     </g>
   );
 }
 
-function LabelBadge({ it, k, small, cx, cy }) {
-  const lines = [it.label];
-  if (it.params?.tiers) lines.push(`${Math.round(it.w)}×${Math.round(it.h)} · ${it.params.tiers} яр.`);
-  const w = Math.max(80, lines[0].length * 7) * k;
-  const h = (lines.length * 14 + 8) * k;
-  const lx = small ? cx - w / 2 : cx - w / 2;
-  const ly = small ? it.y - h - 10 * k : it.y + it.h + 8 * k;
+function ItemLabelBadge({ it, plan, k, zoom, display, room }) {
+  const mode = labelModeForItem(it, display);
+  const lines = buildItemLabelLines(it, plan, mode);
+  const place = autoItemLabelPlacement(it, room);
   return (
-    <g pointerEvents="none">
-      {!small && <line x1={cx} y1={cy} x2={lx + w / 2} y2={ly} stroke="#b9c2bd" strokeWidth={0.8 * k} />}
-      <rect x={lx} y={ly} width={w} height={h} rx={3 * k} fill="#fff" stroke="#d9e0dc" strokeWidth={0.8 * k} />
-      {lines.map((s, i) => (
-        <text key={i} x={lx + 6 * k} y={ly + (14 * (i + 1)) * k} fontSize={11 * k} fill="#1f2925" fontWeight={i === 0 ? 600 : 400}>
-          {s}
-        </text>
-      ))}
+    <LabelPlaque
+      x={place.x}
+      y={place.y}
+      lines={lines}
+      k={k}
+      zoom={zoom}
+      align="center"
+      leaderTo={place.external ? place.anchor : null}
+      leaderFrom={place.external ? { x: place.x, y: place.y } : null}
+    />
+  );
+}
+
+export function LabelEl({ lb, items, k, zoom, selected, onDown, activeLayer, display }) {
+  const tgt = lb.targetId ? items.find((i) => i.id === lb.targetId) : null;
+  if (tgt && !labelsVisible(tgt.layer, activeLayer, display, display?.sheet)) return null;
+  if (!labelAudienceVisible(lb.audience, activeLayer)) return null;
+  const pos = resolveFreeLabelPosition(lb, tgt);
+  const lines = (lb.text || "").split("\n").filter(Boolean);
+  const anchor = tgt ? { x: tgt.x + tgt.w / 2, y: tgt.y + tgt.h / 2 } : null;
+  return (
+    <g opacity={selected ? 1 : 0.92}>
+      <LabelPlaque
+        x={pos.x}
+        y={pos.y}
+        lines={lines}
+        k={k}
+        zoom={zoom}
+        selected={selected}
+        onDown={onDown}
+        align="left"
+        leaderTo={anchor}
+        leaderFrom={{ x: pos.x, y: pos.y + labelFontSize(k, zoom) }}
+      />
     </g>
   );
 }
 
-export function ZoneEl({ zn, k, selected, onDown, onResize, fmtU, activeLayer, showDetail }) {
+export function ZoneEl({
+  zn, k, selected, onDown, onResize, fmtU, activeLayer, showDetail,
+  showFlow = true, showZoneAreas = true, showZoneFill = true, zoneContoursOnly = false, room,
+  vis, display,
+}) {
+  const zoneOpacity = vis && display
+    ? layerOpacity("zones", activeLayer, vis.zones !== false, display, display?.sheet)
+    : 1;
+  if (zoneOpacity === 0) return null;
   const cx = zn.x + zn.w / 2;
   const cy = zn.y + zn.h / 2;
   const detail = showDetail || activeLayer === "zones";
   const poly = zn.polygon?.length >= 3;
   const polyD = poly ? `M ${zn.polygon.map((p) => `${p.x} ${p.y}`).join(" L ")} Z` : null;
-  const flow = ZONE_FLOW[zn.flow] || ZONE_FLOW.neutral;
-  const stroke = flow.color;
-  const fillOp = selected ? flow.fill + 0.04 : flow.fill;
+  const flow = showFlow ? (ZONE_FLOW[zn.flow] || ZONE_FLOW.neutral) : ZONE_FLOW.neutral;
+  const stroke = zn.zoneColor || flow.color;
+  const fillColor = zn.zoneColor || flow.color;
+  const contoursOnly = zn.contoursOnly || zoneContoursOnly;
+  const hideFill = zn.hideFill || !showZoneFill || contoursOnly;
+  let fillOp = hideFill ? 0 : (selected ? flow.fill + 0.04 : flow.fill);
+  if (!hideFill && zn.auto) fillOp = Math.max(fillOp, flow.fill);
+  const areaMm2 = zoneAreaMm2(zn);
+  const small = areaMm2 < 2_500_000;
+  const rcx = room?.w ? room.w / 2 : cx;
+  const rcy = room?.h ? room.h / 2 : cy;
+  const dx = cx - rcx;
+  const dy = cy - rcy;
+  const distC = Math.hypot(dx, dy) || 1;
+  const labelX = small ? cx + (dx / distC) * Math.max(zn.w, zn.h) * 0.55 : cx;
+  const labelY = small ? cy + (dy / distC) * Math.max(zn.w, zn.h) * 0.55 : cy;
+  const showArea = zn.showArea !== false && showZoneAreas;
+  const showName = zn.showName !== false;
+  const showHeightLbl = zn.showHeight !== false && activeLayer === "zones";
+  const locked = zn.locked === true;
+  const dash = contoursOnly ? `${8 * k} ${5 * k}` : (detail ? "none" : `${10 * k} ${6 * k}`);
+  const zoneLabels = display ? labelsVisible("zones", activeLayer, display, display?.sheet) : true;
+  const labelLines = [];
+  if (showName && zn.name) labelLines.push(zn.name);
+  if (showFlow && zn.flow && zn.flow !== "neutral") labelLines.push(flow.label);
+  if (showArea) labelLines.push(`S = ${formatZoneAreaM2(zn)} м²`);
+  if (showHeightLbl && zn.height) labelLines.push(`H = ${(zn.height / 1000).toFixed(2)} м`);
+
   return (
-    <g>
+    <g opacity={zoneOpacity < 1 ? zoneOpacity : undefined}>
       {poly ? (
         <path
           d={polyD}
-          fill={stroke}
+          fill={fillColor}
           fillOpacity={fillOp}
           stroke={stroke}
           strokeWidth={(selected ? 2 : 1.2) * k}
-          onPointerDown={onDown}
-          style={{ cursor: "move" }}
+          strokeDasharray={dash}
+          onPointerDown={locked ? undefined : onDown}
+          style={{ cursor: locked ? "default" : "move" }}
         />
       ) : (
         <rect
@@ -403,36 +860,33 @@ export function ZoneEl({ zn, k, selected, onDown, onResize, fmtU, activeLayer, s
           width={zn.w}
           height={zn.h}
           rx={2 * k}
-          fill={stroke}
+          fill={fillColor}
           fillOpacity={fillOp}
           stroke={stroke}
           strokeWidth={(selected ? 2 : 1.2) * k}
-          strokeDasharray={detail ? "none" : `${10 * k} ${6 * k}`}
-          onPointerDown={onDown}
-          style={{ cursor: "move" }}
+          strokeDasharray={dash}
+          onPointerDown={locked ? undefined : onDown}
+          style={{ cursor: locked ? "default" : "move" }}
         />
       )}
-      {detail && (
+      {detail && zoneLabels && labelLines.length > 0 && (
         <>
-          <text x={cx} y={cy - 6 * k} fontSize={13 * k} textAnchor="middle" fill={stroke} fontWeight="600" pointerEvents="none">
-            {zn.name}
-          </text>
-          {zn.flow && zn.flow !== "neutral" && (
-            <text x={cx} y={cy + 8 * k} fontSize={10 * k} textAnchor="middle" fill={stroke} pointerEvents="none" opacity={0.85}>
-              {flow.label}
-            </text>
+          {small && (
+            <line x1={cx} y1={cy} x2={labelX} y2={labelY} stroke={DG_THEME.labelLeader} strokeWidth={1 * k} opacity={0.6} pointerEvents="none" />
           )}
-          <text x={cx} y={cy + (zn.flow && zn.flow !== "neutral" ? 24 : 12) * k} fontSize={11 * k} textAnchor="middle" fill="#8a7a9c" pointerEvents="none" style={{ fontFamily: "var(--mono)" }}>
-            S = {areaM2(zn.w, zn.h)} м²
-          </text>
-          {activeLayer === "zones" && (
-            <text x={cx} y={cy + 28 * k} fontSize={10 * k} textAnchor="middle" fill="#9c8aac" pointerEvents="none" style={{ fontFamily: "var(--mono)" }}>
-              H = {(zn.height / 1000).toFixed(2)} м
-            </text>
-          )}
+          <LabelPlaque
+            x={labelX}
+            y={labelY - (labelLines.length * 12 * k) / 2}
+            lines={labelLines}
+            k={k}
+            zoom={k > 0 ? 1 / k : 0.1}
+            align="center"
+            leaderTo={small ? { x: cx, y: cy } : null}
+            leaderFrom={small ? { x: labelX, y: labelY } : null}
+          />
         </>
       )}
-      {selected && (
+      {selected && !locked && !zn.auto && (
         <rect
           x={zn.x + zn.w - 6 * k}
           y={zn.y + zn.h - 6 * k}
@@ -449,94 +903,97 @@ export function ZoneEl({ zn, k, selected, onDown, onResize, fmtU, activeLayer, s
   );
 }
 
-export function LabelEl({ lb, items, k, selected, onDown, activeLayer }) {
-  const lines = (lb.text || "").split("\n");
-  const w = Math.max(120, ...lines.map((s) => s.length * 7.5)) * k;
-  const h = (lines.length * 15 + 10) * k;
-  const tgt = lb.targetId ? items.find((i) => i.id === lb.targetId) : null;
-  const show = !tgt || labelsVisible(tgt.layer, activeLayer);
-  if (!show) return null;
-  return (
-    <g opacity={selected ? 1 : 0.9}>
-      {tgt && (
-        <line x1={lb.x} y1={lb.y + h / 2} x2={tgt.x + tgt.w / 2} y2={tgt.y + tgt.h / 2} stroke="#b9c2bd" strokeWidth={1 * k} />
-      )}
-      <rect
-        x={lb.x}
-        y={lb.y}
-        width={w}
-        height={h}
-        rx={3 * k}
-        fill="#fff"
-        stroke={selected ? "#116355" : "#d9e0dc"}
-        strokeWidth={(selected ? 1.6 : 1) * k}
-        onPointerDown={onDown}
-        style={{ cursor: "move" }}
-      />
-      {lines.map((s, i) => (
-        <text key={i} x={lb.x + 6 * k} y={lb.y + (15 * (i + 1) - 3) * k} fontSize={11 * k} fill="#1f2925" pointerEvents="none">
-          {s}
-        </text>
-      ))}
-    </g>
-  );
-}
-
-export function LineEl({ line, k, showDims, editable, selected, onSel, onNode, onDel, fmtU, activeLayer, vis, display }) {
-  const opacity = layerOpacity(line.layer, activeLayer, vis[line.layer] !== false, display);
+export function LineEl({ line, k, showDims, editable, selected, hovered = false, onSel, onNode, onDel, onHover, fmtU, activeLayer, vis, display }) {
+  const opacity = layerOpacity(line.layer, activeLayer, vis[line.layer] !== false, display, display?.sheet);
   if (opacity === 0) return null;
-  const st = LINE_STYLE[line.layer] || LINE_STYLE.irrigation || LINE_STYLE.supply;
-  const d = line.pts.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ");
+  const st = resolveLineVisual(line);
+  const pts = line.pts || [];
+  const d = pts.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ");
+  const dash = st.dash ? st.dash.map((v) => v * k).join(" ") : "none";
+  const sw = (selected ? st.w + 1 : hovered ? st.w + 0.6 : st.w) * k;
+  const lineColor = selected ? SEL_COLORS.select : hovered ? SEL_COLORS.hover : st.color;
+  const arrowsOn = st.arrow && display.showLineArrows !== false;
+  const arrowPts = arrowsOn ? arrowPointsAlongLine(pts, 900, line.arrowReverse) : [];
+  const offset = st.double ? 2.5 * k : 0;
+
+  const drawPath = (ox = 0, oy = 0) => (
+    <path
+      d={pts.map((p, i) => (i ? "L" : "M") + (p.x + ox) + " " + (p.y + oy)).join(" ")}
+      fill="none"
+      stroke={lineColor}
+      strokeWidth={sw}
+      strokeDasharray={dash}
+      strokeLinejoin="round"
+      strokeLinecap="round"
+      onPointerDown={(e) => {
+        if (editable && !line.locked) {
+          e.stopPropagation();
+          onSel();
+        }
+      }}
+      onPointerEnter={onHover ? () => onHover(line.id) : undefined}
+      onPointerLeave={onHover ? () => onHover(null) : undefined}
+      style={{ cursor: editable && !line.locked ? "pointer" : "default" }}
+    />
+  );
+
   return (
     <g opacity={opacity}>
-      <path
-        d={d}
-        fill="none"
-        stroke={st.color}
-        strokeWidth={(selected ? st.w + 1 : st.w) * k}
-        strokeDasharray={st.dash ? `${8 * k} ${5 * k}` : "none"}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        onPointerDown={(e) => {
-          if (editable) {
-            e.stopPropagation();
-            onSel();
-          }
-        }}
-        style={{ cursor: editable ? "pointer" : "default" }}
-      />
-      {st.arrow && line.pts.length >= 2 && <Arrow a={line.pts[line.pts.length - 2]} b={line.pts[line.pts.length - 1]} k={k} color={st.color} />}
-      {showDims &&
-        line.pts.map((p, i) => {
+      {st.double ? (
+        <>
+          {drawPath(-offset, 0)}
+          {drawPath(offset, 0)}
+        </>
+      ) : drawPath()}
+      {arrowsOn && arrowPts.map((ap, i) => (
+        <LineArrow key={i} x={ap.x} y={ap.y} ang={ap.ang} k={k} color={st.color} />
+      ))}
+      {showDims && selected &&
+        pts.map((p, i) => {
           if (!i) return null;
-          const a = line.pts[i - 1];
-          const mx = (a.x + p.x) / 2;
-          const my = (a.y + p.y) / 2;
+          const a = pts[i - 1];
           return (
-            <g key={i} pointerEvents="none">
-              <rect x={mx - 30 * k} y={my - 8 * k} width={60 * k} height={13 * k} rx={3 * k} fill="#fff" stroke="#d9e0dc" strokeWidth={0.5 * k} />
-              <text x={mx} y={my + 3.5 * k} fontSize={9.5 * k} textAnchor="middle" fill={st.color} style={{ fontFamily: "var(--mono)" }}>
-                {fmtU(Math.hypot(p.x - a.x, p.y - a.y))}
-              </text>
-            </g>
+            <SegDim
+              key={i}
+              a={a}
+              b={p}
+              label={fmtU(Math.hypot(p.x - a.x, p.y - a.y))}
+              k={k}
+              offset={100}
+              offsetSide={-1}
+              state="active"
+            />
           );
         })}
-      {editable &&
-        line.pts.map((p, i) => (
+      {selected && pts.length >= 2 && (
+        <text
+          x={(pts[0].x + pts[pts.length - 1].x) / 2}
+          y={(pts[0].y + pts[pts.length - 1].y) / 2 - 16 * k}
+          fontSize={10 * k}
+          textAnchor="middle"
+          fill="#5a5f5c"
+          pointerEvents="none"
+          style={{ fontFamily: "var(--mono)" }}
+        >
+          Σ {fmtU(lineTotalLengthMm(line))} ({line.reservePct ?? 10}%)
+        </text>
+      )}
+      {editable && !line.locked &&
+        pts.map((p, i) => (
           <circle
             key={i}
             cx={p.x}
             cy={p.y}
             r={5 * k}
             fill="#fff"
-            stroke={st.color}
+            stroke={lineColor}
             strokeWidth={1.5 * k}
             onPointerDown={(e) => onNode(e, "lines", line.id, i)}
             style={{ cursor: "move" }}
           />
         ))}
-      {editable && selected && (
-        <text x={line.pts[0].x + 10 * k} y={line.pts[0].y - 10 * k} fontSize={13 * k} fill="#a5371f" style={{ cursor: "pointer" }} onClick={onDel}>
+      {editable && selected && !line.locked && (
+        <text x={pts[0]?.x + 10 * k} y={pts[0]?.y - 10 * k} fontSize={13 * k} fill="#a5371f" style={{ cursor: "pointer" }} onClick={onDel}>
           ✕
         </text>
       )}
@@ -544,62 +1001,139 @@ export function LineEl({ line, k, showDims, editable, selected, onSel, onNode, o
   );
 }
 
-function Arrow({ a, b, k, color }) {
-  const ang = Math.atan2(b.y - a.y, b.x - a.x);
-  const s = 30 * k;
+function LineArrow({ x, y, ang, k, color }) {
+  const s = 22 * k;
   return (
-    <g stroke={color} strokeWidth={2 * k} fill="none">
-      <line x1={b.x} y1={b.y} x2={b.x - s * Math.cos(ang - 0.4)} y2={b.y - s * Math.sin(ang - 0.4)} />
-      <line x1={b.x} y1={b.y} x2={b.x - s * Math.cos(ang + 0.4)} y2={b.y - s * Math.sin(ang + 0.4)} />
+    <g stroke={color} strokeWidth={1.8 * k} fill="none" pointerEvents="none">
+      <line x1={x} y1={y} x2={x - s * Math.cos(ang - 0.42)} y2={y - s * Math.sin(ang - 0.42)} />
+      <line x1={x} y1={y} x2={x - s * Math.cos(ang + 0.42)} y2={y - s * Math.sin(ang + 0.42)} />
     </g>
   );
 }
 
-export function DraftLine({ pts, cursor, k, wall, thk, color, fmtU, snapPt }) {
+export function DraftLine({ pts, cursor, k, wall, thk, color, fmtU, snapPt, room, angleSnap }) {
   const all = cursor ? [...pts, cursor] : pts;
-  const d = all.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ");
   const lenColor = wall ? "#2f3431" : color;
+  const mockWall = wall ? { thk: thk || 100, thicknessSide: "center" } : null;
+  const faceW = wall ? 1.2 * k : 3 * k;
   return (
     <g>
-      <path
-        d={d}
-        fill="none"
-        stroke={wall ? "#2f3431" : color}
-        strokeWidth={wall ? thk : 3 * k}
-        strokeDasharray={wall ? "none" : `${6 * k} ${4 * k}`}
-        opacity={wall ? 0.55 : 0.85}
-        strokeLinecap={wall ? "butt" : "round"}
-      />
+      {wall && all.length >= 2 ? (
+        <>
+          {Array.from({ length: all.length - 1 }, (_, i) => {
+            const a = all[i];
+            const b = all[i + 1];
+            const outer = wallFaceSegment(a, b, "outer", mockWall, room);
+            const inner = wallFaceSegment(a, b, "inner", mockWall, room);
+            return (
+              <g key={i}>
+                <line x1={outer.a.x} y1={outer.a.y} x2={outer.b.x} y2={outer.b.y} stroke="#2f3431" strokeWidth={faceW} opacity={0.7} strokeLinecap="square" />
+                <line x1={inner.a.x} y1={inner.a.y} x2={inner.b.x} y2={inner.b.y} stroke="#8a8580" strokeWidth={faceW * 0.92} opacity={0.55} strokeLinecap="square" />
+              </g>
+            );
+          })}
+        </>
+      ) : (
+        <path
+          d={all.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ")}
+          fill="none"
+          stroke={color}
+          strokeWidth={faceW}
+          strokeDasharray={`${6 * k} ${4 * k}`}
+          opacity={0.85}
+          strokeLinecap="round"
+        />
+      )}
       {pts.map((p, i) => (
         <circle key={i} cx={p.x} cy={p.y} r={5 * k} fill={wall ? "#2f3431" : color} />
       ))}
       {snapPt?.snapped && cursor && (
-        <circle cx={cursor.x} cy={cursor.y} r={8 * k} fill="none" stroke="#116355" strokeWidth={2 * k} opacity={0.85} />
+        <>
+          <circle cx={cursor.x} cy={cursor.y} r={8 * k} fill="none" stroke="#116355" strokeWidth={2 * k} opacity={0.85} />
+          {snapPt.kind === "close" && (
+            <text x={cursor.x} y={cursor.y - 14 * k} fontSize={10 * k} textAnchor="middle" fill="#116355" fontWeight="600">
+              Замкнуть помещение
+            </text>
+          )}
+          {(snapPt.kind === "port" || snapPt.kind === "object") && (
+            <text x={cursor.x} y={cursor.y - 14 * k} fontSize={9 * k} textAnchor="middle" fill="#116355" fontWeight="600">
+              {snapPt.kind === "port" ? "Порт" : "Объект"}
+            </text>
+          )}
+          {snapPt.kind === "trass" && (
+            <text x={cursor.x} y={cursor.y - 14 * k} fontSize={9 * k} textAnchor="middle" fill="#116355" fontWeight="600">
+              Трасса
+            </text>
+          )}
+        </>
       )}
-      {cursor && pts.length > 0 && (
-        <text
-          x={(pts[pts.length - 1].x + cursor.x) / 2}
-          y={(pts[pts.length - 1].y + cursor.y) / 2 - 8 * k}
-          fontSize={11 * k}
-          textAnchor="middle"
-          fill={lenColor}
-          fontWeight="600"
-          style={{ fontFamily: "var(--mono)" }}
-        >
-          {fmtU(Math.hypot(cursor.x - pts[pts.length - 1].x, cursor.y - pts[pts.length - 1].y))}
-        </text>
-      )}
+      {cursor && pts.length > 0 && (() => {
+        const a = pts[pts.length - 1];
+        const len = Math.hypot(cursor.x - a.x, cursor.y - a.y);
+        let ang = Math.round(angleSnap?.snappedAngle ?? (Math.atan2(cursor.y - a.y, cursor.x - a.x) * 180) / Math.PI);
+        if (ang < 0) ang += 360;
+        const midX = (a.x + cursor.x) / 2;
+        const midY = (a.y + cursor.y) / 2;
+        const snapSuffix = angleSnap?.isSnapped && angleSnap?.guideLabel ? ` · ${angleSnap.guideLabel}` : "";
+        const hint = wall
+          ? `${fmtU(len)} · ${ang}°${snapSuffix}`
+          : `${fmtU(len)} · ${ang}°${snapSuffix}`;
+        const hudX = cursor.x + 16 * k;
+        const hudY = cursor.y - 12 * k;
+        return (
+          <>
+            {angleSnap?.isSnapped && (
+              <line
+                x1={a.x}
+                y1={a.y}
+                x2={cursor.x}
+                y2={cursor.y}
+                stroke="#8f9a94"
+                strokeWidth={1 * k}
+                strokeDasharray={`${4 * k} ${3 * k}`}
+                opacity={0.75}
+              />
+            )}
+            <SegDim a={a} b={cursor} label={fmtU(len)} k={k} offset={120} offsetSide={-1} active />
+            <g transform={`translate(${hudX},${hudY})`} pointerEvents="none">
+              <rect x={-4 * k} y={-12 * k} width={Math.max(72 * k, hint.length * 5.2 * k)} height={18 * k} rx={4 * k} fill="#fff" stroke="#d9e0dc" strokeWidth={1 * k} />
+              <text
+                x={4 * k}
+                y={0}
+                fontSize={11 * k}
+                fill="#2f3431"
+                style={{ fontFamily: "var(--mono)" }}
+              >
+                {hint}
+              </text>
+            </g>
+            <text
+              x={cursor.x}
+              y={cursor.y + 18 * k}
+              fontSize={9 * k}
+              textAnchor="middle"
+              fill={lenColor}
+              opacity={0.85}
+              style={{ fontFamily: "var(--mono)" }}
+            >
+              {fmtCoordMm(cursor.x)}, {fmtCoordMm(cursor.y)}
+            </text>
+          </>
+        );
+      })()}
     </g>
   );
 }
 
-export function LinkEl({ link, items, room, k, selected, showLabel, onDown, onDel }) {
-  const rule = LINK_RULES[link.type] || { color: "#5a5f5c", label: "Связь" };
+export function LinkEl({ link, items, room, k, selected, hovered = false, showLabel, onDown, onDel, onHover }) {
+  if (link.visible === false) return null;
+  const color = resolveLinkColor(link);
   const { pts, total } = linkLengthMm(link, items, room);
   if (pts.length < 2) return null;
   const d = pts.map((p) => `${p.x},${p.y}`).join(" ");
   const mid = pts[Math.floor(pts.length / 2)];
-  const sw = (selected ? 2.4 : 1.6) * k;
+  const strokeColor = selected ? SEL_COLORS.select : hovered ? SEL_COLORS.hover : color;
+  const sw = (selected ? 2.4 : hovered ? 2 : 1.6) * k;
   const last = pts[pts.length - 1];
   const prev = pts[pts.length - 2];
   const ang = Math.atan2(last.y - prev.y, last.x - prev.x) * 180 / Math.PI;
@@ -609,17 +1143,19 @@ export function LinkEl({ link, items, room, k, selected, showLabel, onDown, onDe
       <polyline
         points={d}
         fill="none"
-        stroke={rule.color}
+        stroke={strokeColor}
         strokeWidth={sw}
         strokeDasharray={`${8 * k} ${5 * k}`}
-        opacity={selected ? 1 : 0.85}
+        opacity={selected ? 1 : hovered ? 0.95 : 0.85}
         onPointerDown={onDown}
+        onPointerEnter={onHover ? () => onHover(link.id) : undefined}
+        onPointerLeave={onHover ? () => onHover(null) : undefined}
         style={{ cursor: "pointer" }}
       />
       <g transform={`translate(${last.x},${last.y}) rotate(${ang})`} pointerEvents="none">
         <polygon
           points={`0,0 ${-10 * k},${-5 * k} ${-10 * k},${5 * k}`}
-          fill={rule.color}
+          fill={strokeColor}
         />
       </g>
       {showLabel && (
@@ -628,7 +1164,7 @@ export function LinkEl({ link, items, room, k, selected, showLabel, onDown, onDe
           y={mid.y - 8 * k}
           fontSize={9 * k}
           textAnchor="middle"
-          fill={rule.color}
+          fill={strokeColor}
           pointerEvents="none"
           style={{ fontFamily: "var(--mono)" }}
         >
@@ -655,29 +1191,83 @@ export function TypedLengthHint({ value, k }) {
   if (!value) return null;
   return (
     <g data-ui="typed-length">
-      <rect x={12} y={12} width={180 * k} height={28 * k} rx={6 * k} fill="#fff" stroke="#116355" strokeWidth={1.2 * k} />
+      <rect x={12} y={12} width={220 * k} height={30 * k} rx={6 * k} fill="#fff" stroke="#116355" strokeWidth={1.2 * k} />
       <text x={20 * k} y={32 * k} fontSize={12 * k} fill="#116355" fontWeight="600" style={{ fontFamily: "var(--mono)" }}>
-        Длина: {value} мм ↵
+        Длина {value} мм · Enter
       </text>
     </g>
   );
 }
 
-export function SelectionDims({ it, room, k, fmtU }) {
+export function SelectionDims({ it, plan, k, fmtU, display = {} }) {
   if (it.angle && it.angle % 90 !== 0) return null;
+  const showObj = display.showObjectDims !== false;
+  const showClr = display.showClearanceDims !== false;
+  const warnMm = display.dimPassageWarnMm ?? DEFAULT_PASSAGE_WARN_MM;
+  const errorMm = display.dimPassageErrorMm ?? DEFAULT_PASSAGE_ERROR_MM;
+  const mounted = isWallMountedItem(it);
   const cy = it.y + it.h / 2;
-  const cx = it.x + it.w / 2;
+
   return (
-    <g>
-      {it.x > 1 && <DimLine horizontal x1={0} y1={cy} x2={it.x} y2={cy} label={fmtU(it.x)} k={k} active />}
-      {it.y > 1 && <DimLine x1={cx} y1={0} x2={cx} y2={it.y} label={fmtU(it.y)} k={k} active />}
-      {room.w - (it.x + it.w) > 1 && (
-        <DimLine horizontal x1={it.x + it.w} y1={cy} x2={room.w} y2={cy} label={fmtU(room.w - it.x - it.w)} k={k} active />
+    <g data-ui="dim-selection">
+      {showObj && !mounted && (
+        <RectDims x={it.x} y={it.y} w={it.w} h={it.h} k={k} fmtU={fmtU} offset={130} state="active" />
       )}
-      {room.h - (it.y + it.h) > 1 && (
-        <DimLine x1={cx} y1={it.y + it.h} x2={cx} y2={room.h} label={fmtU(room.h - it.y - it.h)} k={k} active />
+      {showObj && mounted && (
+        <SegDim
+          a={{ x: it.x, y: cy }}
+          b={{ x: it.x + it.w, y: cy }}
+          label={fmtU(it.w)}
+          k={k}
+          offset={80}
+          offsetSide={-1}
+          state="active"
+        />
+      )}
+      {showClr && (
+        <ClearanceDims it={it} plan={plan} k={k} fmtU={fmtU} warnMm={warnMm} errorMm={errorMm} />
       )}
     </g>
+  );
+}
+
+export function SelectionMarquee({ rect, k }) {
+  if (!rect) return null;
+  const x = Math.min(rect.x1, rect.x2);
+  const y = Math.min(rect.y1, rect.y2);
+  const w = Math.abs(rect.x2 - rect.x1);
+  const h = Math.abs(rect.y2 - rect.y1);
+  if (w < 2 && h < 2) return null;
+  return (
+    <rect
+      x={x}
+      y={y}
+      width={w}
+      height={h}
+      fill="rgba(17,99,85,0.08)"
+      stroke="#116355"
+      strokeWidth={1.5 * k}
+      strokeDasharray={`${5 * k} ${4 * k}`}
+      pointerEvents="none"
+    />
+  );
+}
+
+export function MultiSelectBounds({ bounds, k }) {
+  if (!bounds) return null;
+  const pad = 6 * k;
+  return (
+    <rect
+      x={bounds.x - pad}
+      y={bounds.y - pad}
+      width={bounds.w + pad * 2}
+      height={bounds.h + pad * 2}
+      fill="none"
+      stroke="#116355"
+      strokeWidth={1.5 * k}
+      strokeDasharray={`${7 * k} ${5 * k}`}
+      pointerEvents="none"
+    />
   );
 }
 

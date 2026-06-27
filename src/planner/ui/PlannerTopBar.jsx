@@ -12,6 +12,7 @@ export function PlannerTopBar({
   onExportJson,
   onImportJson,
   onRename,
+  onAttach,
   projectId,
 }) {
   const [open, setOpen] = useState(false);
@@ -61,6 +62,9 @@ export function PlannerTopBar({
             </button>
             <button type="button" className="planner-btn" onClick={() => importRef.current?.click()} disabled={busy}>
               Импорт
+            </button>
+            <button type="button" className="planner-btn planner-btn--primary" onClick={onAttach} disabled={busy || !onAttach}>
+              Привязать к проекту
             </button>
             <input
               ref={importRef}

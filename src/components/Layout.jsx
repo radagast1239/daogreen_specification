@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { berryCalculatorUrl, economicCalculatorUrl, saladEconomicsUrl } from "../lib/calcUrls.js";
 import GlobalSearch from "./GlobalSearch.jsx";
 import { getCompactMode, setCompactMode } from "../lib/compactMode.js";
+import { getSidebarCollapsed, setSidebarCollapsed } from "../lib/sidebarPrefs.js";
 import { NavIcon } from "./NavIcons.jsx";
 import { useStore } from "../store/StoreContext.jsx";
 
@@ -24,53 +25,82 @@ const CALC_LINKS = [
   { href: berryCalculatorUrl, label: "Калькулятор ягод", icon: "berry" },
 ];
 
-function SidebarNav({ compact, onToggleCompact, onNavigate }) {
+function NavItem({ to, end, label, icon, onNavigate, collapsed }) {
+  return (
+    <NavLink
+      to={to}
+      end={end}
+      className={({ isActive }) => "navlink" + (isActive ? " active" : "")}
+      onClick={onNavigate}
+      title={collapsed ? label : undefined}
+    >
+      <NavIcon name={icon} />
+      <span className="navlink__label">{label}</span>
+    </NavLink>
+  );
+}
+
+function ExtNavItem({ href, label, icon, onNavigate, collapsed }) {
+  return (
+    <a
+      className="navlink navlink--ext"
+      href={href()}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={onNavigate}
+      title={collapsed ? label : undefined}
+    >
+      <NavIcon name={icon} />
+      <span className="navlink__label">{label}</span>
+      <span className="navlink__ext" aria-hidden>↗</span>
+    </a>
+  );
+}
+
+function SidebarNav({ compact, collapsed, onToggleCompact, onToggleCollapse, onNavigate }) {
   return (
     <>
       <div className="sidebar__head">
-        <span className="eyebrow" style={{ color: "#9ecdb8" }}>Daogreen · Spec</span>
+        <div className="sidebar__brand" title="Daogreen · Spec">
+          <span className="sidebar__brand-mark" aria-hidden>DG</span>
+          <span className="sidebar__brand-text eyebrow">Daogreen · Spec</span>
+        </div>
+        <button
+          type="button"
+          className="sidebar__toggle no-print"
+          onClick={onToggleCollapse}
+          title={collapsed ? "Развернуть меню" : "Свернуть меню"}
+          aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"}
+        >
+          <NavIcon name={collapsed ? "panel-open" : "panel-close"} />
+        </button>
       </div>
-      {NAV.map((n) => (
-        <NavLink
-          key={n.to}
-          to={n.to}
-          end={n.end}
-          className={({ isActive }) => "navlink" + (isActive ? " active" : "")}
-          onClick={onNavigate}
-        >
-          <NavIcon name={n.icon} />
-          {n.label}
-        </NavLink>
-      ))}
-      <div className="sidebar__sep">Планировщик</div>
-      <NavLink
-        to="/planner"
-        className={({ isActive }) => "navlink" + (isActive ? " active" : "")}
-        onClick={onNavigate}
-      >
-        <NavIcon name="planner" />
-        Планировщик
-      </NavLink>
 
-      <div className="sidebar__sep">Калькуляторы</div>
-      {CALC_LINKS.map((n) => (
-        <a
-          key={n.label}
-          className="navlink navlink--ext"
-          href={n.href()}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={onNavigate}
-        >
-          <NavIcon name={n.icon} />
-          {n.label}
-          <span className="navlink__ext" aria-hidden>↗</span>
-        </a>
+      {NAV.map((n) => (
+        <NavItem key={n.to} {...n} onNavigate={onNavigate} collapsed={collapsed} />
       ))}
+
+      <div className="sidebar__sep" title={collapsed ? "Планировщик" : undefined}>
+        <span className="sidebar__sep-text">Планировщик</span>
+      </div>
+      <NavItem to="/planner" label="Планировщик" icon="planner" onNavigate={onNavigate} collapsed={collapsed} />
+
+      <div className="sidebar__sep" title={collapsed ? "Калькуляторы" : undefined}>
+        <span className="sidebar__sep-text">Калькуляторы</span>
+      </div>
+      {CALC_LINKS.map((n) => (
+        <ExtNavItem key={n.label} {...n} onNavigate={onNavigate} collapsed={collapsed} />
+      ))}
+
       <div className="spacer" />
-      <button type="button" className="navlink navlink--toggle" onClick={onToggleCompact}>
+      <button
+        type="button"
+        className="navlink navlink--toggle"
+        onClick={onToggleCompact}
+        title={collapsed ? (compact ? "Обычные таблицы" : "Компактные таблицы") : undefined}
+      >
         <NavIcon name="compact" />
-        {compact ? "Обычные таблицы" : "Компактные таблицы"}
+        <span className="navlink__label">{compact ? "Обычные таблицы" : "Компактные таблицы"}</span>
       </button>
       <div className="foot">Спецификации v1</div>
     </>
@@ -79,6 +109,7 @@ function SidebarNav({ compact, onToggleCompact, onNavigate }) {
 
 export default function Layout() {
   const [compact, setCompact] = useState(getCompactMode());
+  const [collapsed, setCollapsed] = useState(getSidebarCollapsed());
   const [menuOpen, setMenuOpen] = useState(false);
   const { actions } = useStore();
   const { pathname } = useLocation();
@@ -99,15 +130,26 @@ export default function Layout() {
     setCompact(next);
   };
 
+  const toggleCollapse = () => {
+    const next = !collapsed;
+    setSidebarCollapsed(next);
+    setCollapsed(next);
+  };
+
   useEffect(() => {
     document.body.classList.toggle("nav-open", menuOpen);
     return () => document.body.classList.remove("nav-open");
   }, [menuOpen]);
 
+  useEffect(() => {
+    document.body.classList.toggle("sidebar-collapsed", collapsed && !menuOpen);
+    return () => document.body.classList.remove("sidebar-collapsed");
+  }, [collapsed, menuOpen]);
+
   const closeMenu = () => setMenuOpen(false);
 
   return (
-    <div className="shell">
+    <div className={"shell" + (collapsed ? " shell--sidebar-collapsed" : "")}>
       <button
         type="button"
         className="mobile-menu-btn no-print"
@@ -117,8 +159,14 @@ export default function Layout() {
         <NavIcon name={menuOpen ? "close" : "menu"} />
       </button>
       {menuOpen && <button type="button" className="sidebar-backdrop" aria-label="Закрыть" onClick={closeMenu} />}
-      <aside className={"sidebar" + (menuOpen ? " sidebar--open" : "")}>
-        <SidebarNav compact={compact} onToggleCompact={toggleCompact} onNavigate={closeMenu} />
+      <aside className={"sidebar" + (menuOpen ? " sidebar--open" : "") + (collapsed ? " sidebar--collapsed" : "")}>
+        <SidebarNav
+          compact={compact}
+          collapsed={collapsed}
+          onToggleCompact={toggleCompact}
+          onToggleCollapse={toggleCollapse}
+          onNavigate={closeMenu}
+        />
       </aside>
       <div className="main">
         {!plannerFocus && <GlobalSearch />}

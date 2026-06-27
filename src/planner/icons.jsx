@@ -1,10 +1,14 @@
 import React from "react";
+import { isRackKind, rackIconForType } from "./rackProperties.js";
+import { DG_THEME } from "./plannerVisualTheme.js";
 // Иконки объектов сверху. Локальные координаты (0..w, 0..h). k = 1/zoom.
 
-function useDraw(it, k) {
-  const { w, h, color } = it;
-  const sw = 1.4 * k;
-  const o = 0.72;
+function useDraw(it, k, opts = {}) {
+  const { w, h } = it;
+  const color = opts.stroke || it.color || "#3d4a46";
+  const baseFill = opts.fillOpacity ?? 0.06;
+  const sw = (opts.strokeWidth ?? 1.2) * k;
+  const o = opts.lineOpacity ?? 0.78;
   const cx = w / 2;
   const cy = h / 2;
   const r = Math.min(w, h) / 2;
@@ -18,8 +22,8 @@ function useDraw(it, k) {
   const rect = (x, y, ww, hh, rx = 0, op = o, fillOp = 0) => (
     <rect x={x} y={y} width={ww} height={hh} rx={rx} fill={fillOp ? color : "none"} fillOpacity={fillOp} stroke={color} strokeWidth={sw} opacity={op} />
   );
-  const fill = (x, y, ww, hh, rx = 0, fillOp = 0.06) => (
-    <rect x={x} y={y} width={ww} height={hh} rx={rx} fill={color} fillOpacity={fillOp} stroke="none" />
+  const fill = (x, y, ww, hh, rx = 0, fillOp) => (
+    <rect x={x} y={y} width={ww} height={hh} rx={rx} fill={color} fillOpacity={fillOp ?? baseFill} stroke="none" />
   );
   const elli = (x, y, rx, ry, op = o) => (
     <ellipse cx={x} cy={y} rx={rx} ry={ry} fill="none" stroke={color} strokeWidth={sw} opacity={op} />
@@ -49,13 +53,31 @@ function useDraw(it, k) {
       </g>
     );
   };
-  return { w, h, color, sw, o, cx, cy, r, detail, ln, cir, rect, fill, elli, posts, legs4, flowArrow };
+  return { w, h, color, sw, o, cx, cy, r, detail, ln, cir, rect, fill, elli, posts, legs4, flowArrow, baseFill };
 }
 
-function RackNft({ d }) {
+function RackAero({ d, it }) {
+  const { w, h, detail, fill, posts, cir, ln } = d;
+  const cols = it?.channelCount || it?.params?.levels || Math.max(4, Math.round(w / 90));
+  const rows = it?.tierCount || it?.params?.tiers || Math.max(3, Math.round(h / 90));
+  const L = [fill(0, 0, w, h, 3 * d.sw, 0.07), ...posts()];
+  const dx = (w * 0.84) / cols;
+  const dy = (h * 0.84) / rows;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = w * 0.08 + c * dx + dx * 0.5;
+      const y = h * 0.08 + r * dy + dy * 0.5;
+      L.push(cir(x, y, Math.min(dx, dy) * 0.22, detail ? "fill" : "none", detail ? 0.35 : 0.5));
+      if (detail && c < cols - 1) L.push(ln(x + dx * 0.22, y, x + dx * 0.78, y, 0.3, 0.45));
+    }
+  }
+  return <g pointerEvents="none">{L}</g>;
+}
+
+function RackNft({ d, it }) {
   const { w, h, detail, fill, posts, ln } = d;
-  const n = Math.max(3, Math.min(12, Math.round(w / 180)));
-  const channels = Math.max(4, Math.round(h / 90));
+  const n = it?.tierCount || it?.params?.tiers || Math.max(3, Math.min(12, Math.round(w / 180)));
+  const channels = it?.channelCount || it?.params?.levels || Math.max(4, Math.round(h / 90));
   const L = [fill(0, 0, w, h, 3 * d.sw, 0.06), ...posts()];
   for (let i = 1; i < n; i++) L.push(ln(i * (w / n), h * 0.06, i * (w / n), h * 0.94, 0.55, 0.7));
   for (let j = 1; j < channels; j++) {
@@ -65,10 +87,10 @@ function RackNft({ d }) {
   return <g pointerEvents="none">{L}</g>;
 }
 
-function RackFlood({ d }) {
+function RackFlood({ d, it }) {
   const { w, h, detail, fill, posts, rect, ln } = d;
-  const tiers = Math.max(2, Math.round(h / 200));
-  const trays = Math.max(2, Math.round(w / 400));
+  const tiers = it?.tierCount || it?.params?.tiers || Math.max(2, Math.round(h / 200));
+  const trays = it?.channelCount || it?.params?.levels || Math.max(2, Math.round(w / 400));
   const L = [fill(0, 0, w, h, 3 * d.sw, 0.06), ...posts()];
   for (let t = 0; t < tiers; t++) {
     const y0 = h * 0.08 + (t * (h * 0.84)) / tiers;
@@ -84,10 +106,10 @@ function RackFlood({ d }) {
   return <g pointerEvents="none">{L}</g>;
 }
 
-function RackSeedling({ d }) {
+function RackSeedling({ d, it }) {
   const { w, h, detail, fill, posts, rect, cir } = d;
-  const cols = Math.max(3, Math.round(w / 120));
-  const rows = Math.max(2, Math.round(h / 100));
+  const cols = it?.channelCount || it?.params?.levels || Math.max(3, Math.round(w / 120));
+  const rows = it?.tierCount || it?.params?.tiers || Math.max(2, Math.round(h / 100));
   const L = [fill(0, 0, w, h, 3 * d.sw, 0.06), ...posts()];
   const cw = (w * 0.86) / cols;
   const ch = (h * 0.86) / rows;
@@ -102,10 +124,10 @@ function RackSeedling({ d }) {
   return <g pointerEvents="none">{L}</g>;
 }
 
-function RackStrawberry({ d }) {
+function RackStrawberry({ d, it }) {
   const { w, h, detail, fill, posts, cir } = d;
-  const rows = Math.max(3, Math.round(h / 80));
-  const cols = Math.max(4, Math.round(w / 70));
+  const rows = it?.tierCount || it?.params?.tiers || Math.max(3, Math.round(h / 80));
+  const cols = it?.channelCount || it?.params?.levels || Math.max(4, Math.round(w / 70));
   const L = [fill(0, 0, w, h, 3 * d.sw, 0.06), ...posts()];
   const dx = (w * 0.84) / cols;
   const dy = (h * 0.84) / rows;
@@ -118,13 +140,13 @@ function RackStrawberry({ d }) {
   return <g pointerEvents="none">{L}</g>;
 }
 
-function RackShelf({ d }) {
+function RackShelf({ d, it }) {
   const { w, h, detail, fill, posts, ln } = d;
   const n = Math.max(2, Math.min(6, Math.round(w / 500)));
   const seg = w / n;
+  const shelves = it?.tierCount || it?.params?.tiers || Math.max(2, Math.round(h / 150));
   const L = [fill(0, 0, w, h, 3 * d.sw, 0.05), ...posts()];
   for (let i = 1; i < n; i++) L.push(ln(i * seg, h * 0.08, i * seg, h * 0.92, 0.55, 0.7));
-  const shelves = Math.max(2, Math.round(h / 150));
   for (let j = 1; j < shelves; j++) L.push(ln(w * 0.06, (h * j) / shelves, w * 0.94, (h * j) / shelves, detail ? 0.4 : 0.3, 0.55));
   return <g pointerEvents="none">{L}</g>;
 }
@@ -152,9 +174,21 @@ function TankRound({ d, waste = false }) {
   const { w, h, cx, cy, r, cir, rect, ln, fill } = d;
   const outer = r * 0.82;
   const inner = r * 0.52;
+  if (waste) {
+    return (
+      <g pointerEvents="none">
+        {fill(cx - outer, cy - outer, outer * 2, outer * 2, outer, 0.05)}
+        {cir(cx, cy, outer)}
+        {cir(cx, cy, inner, "none", 0.35)}
+        {rect(cx - outer * 0.55, cy - outer * 0.92, outer * 1.1, outer * 0.28, 2 * d.sw, 0.65, 0.04)}
+        {ln(cx - inner * 0.85, cy - inner * 0.85, cx + inner * 0.85, cy + inner * 0.85, 0.32, 0.55)}
+        {ln(cx - inner * 0.85, cy + inner * 0.85, cx + inner * 0.85, cy - inner * 0.85, 0.32, 0.55)}
+      </g>
+    );
+  }
   return (
     <g pointerEvents="none">
-      {fill(cx - outer, cy - outer, outer * 2, outer * 2, outer, waste ? 0.05 : 0.06)}
+      {fill(cx - outer, cy - outer, outer * 2, outer * 2, outer, 0.06)}
       {cir(cx, cy, outer)}
       {cir(cx, cy, inner, "none", 0.45)}
       {rect(cx - 5 * d.sw, h * 0.04, 10 * d.sw, 8 * d.sw, 2 * d.sw, 0.75)}
@@ -434,14 +468,35 @@ function PersonTop({ d }) {
   );
 }
 
+function OpeningPalette({ d, glass, dash, arch, vents, serve }) {
+  const { w, cy, rect, sw, color, ln } = d;
+  const dashAttr = dash ? { strokeDasharray: `${4 * sw} ${2.5 * sw}` } : {};
+  if (arch) {
+    return (
+      <g pointerEvents="none">
+        <path d={`M ${w * 0.08} ${cy} Q ${w / 2} ${cy - w * 0.28} ${w * 0.92} ${cy}`} fill="none" stroke={color} strokeWidth={sw * 1.1} />
+        {ln(w * 0.08, cy, w * 0.92, cy, 0.7, 1.1)}
+      </g>
+    );
+  }
+  return (
+    <g pointerEvents="none">
+      <line x1={w * 0.06} y1={cy} x2={w * 0.94} y2={cy} stroke={color} strokeWidth={sw * 1.4} opacity={0.85} {...dashAttr} />
+      {glass && rect(w * 0.14, cy - w * 0.1, w * 0.72, w * 0.2, 2 * sw, 0.55, 0.12)}
+      {vents && [0.3, 0.5, 0.7].map((t, i) => <g key={i}>{ln(w * t, cy - 5 * sw, w * t, cy + 5 * sw, 0.6)}</g>)}
+      {serve && rect(w * 0.35, cy - w * 0.14, w * 0.3, w * 0.28, 2 * sw, 0.65, 0.08)}
+    </g>
+  );
+}
+
 const ICON_RENDERERS = {
-  rack_nft: (d) => <RackNft d={d} />,
-  rack: (d) => <RackNft d={d} />,
-  rack_flood: (d) => <RackFlood d={d} />,
-  rack_seedling: (d) => <RackSeedling d={d} />,
-  rack_strawberry: (d) => <RackStrawberry d={d} />,
-  rack_shelf: (d) => <RackShelf d={d} />,
-  rack_aero: (d) => <RackStrawberry d={d} />,
+  rack_nft: (d, it) => <RackNft d={d} it={it} />,
+  rack: (d, it) => <RackNft d={d} it={it} />,
+  rack_flood: (d, it) => <RackFlood d={d} it={it} />,
+  rack_seedling: (d, it) => <RackSeedling d={d} it={it} />,
+  rack_strawberry: (d, it) => <RackStrawberry d={d} it={it} />,
+  rack_shelf: (d, it) => <RackShelf d={d} it={it} />,
+  rack_aero: (d, it) => <RackAero d={d} it={it} />,
 
   table_sowing: (d) => <TableBase d={d} trays />,
   table_receiving: (d) => <TableBase d={d} belt />,
@@ -482,17 +537,25 @@ const ICON_RENDERERS = {
 
   bin_trash: (d) => <BinTrash d={d} />,
   bin: (d) => <BinTrash d={d} />,
+
+  window: (d) => <OpeningPalette d={d} glass />,
+  opening: (d) => <OpeningPalette d={d} dash />,
+  opening_vent: (d) => <OpeningPalette d={d} dash vents />,
+  opening_tech: (d) => <OpeningPalette d={d} glass />,
+  opening_serve: (d) => <OpeningPalette d={d} glass serve />,
+  opening_arch: (d) => <OpeningPalette d={d} arch />,
 };
 
-export function ObjectIcon({ it, k }) {
-  const d = useDraw(it, k);
+export function ObjectIcon({ it, k, stroke, fillOpacity, icon: iconOverride }) {
+  const drawIt = stroke ? { ...it, color: stroke } : it;
+  const d = useDraw(drawIt, k, { stroke, fillOpacity });
   const { w, h, rect, ln, cir, cx, cy, r, detail } = d;
-  const { icon } = it;
+  const iconKey = iconOverride || it.icon || (isRackKind(it.kind) ? rackIconForType(it.rackType) : null);
 
-  const render = ICON_RENDERERS[icon];
-  if (render) return render(d);
+  const render = iconKey ? ICON_RENDERERS[iconKey] : null;
+  if (render) return render(d, it);
 
-  switch (icon) {
+  switch (iconKey || it.icon) {
     case "chair":
       return <g pointerEvents="none">{rect(w * 0.15, h * 0.15, w * 0.7, h * 0.7, 4 * d.sw, 0.55)}{ln(w * 0.15, h * 0.15, w * 0.85, h * 0.15, 0.55)}</g>;
     case "bench":
@@ -547,31 +610,97 @@ export function ObjectIcon({ it, k }) {
       return <g pointerEvents="none">{L}</g>;
     }
     default:
-      return null;
+      return (
+        <g pointerEvents="none">
+          {rect(w * 0.1, h * 0.1, w * 0.8, h * 0.8, 3 * d.sw, 0.55, d.baseFill)}
+          {detail && ln(cx, h * 0.22, cx, h * 0.78, 0.4, 0.55)}
+        </g>
+      );
   }
 }
 
-// Дверь со створкой и дугой открывания (рисуется в проёме шириной w, толщина стены = h)
-export function DoorIcon({ it, k, swing }) {
-  const { w, h, color } = it;
-  const sw = 1.4 * k;
-  if (swing) {
-    const hw = w / 2;
+// Окно / проём в стене (вид сверху, локальные координаты 0..w, центр по y=0)
+export function OpeningIcon({ w, k, style = {}, shape = "rect", thk, triple = false }) {
+  const sw = 1.2 * k;
+  const c = style.color || "#5b7c9d";
+  const isArch = shape === "arch" || style.arch;
+  if (isArch) {
+    const h = w * 0.28;
     return (
       <g pointerEvents="none">
-        <line x1={0} y1={0} x2={0} y2={-hw} stroke={color} strokeWidth={sw} />
-        <line x1={hw} y1={0} x2={hw} y2={-hw} stroke={color} strokeWidth={sw} />
-        <path d={`M 0 ${-hw} A ${hw} ${hw} 0 0 1 ${hw} 0`} fill="none" stroke={color} strokeWidth={sw * 0.75} strokeDasharray={`${4 * k} ${3 * k}`} opacity={0.65} />
-        <path d={`M ${hw} ${-hw} A ${hw} ${hw} 0 0 0 ${hw} 0`} fill="none" stroke={color} strokeWidth={sw * 0.75} strokeDasharray={`${4 * k} ${3 * k}`} opacity={0.65} />
-        <line x1={0} y1={0} x2={hw} y2={0} stroke={color} strokeWidth={sw * 0.9} />
+        <path d={`M 0 0 Q ${w / 2} ${-h} ${w} 0`} fill="none" stroke={c} strokeWidth={sw} />
+      </g>
+    );
+  }
+  if (triple) {
+    const half = Math.max((thk || w * 0.14) / 2, 18 * k);
+    return (
+      <g pointerEvents="none">
+        <line x1={0} y1={-half} x2={w} y2={-half} stroke={c} strokeWidth={sw} opacity={0.85} />
+        <line x1={0} y1={0} x2={w} y2={0} stroke={style.accent || c} strokeWidth={sw * 0.75} opacity={0.65} />
+        <line x1={0} y1={half} x2={w} y2={half} stroke={c} strokeWidth={sw} opacity={0.85} />
       </g>
     );
   }
   return (
     <g pointerEvents="none">
-      <line x1={0} y1={0} x2={0} y2={-w} stroke={color} strokeWidth={sw} />
-      <path d={`M 0 ${-w} A ${w} ${w} 0 0 1 ${w} 0`} fill="none" stroke={color} strokeWidth={sw * 0.75} strokeDasharray={`${4 * k} ${3 * k}`} opacity={0.65} />
-      <line x1={w} y1={0} x2={0} y2={0} stroke={color} strokeWidth={sw * 0.9} />
+      <line x1={0} y1={0} x2={w} y2={0} stroke={c} strokeWidth={sw * 0.6} opacity={0.45} />
+    </g>
+  );
+}
+
+// Дверь со створкой и дугой открывания (рисуется в проёме шириной w, толщина стены = h)
+export function DoorIcon({ it, k, swing, pivot, slide, accent, showArc = true }) {
+  const { w, color } = it;
+  const leaf = color || DG_THEME.wall;
+  const arc = DG_THEME.doorArc;
+  const sw = 1.4 * k;
+  if (slide) {
+    return (
+      <g pointerEvents="none">
+        <line x1={0} y1={0} x2={w} y2={0} stroke={leaf} strokeWidth={sw} />
+        <line x1={w * 0.15} y1={-w * 0.12} x2={w * 0.85} y2={-w * 0.12} stroke={accent || leaf} strokeWidth={sw * 0.8} strokeDasharray={`${6 * k} ${4 * k}`} />
+        <polygon points={`${w * 0.7},${-w * 0.06} ${w * 0.85},0 ${w * 0.7},${w * 0.06}`} fill={accent || leaf} />
+      </g>
+    );
+  }
+  if (swing) {
+    const hw = w / 2;
+    return (
+      <g pointerEvents="none">
+        <line x1={0} y1={0} x2={0} y2={-hw} stroke={leaf} strokeWidth={sw} />
+        <line x1={hw} y1={0} x2={hw} y2={-hw} stroke={leaf} strokeWidth={sw} />
+        {showArc && (
+          <>
+            <path d={`M 0 ${-hw} A ${hw} ${hw} 0 0 1 ${hw} 0`} fill="none" stroke={arc} strokeWidth={sw * 0.75} strokeDasharray={`${4 * k} ${3 * k}`} />
+            <path d={`M ${hw} ${-hw} A ${hw} ${hw} 0 0 0 ${hw} 0`} fill="none" stroke={arc} strokeWidth={sw * 0.75} strokeDasharray={`${4 * k} ${3 * k}`} />
+          </>
+        )}
+        <line x1={0} y1={0} x2={hw} y2={0} stroke={accent || leaf} strokeWidth={sw * 0.9} />
+      </g>
+    );
+  }
+  if (pivot) {
+    return (
+      <g pointerEvents="none">
+        <line x1={w / 2} y1={0} x2={w / 2} y2={-w * 0.45} stroke={leaf} strokeWidth={sw} />
+        {showArc && (
+          <>
+            <path d={`M 0 0 A ${w / 2} ${w / 2} 0 0 1 ${w} 0`} fill="none" stroke={arc} strokeWidth={sw * 0.7} strokeDasharray={`${4 * k} ${3 * k}`} />
+            <path d={`M 0 0 A ${w / 2} ${w / 2} 0 0 0 ${w} 0`} fill="none" stroke={arc} strokeWidth={sw * 0.7} strokeDasharray={`${4 * k} ${3 * k}`} />
+          </>
+        )}
+        <line x1={0} y1={0} x2={w} y2={0} stroke={accent || leaf} strokeWidth={sw * 0.85} />
+      </g>
+    );
+  }
+  return (
+    <g pointerEvents="none">
+      <line x1={0} y1={0} x2={0} y2={-w} stroke={leaf} strokeWidth={sw} />
+      {showArc && (
+        <path d={`M 0 ${-w} A ${w} ${w} 0 0 1 ${w} 0`} fill="none" stroke={arc} strokeWidth={sw * 0.75} strokeDasharray={`${4 * k} ${3 * k}`} />
+      )}
+      <line x1={w} y1={0} x2={0} y2={0} stroke={accent || leaf} strokeWidth={sw * 0.9} />
     </g>
   );
 }

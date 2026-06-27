@@ -43,10 +43,15 @@ conn
       await exec(
         conn,
         `ln -sf /etc/nginx/sites-available/daogreen-unified.conf /etc/nginx/sites-enabled/daogreen-unified.conf
+if [ -f /etc/letsencrypt/live/spec.nikita-daogreen.ru/fullchain.pem ]; then
+  certbot --nginx -d spec.nikita-daogreen.ru --non-interactive --agree-tos -m admin@nikita-daogreen.ru --redirect || true
+fi
 nginx -t && systemctl reload nginx
 systemctl restart daogreen-spec
 sleep 3
 curl -fsS http://127.0.0.1:3002/api/health
+echo
+curl -fsS https://spec.nikita-daogreen.ru/spec/api/health || echo HTTPS_CHECK_FAILED
 echo
 head -5 ${remoteRoot}/dist/index.html`
       );
