@@ -1,6 +1,10 @@
 node_modules/
 data/*.db
 data/*.db-*
+data/*.sqlite
+data/*.json
 uploads/*
 !.gitkeep
 .env
+.env.*
+!.env.example

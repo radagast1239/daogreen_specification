@@ -1,19 +1,37 @@
 node_modules
 dist
+build
 .DS_Store
 *.local
 .vite
+
+# Secrets and local env (keep *.example)
 .env
+.env.*
+!.env.example
 backend/.env
+!backend/.env.example
+
 backend/node_modules
 backend/data/*.db
 backend/data/*.db-*
+backend/data/*.sqlite
 backend/data/*.json
 backend/uploads/*
 !backend/uploads/.gitkeep
+uploads/
+!uploads/.gitkeep
+
 materials-photos/*
 !materials-photos/README.md
 !materials-photos/.gitkeep
+
 import-sources/
 backend/import-sources/
+
 tmp-*
+
+# Duplicate workspace copies (must not ship in archive)
+daogreen-spec 1/
+_planner-kits/
+_planner-specsync/
