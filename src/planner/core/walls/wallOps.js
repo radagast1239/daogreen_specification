@@ -35,14 +35,14 @@ export function planHasDrawnWalls(walls) {
   return (walls || []).some((w) => (w.pts?.length || 0) >= 2 || (w.a && w.b));
 }
 
-/** Рёбра a/b + plan.nodes → стены с pts для геометрии (без циклических импортов). */
+/** Рёбра a/b + plan.nodes → стены с pts для геометрии (без циклических импортов).
+ * Приоритет: network (a/b + nodes) > legacy (pts).
+ */
 export function resolveWallPtsList(walls, nodes = {}) {
   const nodeMap = nodes || {};
-  const hasNodes = Object.keys(nodeMap).length > 0;
   return (walls || [])
     .map((w) => {
-      if (w.pts?.length >= 2) return w;
-      if (hasNodes && w.a && w.b && nodeMap[w.a] && nodeMap[w.b]) {
+      if (w.a && w.b && nodeMap[w.a] && nodeMap[w.b]) {
         return {
           ...w,
           pts: [
@@ -51,6 +51,7 @@ export function resolveWallPtsList(walls, nodes = {}) {
           ],
         };
       }
+      if (w.pts?.length >= 2) return { ...w };
       return w;
     })
     .filter((w) => w.pts?.length >= 2);
