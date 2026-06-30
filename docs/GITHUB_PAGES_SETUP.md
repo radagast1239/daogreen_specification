@@ -1,53 +1,83 @@
-# GitHub Pages — почему 404 и как включить
+# GitHub Pages — настройка и типичные ошибки
 
-## Симптом
+## URL после успешного деплоя
 
-Открываете https://radagast1239.github.io/daogreen_specification/ — видите:
+**https://radagast1239.github.io/daogreen_specification/**
 
-> **404** — There isn't a GitHub Pages site here.
+---
 
-## Причина (проверено 2026-06-30)
+## Шаг 1 — включить Pages (Source: GitHub Actions)
 
-Workflow **Deploy GitHub Pages** запускается, job `build` **успешен**, job `deploy` **падает**:
+1. https://github.com/radagast1239/daogreen_specification/settings/pages
+2. **Build and deployment** → **Source** → **GitHub Actions**
+
+---
+
+## Шаг 2 — разрешить ветку `main` в environment `github-pages`
+
+Если в Actions видите:
 
 ```
-Failed to create deployment (status: 404)
-Ensure GitHub Pages has been enabled:
-https://github.com/radagast1239/daogreen_specification/settings/pages
+Branch "main" is not allowed to deploy to github-pages due to environment protection rules.
+The deployment was rejected or didn't satisfy other protection rules.
 ```
 
-API `GET /repos/.../pages` → **404** — Pages в репозитории **не включены**.
+Это **не ошибка кода** — сработали правила окружения `github-pages`.
 
-## Одноразовая настройка (2 минуты)
+### Исправление (1 минута)
 
-1. Откройте: https://github.com/radagast1239/daogreen_specification/settings/pages
+1. Откройте: https://github.com/radagast1239/daogreen_specification/settings/environments
+2. Нажмите **github-pages**
+3. Блок **Deployment branches and tags**:
+   - выберите **All branches** (проще всего), **или**
+   - **Selected branches and tags** → **Add branch or tag** → введите `main` → **Add**
+4. Блок **Environment protection rules** (если есть):
+   - **Required reviewers** — **выключите** (для личного репо не нужно), иначе каждый деплой ждёт ручного approve
+   - **Wait timer** — выключите
+5. **Save protection rules**
 
-2. **Build and deployment** → **Source** → выберите **GitHub Actions** (не «Deploy from a branch»).
+### Перезапуск деплоя
 
-3. Перезапустите деплой:
-   - https://github.com/radagast1239/daogreen_specification/actions/workflows/deploy-pages.yml
-   - **Run workflow** → branch `main` → Run
+https://github.com/radagast1239/daogreen_specification/actions/workflows/deploy-pages.yml  
+→ **Run workflow** → branch `main`
 
-4. (Опционально) Secret для API:
-   - Settings → Secrets and variables → Actions
-   - `VITE_API_URL` = `https://ваш-backend.onrender.com` (без `/` в конце)
-   - На backend в `CORS_ORIGIN` добавьте: `https://radagast1239.github.io`
+---
 
-## После успешного деплоя
+## Шаг 3 (опционально) — API для фронта
+
+1. Settings → Secrets and variables → Actions → **New repository secret**
+2. Имя: `VITE_API_URL`, значение: `https://ваш-backend.onrender.com` (без `/` в конце)
+3. На backend в `CORS_ORIGIN` добавьте: `https://radagast1239.github.io`
+
+---
+
+## Диагностика по логам
+
+| Ошибка | Причина | Решение |
+|--------|---------|---------|
+| `404` на github.io | Pages не включены или деплой не прошёл | Шаги 1–2 |
+| `Failed to create deployment (404)` | Source ≠ GitHub Actions | Шаг 1 |
+| `main is not allowed to deploy` | Environment protection | Шаг 2 |
+| `Required reviewers` / pending | Ждёт approve | Шаг 2, отключить reviewers |
+
+---
+
+## Ссылки
 
 | Что | URL |
 |-----|-----|
-| Приложение (фронт) | https://radagast1239.github.io/daogreen_specification/ |
+| Приложение | https://radagast1239.github.io/daogreen_specification/ |
 | CI / тесты | https://github.com/radagast1239/daogreen_specification/actions/workflows/ci.yml |
-| Деплой Pages | https://github.com/radagast1239/daogreen_specification/actions/workflows/deploy-pages.yml |
+| Деплой | https://github.com/radagast1239/daogreen_specification/actions/workflows/deploy-pages.yml |
+| Environment | https://github.com/radagast1239/daogreen_specification/settings/environments |
 
-Базовый путь сборки: `/daogreen_specification/` (см. `vite.config.js`, `GITHUB_PAGES=true`).
+Базовый путь сборки: `/daogreen_specification/` (`vite.config.js`, `GITHUB_PAGES=true`).
 
-## Локально без Pages
+## Локально
 
 ```bash
 npm install
 npm run dev
 ```
 
-→ http://localhost:5173 (нужен backend на :3001 для API).
+→ http://localhost:5173
