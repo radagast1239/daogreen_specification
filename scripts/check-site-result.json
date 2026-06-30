@@ -1,0 +1,14 @@
+{
+  "url": "http://62.233.35.206/spec/",
+  "errors": [
+    "CONSOLE: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "CONSOLE: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "CONSOLE: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "CONSOLE: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "CONSOLE: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "failed": [],
+  "title": "Daogreen — инструменты фермы",
+  "rootText": "Daogreen\nСПЕЦИФИКАЦИИ\nВход в спецификации\n\nКлюч из backend/.env (ADMIN_KEY).\n\nКлюч доступа\nВойти",
+  "rootHtml": "<div class=\"login-wrap\"><form class=\"card login-card\"><div class=\"brandmark\"><div class=\"spine\"></div><div><b>Daogreen</b><span style=\"color: var(--muted);\">спецификации</span></div></div><h2 style=\"margin: 0px 0px 8px;\">Вход в спецификации</h2><p class=\"muted\" style=\"font-size: 13px; margin-bottom: 20px;\">Ключ из <code>backend/.env</code> (ADMIN_KEY).</p><div class=\"field\"><label>Ключ доступа</label><input type=\"password\" value=\"\"></div><button class=\"btn btn-primary\" style=\"width: 100%; margin-top: 12px;\">Войти</button></form></div><div class=\"toast-stack\" aria-live=\"polite\"></div>"
+}

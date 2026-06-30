@@ -93,7 +93,7 @@ export function glyphFillOpacityForItem(it) {
   if (isRackKind(it.kind)) return 0.07;
   if (["tank", "tank_waste", "tank_acid"].includes(it.kind)) return 0.06;
   if (["sink_single", "sink_double", "sink_susp", "sink_table", "toilet", "shower_pan", "trap"].includes(it.kind)) {
-    return 0.05;
+    return 0.1;
   }
   if (["fridge", "freezer", "ac_indoor", "ac_out"].includes(it.kind)) return 0.06;
   return 0.05;

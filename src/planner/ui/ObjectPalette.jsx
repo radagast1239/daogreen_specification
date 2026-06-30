@@ -1,9 +1,13 @@
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  catalogForLayer, catalogByKind, RACK_PRESETS, LINE_STYLE,
-  layerById, LAYER_TOOLS, WALL_THK_PRESETS, ROOM_HEIGHT_PRESETS,
+  catalogForLayer, LINE_STYLE,
+  layerById, LAYER_TOOLS,
 } from "../catalog.js";
+import {
+  resolveCatalogKind, getWallThkPresets,
+} from "../plannerMaterialPresets.js";
+import { FARM_RACK_PRESETS } from "../farmObjects.js";
 
 const TOOL_DEFS = {
   select:  { icon: "↖", label: "Выбор" },
@@ -175,40 +179,20 @@ export function ObjectPalette({
 
         {active === "room" && (
           <div className="planner-side__section">
-            <div className="planner-side__title">Лист чертежа, мм</div>
+            <div className="planner-side__title">Параметры по умолчанию</div>
             <p className="planner-spec-intro" style={{ marginBottom: 10 }}>
-              Пустая сетка. Стены рисуйте инструментом <b>Стена</b> на листе «Перегородки».
+              Для новых стен. Можно изменить у каждой стены в свойствах.
             </p>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Ширина листа</label>
-                <input type="number" value={plan.room.w} onChange={(e) => onRoomPatch({ w: Math.max(500, +e.target.value || 0) })} />
+                <label>Толщина стены, мм</label>
+                <input type="number" min={0} value={plan.room.wallThk} onChange={(e) => onRoomPatch({ wallThk: Math.max(0, +e.target.value || 0) })} />
               </div>
               <div className="planner-field">
-                <label>Глубина листа</label>
-                <input type="number" value={plan.room.h} onChange={(e) => onRoomPatch({ h: Math.max(500, +e.target.value || 0) })} />
+                <label>Высота помещения, мм</label>
+                <input type="number" min={0} value={plan.room.height ?? 3000} onChange={(e) => onRoomPatch({ height: Math.max(0, +e.target.value || 0) })} />
               </div>
             </div>
-            <div className="planner-row">
-              <div className="planner-field">
-                <label>Толщина стены</label>
-                <input type="number" value={plan.room.wallThk} onChange={(e) => onRoomPatch({ wallThk: Math.max(40, +e.target.value || 0) })} />
-              </div>
-              <div className="planner-field">
-                <label>Высота помещения</label>
-                <select value={plan.room.height || 3000} onChange={(e) => onRoomPatch({ height: +e.target.value })}>
-                  {ROOM_HEIGHT_PRESETS.map((h) => <option key={h} value={h}>{h} мм</option>)}
-                </select>
-              </div>
-            </div>
-            <label className="planner-chk" style={{ marginTop: 8 }}>
-              <input
-                type="checkbox"
-                checked={!!plan.room.showBoundary}
-                onChange={(e) => onRoomPatch({ showBoundary: e.target.checked })}
-              />
-              Показать границу листа (пунктир)
-            </label>
           </div>
         )}
 
@@ -228,13 +212,13 @@ export function ObjectPalette({
             <div className="planner-field">
               <label>Толщина, мм</label>
               <div className="planner-presets">
-                {WALL_THK_PRESETS.map((t) => (
+                {getWallThkPresets().map((t) => (
                   <button key={t} type="button" className={"planner-preset" + (wallThk === t ? " planner-preset--on" : "")} onClick={() => onWallThk(t)}>
                     {t}
                   </button>
                 ))}
               </div>
-              <input type="number" value={wallThk} onChange={(e) => onWallThk(Math.max(40, +e.target.value || 0))} style={{ marginTop: 8 }} />
+              <input type="number" min={0} value={wallThk} onChange={(e) => onWallThk(Math.max(0, +e.target.value || 0))} style={{ marginTop: 8 }} />
             </div>
             {onSyncZones && (
               <button type="button" className="planner-btn" style={{ width: "100%", marginTop: 10 }} onClick={onSyncZones}>
@@ -242,7 +226,7 @@ export function ObjectPalette({
               </button>
             )}
             <p className="planner-spec-intro" style={{ marginTop: 10 }}>
-              Замкните контур перегородок — помещения появятся на листе «Помещения».
+              Замкните контур перегородок — помещения появятся автоматически (белая заливка пола).
             </p>
           </div>
         )}
@@ -260,31 +244,45 @@ export function ObjectPalette({
             <div className="planner-side__title">Каталог</div>
             <input className="planner-search" placeholder="Поиск объекта…" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 10 }} />
             <div className="planner-catalog">
-              {filtered.map((c) => (
-                <button
-                  key={c.kind}
-                  type="button"
-                  className={"planner-card" + (tool === "add" && pending === c.kind ? " planner-card--active" : "")}
-                  onClick={() => onPending(c.kind)}
-                >
-                  <div className="planner-card__icon">
-                    <span className="planner-card__icon-dot" style={{ background: c.color }} />
-                  </div>
-                  <div className="planner-card__body">
-                    <div className="planner-card__name">{c.label}</div>
-                    <div className="planner-card__meta">
-                      {c.w}×{c.h} мм
-                      {c.params?.tiers ? ` · ${c.params.tiers} ярусов` : ""}
+              {filtered.map((c) => {
+                const resolved = resolveCatalogKind(c.kind);
+                return (
+                  <button
+                    key={c.kind}
+                    type="button"
+                    className={"planner-card" + (tool === "add" && pending === c.kind ? " planner-card--active" : "")}
+                    onClick={() => onPending(c.kind, { w: resolved.w, h: resolved.h })}
+                  >
+                    <div className="planner-card__icon">
+                      <span className="planner-card__icon-dot" style={{ background: c.color }} />
                     </div>
-                  </div>
-                </button>
-              ))}
+                    <div className="planner-card__body">
+                      <div className="planner-card__name">{resolved.label}</div>
+                      <div className="planner-card__meta">
+                        {resolved.w}×{resolved.h} мм
+                        {c.params?.tiers ? ` · ${c.params.tiers} ярусов` : ""}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
             {active === "racks" && (
               <div className="planner-presets">
-                {RACK_PRESETS.map((r, i) => (
-                  <button key={i} type="button" className="planner-preset" onMouseDown={() => onPending("rack")}>
-                    {r.w}×{r.h}
+                {FARM_RACK_PRESETS.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className="planner-preset"
+                    onMouseDown={() => onPending("rack", {
+                      w: r.w,
+                      h: r.h,
+                      farmPresetId: r.id,
+                      rackType: r.rackType,
+                      label: r.name,
+                    })}
+                  >
+                    {r.name}
                   </button>
                 ))}
               </div>
@@ -294,8 +292,8 @@ export function ObjectPalette({
 
         {tool === "add" && pending && (
           <div className="planner-hint" style={{ marginTop: 12 }}>
-            Клик по плану — поставить «{catalogByKind(pending).label}»
-            {catalogByKind(pending).wall ? " (прилипнет к стене)" : ""}
+            Клик по плану — поставить «{resolveCatalogKind(pending).label}»
+            {resolveCatalogKind(pending).wall ? " (прилипнет к стене)" : ""}
           </div>
         )}
         {(tool === "line" || tool === "wall") && (
@@ -305,7 +303,7 @@ export function ObjectPalette({
         )}
         {tool === "label" && (
           <div className="planner-hint" style={{ marginTop: 12 }}>
-            Клик по объекту — выноска · по пустому — свободная подпись
+            1) Клик по объекту или точке на плане — якорь выноски · 2) текст и размер шрифта · Esc — отмена
           </div>
         )}
         {tool === "pan" && (

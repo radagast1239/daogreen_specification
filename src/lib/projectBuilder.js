@@ -7,7 +7,11 @@ import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
 import { blankLine, lineFromMaterial } from "./specLineCore.js";
 import { resolvePipeCuts, normalizePipeCuts } from "../../shared/profilePipeCuts.js";
 import { resolveBreakerSpecs, normalizeBreakerSpecs } from "../../shared/breakerSpecs.js";
-import { resolveFlowSpecs, normalizeFlowSpecs } from "../../shared/flowSpecs.js";
+import {
+  resolveFlowSpecs,
+  normalizeFlowSpecs,
+  resolveBuilderLineQty,
+} from "../../shared/flowSpecs.js";
 import { resolveSplitSpecs, normalizeSplitSpecs } from "../../shared/splitSpecs.js";
 import { patchMaterialModules, normalizeMaterialModules, primaryMaterialModule, materialInModule } from "../../shared/materialModules.js";
 import {
@@ -17,6 +21,8 @@ import {
   resolveMaterialFarmSections,
 } from "../../shared/materialFarmSections.js";
 import { resolveItemType } from "../../shared/itemTypes.js";
+import { isSplitSystemName } from "../../shared/splitSpecs.js";
+import { buildAcLineFromRoom, AC_ITEM_SECTION } from "../../shared/roomAcSpec.js";
 
 export { blankLine, lineFromMaterial };
 
@@ -208,7 +214,7 @@ export function buildProjectFromBuilder({
       })),
     });
     for (const line of activeLines(syncFastenersFromCrabs(st.items, materials))) {
-      const baseQty = Number(line.qty) || 0;
+      const baseQty = resolveBuilderLineQty(line);
       if (baseQty <= 0) continue;
       pushLine(
         { ...line, qty: Math.round(baseQty * stCount * 100) / 100 },
@@ -223,7 +229,7 @@ export function buildProjectFromBuilder({
       const sectionName = sec.sectionName || sec.name;
       const defaultResp = sec.defaultResponsible || "";
       for (const line of activeLines(syncFastenersFromCrabs(sec.items, materials))) {
-        if ((Number(line.qty) || 0) <= 0) continue;
+        if (resolveBuilderLineQty(line) <= 0) continue;
         pushLine(
           { ...line, responsible: line.responsible || defaultResp || undefined },
           sectionName
@@ -242,6 +248,25 @@ export function buildProjectFromBuilder({
     if (!room?.selectedItemId) continue;
     const it = items.find((i) => i.id === room.selectedItemId);
     if (it && !it.roomId) it.roomId = room.id;
+  }
+
+  const roomIdsWithAcItem = new Set(
+    items.filter((it) => isSplitSystemName(it.name) && it.roomId).map((it) => it.roomId)
+  );
+  for (const room of rooms || []) {
+    if (roomIdsWithAcItem.has(room.id)) continue;
+    const acLine = buildAcLineFromRoom(room);
+    if (!acLine) continue;
+    pushLine(
+      {
+        ...acLine,
+        included: true,
+        includedInProject: true,
+        visibleToClient: true,
+      },
+      AC_ITEM_SECTION,
+      { instanceId: room.id }
+    );
   }
 
   return {

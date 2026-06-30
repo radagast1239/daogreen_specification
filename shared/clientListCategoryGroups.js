@@ -8,7 +8,7 @@ function norm(s) {
     .trim();
 }
 
-/** Позиции из состава стеллажа — в «Списком» не выводим (см. «По разделам») */
+/** Модуль строки — состав стеллажа (Стеллаж 1, к стеллаж …) */
 export function isStellagePurchaseModule(item) {
   const mod = norm(item?.module);
   if (!mod) return false;
@@ -16,6 +16,14 @@ export function isStellagePurchaseModule(item) {
 }
 
 export const CLIENT_LIST_CATEGORY_GROUPS = [
+  {
+    id: "stellage",
+    label: "Стеллажи и каркас",
+    hint: "Каркас, лотки, крепёж и комплектация стеллажей. Одинаковые позиции с разных стеллажей объединены.",
+    match(item) {
+      return isStellagePurchaseModule(item);
+    },
+  },
   {
     id: "plumbing",
     label: "Сантехника",
@@ -109,7 +117,7 @@ export const CLIENT_LIST_CATEGORY_GROUPS = [
 ];
 
 export function resolveListCategoryGroupId(item) {
-  if (!item || isStellagePurchaseModule(item)) return null;
+  if (!item) return null;
   for (const g of CLIENT_LIST_CATEGORY_GROUPS) {
     if (g.match(item)) return g.id;
   }

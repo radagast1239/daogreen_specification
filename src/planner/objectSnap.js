@@ -2,6 +2,11 @@
  * Привязка объектов к сетке, стенам, краям и центрам соседей.
  */
 
+import { planHasDrawnWalls, wallSegments } from "./wallGeometry.js";
+import { isRackKind } from "./rackProperties.js";
+
+const SNAP_STICKY_RELEASE = 1.65;
+
 export function snapDistanceMm(zoom, snapDistancePx = 10) {
   return snapDistancePx / Math.max(zoom, 0.05);
 }
@@ -23,14 +28,29 @@ function collectSnapLines({
     H.push(innerBounds.t, innerBounds.b);
   }
 
-  if (room && snapWalls) {
+  if (room && snapWalls && !planHasDrawnWalls(walls)) {
     const t = room.wallThk / 2;
     V.push(t, room.w - t);
     H.push(t, room.h - t);
   }
 
-  if (snapWalls) {
+  if (snapWalls && planHasDrawnWalls(walls)) {
+    wallSegments(walls).forEach((seg) => {
+      const half = (seg.thk || 100) / 2;
+      const a = seg.a;
+      const b = seg.b;
+      if (Math.abs(b.x - a.x) < 2) {
+        V.push(a.x - half, a.x + half);
+      } else if (Math.abs(b.y - a.y) < 2) {
+        H.push(a.y - half, a.y + half);
+      } else {
+        V.push(a.x, b.x);
+        H.push(a.y, b.y);
+      }
+    });
+  } else if (snapWalls) {
     walls.forEach((w) => {
+      if (!w.pts?.length) return;
       w.pts.forEach((p) => {
         V.push(p.x);
         H.push(p.y);
@@ -49,6 +69,8 @@ function collectSnapLines({
   if (snapObjects) {
     items.forEach((it) => {
       if (it.id === obj.id) return;
+      // Стеллажи выравниваются отдельно (snapRackNeighbor), иначе центры/края конфликтуют.
+      if (isRackKind(obj.kind) && isRackKind(it.kind)) return;
       V.push(it.x, it.x + it.w / 2, it.x + it.w);
       H.push(it.y, it.y + it.h / 2, it.y + it.h);
     });
@@ -86,12 +108,20 @@ export function snapObjectPosition({
   snapDistancePx = 10,
   innerBounds = null,
   gridSnap = (v) => v,
+  sticky = null,
 }) {
   if (!snapOn) {
     return { x: gridSnap(x), y: gridSnap(y), guides: [] };
   }
 
   const thr = snapDistanceMm(zoom, snapDistancePx);
+  const releaseThr = thr * SNAP_STICKY_RELEASE;
+  if (sticky?.atX != null && Math.abs(x - sticky.atX) <= releaseThr) {
+    x = sticky.x;
+  }
+  if (sticky?.atY != null && Math.abs(y - sticky.atY) <= releaseThr) {
+    y = sticky.y;
+  }
   const { V, H } = collectSnapLines({
     items,
     walls,
@@ -119,6 +149,10 @@ export function snapObjectPosition({
 
   if (vb) {
     nx = x + vb.off;
+    if (sticky) {
+      sticky.x = nx;
+      sticky.atX = x;
+    }
     if (snapGuides) {
       guides.push({
         type: "V",
@@ -129,10 +163,18 @@ export function snapObjectPosition({
     }
   } else if (snapGrid) {
     nx = gridSnap(x);
+    if (sticky) {
+      sticky.x = null;
+      sticky.atX = null;
+    }
   }
 
   if (hb) {
     ny = y + hb.off;
+    if (sticky) {
+      sticky.y = ny;
+      sticky.atY = y;
+    }
     if (snapGuides) {
       guides.push({
         type: "H",
@@ -143,6 +185,10 @@ export function snapObjectPosition({
     }
   } else if (snapGrid) {
     ny = gridSnap(y);
+    if (sticky) {
+      sticky.y = null;
+      sticky.atY = null;
+    }
   }
 
   return { x: nx, y: ny, guides };

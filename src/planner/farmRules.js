@@ -178,14 +178,14 @@ export function collectFarmWarnings(plan) {
 
 export const PDF_LEGEND = [
   { icon: "rack_nft", label: "Стеллаж NFT", color: "#116355" },
-  { icon: "tank_round", label: "Ёмкость полива", color: "#1f6f8b" },
-  { icon: "pump_inline", label: "Насос", color: "#1f6f8b" },
+  { icon: "tank_rect", label: "Ёмкость", color: "#116355" },
+  { icon: "pump_station", label: "Насосная станция", color: "#116355" },
   { icon: "panel", label: "Электрощит", color: "#a5371f" },
   { icon: "socket", label: "Розетка", color: "#a5371f" },
   { icon: "dezmat", label: "Дизковрик", color: "#9c6b9c" },
   { icon: "tank_waste", label: "Бак для мусора", color: "#6d5c52" },
   { icon: "door", label: "Дверь / проём", color: "#2f3431" },
-  { icon: "sink_single", label: "Раковина", color: "#1f6f8b" },
+  { icon: "sink_single", label: "Раковина", color: "#116355" },
   { icon: "vent", label: "Вентиляция", color: "#6b7d74" },
   { icon: "ac_indoor", label: "Кондиционер", color: "#5b7c9d" },
 ];

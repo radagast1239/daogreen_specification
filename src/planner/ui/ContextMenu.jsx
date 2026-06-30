@@ -84,13 +84,16 @@ export function buildObjectMenu(obj, coll, opts = {}) {
     ];
   }
   if (coll === "zones") {
+    const auto = obj?.auto !== false;
     return [
       { id: "rename", label: "Переименовать" },
-      { id: "delete", label: "Удалить помещение", danger: true },
+      ...(auto ? [] : [{ id: "delete", label: "Удалить помещение", danger: true }]),
     ];
   }
   if (coll === "items") {
     const base = [
+      { id: "item-dims", label: obj.dimensions?.display === false ? "Показать размеры" : "Скрыть размеры" },
+      { sep: true, id: "s-dims" },
       { id: "group", label: obj.groupId ? "Перегруппировать" : "Сгруппировать (Ctrl+G)", disabled: opts.multiCount === 1 && !obj.groupId },
       { id: "ungroup", label: "Разгруппировать", disabled: !obj.groupId },
       { sep: true, id: "s0" },
@@ -124,6 +127,7 @@ export function buildObjectMenu(obj, coll, opts = {}) {
       base.splice(4, 0,
         ...linkItems,
         { sep: true, id: "s-rack-links" },
+        { id: "rack-add-light", label: "Добавить свет на стеллаж" },
         { id: "rack-row", label: "Создать ряд…" },
         { id: "rack-grid", label: "Сетка стеллажей…" },
         { id: "rack-auto-num", label: "Пронумеровать все стеллажи" },

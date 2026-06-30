@@ -14,21 +14,21 @@ export const ZONE_VIS = {
 export const SERVICE_ZONE_PROFILES = {
   rack: {
     label: "Стеллаж",
-    defaults: { enabled: true, front: 900, back: 700, left: 250, right: 250, access: 900 },
+    defaults: { enabled: false, front: 900, back: 700, left: 250, right: 250, access: 900 },
     hints: { front: "Проход спереди", back: "Проход сзади", left: "Зазор от стены", right: "Зазор от стены" },
   },
   seed_rack: {
     label: "Рассадный стеллаж",
-    defaults: { enabled: true, front: 800, back: 600, left: 250, right: 250, access: 800 },
+    defaults: { enabled: false, front: 800, back: 600, left: 250, right: 250, access: 800 },
     hints: { front: "Проход спереди", back: "Проход сзади" },
   },
   shelf_cons: {
     label: "Стеллаж расходников",
-    defaults: { enabled: true, front: 700, back: 500, left: 200, right: 200, access: 700 },
+    defaults: { enabled: false, front: 700, back: 500, left: 200, right: 200, access: 700 },
   },
   shelf_inv: {
     label: "Стеллаж инвентаря",
-    defaults: { enabled: true, front: 700, back: 500, left: 200, right: 200, access: 700 },
+    defaults: { enabled: false, front: 700, back: 500, left: 200, right: 200, access: 700 },
   },
   tank: {
     label: "Бак",
@@ -40,9 +40,9 @@ export const SERVICE_ZONE_PROFILES = {
     defaults: { enabled: true, front: 600, back: 500, left: 400, right: 400, access: 700 },
   },
   pump: {
-    label: "Насос",
-    defaults: { enabled: true, front: 600, back: 500, left: 400, right: 400, access: 600 },
-    hints: { front: "Доступ к насосу" },
+    label: "Насосная станция",
+    defaults: { enabled: true, front: 800, back: 700, left: 500, right: 500, access: 800 },
+    hints: { front: "Доступ к насосной" },
   },
   osmosis: {
     label: "Осмос",
@@ -195,12 +195,23 @@ export function defaultServiceZoneForKind(kind) {
   return { enabled: false, front: 0, back: 0, left: 0, right: 0, access: 0 };
 }
 
+/** Слитые настройки зоны объекта (сохранённые + профиль по kind). */
+export function resolveServiceZone(it) {
+  return { ...defaultServiceZoneForKind(it.kind), ...(it.serviceZone || {}) };
+}
+
+/** Показывать зону на плане для этого объекта (без учёта глобального слоя). */
+export function isServiceZoneEnabled(it) {
+  return resolveServiceZone(it).enabled !== false;
+}
+
 /** Все зоны объекта: прямоугольники и полигоны. */
 export function serviceZoneElements(it) {
   if (isDoorKind(it.kind)) {
-    if (it.serviceZone?.enabled === false) return [];
+    const sz = resolveServiceZone(it);
+    if (sz.enabled === false) return [];
     if (it.kind === "door_slide") return [];
-    if (!DOOR_KINDS_WITH_SWING.has(it.kind) && it.serviceZone?.swing === false) return [];
+    if (!DOOR_KINDS_WITH_SWING.has(it.kind) && sz.swing === false) return [];
     const poly = doorSwingPolygon(it);
     if (poly.length < 3) return [];
     const xs = poly.map((p) => p.x);
@@ -216,8 +227,8 @@ export function serviceZoneElements(it) {
     }];
   }
 
-  const sz = it.serviceZone;
-  if (!sz?.enabled) return [];
+  const sz = resolveServiceZone(it);
+  if (!sz.enabled) return [];
 
   const access = Math.max(it.accessZoneMm || 0, sz.access || 0);
   const out = [];

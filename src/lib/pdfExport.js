@@ -4,8 +4,10 @@ import QRCode from "qrcode";
 import { money, num } from "../store/helpers.js";
 import { lineGross } from "./itemHelpers.js";
 import { absolutePhotoUrl } from "./photoHelpers.js";
+import { loadPdfImage, buildPdfPhotoMap, pdfPhotoTableHooks, itemRowPhotoUrl } from "./pdfImageHelpers.js";
 import { PDF_COLUMN_OPTIONS } from "./clientBrandConfig.js";
 import { PURCHASE_STATUSES } from "../data/modules.js";
+import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdfFontSetup.js";
 
 const COLUMN_LABELS = Object.fromEntries(PDF_COLUMN_OPTIONS.map((c) => [c.id, c.label]));
 
@@ -16,20 +18,8 @@ function hexToRgb(hex) {
 }
 
 async function loadImageDataUrl(url) {
-  if (!url) return null;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
-  }
+  const img = await loadPdfImage(url);
+  return img?.dataUrl || null;
 }
 
 function cellValue(col, it, project, purchaseStatuses) {
@@ -65,11 +55,13 @@ function cellValue(col, it, project, purchaseStatuses) {
 
 export async function generateProjectPdf({ project, items, branding = {}, purchaseStatuses, pageUrl }) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  await setupPdfFonts(doc);
   const brand = branding.brandColor || "#116355";
   const [r, g, b] = hexToRgb(brand);
   const cols = branding.pdfColumns?.length ? branding.pdfColumns : ["name", "qty", "unit", "price", "sum", "supplier"];
-  const head = cols.map((c) => COLUMN_LABELS[c] || c);
-  const body = items.map((it) => cols.map((c) => cellValue(c, it, project, purchaseStatuses)));
+  const head = ["Фото", ...cols.map((c) => COLUMN_LABELS[c] || c)];
+  const photoMap = await buildPdfPhotoMap(items, itemRowPhotoUrl, {});
+  const body = items.map((it) => ["", ...cols.map((c) => cellValue(c, it, project, purchaseStatuses))]);
 
   let headerY = 28;
   const logoUrl = absolutePhotoUrl(branding.logoUrl);
@@ -100,8 +92,10 @@ export async function generateProjectPdf({ project, items, branding = {}, purcha
     startY: headerY + 14,
     head: [head],
     body,
-    styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: [r, g, b] },
+    styles: { fontSize: 8, cellPadding: 2, ...pdfTableFontStyles() },
+    headStyles: { fillColor: [r, g, b], ...pdfTableHeadFontStyles() },
+    columnStyles: { 1: { cellWidth: 52 } },
+    ...pdfPhotoTableHooks(photoMap, 0),
   });
 
   const footer = branding.pdfFooter?.trim();

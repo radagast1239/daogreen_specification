@@ -35,6 +35,7 @@ import FloorPlanPin from "../../components/FloorPlanPin.jsx";
 import { defaultRooms, isFarmGeneralItem, roomLabel } from "../../lib/roomHelpers.js";
 import RoomCoolingSummary from "../../components/RoomCoolingSummary.jsx";
 import RoomCoolingEditor from "../../components/RoomCoolingEditor.jsx";
+import { syncRoomAcSpecItems } from "../../../shared/roomAcSync.js";
 import ReplacementReviewModal from "../../components/ReplacementReviewModal.jsx";
 import { findStaleProjectPrices } from "../../../shared/staleProjectPrices.js";
 import ActivityFeed from "../../components/ActivityFeed.jsx";
@@ -191,7 +192,10 @@ export default function SpecEditorPage() {
       refreshPublishCheck();
     });
 
-  const saveRooms = (rooms) => actions.projectUpdate(project.id, { rooms });
+  const saveRooms = async (rooms) => {
+    await actions.projectUpdate(project.id, { rooms });
+    await syncRoomAcSpecItems({ ...project, rooms }, rooms, actions);
+  };
 
   const saveManualParam = (key, value) => {
     const mp = project.manualParams && typeof project.manualParams === "object" ? project.manualParams : {};
@@ -928,9 +932,7 @@ function SpecTab({
             <RoomsEditor rooms={rooms} onChange={(next) => saveRooms(next)} compact />
             <RoomCoolingEditor
               rooms={rooms}
-              items={project.items}
               onChange={(next) => saveRooms(next)}
-              onLinkItem={(itemId, patch) => patchItem(itemId, patch)}
             />
           </div>
         )}

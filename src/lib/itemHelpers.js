@@ -89,7 +89,10 @@ export function applyMergedPurchaseFilter(rows, filterId) {
   return (rows || []).filter((row) => {
     const items = row.sourceItems || [];
     if (filterId === "todo") return items.some((i) => !isPurchaseClosed(i));
-    if (filterId === "bought") return items.every((i) => isPurchaseClosed(i));
+    if (filterId === "closed" || filterId === "bought") {
+      return items.some((i) => isClosedPurchaseStatus(i.status));
+    }
+    if (filterId === "ordered") return items.some((i) => i.status === "ordered");
     return items.some((i) => i.status === filterId);
   });
 }

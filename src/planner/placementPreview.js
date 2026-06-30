@@ -1,8 +1,14 @@
 import { catalogByKind, clamp } from "./catalog.js";
+import { resolveCatalogKind } from "./plannerMaterialPresets.js";
 import { pointInPolygon } from "./wallGeometry.js";
 import { zoneForItem } from "./farmRules.js";
 import { isStrictWallItem } from "./doorTypes.js";
 import { attachItemZoneFields } from "./roomZones.js";
+import { itemHitsAnyStructural } from "./structuralGeometry.js";
+import { structuralBlocksPlacement } from "./structuralTypes.js";
+import { resolveWallPtsList } from "./wallGeometry.js";
+import { itemOverlapsAnyWall } from "./wallCollision.js";
+import { itemOverlapsBlocked, overlapConflictLabel } from "./itemOverlap.js";
 
 function zonePolygon(z) {
   if (z.polygon?.length >= 3) return z.polygon;
@@ -31,7 +37,7 @@ export function computeItemPlacement({
   innerT,
   innerB,
 }) {
-  const c = catalogByKind(kind);
+  const c = resolveCatalogKind(kind);
   if (!c) {
     return { valid: false, blocking: true, warning: "Неизвестный тип", item: null, guides: [] };
   }
@@ -55,9 +61,9 @@ export function computeItemPlacement({
         warning: placed?.error || (isStrictWallItem(c.kind) ? "Только на стене" : "Нет стены рядом"),
         item: {
           kind: c.kind,
-          icon: c.icon,
+          icon: size?.icon ?? c.icon,
           layer: c.layer,
-          label: c.label,
+          label: size?.label ?? c.label,
           color: c.color,
           w: iw,
           h: ih,
@@ -92,9 +98,9 @@ export function computeItemPlacement({
 
   let item = {
     kind: c.kind,
-    icon: c.icon,
+    icon: size?.icon ?? c.icon,
     layer: c.layer,
-    label: c.label,
+    label: size?.label ?? c.label,
     color: c.color,
     w: iw,
     h: ih,
@@ -122,6 +128,26 @@ export function computeItemPlacement({
     }
   } else {
     item = attachItemZoneFields(plan, item);
+  }
+
+  const structurals = (plan.structurals || []).filter(structuralBlocksPlacement);
+  if (structurals.length && itemHitsAnyStructural(item, structurals)) {
+    valid = false;
+    blocking = true;
+    warning = "Зона ригеля / бордюра / колонны";
+  }
+
+  if (itemOverlapsAnyWall(item, resolveWallPtsList(plan.walls, plan.nodes))) {
+    valid = false;
+    blocking = true;
+    warning = warning || "Объект внутри стены";
+  }
+
+  const overlap = itemOverlapsBlocked(item, plan.items);
+  if (overlap.blocked) {
+    valid = false;
+    blocking = true;
+    warning = `Пересечение с «${overlapConflictLabel(overlap.conflicting)}»`;
   }
 
   return { valid, blocking, warning, item, guides };

@@ -101,6 +101,15 @@ input, select, textarea {
   padding: 8px 10px; background: var(--paper); width: 100%;
 }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand-tint-2); border-color: var(--brand); }
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  min-width: 1rem;
+  flex-shrink: 0;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--brand);
+}
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field label { font-size: 12px; font-weight: 600; color: var(--muted); }
 .input-inline { padding: 4px 7px; font-size: 13px; }
@@ -911,6 +920,12 @@ body.nav-open { overflow: hidden; }
   gap: 6px;
   align-items: center;
 }
+.client-topbar__toggle {
+  display: none;
+  flex-shrink: 0;
+  min-width: 36px;
+  padding: 6px 10px;
+}
 .client-topbar__foot {
   display: flex;
   align-items: center;
@@ -945,6 +960,29 @@ body.nav-open { overflow: hidden; }
   font-weight: 600;
 }
 .client-purchase-panel { margin-top: 4px; }
+.client-purchase-show-bought {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  width: auto;
+  max-width: 100%;
+  font-size: 13px;
+  line-height: 1.35;
+  cursor: pointer;
+  user-select: none;
+}
+.client-purchase-filters .client-purchase-show-bought {
+  margin-left: auto;
+}
+.client-purchase-show-bought input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+.client-purchase-filters__count {
+  flex-shrink: 0;
+  font-size: 13px;
+}
 .client-guide {
   margin: 0 0 14px;
   padding: 14px 16px;
@@ -1009,6 +1047,75 @@ body.nav-open { overflow: hidden; }
 }
 .client-guide__steps li { margin-bottom: 6px; }
 .client-guide__steps li:last-child { margin-bottom: 0; }
+
+.client-pdf-export-options {
+  display: grid;
+  gap: 10px;
+}
+.client-pdf-export-option {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  margin: 0;
+  cursor: pointer;
+  border: 2px solid var(--line);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.client-pdf-export-option input {
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+.client-pdf-export-option--active {
+  border-color: var(--client-brand, var(--brand));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--client-brand, var(--brand)) 35%, transparent);
+}
+.client-pdf-export-option--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.client-pdf-export-option__body {
+  flex: 1;
+  min-width: 0;
+}
+.client-pdf-export-option__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.client-pdf-export-option__stat {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--client-brand, var(--brand));
+  margin-bottom: 6px;
+}
+.client-pdf-export-option__summary {
+  font-size: 13px;
+  margin: 0;
+  color: var(--ink);
+}
+.client-pdf-export-option__detail {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.client-pdf-export-option__detail p:first-child {
+  margin-top: 0;
+}
+.client-pdf-export-note {
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--amber) 12%, var(--surface));
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--amber);
+}
+
 .client-purchase-modes--sub {
   padding-top: 4px;
   border-top: 1px dashed var(--line);
@@ -1136,8 +1243,25 @@ body.nav-open { overflow: hidden; }
   .main-inner { padding: 60px 14px 36px; max-width: none; }
   .page-head h1 { font-size: 19px; }
   .client-hero { padding: 18px 16px; }
-  .client-topbar { top: 0; padding: 10px 12px; }
-  .client-topbar__foot { flex-direction: column; align-items: stretch; }
+  .client-topbar { position: static; top: auto; padding: 8px 10px; margin-bottom: 10px; }
+  .client-topbar__toggle { display: inline-flex; }
+  .client-topbar--compact .client-topbar__foot,
+  .client-topbar--compact .client-topbar__eyebrow,
+  .client-topbar--compact .client-topbar__sub,
+  .client-topbar--compact .client-topbar__actions {
+    display: none;
+  }
+  .client-topbar--compact .client-topbar__title {
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .client-topbar--compact .client-topbar__brand {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .client-topbar--expanded .client-topbar__foot { flex-direction: column; align-items: stretch; }
   .client-topbar__progress-mini { max-width: none; }
   .client-topbar__actions { width: 100%; }
   .client-topbar__actions {
@@ -1158,13 +1282,17 @@ body.nav-open { overflow: hidden; }
     font-size: 12px;
   }
   .client-purchase-toolbar {
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
   }
-  .client-purchase-toolbar__search,
+  .client-purchase-toolbar__search {
+    width: auto;
+    max-width: min(100%, 34ch);
+  }
   .client-purchase-toolbar__sort {
     max-width: none;
-    width: 100%;
+    width: auto;
   }
   .client-view-toggles {
     margin-left: 0;
@@ -1966,9 +2094,11 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   margin: 12px 0 8px;
 }
 .client-purchase-toolbar__search {
-  flex: 1 1 180px;
-  max-width: 280px;
-  min-width: 0;
+  width: auto;
+  flex: 0 1 auto;
+  min-width: 12ch;
+  max-width: min(100%, 34ch);
+  field-sizing: content;
 }
 .client-purchase-toolbar__sort {
   width: auto;

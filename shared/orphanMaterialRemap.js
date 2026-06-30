@@ -32,6 +32,12 @@ export const LEGACY_MATERIAL_ID_MAP = {
   m165: "m164",
   m167: "m168",
   m177: "m121",
+  m111: "m121",
+  m172: "m121",
+  m124: "m143",
+  m125: "m129",
+  m126: "m129",
+  m131: "m132",
 };
 
 export function normMaterialName(s) {
@@ -73,6 +79,18 @@ export function findMaterialByName(name, materials) {
     }
   }
   return best;
+}
+
+export function resolveOrphanMaterialIdStrict(oldId, name, materials, materialIds) {
+  if (!oldId) return null;
+  if (materialIds.has(oldId)) return oldId;
+  if (LEGACY_MATERIAL_ID_MAP[oldId] && materialIds.has(LEGACY_MATERIAL_ID_MAP[oldId])) {
+    return LEGACY_MATERIAL_ID_MAP[oldId];
+  }
+  const n = normMaterialName(name);
+  if (!n) return null;
+  const exact = materials.find((m) => normMaterialName(m.name) === n);
+  return exact?.id && materialIds.has(exact.id) ? exact.id : null;
 }
 
 /** @returns {string|null} новый id или null если не найден */

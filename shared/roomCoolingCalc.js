@@ -34,7 +34,11 @@ export function enrichRooms(rooms) {
   return (rooms || []).map(enrichRoom);
 }
 
+import { aggregateSplitCoolingKw, resolveSplitSpecs } from "./splitSpecs.js";
+
 export function actualCoolingFromItem(item) {
   if (!item) return 0;
+  const fromSplit = aggregateSplitCoolingKw(resolveSplitSpecs(item));
+  if (fromSplit > 0) return fromSplit;
   return Number(item.coolingKw) || 0;
 }

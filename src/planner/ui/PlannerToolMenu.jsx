@@ -1,8 +1,17 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { layerById, WALL_THK_PRESETS, ROOM_HEIGHT_PRESETS } from "../catalog.js";
-import { resolveTool, filterToolGroups } from "../plannerTools.js";
+import { layerById } from "../catalog.js";
+import { getWallThkPresets } from "../plannerMaterialPresets.js";
+import { resolveTool, filterToolGroups, isImplementedTool } from "../plannerTools.js";
 import { sheetById } from "../plannerSheets.js";
+import { WALL_TOOL_PRESETS } from "../wallToolPresets.js";
+import { WALL_KINDS } from "../wallTypes.js";
+
+function toolWallColor(toolId) {
+  const preset = WALL_TOOL_PRESETS[toolId];
+  if (!preset?.kind) return null;
+  return WALL_KINDS[preset.kind]?.color || null;
+}
 
 function ToolRow({ tool, activeToolId, onPick, depth = 0 }) {
   const [subOpen, setSubOpen] = useState(false);
@@ -10,6 +19,11 @@ function ToolRow({ tool, activeToolId, onPick, depth = 0 }) {
   const isActive = activeToolId === tool.id;
 
   if (hasChildren) {
+    const visibleChildren = tool.children.filter((cid) => {
+      const child = resolveTool(cid);
+      return child && (child.children?.length || isImplementedTool(child));
+    });
+    if (!visibleChildren.length) return null;
     return (
       <div className={"planner-menu-group" + (subOpen ? " planner-menu-group--open" : "")}>
         <button
@@ -23,7 +37,7 @@ function ToolRow({ tool, activeToolId, onPick, depth = 0 }) {
         </button>
         {subOpen && (
           <div className="planner-menu-submenu">
-            {tool.children.map((cid) => {
+            {visibleChildren.map((cid) => {
               const child = resolveTool(cid);
               if (!child) return null;
               return (
@@ -42,6 +56,10 @@ function ToolRow({ tool, activeToolId, onPick, depth = 0 }) {
     );
   }
 
+  if (!isImplementedTool(tool)) return null;
+
+  const wallColor = tool.mode === "wall" ? toolWallColor(tool.id) : null;
+
   return (
     <button
       type="button"
@@ -50,8 +68,14 @@ function ToolRow({ tool, activeToolId, onPick, depth = 0 }) {
       style={{ paddingLeft: 12 + depth * 10 }}
       title={tool.hint}
     >
+      {wallColor && (
+        <span
+          className="planner-menu-item__swatch"
+          style={{ background: wallColor }}
+          aria-hidden
+        />
+      )}
       <span>{tool.label}</span>
-      {tool.mode === "placeholder" && <span className="planner-menu-item__tag">скоро</span>}
     </button>
   );
 }
@@ -88,14 +112,16 @@ export function PlannerToolMenu({
     return false;
   };
 
-  if (sheetId === "spec") {
+  if (sheetId === "specification" || sheetId === "spec") {
     const specObjects = (plan.items || []).filter((it) => it.includedInProject !== false);
     return (
       <div className="planner-tool-menu">
         <p className="planner-spec-intro">
           {onSync
-            ? "Лист спецификации формируется из объектов плана."
-            : "Черновик — синхронизация доступна в плане проекта."}
+            ? (projectId
+              ? "Лист спецификации формируется из объектов плана."
+              : "Сформируйте позиции из черновика. Для записи в таблицу привяжите план к проекту.")
+            : "Синхронизация недоступна."}
         </p>
         {specSummary && (
           <ul className="planner-spec-stats">
@@ -135,7 +161,7 @@ export function PlannerToolMenu({
       {groups.map((group) => {
         const tools = (group.tools || [])
           .map((id) => resolveTool(id))
-          .filter((t) => t && matchSearch(t));
+          .filter((t) => t && matchSearch(t) && (t.children?.length || isImplementedTool(t)));
         if (!tools.length) return null;
         return (
           <section key={group.id} className="planner-tool-menu__section">
@@ -149,37 +175,20 @@ export function PlannerToolMenu({
         );
       })}
 
-      {sheetId === "source" && (
-        <section className="planner-tool-menu__section">
-          <div className="planner-side__title">Лист, мм</div>
-          <div className="planner-row">
-            <div className="planner-field">
-              <label>Ширина</label>
-              <input type="number" value={plan.room.w} onChange={(e) => onRoomPatch?.({ w: Math.max(500, +e.target.value || 0) })} />
-            </div>
-            <div className="planner-field">
-              <label>Глубина</label>
-              <input type="number" value={plan.room.h} onChange={(e) => onRoomPatch?.({ h: Math.max(500, +e.target.value || 0) })} />
-            </div>
-          </div>
-          <div className="planner-field">
-            <label>Высота</label>
-            <select value={plan.room.height || 3000} onChange={(e) => onRoomPatch?.({ height: +e.target.value })}>
-              {ROOM_HEIGHT_PRESETS.map((h) => <option key={h} value={h}>{h} мм</option>)}
-            </select>
-          </div>
-        </section>
-      )}
-
       {sheetId === "partitions" && (
         <section className="planner-tool-menu__section">
           <div className="planner-side__title">Толщина, мм</div>
           <div className="planner-presets">
-            {WALL_THK_PRESETS.map((t) => (
+            {getWallThkPresets().map((t) => (
               <button key={t} type="button" className={"planner-preset" + (wallThk === t ? " planner-preset--on" : "")} onClick={() => onWallThk?.(t)}>
                 {t}
               </button>
             ))}
+          </div>
+          <input type="number" min={0} value={wallThk} onChange={(e) => onWallThk?.(Math.max(0, +e.target.value || 0))} style={{ marginTop: 8, width: "100%" }} />
+          <div className="planner-field" style={{ marginTop: 10 }}>
+            <label>Высота помещения, мм</label>
+            <input type="number" min={0} value={plan.room.height ?? 3000} onChange={(e) => onRoomPatch?.({ height: Math.max(0, +e.target.value || 0) })} />
           </div>
           {onSyncZones && (
             <button type="button" className="planner-btn planner-tool-menu__cta" onClick={onSyncZones}>
@@ -193,7 +202,7 @@ export function PlannerToolMenu({
         <div className="planner-hint">Клик по плану — поставить объект</div>
       )}
       {(tool === "line" || tool === "wall") && !embedded && (
-        <div className="planner-hint">Клик — точки · Enter — завершить · Shift — 90°</div>
+        <div className="planner-hint">Клик — точки · Enter — завершить · Esc — отмена · Backspace — шаг назад · Shift — 90° · Alt — без snap · R — реверс потока</div>
       )}
     </div>
   );

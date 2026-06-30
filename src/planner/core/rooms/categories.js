@@ -1,0 +1,85 @@
+export const ROOM_CATEGORIES = [
+  "production_main",
+  "production_seedling",
+  "microgreens",
+  "nursery",
+  "manipulation",
+  "packing",
+  "storage_clean",
+  "storage_dirty",
+  "cold_room",
+  "water_treatment",
+  "irrigation_room",
+  "electrical_room",
+  "climate_room",
+  "staff_room",
+  "sanitary_lock",
+  "shower",
+  "toilet",
+  "corridor",
+  "loading",
+  "waste",
+  "technical",
+  "quarantine",
+  "other",
+];
+
+export const ROOM_CATEGORY_LABELS = {
+  production_main: "Производство",
+  production_seedling: "Рассадная",
+  microgreens: "Микрозелень",
+  nursery: "Нерест/Nursery",
+  manipulation: "Манипуляционная",
+  packing: "Упаковка",
+  storage_clean: "Чистый склад",
+  storage_dirty: "Грязный склад",
+  cold_room: "Холодильная",
+  water_treatment: "Водоподготовка",
+  irrigation_room: "Полив/ирригация",
+  electrical_room: "Электрощитовая",
+  climate_room: "Климатическая",
+  staff_room: "Комната персонала",
+  sanitary_lock: "Санпропускник",
+  shower: "Душевая",
+  toilet: "Туалет",
+  corridor: "Коридор",
+  loading: "Погрузка",
+  waste: "Отходы",
+  technical: "Техническая",
+  quarantine: "Карантин",
+  other: "Прочее",
+};
+
+export const ROOM_CATEGORY_COLORS = {
+  production_main: "#dff4e8",
+  production_seedling: "#e6f7ef",
+  microgreens: "#e8f8ee",
+  nursery: "#e9f6ed",
+  manipulation: "#f6efe2",
+  packing: "#f7f2e8",
+  storage_clean: "#edf6ed",
+  storage_dirty: "#f7efe8",
+  cold_room: "#e6f2fb",
+  water_treatment: "#e3f1fb",
+  irrigation_room: "#e5f3ff",
+  electrical_room: "#edf0f2",
+  climate_room: "#e9eef5",
+  staff_room: "#f2f2f2",
+  sanitary_lock: "#fbf7d9",
+  shower: "#f8f7ea",
+  toilet: "#f8f6e6",
+  corridor: "#f3f4f3",
+  loading: "#f6f4ef",
+  waste: "#f9e6e3",
+  technical: "#eceff1",
+  quarantine: "#efe8f7",
+  other: "#edf1ee",
+};
+
+export function normalizeRoomCategory(category) {
+  return ROOM_CATEGORIES.includes(category) ? category : "other";
+}
+
+export function roomCategoryColor(category) {
+  return ROOM_CATEGORY_COLORS[normalizeRoomCategory(category)];
+}

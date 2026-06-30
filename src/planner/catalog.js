@@ -1,7 +1,6 @@
 // Слои планировщика (листы). mode задаёт тип редактирования на листе.
 export const LAYERS = [
   { id: "room",        name: "Исходный план",       color: "#2f3431", sheet: "Исходный план",        mode: "room",        pdf: true },
-  { id: "zones",       name: "Помещения",           color: "#8a7a9c", sheet: "Помещения",            mode: "zones",       pdf: true },
   { id: "partitions",  name: "Перегородки",         color: "#5a5f5c", sheet: "Перегородки",          mode: "walls",       pdf: true },
   { id: "racks",       name: "Стеллажи",            color: "#116355", sheet: "Стеллажи",             mode: "items",       pdf: true },
   { id: "irrigation",  name: "Полив",               color: "#1f6f8b", sheet: "Полив",                mode: "both",        pdf: true },
@@ -26,7 +25,6 @@ export const layerById = (id) => LAYERS.find((l) => l.id === id) || LAYERS[0];
 // Инструменты, доступные на каждом листе
 export const LAYER_TOOLS = {
   room:        ["select", "measure", "label", "pan"],
-  zones:       ["select", "zone", "measure", "label", "pan"],
   partitions:  ["select", "wall", "measure", "label", "pan"],
   racks:       ["select", "measure", "label", "pan"],
   irrigation:  ["select", "line", "link", "measure", "label", "pan"],
@@ -45,8 +43,80 @@ export const LAYER_TOOLS = {
   spec:        ["select"],
 };
 
-export const WALL_THK_PRESETS = [80, 100, 120, 150, 200];
+export const WALL_THK_PRESETS = [80, 100, 120, 150, 200, 250];
 export const ROOM_HEIGHT_PRESETS = [2700, 3000];
+
+/** Материалы стен/перегородок (remplanner): штриховка, цвет, дефолтная толщина. */
+export const WALL_MATERIALS = {
+  bearing: {
+    id: "bearing",
+    label: "Несущая стена",
+    hatch: "diagonal",
+    color: "#14201b",
+    thk: 250,
+    kind: "existing",
+    role: "outer",
+  },
+  pgb: {
+    id: "pgb",
+    label: "Перегородка из ПГБ",
+    hatch: "diagonal",
+    color: "#2f6f8f",
+    thk: 120,
+    kind: "brick",
+  },
+  foam: {
+    id: "foam",
+    label: "Перегородка из пеноблоков",
+    hatch: "grid",
+    color: "#5b6b52",
+    thk: 120,
+    kind: "brick",
+  },
+  brick: {
+    id: "brick",
+    label: "Перегородка из кирпича",
+    hatch: "diagonal",
+    color: "#b9531d",
+    thk: 120,
+    kind: "brick",
+  },
+  drywall: {
+    id: "drywall",
+    label: "Перегородка из гипсокартона",
+    hatch: "cross",
+    color: "#7a4f9c",
+    thk: 100,
+    kind: "drywall",
+  },
+  glass: {
+    id: "glass",
+    label: "Стеклянная перегородка",
+    hatch: "glass",
+    color: "#5b7c9d",
+    thk: 40,
+    kind: "glass",
+  },
+  lath: {
+    id: "lath",
+    label: "Реечная перегородка",
+    hatch: "vertical",
+    color: "#8a6d3b",
+    thk: 60,
+    kind: "light_mesh",
+  },
+  box: {
+    id: "box",
+    label: "Гипсокартонный короб",
+    hatch: "box",
+    color: "#7a4f9c",
+    thk: 100,
+    kind: "drywall",
+  },
+};
+
+export const wallMaterialById = (id) => WALL_MATERIALS[id] || WALL_MATERIALS.drywall;
+export const wallMaterialPatternId = (id) => `pl-wall-hatch-${id || "drywall"}`;
 
 // Линии-трассы по слоям
 export const LINE_STYLE = {
@@ -54,7 +124,7 @@ export const LINE_STYLE = {
   irrigation: { color: "#1f6f8b", dash: false, w: 4, label: "Труба полива", arrow: true },
   supply:     { color: "#1f6f8b", dash: false, w: 4, label: "Труба полива", arrow: true },
   power:      { color: "#a5371f", dash: true,  w: 2.5, label: "Кабель", arrow: true },
-  vent:       { color: "#6b7d74", dash: false, w: 6, label: "Воздуховод", arrow: true },
+  vent:       { color: "#4a74a8", dash: false, w: 6, label: "Воздуховод", arrow: false },
   climate:    { color: "#5b7c9d", dash: true,  w: 2.5, label: "Трасса кондиционера", arrow: true },
   ac:         { color: "#5b7c9d", dash: true,  w: 2.5, label: "Трасса кондиционера", arrow: true },
   light:      { color: "#d4a017", dash: true,  w: 2, label: "Линия света", arrow: false },
@@ -71,16 +141,31 @@ const LAYER_MIGRATE = {
 const KIND_LAYER_MIGRATE = {
   osmosis: "water",
   water_prep: "water",
-  tank: "irrigation",
+  tank: "water",
   tank_waste: "furn",
-  pump: "irrigation",
+  pump: "water",
   fridge: "climate",
   freezer: "climate",
   recirc: "climate",
+  air_conditioner: "climate",
   ac_indoor: "climate",
   ac_outdoor: "climate",
   ac_floor: "climate",
   ac_duct: "climate",
+  indoor_unit: "climate",
+  outdoor_unit: "climate",
+  dehumidifier: "climate",
+  humidifier: "climate",
+  climate_controller: "climate",
+  temperature_sensor: "climate",
+  humidity_sensor: "climate",
+  co2_sensor: "climate",
+  air_quality_sensor: "climate",
+  dew_point_sensor: "climate",
+  pressure_sensor: "climate",
+  exhaust: "vent",
+  supply: "vent",
+  duct_damper: "vent",
   sink_susp: "sanitary",
   sink_table: "sanitary",
   sink_double: "sanitary",
@@ -125,37 +210,58 @@ export const CATALOG = [
   { kind: "fridge",      label: "Холодильник",        w: 800, h: 600, color: "#5b7c9d", icon: "fridge", layer: "climate" },
   { kind: "freezer",     label: "Морозилка",          w: 1000, h: 500, color: "#5b7c9d", icon: "freezer", layer: "climate" },
   { kind: "recirc",      label: "Бактерицидный рециркулятор", w: 300, h: 310, color: "#5b7c9d", icon: "recirc", layer: "climate", wall: true },
-  { kind: "ac_indoor",   label: "Внутренний блок",    w: 800, h: 250, color: "#5b7c9d", icon: "ac_indoor", layer: "climate", wall: true },
+  { kind: "air_conditioner", label: "Система кондиционирования", w: 1000, h: 500, color: "#5b7c9d", icon: "ac_indoor", layer: "climate" },
+  { kind: "ac_indoor",   label: "Внутренний блок",    w: 750, h: 220, color: "#5b7c9d", icon: "ac_indoor", layer: "climate", wall: true },
   { kind: "ac_outdoor",  label: "Внешний блок",       w: 850, h: 350, color: "#5b7c9d", icon: "ac_out", layer: "climate" },
   { kind: "ac_floor",    label: "Напольный кондиционер", w: 600, h: 350, color: "#5b7c9d", icon: "ac_indoor", layer: "climate" },
   { kind: "ac_duct",     label: "Канальный блок",     w: 1000, h: 700, color: "#5b7c9d", icon: "vent_duct", layer: "climate" },
+  { kind: "dehumidifier", label: "Осушитель",         w: 700, h: 420, color: "#5b7c9d", icon: "ac_indoor", layer: "climate" },
+  { kind: "humidifier",  label: "Увлажнитель",         w: 520, h: 420, color: "#5b7c9d", icon: "ac_indoor", layer: "climate" },
+  { kind: "climate_controller", label: "Климат-контроллер", w: 320, h: 220, color: "#5b7c9d", icon: "panel", layer: "climate", wall: true },
+  { kind: "temperature_sensor", label: "Датчик температуры", w: 120, h: 120, color: "#5b7c9d", icon: "socket", layer: "climate", wall: true },
+  { kind: "humidity_sensor", label: "Датчик влажности", w: 120, h: 120, color: "#5b7c9d", icon: "socket", layer: "climate", wall: true },
+  { kind: "co2_sensor",  label: "Датчик CO₂",          w: 120, h: 120, color: "#5b7c9d", icon: "socket", layer: "climate", wall: true },
+  { kind: "air_quality_sensor", label: "Датчик качества воздуха", w: 120, h: 120, color: "#5b7c9d", icon: "socket", layer: "climate", wall: true },
+  { kind: "dew_point_sensor", label: "Датчик точки росы", w: 120, h: 120, color: "#5b7c9d", icon: "socket", layer: "climate", wall: true },
+  { kind: "pressure_sensor", label: "Датчик давления", w: 120, h: 120, color: "#5b7c9d", icon: "socket", layer: "climate", wall: true },
   // ── Водоснабжение ──
   { kind: "osmosis",     label: "Обратный осмос",     w: 1000, h: 400, color: "#2f6f8f", icon: "osmosis_filters", layer: "water" },
   { kind: "water_prep",  label: "Водоподготовка",     w: 2030, h: 410, color: "#2f6f8f", icon: "osmosis_filters", layer: "water" },
   // ── Санитария ──
-  { kind: "sink_susp",   label: "Раковина подвесная", w: 600, h: 400, color: "#2f6f8f", icon: "sink_single", layer: "sanitary", wall: true },
-  { kind: "sink_table",  label: "Раковина настольная", w: 600, h: 500, color: "#2f6f8f", icon: "sink_single", layer: "sanitary" },
-  { kind: "sink_double", label: "Двойная раковина",   w: 1200, h: 450, color: "#2f6f8f", icon: "sink_double", layer: "sanitary", wall: true },
+  { kind: "sink_susp",   label: "Раковина подвесная", w: 800, h: 420, color: "#116355", icon: "sink_single", layer: "sanitary", wall: true },
+  { kind: "sink_table",  label: "Раковина настольная", w: 800, h: 500, color: "#116355", icon: "sink_single", layer: "sanitary" },
+  { kind: "sink_double", label: "Двойная раковина",   w: 1400, h: 450, color: "#116355", icon: "sink_double", layer: "sanitary", wall: true },
   { kind: "toilet",      label: "Унитаз",             w: 380, h: 650, color: "#475c52", icon: "toilet", layer: "sanitary", wall: true },
   { kind: "bidet",       label: "Биде",               w: 380, h: 600, color: "#475c52", icon: "bidet", layer: "sanitary", wall: true },
-  { kind: "shower_pan",  label: "Душевой поддон",     w: 900, h: 900, color: "#2f6f8f", icon: "shower", layer: "sanitary" },
+  { kind: "shower_pan",  label: "Душевой поддон",     w: 800, h: 800, color: "#116355", icon: "shower", layer: "sanitary" },
   { kind: "shower_sys",  label: "Душевая система",    w: 250, h: 120, color: "#2f6f8f", icon: "showerhead", layer: "sanitary", wall: true },
   { kind: "trap",        label: "Трап",               w: 200, h: 200, color: "#7a5c3e", icon: "trap",   layer: "sanitary" },
   { kind: "mirror",      label: "Зеркало",            w: 600, h: 80, color: "#5b7c9d", icon: "mirror", layer: "sanitary", wall: true },
   { kind: "dispenser",   label: "Диспенсер/санитайзер", w: 150, h: 110, color: "#2f6f8f", icon: "dispenser", layer: "sanitary", wall: true },
   { kind: "dezmat",      label: "Диз. коврик",        w: 900, h: 600, color: "#9c6b9c", icon: "dezmat", layer: "sanitary" },
   // ── Полив ──
-  { kind: "tank",        label: "Ёмкость",            w: 800, h: 800, color: "#1f6f8b", icon: "tank_round", layer: "irrigation" },
-  { kind: "pump",        label: "Насос",              w: 350, h: 250, color: "#b9741d", icon: "pump_inline", layer: "irrigation" },
+  { kind: "tank",        label: "Ёмкость",            w: 2080, h: 1370, color: "#116355", icon: "tank_rect", layer: "water" },
+  { kind: "pump",        label: "Насосная станция",   w: 900, h: 520, color: "#116355", icon: "pump_station", layer: "water" },
+  { kind: "water_valve", label: "Клапан",             w: 260, h: 120, color: "#116355", icon: "valve", layer: "water" },
   // ── Дренаж ──
   { kind: "tank_waste",  label: "Бак для мусора",     w: 600, h: 600, color: "#6d5c52", icon: "tank_waste", layer: "furn" },
   // ── Электрика ──
   { kind: "panel",       label: "Электрощит",         w: 600, h: 200, color: "#a5371f", icon: "panel",  layer: "power", wall: true, params: { ratedW: 22000 } },
   { kind: "socket",      label: "Розетка/блок",       w: 150, h: 80, color: "#c44a2f", icon: "socket",  layer: "sockets", wall: true },
+  { kind: "cable_tray",  label: "Кабельный лоток",    w: 900, h: 140, color: "#7a5c3e", icon: "panel", layer: "power" },
+  { kind: "junction_box", label: "Распредкоробка",    w: 180, h: 180, color: "#6b7d74", icon: "panel", layer: "power", wall: true },
+  { kind: "switch",      label: "Выключатель",        w: 120, h: 80, color: "#8b4a2b", icon: "socket", layer: "power", wall: true },
+  { kind: "sensor",      label: "Датчик",             w: 120, h: 120, color: "#5b7c9d", icon: "socket", layer: "power", wall: true },
+  { kind: "relay_box",   label: "Релейный блок",      w: 260, h: 180, color: "#6d5c52", icon: "panel", layer: "power", wall: true },
   { kind: "light_panel", label: "Светильник",         w: 600, h: 120, color: "#d4a017", icon: "light",   layer: "light", wall: true },
+  { kind: "lighting_group", label: "Группа освещения", w: 420, h: 220, color: "#d4a017", icon: "panel", layer: "light" },
   // ── Вентиляция ──
   { kind: "vent_unit",   label: "Вентустановка",      w: 800, h: 600, color: "#6b7d74", icon: "vent",   layer: "vent" },
   { kind: "blade_fan",   label: "Вентилятор",         w: 600, h: 600, color: "#6b7d74", icon: "fan_round", layer: "vent", wall: true },
+  { kind: "supply",      label: "Приточная решетка",  w: 400, h: 140, color: "#6b7d74", icon: "vent", layer: "vent", wall: true },
+  { kind: "exhaust",     label: "Вытяжная решетка",   w: 400, h: 140, color: "#6b7d74", icon: "vent", layer: "vent", wall: true },
+  { kind: "duct_damper", label: "Воздушная заслонка", w: 260, h: 160, color: "#6b7d74", icon: "vent", layer: "vent" },
+  { kind: "airflow_arrow", label: "Стрелка потока",   w: 400, h: 120, color: "#6b7d74", icon: "vent", layer: "vent" },
   // ── Исходный план: двери / окна ──
   { kind: "door",          label: "Дверь",              w: 900,  h: 120, color: "#14201b", icon: "door",          layer: "room", wall: true },
   { kind: "door2",         label: "Дверь двойная",      w: 1400, h: 120, color: "#14201b", icon: "door2",         layer: "room", wall: true },
@@ -179,13 +285,15 @@ export const catalogByKind = (kind) => CATALOG.find((c) => c.kind === kind) || C
 export const catalogForLayer = (layer) => CATALOG.filter((c) => c.layer === layer);
 
 export const RACK_PRESETS = [
-  { w: 1000, h: 500 }, { w: 1220, h: 600 }, { w: 1500, h: 600 },
-  { w: 2000, h: 600 }, { w: 3000, h: 600 }, { w: 1220, h: 800 },
+  { w: 1200, h: 600, label: "1200×600" },
+  { w: 1500, h: 600, label: "1500×600" },
+  { w: 2000, h: 600, label: "2000×600" },
+  { w: 2000, h: 740, label: "2000×740" },
+  { w: 2000, h: 1000, label: "2000×1000" },
+  { w: 3000, h: 600, label: "3000×600" },
 ];
 
-export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-export const snap = (v, step, on = true) => (on ? Math.round(v / step) * step : Math.round(v));
-export function polyLength(pts) { let l = 0; for (let i = 1; i < pts.length; i++) l += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); return l; }
+export { clamp, snap, polyLength } from "./core/geometry/index.js";
 export const fmt = (mm, unit = "mm") => {
   const v = Math.round(mm);
   if (unit === "m") return (v / 1000).toFixed(2).replace(/\.?0+$/, "") + " м";
@@ -195,8 +303,21 @@ export const areaM2 = (w, h) => ((w / 1000) * (h / 1000)).toFixed(2);
 
 export const DEFAULT_PLAN = () => ({
   unit: "mm",
-  room: { w: 12000, h: 8000, wallThk: 120, height: 3000, showBoundary: false },
+  room: { w: 12000, h: 8000, wallThk: 120, height: 3000, defaultRoomHeightMm: 3000, showBoundary: false },
+  nodes: {},
   walls: [], items: [], lines: [], links: [], zones: [], labels: [],
+  measurements: [], rulers: [], structurals: [],
+  rooms: [],
+  farmObjectGroups: [],
+  electricalGroups: [],
+  electricalLoads: null,
+  climateSettings: {
+    forbidIndoorOverPassage: true,
+    maxRackFanDistanceMm: 4500,
+  },
+  climateLoads: null,
+  dimensions: [],
+  validationWarnings: [],
 });
 
 export { LINK_RULES } from "./linkRules.js";
@@ -206,6 +327,9 @@ export { LINK_RULES } from "./linkRules.js";
 export const DEFAULT_DISPLAY = () => ({
   showDims: true,
   showObjectDims: true,
+  showRulers: true,
+  showWallChainFinishing: true,
+  showWallChainGross: true,
   showClearanceDims: true,
   dimPassageWarnMm: 700,
   dimPassageErrorMm: 600,
@@ -216,6 +340,7 @@ export const DEFAULT_DISPLAY = () => ({
   showMinorGrid: true,
   showMediumGrid: true,
   showMajorGrid: true,
+  dimensionDisplayMode: "remplanner_cm",
   showZoneNames: true,
   showZoneAreas: true,
   showZoneFill: true,
@@ -234,7 +359,7 @@ export const DEFAULT_DISPLAY = () => ({
   highlightErrors: true,
   showZoneFlow: true,
   showLinks: true,
-  onlyInsideRooms: false,
+  onlyInsideRooms: true,
   snapStep: 50,
   snapRoundMm: 1,
   snapAngles: true,
@@ -243,6 +368,7 @@ export const DEFAULT_DISPLAY = () => ({
   snapGuides: true,
   arrowStepMm: 10,
   arrowStepShiftMm: 100,
+  arrowStepCtrlMm: 1,
   arrowStepAltMm: 1,
   coordUnit: "mm",
   showAxes: false,

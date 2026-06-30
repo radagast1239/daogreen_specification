@@ -5,7 +5,7 @@ import { sheetsForViewMode } from "../plannerViewModes.js";
 const SHEET_MARKERS = {
   client: "client",
   install: "install",
-  spec: "spec",
+  specification: "spec",
 };
 
 export function PlannerSheetStrip({ activeSheetId, viewMode = "2d", onPick }) {

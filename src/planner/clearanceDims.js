@@ -1,6 +1,7 @@
 import { isDoorKind, isOpeningKind } from "./doorTypes.js";
 import { segmentParam, lerpPt } from "./doorGeometry.js";
-import { wallSegments, dist, nearestWallSegment } from "./wallGeometry.js";
+import { wallSegments, dist, nearestWallSegment, planHasDrawnWalls, roomOuterWallSegments } from "./wallGeometry.js";
+import { resolvePlanWalls } from "./wallNetwork.js";
 
 const MIN_CLEAR = 40;
 const MAX_RAY = 200000;
@@ -10,29 +11,28 @@ export function isWallMountedItem(it) {
 }
 
 export function collectPlanWallSegments(plan) {
-  const segs = wallSegments(plan.walls || []);
+  const segs = wallSegments(resolvePlanWalls(plan));
   const room = plan.room;
-  if (room) {
-    const t = room.wallThk / 2;
-    segs.push(
-      { a: { x: t, y: t }, b: { x: room.w - t, y: t }, wallId: "outer" },
-      { a: { x: room.w - t, y: t }, b: { x: room.w - t, y: room.h - t }, wallId: "outer" },
-      { a: { x: room.w - t, y: room.h - t }, b: { x: t, y: room.h - t }, wallId: "outer" },
-      { a: { x: t, y: room.h - t }, b: { x: t, y: t }, wallId: "outer" },
-    );
+  const resolved = resolvePlanWalls(plan);
+  if (room && !planHasDrawnWalls(resolved)) {
+    segs.push(...roomOuterWallSegments(room).map(({ a, b, wallId }) => ({ a, b, wallId })));
   }
   return segs;
 }
 
-/** Пересечение луча ro + t·rd (t > 0) с отрезком ab. */
-function raySegmentHit(ro, rd, a, b) {
+/** Пересечение луча ro + t·rd (t > 0) с отрезком ab; t — до внутренней грани стены со стороны объекта. */
+function raySegmentHit(ro, rd, a, b, thk = 100) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const denom = rd.x * dy - rd.y * dx;
   if (Math.abs(denom) < 1e-9) return null;
   const t = ((a.x - ro.x) * dy - (a.y - ro.y) * dx) / denom;
   const u = ((a.x - ro.x) * rd.y - (a.y - ro.y) * rd.x) / denom;
-  if (t > 2 && u >= -0.001 && u <= 1.001) return t;
+  if (t > 2 && u >= -0.001 && u <= 1.001) {
+    const half = (thk || 100) / 2;
+    const faceT = Math.max(0, t - half);
+    return faceT >= MIN_CLEAR ? faceT : null;
+  }
   return null;
 }
 
@@ -124,7 +124,7 @@ export function computeFloorClearances(it, plan) {
   return probes.map(({ a, rd }) => {
     let best = MAX_RAY;
     segs.forEach((s) => {
-      const t = raySegmentHit(a, rd, s.a, s.b);
+      const t = raySegmentHit(a, rd, s.a, s.b, s.thk);
       if (t != null && t < best) best = t;
     });
     items.forEach((other) => {
@@ -144,7 +144,7 @@ function wallSegmentForItem(it, plan) {
   }
   const cx = it.x + it.w/2;
   const cy = it.y + it.h/2;
-  const hit = nearestWallSegment({ x: cx, y: cy }, plan.walls || [], plan.room, 250);
+  const hit = nearestWallSegment({ x: cx, y: cy }, resolvePlanWalls(plan), plan.room, 250);
   if (!hit) return null;
   return { a: hit.a, b: hit.b, wallId: hit.wallId };
 }

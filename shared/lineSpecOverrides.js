@@ -1,28 +1,48 @@
-import { normalizePipeCuts, pipeCutsClientNote } from "./profilePipeCuts.js";
-import { normalizeBreakerSpecs } from "./breakerSpecs.js";
-import { normalizeFlowSpecs } from "./flowSpecs.js";
-import { normalizeSplitSpecs } from "./splitSpecs.js";
+import { normalizePipeCuts, pipeCutsClientNote, draftPipeCuts } from "./profilePipeCuts.js";
+import { normalizeBreakerSpecs, breakerSpecsClientNote, draftBreakerSpecs } from "./breakerSpecs.js";
+import {
+  normalizeFlowSpecs,
+  flowSpecsClientNote,
+  aggregateFlowM3,
+  primaryFlowLink,
+  draftFlowSpecs,
+} from "./flowSpecs.js";
+import { normalizeSplitSpecs, splitSpecsClientNote, draftSplitSpecs } from "./splitSpecs.js";
 
 /** Поля состава строки — задаются в шаблоне/проекте, не дублируют базу материалов */
 export function pickLineSpecOverrides(ln) {
   if (!ln || typeof ln !== "object") return {};
   const out = {};
 
-  const pipeCuts = normalizePipeCuts(ln.pipeCuts);
-  if (pipeCuts.length) {
-    out.pipeCuts = pipeCuts;
-    const note = pipeCutsClientNote(pipeCuts);
+  if (Array.isArray(ln.pipeCuts) && ln.pipeCuts.length) {
+    out.pipeCuts = draftPipeCuts(ln.pipeCuts);
+    const note = pipeCutsClientNote(normalizePipeCuts(ln.pipeCuts));
     if (note) out.clientNote = note;
   }
 
-  const breakerSpecs = normalizeBreakerSpecs(ln.breakerSpecs);
-  if (breakerSpecs.length) out.breakerSpecs = breakerSpecs;
+  if (Array.isArray(ln.breakerSpecs) && ln.breakerSpecs.length) {
+    out.breakerSpecs = draftBreakerSpecs(ln.breakerSpecs);
+    const note = breakerSpecsClientNote(normalizeBreakerSpecs(ln.breakerSpecs), ln.name);
+    if (note) out.clientNote = note;
+  }
 
-  const flowSpecs = normalizeFlowSpecs(ln.flowSpecs);
-  if (flowSpecs.length) out.flowSpecs = flowSpecs;
+  if (Array.isArray(ln.flowSpecs) && ln.flowSpecs.length) {
+    out.flowSpecs = draftFlowSpecs(ln.flowSpecs);
+    const normalized = normalizeFlowSpecs(ln.flowSpecs);
+    if (normalized.length) {
+      const note = flowSpecsClientNote(ln.flowSpecs, ln.name);
+      if (note) out.clientNote = note;
+      out.exhaustM3 = aggregateFlowM3(ln.flowSpecs);
+      const link = primaryFlowLink(ln.flowSpecs, ln.link);
+      if (link) out.link = link;
+    }
+  }
 
-  const splitSpecs = normalizeSplitSpecs(ln.splitSpecs);
-  if (splitSpecs.length) out.splitSpecs = splitSpecs;
+  if (Array.isArray(ln.splitSpecs) && ln.splitSpecs.length) {
+    out.splitSpecs = draftSplitSpecs(ln.splitSpecs);
+    const note = splitSpecsClientNote(normalizeSplitSpecs(ln.splitSpecs));
+    if (note) out.clientNote = note;
+  }
 
   return out;
 }

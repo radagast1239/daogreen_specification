@@ -5,6 +5,9 @@ import { linkLengthMm } from "./linkGeometry.js";
 import { defaultObjectPropertyFields } from "./objectProperties.js";
 import { isRackKind, rackSpecNote } from "./rackProperties.js";
 import { lineTotalLengthMm } from "./lineProperties.js";
+import { isPipeLine, calculatePipeLength } from "./pipes.js";
+import { isPowerLine, calculatePowerLineLength } from "./electrical.js";
+import { isDuctLine, calculateDuctLength } from "./climate.js";
 
 const EXCLUDED_FROM_SPEC_BY_DEFAULT = new Set([
   "door", "door2", "door_slide", "door_pivot", "door_cold", "door_sanitary", "door_wash", "door_tech", "door_gate",
@@ -32,6 +35,19 @@ const OBJECT_KIND_HINTS = {
   ac_outdoor: ["климат", "кондиц"],
   ac_floor: ["климат", "кондиц"],
   ac_duct: ["климат", "вентиляц"],
+  air_conditioner: ["климат", "кондиц"],
+  dehumidifier: ["климат", "осуш"],
+  humidifier: ["климат", "увлаж"],
+  climate_controller: ["климат", "автоматик", "контрол"],
+  temperature_sensor: ["климат", "датчик", "температур"],
+  humidity_sensor: ["климат", "датчик", "влажност"],
+  co2_sensor: ["климат", "датчик", "co2"],
+  air_quality_sensor: ["климат", "датчик", "воздух"],
+  dew_point_sensor: ["климат", "датчик", "росы"],
+  pressure_sensor: ["климат", "датчик", "давлен"],
+  supply: ["вентиляц", "приток"],
+  exhaust: ["вентиляц", "вытяж"],
+  duct_damper: ["вентиляц", "заслон"],
   panel: ["электр", "щит"],
   socket: ["электр", "розет"],
 };
@@ -91,7 +107,7 @@ const OBJECT_PRESETS = {
   mirror:      { module: "Сантехника", category: "Прочее", unit: "шт.", name: "Зеркало" },
   tank:        { module: "Водоподготовка", category: "Полив и сантехника", unit: "шт.", name: "Ёмкость" },
   tank_waste:  { module: "Манипуляционная зона", category: "Прочее", unit: "шт.", name: "Бак для мусора" },
-  pump:        { module: "Водоподготовка", category: "Полив и сантехника", unit: "шт.", name: "Насос" },
+  pump:        { module: "Водоподготовка", category: "Полив и сантехника", unit: "шт.", name: "Насосная станция" },
   panel:       { module: "Электрика и щит", category: "Электрика и свет", unit: "шт.", name: "Электрощит" },
   socket:      { module: "Электрика и щит", category: "Электрика и свет", unit: "шт.", name: "Розетка/блок" },
   vent_unit:   { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Вентустановка" },
@@ -100,6 +116,19 @@ const OBJECT_PRESETS = {
   ac_outdoor:  { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Внешний блок кондиционера" },
   ac_floor:    { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Напольный кондиционер" },
   ac_duct:     { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Канальный блок" },
+  air_conditioner: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Система кондиционирования" },
+  dehumidifier: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Осушитель воздуха" },
+  humidifier: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Увлажнитель воздуха" },
+  climate_controller: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Климат-контроллер" },
+  temperature_sensor: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Датчик температуры" },
+  humidity_sensor: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Датчик влажности" },
+  co2_sensor: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Датчик CO₂" },
+  air_quality_sensor: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Датчик качества воздуха" },
+  dew_point_sensor: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Датчик точки росы" },
+  pressure_sensor: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Датчик давления" },
+  supply: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Приточная решетка" },
+  exhaust: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Вытяжная решетка" },
+  duct_damper: { module: "Климат и вентиляция", category: "Климат и вентиляция", unit: "шт.", name: "Воздушная заслонка" },
 };
 
 const LINE_PRESETS = {
@@ -312,7 +341,13 @@ function addObjectAsModule({ obj, materials, modules, existingByKey, groups }) {
 function mergeLineItem(line, existingByKey) {
   const preset = LINE_PRESETS[line.layer];
   if (!preset || line.layer === "staff") return null;
-  const qty = roundQty(lineTotalLengthMm(line) / 1000);
+  const qty = isPipeLine(line)
+    ? roundQty(calculatePipeLength(line).withReserveRoundedM)
+    : isPowerLine(line)
+      ? roundQty((calculatePowerLineLength(line) / 1000) * 1.15)
+      : isDuctLine(line)
+        ? roundQty((calculateDuctLength(line) / 1000) * (1 + ((line.reservePct ?? 10) / 100)))
+      : roundQty(lineTotalLengthMm(line) / 1000);
   if (!qty) return null;
   const sourceKey = `planner:line:${line.layer}`;
   const prev = existingByKey.get(sourceKey);

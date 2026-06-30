@@ -2,9 +2,29 @@ import { isDoorKind, isOpeningKind } from "./doorTypes.js";
 import { pointInPolygon } from "./wallGeometry.js";
 
 const CORNER_CLEAR_MM = 350;
+const SEG_MATCH_MM = 15;
+const OPENING_PERP_MAX_MM = 160;
 
 export function dist(a, b) {
   return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function near(a, b, thr = SEG_MATCH_MM) {
+  return dist(a, b) <= thr;
+}
+
+/** Тот же сегмент стены (концы совпадают с допуском). */
+function isSameWallSegment(segA, segB, a, b) {
+  if (!segA || !segB) return false;
+  return (near(segA, a) && near(segB, b)) || (near(segA, b) && near(segB, a));
+}
+
+/** Расстояние от точки до отрезка и параметр проекции. */
+function pointOnSegment(p, a, b) {
+  const t = segmentParam(p, a, b);
+  const tc = Math.max(0, Math.min(1, t));
+  const proj = lerpPt(a, b, tc);
+  return { t, tc, proj, perp: dist(p, proj), onSegment: t >= -0.002 && t <= 1.002 };
 }
 
 export function lerpPt(a, b, t) {
@@ -40,10 +60,21 @@ export function openingRangesOnSegment(a, b, wallId, items) {
   items.forEach((it) => {
     if (!isDoorKind(it.kind) && !isOpeningKind(it.kind)) return;
     if (it.wallId && it.wallId !== wallId) return;
+
     const cx = it.x + it.w / 2;
     const cy = it.y + it.h / 2;
-    const t = segmentParam({ x: cx, y: cy }, a, b);
-    if (t < -0.08 || t > 1.08) return;
+    const pt = { x: cx, y: cy };
+
+    if (it.wallSeg?.a && it.wallSeg?.b) {
+      if (!isSameWallSegment(it.wallSeg.a, it.wallSeg.b, a, b)) return;
+    } else {
+      const { onSegment, perp } = pointOnSegment(pt, a, b);
+      if (!onSegment || perp > OPENING_PERP_MAX_MM) return;
+    }
+
+    const { t, onSegment } = pointOnSegment(pt, a, b);
+    if (!onSegment) return;
+
     const half = (it.w / 2 + 20) / len;
     ranges.push([Math.max(0, t - half), Math.min(1, t + half)]);
   });

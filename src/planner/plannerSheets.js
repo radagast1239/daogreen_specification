@@ -1,9 +1,8 @@
-import { LAYERS } from "./catalog.js";
+import { LAYERS, LINE_STYLE, catalogByKind } from "./catalog.js";
 import { resolveTool, flattenTools } from "./plannerTools.js";
+import { farmCategoryForKind } from "./farmObjects.js";
 
-const CONTEXT_LAYERS = ["room", "partitions"];
 const ALL_LAYER_IDS = LAYERS.map((l) => l.id);
-
 const BASE_TOOLS = ["select", "measure", "label", "pan"];
 
 function sheet(
@@ -13,7 +12,7 @@ function sheet(
   {
     color = "#116355",
     activeLayer = layerId,
-    visibleLayers,
+    visibleLayers = [activeLayer, "room", "partitions", "labels"],
     mutedLayers = [],
     hiddenLayers = [],
     toolGroups = [],
@@ -24,17 +23,17 @@ function sheet(
     defaultToolId,
     showDims = true,
     showLabels = true,
+    sheetExportConfig = null,
   } = {},
 ) {
-  const vis = visibleLayers || [activeLayer, ...CONTEXT_LAYERS, "labels"];
   return {
     id,
     name,
     layerId,
     color,
     activeLayer,
-    visibleLayers: vis,
-    mutedLayers: mutedLayers.length ? mutedLayers : ALL_LAYER_IDS.filter((l) => !vis.includes(l) && !hiddenLayers.includes(l)),
+    visibleLayers,
+    mutedLayers: mutedLayers.length ? mutedLayers : ALL_LAYER_IDS.filter((l) => !visibleLayers.includes(l) && !hiddenLayers.includes(l)),
     hiddenLayers,
     toolGroups,
     filters,
@@ -44,60 +43,70 @@ function sheet(
     defaultToolId,
     showDims,
     showLabels,
+    sheetExportConfig: sheetExportConfig || {
+      sheetId: id,
+      title: name,
+      scale: "1:100",
+      showLegend: true,
+      showTitleBlock: true,
+      showDimensions: showDims,
+      showWarnings: true,
+    },
   };
 }
 
-export const SHEETS = [
-  sheet("source", "Исходный план", "room", {
+export const REQUIRED_FARM_SHEET_IDS = [
+  "base_plan",
+  "partitions",
+  "farm_zones",
+  "racks",
+  "irrigation",
+  "drainage",
+  "water_treatment",
+  "electrical",
+  "lighting",
+  "climate",
+  "ventilation",
+  "plumbing",
+  "equipment",
+  "safety",
+  "specification",
+];
+
+const FARM_SHEETS = [
+  sheet("base_plan", "Исходный план", "room", {
     color: "#2f3431",
+    activeLayer: "room",
     visibleLayers: ["room", "partitions", "zones", "labels"],
-    mutedLayers: ["racks", "furn", "irrigation", "drain", "water", "power", "sockets", "light", "climate", "vent", "staff", "sanitary"],
-    defaultToolId: "select",
+    defaultToolId: "wall_draw",
     toolGroups: [
-      { id: "draw", label: "Чертёж", tools: ["wall_draw", "wall_outline", "room_by_size"] },
-      { id: "openings", label: "Проёмы", tools: ["doors_group", "windows_group", "opening_tech", "opening_comm", "opening_floor"] },
-      { id: "struct", label: "Конструкции", tools: ["column", "beam", "gate_zone", "ext_pad"] },
-      { id: "backdrop", label: "Подложка", tools: ["backdrop", "backdrop_scale"] },
+      { id: "base", label: "Чертёж", tools: ["wall_draw", "doors_group", "windows_group", "column", "beam", "measure"] },
       { id: "common", label: "Общие", tools: BASE_TOOLS },
     ],
   }),
-
-  sheet("demolition", "Демонтаж", "room", {
-    color: "#8a4a3a",
-    visibleLayers: ["room", "partitions", "labels"],
-    mutedLayers: ALL_LAYER_IDS.filter((l) => !["room", "partitions", "labels"].includes(l)),
-    defaultToolId: "select",
-    toolGroups: [
-      { id: "demo", label: "Демонтаж", tools: ["select", "label", "measure", "comment"] },
-    ],
-  }),
-
   sheet("partitions", "Перегородки", "partitions", {
     color: "#5a5f5c",
     visibleLayers: ["room", "partitions", "zones", "labels"],
     defaultToolId: "wall_draw",
     toolGroups: [
-      { id: "walls", label: "Перегородки", tools: ["wall_draw", "wall_sandwich", "wall_food", "wall_cold", "wall_pvc", "wall_brick", "wall_gkl", "wall_glass", "wall_light", "wall_box"] },
-      { id: "zones", label: "Зонирование", tools: ["zone_room", "sanitary_lock", "part_opening", "part_door"] },
+      { id: "walls", label: "Перегородки", tools: ["wall_draw", "wall_bearing", "wall_pgb", "wall_foam", "wall_brick", "wall_gkl", "wall_glass", "wall_lath", "wall_box", "doors_group", "windows_group", "column"] },
       { id: "common", label: "Общие", tools: BASE_TOOLS },
     ],
   }),
-
-  sheet("zones", "Помещения", "zones", {
-    color: "#8a7a9c",
+  sheet("farm_zones", "Зоны фермы", "room", {
+    color: "#116355",
+    activeLayer: "zones",
     visibleLayers: ["room", "partitions", "zones", "labels"],
     defaultToolId: "zone_assign",
     toolGroups: [
-      { id: "zones", label: "Назначение", tools: ["zone_assign", "zone_clean", "zone_dirty", "zone_buffer", "zone_seed", "zone_grow", "zone_pack", "zone_gas", "zone_waste", "zone_water_prep", "zone_storage", "zone_cold_room", "zone_sanlock", "zone_tech", "zone_staff", "zone_shower", "zone_wc", "zone_corridor", "zone_ship", "zone_recv"] },
+      { id: "zones", label: "Зоны", tools: ["zone_assign", "zone_clean", "zone_dirty", "zone_buffer", "measure"] },
       { id: "common", label: "Общие", tools: BASE_TOOLS },
     ],
   }),
-
   sheet("racks", "Стеллажи", "racks", {
     color: "#116355",
-    visibleLayers: ["room", "partitions", "zones", "racks", "irrigation", "labels"],
-    mutedLayers: ["furn", "water", "power", "vent", "staff", "sanitary"],
-    defaultToolId: "rack_nft",
+    visibleLayers: ["room", "partitions", "zones", "racks", "labels", "irrigation"],
+    defaultToolId: "rack_nft_2000_740",
     filters: [
       { id: "all", label: "Все" },
       { id: "nft", label: "NFT" },
@@ -109,235 +118,191 @@ export const SHEETS = [
       { id: "pick", label: "Выбрать" },
     ],
     toolGroups: [
-      { id: "racks", label: "Стеллажи", tools: ["racks_group", "rack_storage", "rack_cons"] },
-      { id: "layout", label: "Размещение", tools: ["rack_row", "rack_block", "rack_number", "rack_aisle", "rack_service"] },
-      { id: "links", label: "Привязки", tools: ["link_tank", "link_pump", "link_drain", "link_socket", "link_light", "link"] },
+      { id: "racks", label: "Стеллажи", tools: ["racks_group", "rack_row", "rack_block", "rack_number"] },
+      { id: "dims", label: "Проходы и размеры", tools: ["measure"] },
       { id: "common", label: "Общие", tools: BASE_TOOLS },
     ],
   }),
-
-  sheet("furn", "Мебель", "furn", {
-    color: "#5b6b52",
-    visibleLayers: ["room", "partitions", "zones", "furn", "labels"],
-    defaultToolId: "table_sow",
+  sheet("irrigation", "Полив", "irrigation", {
+    color: "#2f6f8f",
+    visibleLayers: ["room", "partitions", "racks", "water", "irrigation", "labels"],
+    defaultToolId: "water_line",
     toolGroups: [
-      { id: "tables", label: "Столы", tools: ["table_sow", "table_manip", "table_pack", "table_recv", "table_subs"] },
-      { id: "equip", label: "Оборудование", tools: ["trolley_plant", "scales_fl", "scales_tb", "fridge", "freezer", "trashcan", "tank_waste", "ladder"] },
-      { id: "storage", label: "Хранение", tools: ["wardrobe", "bench", "hanger", "chair", "shelf_inv", "rack_cons"] },
-      { id: "common", label: "Общие", tools: BASE_TOOLS },
+      { id: "irr", label: "Полив", tools: ["tank_clean", "tank_solution", "pump", "osmosis", "water_line", "water_valve_group"] },
+      { id: "common", label: "Общие", tools: [...BASE_TOOLS, "link"] },
     ],
   }),
-
-  sheet("sanitary", "Сантехника", "sanitary", {
+  sheet("drainage", "Дренаж", "drain", {
+    color: "#7a5c3e",
+    visibleLayers: ["room", "partitions", "racks", "drain", "labels"],
+    defaultToolId: "drain_line",
+    toolGroups: [
+      { id: "drain", label: "Дренаж", tools: ["drain_line", "drain_main", "drain_emergency", "trap", "tank_drain_collection", "tank_waste_liquid"] },
+      { id: "common", label: "Общие", tools: [...BASE_TOOLS, "link"] },
+    ],
+  }),
+  sheet("water_treatment", "Водоподготовка", "water", {
+    color: "#2f6f8f",
+    visibleLayers: ["room", "partitions", "racks", "water", "irrigation", "labels"],
+    defaultToolId: "water_prep",
+    toolGroups: [
+      { id: "wt", label: "Водоподготовка", tools: ["water_prep", "osmosis", "tank_clean", "pump", "water_line"] },
+      { id: "common", label: "Общие", tools: [...BASE_TOOLS, "link"] },
+    ],
+  }),
+  sheet("electrical", "Электрика", "power", {
+    color: "#a5371f",
+    visibleLayers: ["room", "partitions", "racks", "power", "sockets", "labels"],
+    defaultToolId: "panel",
+    toolGroups: [
+      {
+        id: "el",
+        label: "Электрика",
+        tools: ["panel", "socket_220", "socket_pump", "socket_service", "power_line", "wall_cable", "ceiling_cable", "tray_cable", "cable_tray", "junction_box", "switch", "sensor", "relay_box", "sensor_cable"],
+      },
+      { id: "common", label: "Общие", tools: [...BASE_TOOLS, "link"] },
+    ],
+  }),
+  sheet("lighting", "Освещение", "light", {
+    color: "#d4a017",
+    visibleLayers: ["room", "partitions", "racks", "light", "power", "labels"],
+    defaultToolId: "light_panel",
+    toolGroups: [
+      { id: "light", label: "Освещение", tools: ["light_linear_60", "light_linear_100", "light_linear_120", "light_quantum", "light_service", "light_germination", "lighting_group", "add_light_to_rack", "light_line", "link_light"] },
+      { id: "common", label: "Общие", tools: [...BASE_TOOLS, "link"] },
+    ],
+  }),
+  sheet("climate", "Климат", "climate", {
+    color: "#5b7c9d",
+    visibleLayers: ["room", "partitions", "zones", "climate", "labels"],
+    defaultToolId: "indoor_unit",
+    toolGroups: [
+      {
+        id: "climate",
+        label: "Климат",
+        tools: [
+          "climate_system",
+          "indoor_unit",
+          "outdoor_unit",
+          "dehumidifier",
+          "humidifier",
+          "climate_controller",
+          "temperature_sensor",
+          "humidity_sensor",
+          "co2_sensor",
+          "air_quality_sensor",
+          "dew_point_sensor",
+          "pressure_sensor",
+          "fan_recirc",
+          "ac_line",
+        ],
+      },
+      { id: "common", label: "Общие", tools: [...BASE_TOOLS, "link", "view_show_airflow"] },
+    ],
+  }),
+  sheet("ventilation", "Вентиляция", "vent", {
+    color: "#6b7d74",
+    visibleLayers: ["room", "partitions", "zones", "vent", "labels"],
+    defaultToolId: "duct_tool",
+    toolGroups: [
+      {
+        id: "vent",
+        label: "Вентиляция",
+        tools: [
+          "duct_tool",
+          "vent_line_in",
+          "vent_line_out",
+          "vent_recirc",
+          "supply_grille",
+          "exhaust_grille",
+          "duct_damper",
+          "fan_axial",
+          "fan_duct",
+          "vent_unit",
+          "airflow_arrow",
+        ],
+      },
+      { id: "common", label: "Общие", tools: [...BASE_TOOLS, "link", "view_show_airflow"] },
+    ],
+  }),
+  sheet("plumbing", "Сантехника", "sanitary", {
     color: "#2f6f8f",
     visibleLayers: ["room", "partitions", "zones", "sanitary", "labels"],
     defaultToolId: "sink_susp",
     toolGroups: [
-      { id: "plumb", label: "Сантехника", tools: ["sink_susp", "sink_double", "sink_table", "toilet", "shower_pan", "shower_sys", "trap", "dispenser"] },
+      { id: "plumb", label: "Сантехника", tools: ["sink_susp", "sink_double", "toilet", "shower_pan", "trap"] },
       { id: "common", label: "Общие", tools: [...BASE_TOOLS, "link"] },
     ],
   }),
-
-  sheet("water", "Водоснабжение", "water", {
-    color: "#2f6f8f",
-    visibleLayers: ["room", "partitions", "zones", "water", "irrigation", "labels"],
-    mutedLayers: ["racks", "furn", "power", "vent"],
-    defaultToolId: "tank_solution",
-    filters: [
-      { id: "all", label: "Все трубы" },
-      { id: "clean", label: "Чистая вода" },
-      { id: "solution", label: "Раствор" },
-      { id: "acid", label: "Кислота" },
-      { id: "fert_a", label: "Удобрение А" },
-      { id: "fert_b", label: "Удобрение Б" },
-      { id: "return", label: "Обратка" },
-      { id: "pick", label: "Выбрать" },
-    ],
+  sheet("equipment", "Оборудование", "furn", {
+    color: "#5b6b52",
+    visibleLayers: ["room", "partitions", "racks", "furn", "water", "climate", "labels"],
+    defaultToolId: "table_sow",
     toolGroups: [
-      { id: "tanks", label: "Ёмкости", tools: ["tanks_group"] },
-      { id: "equip", label: "Оборудование", tools: ["pump", "osmosis", "water_prep"] },
-      { id: "pipes", label: "Трубопровод", tools: ["water_line", "line", "water_valve", "link"] },
+      { id: "equip", label: "Оборудование", tools: ["table_sow", "table_manip", "trolley_plant", "fridge", "freezer", "pump"] },
       { id: "common", label: "Общие", tools: BASE_TOOLS },
     ],
   }),
-
-  sheet("drain", "Дренаж", "drain", {
-    color: "#7a5c3e",
-    visibleLayers: ["room", "partitions", "zones", "drain", "labels"],
-    defaultToolId: "drain_line",
-    filters: [
-      { id: "all", label: "Все линии" },
-      { id: "main", label: "Основной слив" },
-      { id: "emergency", label: "Аварийный слив" },
-      { id: "condensate", label: "Конденсат" },
-      { id: "waste", label: "Отходы" },
-      { id: "pick", label: "Выбрать" },
-    ],
-    toolGroups: [
-      { id: "drain", label: "Дренаж", tools: ["drain_line", "drain_main", "drain_emergency", "trap", "line", "link"] },
-      { id: "common", label: "Общие", tools: BASE_TOOLS },
-    ],
-  }),
-
-  sheet("sockets", "Розетки", "sockets", {
-    color: "#c44a2f",
-    visibleLayers: ["room", "partitions", "zones", "sockets", "power", "labels"],
-    defaultToolId: "socket",
-    toolGroups: [
-      { id: "sockets", label: "Розетки", tools: ["sockets_group", "socket"] },
-      { id: "links", label: "Привязки", tools: ["link"] },
-      { id: "common", label: "Общие", tools: BASE_TOOLS },
-    ],
-  }),
-
-  sheet("light", "Освещение", "light", {
-    color: "#d4a017",
-    visibleLayers: ["room", "partitions", "zones", "light", "labels"],
-    defaultToolId: "light_panel",
-    toolGroups: [
-      { id: "light", label: "Освещение", tools: ["light_panel", "light_line", "light_zone", "link"] },
-      { id: "common", label: "Общие", tools: BASE_TOOLS },
-    ],
-  }),
-
-  sheet("wiring", "Электропроводка", "power", {
+  sheet("safety", "Санитария / безопасность", "sanitary", {
     color: "#a5371f",
-    visibleLayers: ["room", "partitions", "zones", "power", "light", "labels"],
-    defaultToolId: "power_line",
-    filters: [
-      { id: "all", label: "Все линии" },
-      { id: "power", label: "Силовые" },
-      { id: "low", label: "Слаботочные" },
-      { id: "light", label: "Освещение" },
-      { id: "sensor", label: "Датчики" },
-      { id: "ground", label: "Заземление" },
-      { id: "pick", label: "Выбрать" },
-    ],
-    toolGroups: [
-      { id: "cables", label: "Кабели", tools: ["power_line", "low_line", "light_cable", "sensor_cable", "ground_line", "line"] },
-      { id: "common", label: "Общие", tools: [...BASE_TOOLS, "link"] },
-    ],
-  }),
-
-  sheet("panel", "Электрощит", "power", {
-    color: "#a5371f",
-    visibleLayers: ["room", "partitions", "zones", "power", "labels"],
-    defaultToolId: "panel",
-    toolGroups: [
-      { id: "panel", label: "Щит", tools: ["panel", "link"] },
-      { id: "common", label: "Общие", tools: BASE_TOOLS },
-    ],
-  }),
-
-  sheet("climate", "Климат", "climate", {
-    color: "#5b7c9d",
-    visibleLayers: ["room", "partitions", "zones", "climate", "labels"],
-    defaultToolId: "fan_recirc",
-    toolGroups: [
-      { id: "climate", label: "Климат", tools: ["fan_recirc", "fridge", "freezer", "link"] },
-      { id: "common", label: "Общие", tools: BASE_TOOLS },
-    ],
-  }),
-
-  sheet("ac", "Кондиционеры", "climate", {
-    color: "#5b7c9d",
-    visibleLayers: ["room", "partitions", "zones", "climate", "labels"],
-    defaultToolId: "ac_indoor",
-    toolGroups: [
-      { id: "ac", label: "Кондиционеры", tools: ["ac_indoor", "ac_outdoor", "ac_duct", "ac_floor", "ac_line", "link"] },
-      { id: "common", label: "Общие", tools: BASE_TOOLS },
-    ],
-  }),
-
-  sheet("vent", "Вентиляция", "vent", {
-    color: "#6b7d74",
-    visibleLayers: ["room", "partitions", "zones", "vent", "labels"],
-    defaultToolId: "vent_line_out",
-    filters: [
-      { id: "all", label: "Всё" },
-      { id: "supply", label: "Приток" },
-      { id: "exhaust", label: "Вытяжка" },
-      { id: "recirc", label: "Рециркуляция" },
-      { id: "grilles", label: "Решётки" },
-      { id: "fans", label: "Вентиляторы" },
-      { id: "pick", label: "Выбрать" },
-    ],
-    toolGroups: [
-      { id: "ducts", label: "Воздуховоды", tools: ["vent_line_in", "vent_line_out", "vent_recirc", "line"] },
-      { id: "equip", label: "Оборудование", tools: ["vent_unit", "fans_group"] },
-      { id: "common", label: "Общие", tools: [...BASE_TOOLS, "link"] },
-    ],
-  }),
-
-  sheet("safety", "Безопасность", "sanitary", {
-    color: "#a5371f",
-    visibleLayers: ["room", "partitions", "zones", "sanitary", "labels"],
-    defaultToolId: "select",
-    toolGroups: [
-      { id: "safety", label: "Безопасность", tools: ["select", "label", "comment", "dezmat"] },
-    ],
-  }),
-
-  sheet("hygiene", "Санитария", "sanitary", {
-    color: "#2f6f8f",
-    visibleLayers: ["room", "partitions", "zones", "sanitary", "labels"],
+    visibleLayers: ["room", "partitions", "zones", "sanitary", "staff", "labels"],
     defaultToolId: "dezmat_hygiene",
     toolGroups: [
-      { id: "hygiene", label: "Санитария", tools: ["dezmat_hygiene", "dispenser", "recirc_hygiene", "zone_clean", "zone_dirty"] },
+      { id: "safe", label: "Санитария", tools: ["dezmat_hygiene", "dispenser", "comment", "route_staff"] },
       { id: "common", label: "Общие", tools: BASE_TOOLS },
     ],
   }),
-
-  sheet("routes", "Маршруты", "staff", {
-    color: "#b9741d",
-    visibleLayers: ["room", "partitions", "zones", "staff", "labels"],
-    defaultToolId: "route_staff",
-    filters: [
-      { id: "all", label: "Всё" },
-      { id: "staff", label: "Персонал" },
-      { id: "raw", label: "Сырьё" },
-      { id: "product", label: "Готовая продукция" },
-      { id: "waste", label: "Отходы" },
-      { id: "clean", label: "Чистый поток" },
-      { id: "dirty", label: "Грязный поток" },
-      { id: "pick", label: "Выбрать" },
-    ],
-    toolGroups: [
-      { id: "routes", label: "Потоки", tools: ["route_staff", "route_raw", "route_product", "route_waste", "line"] },
-      { id: "common", label: "Общие", tools: BASE_TOOLS },
-    ],
-  }),
-
-  sheet("spec", "Спецификация", "spec", {
+  sheet("specification", "Спецификация", "spec", {
     color: "#116355",
-    visibleLayers: ALL_LAYER_IDS,
-    defaultToolId: "select",
+    visibleLayers: [...ALL_LAYER_IDS, "labels"],
+    defaultToolId: "sync_spec",
+    showDims: false,
+    showLabels: true,
     toolGroups: [
       { id: "spec", label: "Спецификация", tools: ["select", "sync_spec"] },
     ],
-  }),
-
-  sheet("client", "Клиентский вид", "client", {
-    color: "#477ca8",
-    visibleLayers: ALL_LAYER_IDS.filter((l) => l !== "spec"),
-    hiddenLayers: ["spec"],
-    defaultToolId: "select",
-    toolGroups: [
-      { id: "view", label: "Отображение", tools: ["select", "pan", "view_client_layers", "view_hide_comments", "view_show_dims"] },
-    ],
-    clientVisible: true,
-  }),
-
-  sheet("install", "Монтажный вид", "install", {
-    color: "#3d5a4c",
-    visibleLayers: ALL_LAYER_IDS,
-    defaultToolId: "select",
-    showDims: true,
-    toolGroups: [
-      { id: "view", label: "Монтажный", tools: ["select", "measure", "label", "pan", "view_show_dims", "view_show_errors", "view_show_ports"] },
-    ],
+    sheetExportConfig: {
+      sheetId: "specification",
+      title: "Спецификация",
+      scale: "1:100",
+      showLegend: true,
+      showTitleBlock: true,
+      showDimensions: false,
+      showWarnings: true,
+    },
   }),
 ];
+
+export const LEGACY_SHEET_MIGRATION = {
+  source: "base_plan",
+  furniture: "equipment",
+  furn: "equipment",
+  sockets: "electrical",
+  light: "lighting",
+  lighting: "lighting",
+  sanitary: "plumbing",
+  plumbing: "plumbing",
+  vent: "ventilation",
+  ventilation: "ventilation",
+  conditioners: "climate",
+  climate: "climate",
+  water: "irrigation",
+  drain: "drainage",
+  wiring: "electrical",
+  panel: "electrical",
+  spec: "specification",
+  hygiene: "safety",
+  routes: "safety",
+  demolition: "partitions",
+};
+
+export const LEGACY_SHEETS = Object.keys(LEGACY_SHEET_MIGRATION);
+export const SHEETS = FARM_SHEETS;
+
+export function resolveSheetId(id) {
+  if (!id) return SHEETS[0].id;
+  return LEGACY_SHEET_MIGRATION[id] || id;
+}
 
 export const PLAN_LEVELS = [
   "Этаж 1", "Производство", "Техзона", "Холодильная зона", "Отгрузка", "Внешняя зона",
@@ -347,37 +312,168 @@ export const PLAN_VARIANTS = [
   "Планировка 1", "Планировка 2", "Бюджет", "Оптимальная", "Премиум", "Черновик", "Утверждённая",
 ];
 
-export const sheetById = (id) => SHEETS.find((s) => s.id === id) || SHEETS[0];
-export const sheetByLayerId = (layerId) => SHEETS.find((s) => s.layerId === layerId) || SHEETS[0];
+export const sheetById = (id) => SHEETS.find((s) => s.id === resolveSheetId(id)) || SHEETS[0];
+export const sheetByLayerId = (layerId) => SHEETS.find((s) => s.layerId === layerId || s.activeLayer === layerId) || SHEETS[0];
 
 export function defaultToolForSheet(sheet) {
   const id = sheet?.defaultToolId;
-  if (id) return resolveTool(id);
+  if (id) return resolveTool(id) || resolveTool("select");
   const tools = flattenTools(sheet?.toolGroups?.flatMap((g) => g.tools) || []);
   return tools.find((t) => t.mode && t.mode !== "placeholder") || resolveTool("select");
 }
 
 export function buildVisibilityFromSheet(sheet) {
   const vis = Object.fromEntries(ALL_LAYER_IDS.map((id) => [id, false]));
-  (sheet.visibleLayers || []).forEach((id) => { vis[id] = true; });
-  CONTEXT_LAYERS.forEach((id) => { vis[id] = true; });
-  vis.labels = (sheet.visibleLayers || []).includes("labels") || true;
+  (sheet.visibleLayers || []).forEach((id) => { if (id in vis) vis[id] = true; });
+  vis.labels = (sheet.visibleLayers || []).includes("labels");
+  vis.zones = (sheet.visibleLayers || []).includes("zones");
   (sheet.hiddenLayers || []).forEach((id) => { vis[id] = false; });
   return vis;
 }
 
 export function sheetDisplayPatch(sheet) {
-  const patch = { dimInactive: true, highlightActive: true, labelHideInactive: true };
-  if (sheet.showDims === false) patch.showDims = false;
-  if (sheet.showLabels === false) patch.showLabels = false;
-  if (sheet.id === "client") {
-    patch.hideInactive = true;
-    patch.highlightErrors = false;
+  const engineering = new Set(["irrigation", "drainage", "water_treatment", "electrical", "lighting", "climate", "ventilation", "plumbing"]);
+  const patch = { dimInactive: true, highlightActive: true, labelHideInactive: true, showDims: sheet.showDims !== false, showLabels: sheet.showLabels !== false };
+  if (engineering.has(sheet.id)) {
+    patch.hideInactive = false;
+    patch.highlightErrors = true;
+    patch.showZoneFill = true;
+    patch.zoneContoursOnly = false;
   }
-  if (sheet.id === "install") {
-    patch.showDims = true;
-    patch.showPorts = true;
+  if (sheet.id === "specification") {
+    patch.showDims = false;
     patch.highlightErrors = true;
   }
   return patch;
+}
+
+const CATEGORY_DEFAULT_SHEETS = {
+  rack: ["racks", "equipment", "specification"],
+  nft_channel: ["racks", "specification"],
+  tray_rack: ["racks", "specification"],
+  aeroponic_rack: ["racks", "specification"],
+  strawberry_rack: ["racks", "specification"],
+  tank: ["irrigation", "drainage", "water_treatment", "specification"],
+  pump: ["irrigation", "water_treatment", "equipment", "specification"],
+  filter: ["water_treatment", "irrigation", "specification"],
+  dosing_unit: ["water_treatment", "irrigation", "specification"],
+  pipe: ["irrigation", "specification"],
+  drain_pipe: ["drainage", "specification"],
+  valve: ["irrigation", "drainage", "specification"],
+  light: ["lighting", "electrical", "specification"],
+  lighting_group: ["lighting", "electrical", "specification"],
+  electrical_panel: ["electrical", "specification"],
+  power_line: ["electrical", "lighting", "specification"],
+  cable_tray: ["electrical", "specification"],
+  junction_box: ["electrical", "specification"],
+  switch: ["electrical", "lighting", "specification"],
+  socket: ["electrical", "specification"],
+  sensor: ["electrical", "climate", "specification"],
+  relay_box: ["electrical", "specification"],
+  co2_sensor: ["climate", "ventilation", "specification"],
+  temperature_sensor: ["climate", "specification"],
+  humidity_sensor: ["climate", "specification"],
+  air_quality_sensor: ["climate", "ventilation", "specification"],
+  dew_point_sensor: ["climate", "ventilation", "specification"],
+  pressure_sensor: ["climate", "ventilation", "specification"],
+  climate_controller: ["climate", "specification"],
+  indoor_unit: ["climate", "specification"],
+  outdoor_unit: ["climate", "specification"],
+  exhaust: ["ventilation", "climate", "specification"],
+  supply: ["ventilation", "climate", "specification"],
+  circulation_fan: ["ventilation", "climate", "specification"],
+  duct: ["ventilation", "climate", "specification"],
+  airflow_arrow: ["ventilation", "climate", "specification"],
+  fan: ["ventilation", "climate", "specification"],
+  air_conditioner: ["climate", "specification"],
+  dehumidifier: ["climate", "specification"],
+  humidifier: ["climate", "specification"],
+  co2: ["climate", "specification"],
+  sink: ["plumbing", "safety", "specification"],
+  table: ["equipment", "racks", "specification"],
+  cart: ["equipment", "racks", "specification"],
+  cold_room_equipment: ["equipment", "climate", "specification"],
+  sanitation: ["safety", "plumbing", "specification"],
+  storage: ["equipment", "racks", "specification"],
+  custom: ["equipment", "racks", "specification"],
+};
+
+function inferByLayer(item) {
+  const layer = item.layer;
+  if (layer === "racks") return ["racks", "equipment", "specification"];
+  if (layer === "water" || layer === "irrigation") return ["irrigation", "water_treatment", "specification"];
+  if (layer === "drain") return ["drainage", "specification"];
+  if (layer === "power" || layer === "sockets") return ["electrical", "lighting", "specification"];
+  if (layer === "light") return ["lighting", "electrical", "specification"];
+  if (layer === "climate") return ["climate", "equipment", "specification"];
+  if (layer === "vent") return ["ventilation", "climate", "specification"];
+  if (layer === "sanitary") return ["plumbing", "safety", "specification"];
+  if (layer === "furn") return ["equipment", "racks", "specification"];
+  if (layer === "room" || layer === "partitions") return ["base_plan", "partitions", "farm_zones", "specification"];
+  return ["base_plan", "specification"];
+}
+
+export function inferObjectVisibleSheets(item = {}) {
+  if (Array.isArray(item.visibleOnSheets) && item.visibleOnSheets.length) {
+    return item.visibleOnSheets.map((id) => resolveSheetId(id));
+  }
+  const category = item.category || farmCategoryForKind(item.kind);
+  const byCategory = CATEGORY_DEFAULT_SHEETS[category];
+  if (byCategory?.length) return byCategory;
+  return inferByLayer(item);
+}
+
+export function objectVisibleOnSheet(item, sheetId) {
+  if (!item || item.visible === false) return false;
+  const sid = resolveSheetId(sheetId);
+  return inferObjectVisibleSheets(item).includes(sid);
+}
+
+function legendLabelForObject(item) {
+  if (item.category === "pipe" || item.category === "drain_pipe") {
+    const d = item.params?.diameterMm || item.diameterMm || 0;
+    const mat = (item.params?.material || "pp").toUpperCase();
+    return `Труба ${mat} ${d}`;
+  }
+  if (item.category === "socket") {
+    const wet = item.params?.waterproof === true || String(item.params?.protectionIp || "").toUpperCase().startsWith("IP");
+    return wet ? "Розетка влагозащищенная" : "Розетка стандартная";
+  }
+  if (item.category === "electrical_panel") return "Электрощит";
+  if (item.category === "sensor") return "Датчик";
+  if (item.category === "light") return "Линейный светильник";
+  if (item.category === "rack") return "Стеллаж";
+  if (item.category === "tank") return "Бак";
+  return item.name || item.label || catalogByKind(item.kind || "rack")?.label || item.kind || "Объект";
+}
+
+export function buildSheetLegend(plan, sheetId) {
+  const sid = resolveSheetId(sheetId);
+  const sheet = sheetById(sid);
+  const seen = new Map();
+  if ((sheet.visibleLayers || []).includes("room") || (sheet.visibleLayers || []).includes("partitions")) {
+    if ((plan.walls || []).length) seen.set("walls", { id: "walls", type: "wall", label: "Стены" });
+  }
+  (plan.items || []).forEach((it) => {
+    if (!objectVisibleOnSheet(it, sid)) return;
+    if (!sheet.visibleLayers.includes(it.layer)) return;
+    const label = legendLabelForObject(it);
+    const key = `obj:${label}`;
+    if (!seen.has(key)) seen.set(key, { id: key, type: "object", label });
+  });
+  (plan.lines || []).forEach((ln) => {
+    const lid = ln.layer;
+    if (!sheet.visibleLayers.includes(lid)) return;
+    const style = LINE_STYLE[lid];
+    const label = ln.type === "power_line" || lid === "power"
+      ? "Кабельная линия"
+      : (style?.label || "Линия");
+    const key = `line:${label}`;
+    if (!seen.has(key)) seen.set(key, { id: key, type: "line", label });
+  });
+  return [...seen.values()];
+}
+
+export function getSheetExportConfig(sheetId) {
+  return sheetById(sheetId).sheetExportConfig;
 }

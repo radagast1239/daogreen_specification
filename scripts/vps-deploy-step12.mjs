@@ -23,7 +23,7 @@ if (!password) {
   process.exit(1);
 }
 
-const uploadDirs = ["shared", "src", "backend/src", "backend/migrations"];
+const uploadDirs = ["shared", "src", "backend/src", "backend/scripts", "backend/migrations"];
 
 function collectFiles(dir, base = dir) {
   const out = [];

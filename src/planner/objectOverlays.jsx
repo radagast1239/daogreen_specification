@@ -58,7 +58,11 @@ export function ServiceZoneEl({ it, k }) {
 
 export function PortMarkers({ it, k, show }) {
   if (!show) return null;
-  const ports = it.ports?.length ? it.ports : defaultPortsForKind(it.kind);
+  const ports = it.connectionPorts?.length
+    ? it.connectionPorts
+    : it.ports?.length
+      ? it.ports
+      : defaultPortsForKind(it.kind);
   if (!ports.length) return null;
   return (
     <g pointerEvents="none" data-ui="ports">

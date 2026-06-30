@@ -11,9 +11,19 @@ import { fileURLToPath } from "url";
 import { initDb, db, getDbPath, rowToMaterial } from "../src/db.js";
 import {
   resolveOrphanMaterialId,
-  hydrateLineFromMaterial,
   projectItemPatchFromMaterial,
 } from "../../shared/orphanMaterialRemap.js";
+import {
+  cleanStellageCatalogs,
+  cleanStellageModuleMeta,
+  parseSettingsJson,
+} from "../../shared/cleanStellageCatalogs.js";
+import {
+  cleanFarmSectionCatalogs,
+  cleanFarmSectionVersions,
+  parseFarmSections,
+} from "../../shared/cleanFarmSectionCatalogs.js";
+import { seedModules } from "../../src/data/modules.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const apply = process.argv.includes("--apply");
@@ -38,33 +48,6 @@ function saveSettingsKey(key, value) {
   ).run(key, typeof value === "string" ? value : JSON.stringify(value));
 }
 
-function remapCatalog(catalogs, materials, materialIds, label) {
-  const report = [];
-  let changed = 0;
-  const next = {};
-  for (const [catalogKey, lines] of Object.entries(catalogs || {})) {
-    if (!Array.isArray(lines)) {
-      next[catalogKey] = lines;
-      continue;
-    }
-    next[catalogKey] = lines.map((ln) => {
-      const oldId = ln.materialId || "";
-      if (!oldId || materialIds.has(oldId)) return ln;
-      const newId = resolveOrphanMaterialId(oldId, ln.name, materials, materialIds);
-      if (!newId) {
-        report.push({ kind: label, catalogKey, oldId, name: ln.name, status: "unresolved" });
-        return ln;
-      }
-      const mat = materials.find((m) => m.id === newId);
-      const hydrated = hydrateLineFromMaterial({ ...ln, materialId: newId }, mat);
-      changed++;
-      report.push({ kind: label, catalogKey, oldId, newId, name: ln.name, status: "remapped" });
-      return hydrated;
-    });
-  }
-  return { next, changed, report };
-}
-
 initDb();
 const UPDATE_ITEM_MATERIAL = db.prepare(`
   UPDATE project_items SET
@@ -82,24 +65,72 @@ console.log(`Режим: ${apply ? "APPLY" : "dry-run"}`);
 console.log(`Материалов в базе: ${materials.length} (таблица materials не меняется)`);
 
 const settings = loadSettings();
-const farmCatalogs = parseJson(settings.farmSectionCatalogs, {});
-const stellageCatalogs = parseJson(settings.stellageModuleCatalogs, {});
+const farmSections = parseFarmSections(settings.farmSections);
+const farmClean = cleanFarmSectionCatalogs(parseSettingsJson(settings.farmSectionCatalogs), materials, farmSections);
+const farmVersionsClean = cleanFarmSectionVersions(parseSettingsJson(settings.farmSectionVersions), materials, farmSections);
+const farm = {
+  next: farmClean.next,
+  report: [
+    ...farmClean.report.remapped.map((r) => ({
+      kind: "farm",
+      catalogKey: r.sectionId,
+      oldId: r.oldId,
+      newId: r.newId,
+      name: r.name,
+      status: "remapped",
+    })),
+    ...farmClean.report.dropped.map((r) => ({
+      kind: "farm",
+      catalogKey: r.sectionId,
+      oldId: r.materialId,
+      name: r.name,
+      status: "dropped",
+    })),
+  ],
+};
+const officialStellageIds = seedModules.filter((m) => m.type === "stellage").map((m) => m.id);
+const stellageClean = cleanStellageCatalogs(parseSettingsJson(settings.stellageModuleCatalogs), materials, {
+  officialModuleIds: officialStellageIds,
+});
+const stellageMetaClean = cleanStellageModuleMeta(parseSettingsJson(settings.stellageModuleMeta), officialStellageIds);
+const stellage = {
+  next: stellageClean.next,
+  changed: stellageClean.stats.linesRemapped + stellageClean.stats.linesDropped + stellageClean.stats.modulesRemoved + stellageClean.stats.linesDeduped,
+  report: [
+    ...stellageClean.report.remapped.map((r) => ({
+      kind: "stellage",
+      catalogKey: r.moduleId,
+      oldId: r.oldId,
+      newId: r.newId,
+      name: r.name,
+      status: "remapped",
+    })),
+    ...stellageClean.report.dropped.map((r) => ({
+      kind: "stellage",
+      catalogKey: r.moduleId,
+      oldId: r.materialId,
+      name: r.name,
+      status: "dropped",
+    })),
+  ],
+};
 
-const farm = remapCatalog(farmCatalogs, materials, materialIds, "farm");
-const stellage = remapCatalog(stellageCatalogs, materials, materialIds, "stellage");
+console.log(`\nШаблоны фермы: remapped=${farmClean.stats.linesRemapped}, dropped=${farmClean.stats.linesDropped}, sections removed=${farmClean.stats.sectionsRemoved}, deduped=${farmClean.stats.linesDeduped}`);
+console.log(`Версии разделов фермы: remapped=${farmVersionsClean.stats.linesRemapped}, dropped=${farmVersionsClean.stats.linesDropped}`);
+console.log(`Шаблоны стеллажей: remapped=${stellageClean.stats.linesRemapped}, dropped=${stellageClean.stats.linesDropped}, modules removed=${stellageClean.stats.modulesRemoved}, deduped=${stellageClean.stats.linesDeduped}`);
+if (stellageMetaClean.removed.length) {
+  console.log(`stellageModuleMeta удалено ключей: ${stellageMetaClean.removed.join(", ")}`);
+}
 
-console.log(`\nШаблоны фермы: перепривязано строк ${farm.changed}`);
-console.log(`Шаблоны стеллажей: перепривязано строк ${stellage.changed}`);
-
-const unresolved = [...farm.report, ...stellage.report].filter((r) => r.status === "unresolved");
 const remapped = [...farm.report, ...stellage.report].filter((r) => r.status === "remapped");
+const dropped = [...farm.report, ...stellage.report].filter((r) => r.status === "dropped");
 if (remapped.length) {
   console.log("\nПерепривязки в шаблонах:");
   for (const r of remapped) console.log(`  [${r.kind}/${r.catalogKey}] ${r.oldId} → ${r.newId} | ${r.name}`);
 }
-if (unresolved.length) {
-  console.log("\nНе удалось перепривязать (шаблоны):");
-  for (const r of unresolved) console.log(`  [${r.kind}/${r.catalogKey}] ${r.oldId} | ${r.name}`);
+if (dropped.length) {
+  console.log("\nУдалено из шаблонов (нет в базе):");
+  for (const r of dropped) console.log(`  [${r.kind}/${r.catalogKey}] ${r.oldId} | ${r.name || "—"}`);
 }
 
 const itemRows = db
@@ -121,7 +152,7 @@ console.log(`\nПозиции проектов: к перепривязке ${it
 
 if (!apply) {
   console.log("\nЗапустите с --apply для записи в БД.");
-  process.exit(unresolved.length || itemPlan.some((r) => r.status === "unresolved") ? 1 : 0);
+  process.exit(itemPlan.some((r) => r.status === "unresolved") ? 1 : 0);
 }
 
 const dbPath = getDbPath();
@@ -148,8 +179,10 @@ fs.writeFileSync(
 );
 console.log(`Бэкап settings: ${settingsBackup}`);
 
-saveSettingsKey("farmSectionCatalogs", JSON.stringify(farm.next));
-saveSettingsKey("stellageModuleCatalogs", JSON.stringify(stellage.next));
+saveSettingsKey("farmSectionCatalogs", JSON.stringify(farmClean.next));
+saveSettingsKey("farmSectionVersions", JSON.stringify(farmVersionsClean.next));
+saveSettingsKey("stellageModuleCatalogs", JSON.stringify(stellageClean.next));
+saveSettingsKey("stellageModuleMeta", JSON.stringify(stellageMetaClean.next));
 
 const touchedProjects = new Set();
 let itemsUpdated = 0;
@@ -168,4 +201,4 @@ for (const plan of itemPlan) {
 
 db.exec("PRAGMA wal_checkpoint(FULL)");
 
-console.log(`\nГотово. Шаблоны: ферма ${farm.changed}, стеллажи ${stellage.changed}. Позиций в проектах: ${itemsUpdated}. Проектов: ${touchedProjects.size}.`);
+console.log(`\nГотово. Ферма: ${farmClean.stats.totalLines} строк, стеллажи: ${stellageClean.stats.totalLines} строк. Позиций в проектах: ${itemsUpdated}. Проектов: ${touchedProjects.size}.`);

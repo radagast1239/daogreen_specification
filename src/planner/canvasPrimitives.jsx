@@ -3,34 +3,69 @@ import { areaM2, LINE_STYLE, LINK_RULES } from "./catalog.js";
 import {
   resolveLineVisual, linePlanLengthMm, lineTotalLengthMm, arrowPointsAlongLine,
 } from "./lineProperties.js";
-import { formatZoneAreaM2, zoneAreaMm2 } from "./roomZones.js";
+import { zoneAreaMm2 } from "./roomZones.js";
 import { ZONE_FLOW } from "./farmRules.js";
+import { formatRoomAreaLabel, formatRoomHeightLabel } from "./core/rooms/format.js";
+import { roomCategoryColor } from "./core/rooms/categories.js";
 import { ObjectIcon, DoorIcon } from "./icons.jsx";
 import { layerOpacity } from "./geometry.js";
-import { layerDisplayState } from "./canvasLayers.js";
+import { layerDisplayState, MUTED_LAYER_OPACITY } from "./canvasLayers.js";
 import {
   buildItemLabelLines, autoItemLabelPlacement, labelModeForItem,
   labelsVisible, labelAudienceVisible, resolveFreeLabelPosition, labelFontSize,
+  resolveItemLabelPlacement,
 } from "./labelProperties.js";
 import { LabelPlaque } from "./LabelPlaque.jsx";
 import { wallVisualStyle, wallFaceStrokeWidth, WALL_KINDS } from "./wallTypes.js";
-import { wallFaceSegment } from "./wallParallelGeometry.js";
 import { DG_THEME } from "./plannerVisualTheme.js";
 import { linkLengthMm, resolveLinkColor } from "./linkGeometry.js";
 import { isDoorItem, isOpeningKind, isWindowKind, doorStyle, doorShowsSwing } from "./doorTypes.js";
 import { openingStyle } from "./openingTypes.js";
 import { OpeningIcon } from "./icons.jsx";
-import { openingRangesOnSegment, wallDrawRanges, lerpPt, doorSwingPolygon } from "./doorGeometry.js";
+import { doorSwingPolygon } from "./doorGeometry.js";
+import { WallSlabFill, WallFaceOutlines, WALL_STROKE, WALL_ACTIVE_STROKE, resolveWallFill, resolveWallStrokeColor, collectWallParts, polyD } from "./wallRender.jsx";
 import { resolveGrid, gridLineLevel, buildScreenGridLines, buildScreenAxes, fmtCoordMm, GRID_COLORS, GRID_STROKE } from "./gridSettings.js";
-import { SegDim, wallSegmentOffsetSide, RectDims, WallMountedDim, RoomOutlineDims, ClearanceDims, WallSelectionDims } from "./dimensionMarkers.jsx";
+import { resolveGridLineStyle, wallVisualFromDisplay } from "./plannerVisualSettings.js";
+import {
+  SegDim,
+  wallSegmentDimElements,
+  RectDims,
+  WallMountedDim,
+  RoomOutlineDims,
+  ClearanceDims,
+  WallSelectionDims,
+  ItemDims,
+  WallDimChains,
+  RulerEl,
+  RulerDraftEl,
+  DimensionsLayer,
+  DimensionDraftEl,
+} from "./dimensionMarkers.jsx";
 import { isWallMountedItem } from "./clearanceDims.js";
+import { isAcWallUnit } from "./acProperties.js";
+import { VentDuctGraphic, VentDuctDraftGraphic, isVentDuctLine } from "./ventDuctRender.jsx";
 import { DEFAULT_PASSAGE_WARN_MM, DEFAULT_PASSAGE_ERROR_MM } from "./dimensionProperties.js";
 import { ServiceZoneEl, PortMarkers, StatusBadge, ItemStateIcons } from "./objectOverlays.jsx";
+import { isServiceZoneEnabled } from "./objectProperties.js";
 import { resolveItemVisual, SEL_COLORS } from "./selectionVisuals.js";
 import { glyphRenderProps } from "./objectGlyphs.js";
 import { SelectionHandles } from "./selectionHandles.jsx";
+import { shouldRenderPlannerObject } from "./farmObjects.js";
+import { isPipeLine, longestPipeSegment, resolvePipeLabel } from "./pipes.js";
+import { isDuctLine } from "./climate.js";
 
-export { RectDims, WallMountedDim, RoomOutlineDims, WallSelectionDims };
+export {
+  RectDims,
+  WallMountedDim,
+  RoomOutlineDims,
+  WallSelectionDims,
+  ItemDims,
+  WallDimChains,
+  RulerEl,
+  RulerDraftEl,
+  DimensionsLayer,
+  DimensionDraftEl,
+};
 
 /** Обёртка слоя: скрывает невидимые листы, помечает активный/приглушённый. */
 export function PlanLayerGroup({ layerId, activeLayer, vis, display, children }) {
@@ -42,7 +77,7 @@ export function PlanLayerGroup({ layerId, activeLayer, vis, display, children })
       data-layer-active={st.isActive ? "1" : undefined}
       data-layer-muted={st.isMuted ? "1" : undefined}
     >
-      {children}
+      <LayerMutedWrap muted={st.isMuted}>{children}</LayerMutedWrap>
     </g>
   );
 }
@@ -53,19 +88,22 @@ export function PlanGridScreen({ view, width, height, display }) {
   if (!lines.length) return null;
   return (
     <g data-ui="grid" pointerEvents="none">
-      {lines.map((ln) => (
-        <line
-          key={ln.key}
-          x1={ln.x1}
-          y1={ln.y1}
-          x2={ln.x2}
-          y2={ln.y2}
-          stroke={GRID_COLORS[ln.level]}
-          strokeWidth={GRID_STROKE[ln.level]}
-          shapeRendering="crispEdges"
-          data-grid-level={ln.level}
-        />
-      ))}
+      {lines.map((ln) => {
+        const { stroke, strokeWidth } = resolveGridLineStyle(ln.level, GRID_COLORS[ln.level], GRID_STROKE[ln.level], display);
+        return (
+          <line
+            key={ln.key}
+            x1={ln.x1}
+            y1={ln.y1}
+            x2={ln.x2}
+            y2={ln.y2}
+            stroke={stroke}
+            strokeWidth={strokeWidth}
+            shapeRendering="crispEdges"
+            data-grid-level={ln.level}
+          />
+        );
+      })}
     </g>
   );
 }
@@ -161,21 +199,35 @@ export function PlanAxes({ bounds, display }) {
 
 export { buildScreenGridLines };
 
-/** Лист чертежа — без готовых стен. Опционально пунктир границы листа. */
+/** Лист чертежа — подложка PNG/JPG и опционально пунктир границы. */
 export function SheetBackdrop({ room, k, showBoundary }) {
-  if (!showBoundary) return null;
+  const bd = room?.backdrop;
   return (
-    <rect
-      x={0}
-      y={0}
-      width={room.w}
-      height={room.h}
-      fill="none"
-      stroke="rgba(25,45,38,0.2)"
-      strokeWidth={1.2 * k}
-      strokeDasharray={`${12 * k} ${8 * k}`}
-      pointerEvents="none"
-    />
+    <g data-ui="sheet-backdrop" pointerEvents="none">
+      {bd?.dataUrl && (
+        <image
+          href={bd.dataUrl}
+          x={bd.x ?? 0}
+          y={bd.y ?? 0}
+          width={bd.w ?? room.w}
+          height={bd.h ?? room.h}
+          opacity={bd.opacity ?? 0.55}
+          preserveAspectRatio="none"
+        />
+      )}
+      {showBoundary && (
+        <rect
+          x={0}
+          y={0}
+          width={room.w}
+          height={room.h}
+          fill="none"
+          stroke="rgba(25,45,38,0.2)"
+          strokeWidth={1.2 * k}
+          strokeDasharray={`${12 * k} ${8 * k}`}
+        />
+      )}
+    </g>
   );
 }
 
@@ -210,89 +262,59 @@ export function RoomShell({ room, k, showBoundary = false }) {
   );
 }
 
-export function RoomDims({ room, k, fmtU }) {
-  return <RoomOutlineDims room={room} k={k} fmtU={fmtU} />;
+export { PlannerWallDefs } from "./wallRender.jsx";
+
+/** SVG-фильтр для неактивных слоёв (светло-серый). */
+export function PlannerLayerDefs() {
+  return (
+    <defs>
+      <filter id="pl-layer-muted" x="-8%" y="-8%" width="116%" height="116%" colorInterpolationFilters="sRGB">
+        <feColorMatrix
+          type="matrix"
+          values="0.62 0.62 0.62 0 0.22 0.62 0.62 0.62 0 0.22 0.62 0.62 0.62 0 0.22 0 0 0 1 0"
+        />
+      </filter>
+    </defs>
+  );
 }
 
-function WallBodySegments({
-  wall, openings, stroke, strokeW, dash, face = null, room = null,
-}) {
-  const segs = [];
-  for (let i = 1; i < wall.pts.length; i++) {
-    const a = wall.pts[i - 1];
-    const b = wall.pts[i];
-    const op = openingRangesOnSegment(a, b, wall.id, openings || []);
-    wallDrawRanges(op).forEach(([t0, t1], j) => {
-      let p0 = lerpPt(a, b, t0);
-      let p1 = lerpPt(a, b, t1);
-      if (face && room) {
-        const seg = wallFaceSegment(a, b, face, wall, room);
-        p0 = lerpPt(seg.a, seg.b, t0);
-        p1 = lerpPt(seg.a, seg.b, t1);
-      }
-      segs.push({ key: `${i}-${j}`, p0, p1 });
-    });
-  }
-  if (!segs.length) {
-    const d = wall.pts.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ");
-    return (
-      <path
-        d={d}
-        fill="none"
-        stroke={stroke}
-        strokeWidth={strokeW}
-        strokeLinejoin="miter"
-        strokeLinecap="square"
-        strokeDasharray={dash || undefined}
-        pointerEvents="none"
-      />
-    );
-  }
+/** Обёртка содержимого неактивного слоя — светло-серый, без кликов. */
+export function LayerMutedWrap({ muted, children }) {
+  if (!muted) return children;
   return (
-    <g pointerEvents="none">
-      {segs.map(({ key, p0, p1 }) => (
-        <line
-          key={key}
-          x1={p0.x}
-          y1={p0.y}
-          x2={p1.x}
-          y2={p1.y}
-          stroke={stroke}
-          strokeWidth={strokeW}
-          strokeLinecap="square"
-          strokeDasharray={dash || undefined}
-        />
-      ))}
+    <g filter="url(#pl-layer-muted)" opacity={MUTED_LAYER_OPACITY} style={{ pointerEvents: "none" }}>
+      {children}
     </g>
   );
 }
 
+export function RoomDims({ room, k, fmtU, display }) {
+  return <RoomOutlineDims room={room} k={k} fmtU={fmtU} display={display} />;
+}
+
 export function WallEl({
-  wall, k, editable, selected, hovered = false, fmtU, showDims, onSel, onNode, onDel, onWallMove,
-  hoverNodeIdx = null, hasError = false, openings = [], room = null, onHover, onNodeHover,
+  wall, k, editable, eraseMode = false, selected, hovered = false, fmtU, showDims, chainDims = false, display = {}, onSel, onNode, onDel, onMidNode,
+  hoverNodeIdx = null, hasError = false, openings = [], room = null, allWalls = null, onHover, onNodeHover,
 }) {
   if (!wall?.pts || wall.pts.length < 2) return null;
-  const d = wall.pts.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ");
-  const vs = wallVisualStyle(wall);
-  const faceW = wallFaceStrokeWidth(k, wall);
   const hitW = Math.max(wall.thk || 100, 80);
   const isDemolish = wall.kind === "demolish";
-  const outerColor = hasError ? DG_THEME.dimError : (selected ? DG_THEME.brand : hovered ? "#5a9d8f" : (isDemolish ? DG_THEME.demolish : (wall.role === "outer" ? DG_THEME.wall : DG_THEME.wallInner)));
-  const innerStroke = wall.role === "outer" ? "#8a8580" : "#9a9a96";
+  const outerColor = hasError ? DG_THEME.dimError : (selected ? DG_THEME.brand : hovered ? "#5a9d8f" : (isDemolish ? DG_THEME.demolish : DG_THEME.wall));
   const cx = wall.pts.reduce((s, p) => s + p.x, 0) / wall.pts.length;
   const cy = wall.pts.reduce((s, p) => s + p.y, 0) / wall.pts.length;
   const roleLabel = wall.role === "outer" ? "Наружная" : "Перегородка";
-  const showNodes = editable && (selected || hovered || hoverNodeIdx != null);
+  const showNodes = (editable || eraseMode) && (selected || hovered || hoverNodeIdx != null);
+  const wallPath = wall.pts.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ");
   const onWallDown = (e) => {
-    if (editable) {
+    if (editable || eraseMode) {
       e.stopPropagation();
-      onSel();
+      onSel(e);
     }
   };
   return (
     <g>
       <path
-        d={d}
+        d={wallPath}
         fill="none"
         stroke="transparent"
         strokeWidth={hitW + 80}
@@ -301,59 +323,52 @@ export function WallEl({
         onPointerLeave={onHover ? () => onHover(null) : undefined}
         style={{ cursor: editable ? "pointer" : "default" }}
       />
-      {!isDemolish && (
-        <path
-          d={d}
-          fill="none"
-          stroke={DG_THEME.wallFill}
-          strokeWidth={wall.thk || 100}
-          strokeLinejoin="miter"
-          strokeLinecap="butt"
-          strokeOpacity={DG_THEME.wallFillAlpha}
-          pointerEvents="none"
-        />
-      )}
-      <WallBodySegments
-        wall={wall}
-        openings={openings}
-        stroke={outerColor}
-        strokeW={faceW * (wall.role === "outer" ? 1.15 : 1)}
-        dash={vs.dash}
-        face="outer"
-        room={room}
-      />
-      <WallBodySegments
-        wall={wall}
-        openings={openings}
-        stroke={innerStroke}
-        strokeW={faceW * 0.92}
-        dash={vs.dash}
-        face="inner"
-        room={room}
-      />
+      <WallSlabFill wall={wall} openings={openings} room={room} k={k} isDemolish={isDemolish} allWalls={allWalls} />
       {selected && editable && (
         <text x={cx} y={cy - (wall.thk || 100) * 0.35} fontSize={9 * k} textAnchor="middle" fill="#6b7d74" pointerEvents="none">
-          {WALL_KINDS[wall.kind]?.label || roleLabel}
+          {WALL_KINDS[wall.kind || "new"]?.label || roleLabel}
         </text>
       )}
-      {showDims &&
-        wall.pts.map((p, i) => {
-          if (!i) return null;
-          const a = wall.pts[i - 1];
-          const side = wallSegmentOffsetSide(a, p, room);
-          return (
-            <SegDim
-              key={i}
-              a={a}
-              b={p}
-              label={fmtU(Math.hypot(p.x - a.x, p.y - a.y))}
-              k={k}
-              offset={selected ? 130 : 100}
-              offsetSide={side}
-              state={selected ? "active" : "normal"}
+      {showDims && !selected && !chainDims && (() => {
+        const { segs } = wallSegmentDimElements(wall, room, {
+          k,
+          fmtU,
+          display,
+          offset: 100,
+          state: "normal",
+          keyPrefix: `${wall.id}-`,
+        });
+        return segs;
+      })()}
+      {editable &&
+        showNodes &&
+        wall.pts.length === 2 && (
+          <>
+            <line
+              x1={wall.pts[0].x}
+              y1={wall.pts[0].y}
+              x2={wall.pts[1].x}
+              y2={wall.pts[1].y}
+              stroke="transparent"
+              strokeWidth={Math.max(hitW, 120)}
+              onPointerDown={(e) => onMidNode?.(e, wall)}
+              style={{ cursor: "move" }}
             />
-          );
-        })}
+            <circle
+              cx={(wall.pts[0].x + wall.pts[1].x) / 2}
+              cy={(wall.pts[0].y + wall.pts[1].y) / 2}
+              r={(hoverNodeIdx === -1 ? 10 : 7) * k}
+              fill="#fff"
+              stroke={outerColor}
+              strokeWidth={1.8 * k}
+              strokeDasharray={`${4 * k} ${3 * k}`}
+              onPointerDown={(e) => onMidNode?.(e, wall)}
+              onPointerEnter={() => onNodeHover?.(-1)}
+              onPointerLeave={() => onNodeHover?.(null)}
+              style={{ cursor: "move" }}
+            />
+          </>
+        )}
       {editable &&
         showNodes &&
         wall.pts.map((p, i) => (
@@ -371,21 +386,6 @@ export function WallEl({
             style={{ cursor: "move" }}
           />
         ))}
-      {editable && selected && onWallMove && (
-        <rect
-          x={cx - 5 * k}
-          y={cy - 5 * k}
-          width={10 * k}
-          height={10 * k}
-          fill="#116355"
-          fillOpacity={0.25}
-          stroke="#116355"
-          strokeWidth={1.2 * k}
-          transform={`rotate(45 ${cx} ${cy})`}
-          onPointerDown={(e) => onWallMove(e, wall)}
-          style={{ cursor: "move" }}
-        />
-      )}
       {editable && selected && (
         <text x={wall.pts[0].x + 12 * k} y={wall.pts[0].y - 12 * k} fontSize={13 * k} fill="#a5371f" style={{ cursor: "pointer" }} onClick={onDel}>
           ✕
@@ -396,35 +396,34 @@ export function WallEl({
 }
 
 /** Обводка стен поверх объектов (без интерактива). */
-export function WallsTopOverlay({ walls, k, warnWallIds = new Set(), openings = [], room = null }) {
+export function WallsTopOverlay({
+  walls, k, warnWallIds = new Set(), openings = [], room = null,
+  selectedWallId = null, hoveredWallId = null, display = {},
+}) {
+  const { strokeMul } = wallVisualFromDisplay(display);
   return (
     <g data-ui="walls-top" pointerEvents="none">
       {walls.map((wall) => {
         if (!wall?.pts || wall.pts.length < 2) return null;
         const vs = wallVisualStyle(wall);
-        const faceW = wallFaceStrokeWidth(k, wall);
         const err = warnWallIds.has(wall.id);
-        const stroke = err ? "#c44" : vs.color;
+        const highlight = wall.id === selectedWallId || wall.id === hoveredWallId;
+        const isDemolish = wall.kind === "demolish";
+        const strokeBase = err ? "#c44" : vs.color;
         return (
-          <g key={`top-${wall.id}`}>
-            <WallBodySegments
-              wall={wall}
-              openings={openings}
-              stroke={stroke}
-              strokeW={faceW}
-              dash={vs.dash}
-              face="outer"
-              room={room}
-            />
-            <WallBodySegments
-              wall={wall}
-              openings={openings}
-              stroke={wall.role === "outer" ? "#8a8580" : "#9a9a96"}
-              strokeW={faceW * 0.92}
-              face="inner"
-              room={room}
-            />
-          </g>
+          <WallFaceOutlines
+            key={`top-${wall.id}`}
+            wall={wall}
+            openings={openings}
+            room={room}
+            k={k}
+            strokeOuter={strokeBase}
+            strokeInner={strokeBase}
+            strokeW={wallFaceStrokeWidth(k, wall) * (wall.role === "outer" ? 1.1 : 1) * strokeMul}
+            dash={isDemolish ? vs.dash : (vs.dash || null)}
+            highlight={highlight && !err}
+            allWalls={walls}
+          />
         );
       })}
     </g>
@@ -451,9 +450,13 @@ export function ItemEl({
   display,
   plan,
   zoom,
+  labelSelected = false,
+  onLabelDown,
+  fmtU = (v) => `${Math.round(v)}`,
 }) {
   const opacity = layerOpacity(it.layer, activeLayer, vis[it.layer] !== false, display, display?.sheet);
   if (opacity === 0) return null;
+  if (!shouldRenderPlannerObject(it)) return null;
 
   const a = it.angle || 0;
   const cx = it.x + it.w / 2;
@@ -489,7 +492,7 @@ export function ItemEl({
 
   return (
     <g transform={itemTransform} opacity={itemOpacity}>
-      {(display.showServiceZones || selected) && !opening && (
+      {!opening && (display.showServiceZones || isServiceZoneEnabled(it)) && (
         <ServiceZoneEl it={it} k={k} />
       )}
       {door ? (
@@ -722,8 +725,29 @@ export function ItemEl({
           <ObjectIcon it={{ ...it, color: glyph.stroke || it.color }} k={k} />
         </g>
       )}
+      {it.type === "farm_object" && it.category === "rack" && !door && !opening && (
+        <FarmRackTechnicalOverlay it={it} k={k} fmtU={fmtU} />
+      )}
       {showLabel && !door && !opening && labelsVisible(it.layer, activeLayer, display) && (
-        <ItemLabelBadge it={it} plan={plan} k={k} zoom={zoom} display={display} room={plan?.room} />
+        <ItemLabelBadge
+          it={it}
+          plan={plan}
+          k={k}
+          zoom={zoom}
+          display={display}
+          room={plan?.room}
+          selected={labelSelected}
+          onDown={onLabelDown}
+        />
+      )}
+      {showDims && display.showObjectDims !== false && !door && !opening && (
+        <ItemDims
+          it={it}
+          k={k}
+          fmtU={fmtU}
+          display={display}
+          show={it.dimensions?.display !== false}
+        />
       )}
       <StatusBadge it={it} k={k} cx={cx} cy={it.y - 6 * k} />
       <ItemStateIcons
@@ -755,10 +779,63 @@ export function ItemEl({
   );
 }
 
-function ItemLabelBadge({ it, plan, k, zoom, display, room }) {
+function FarmRackTechnicalOverlay({ it, k, fmtU }) {
+  const innerInset = Math.min(it.w, it.h) * 0.08;
+  const x = it.x + innerInset;
+  const y = it.y + innerInset;
+  const w = Math.max(10, it.w - innerInset * 2);
+  const h = Math.max(10, it.h - innerInset * 2);
+  const levels = it.params?.levels || it.tierCount || it.params?.tiers || null;
+  return (
+    <g pointerEvents="none">
+      <rect
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        fill="none"
+        stroke="#116355"
+        strokeOpacity={0.6}
+        strokeWidth={0.8 * k}
+      />
+      <line
+        x1={x + 6 * k}
+        y1={it.y + it.h / 2}
+        x2={x + w - 6 * k}
+        y2={it.y + it.h / 2}
+        stroke="#116355"
+        strokeOpacity={0.55}
+        strokeWidth={0.8 * k}
+        strokeDasharray={`${4 * k} ${3 * k}`}
+      />
+      <text x={it.x + it.w / 2} y={it.y - 6 * k} fontSize={8 * k} textAnchor="middle" fill="#116355" opacity={0.9}>
+        {fmtU(it.w)}
+      </text>
+      <text
+        x={it.x - 6 * k}
+        y={it.y + it.h / 2}
+        fontSize={8 * k}
+        textAnchor="end"
+        fill="#116355"
+        opacity={0.9}
+        transform={`rotate(-90 ${it.x - 6 * k} ${it.y + it.h / 2})`}
+      >
+        {fmtU(it.h)}
+      </text>
+      {levels ? (
+        <text x={it.x + it.w / 2} y={it.y + it.h + 12 * k} fontSize={8 * k} textAnchor="middle" fill="#116355" opacity={0.9}>
+          {levels} ярусов
+        </text>
+      ) : null}
+    </g>
+  );
+}
+
+function ItemLabelBadge({ it, plan, k, zoom, display, room, selected = false, onDown }) {
   const mode = labelModeForItem(it, display);
   const lines = buildItemLabelLines(it, plan, mode);
-  const place = autoItemLabelPlacement(it, room);
+  const place = resolveItemLabelPlacement(it, room);
+  if (!place) return null;
   return (
     <LabelPlaque
       x={place.x}
@@ -766,7 +843,10 @@ function ItemLabelBadge({ it, plan, k, zoom, display, room }) {
       lines={lines}
       k={k}
       zoom={zoom}
+      display={display}
       align="center"
+      selected={selected}
+      onDown={onDown ? (e) => onDown(e, it) : undefined}
       leaderTo={place.external ? place.anchor : null}
       leaderFrom={place.external ? { x: place.x, y: place.y } : null}
     />
@@ -779,7 +859,7 @@ export function LabelEl({ lb, items, k, zoom, selected, onDown, activeLayer, dis
   if (!labelAudienceVisible(lb.audience, activeLayer)) return null;
   const pos = resolveFreeLabelPosition(lb, tgt);
   const lines = (lb.text || "").split("\n").filter(Boolean);
-  const anchor = tgt ? { x: tgt.x + tgt.w / 2, y: tgt.y + tgt.h / 2 } : null;
+  const anchor = pos.anchor;
   return (
     <g opacity={selected ? 1 : 0.92}>
       <LabelPlaque
@@ -788,11 +868,12 @@ export function LabelEl({ lb, items, k, zoom, selected, onDown, activeLayer, dis
         lines={lines}
         k={k}
         zoom={zoom}
+        display={display}
+        fontSizePt={lb.fontSizePt}
         selected={selected}
         onDown={onDown}
         align="left"
         leaderTo={anchor}
-        leaderFrom={{ x: pos.x, y: pos.y + labelFontSize(k, zoom) }}
       />
     </g>
   );
@@ -818,61 +899,80 @@ export function ZoneEl({
     : zn.y + zn.h / 2;
   const detail = interactive && (showDetail || activeLayer === "zones");
   const flow = showFlow ? (ZONE_FLOW[zn.flow] || ZONE_FLOW.neutral) : ZONE_FLOW.neutral;
-  const stroke = zn.zoneColor || flow.color;
-  const fillColor = zn.zoneColor || flow.color;
+  const zoneCategoryColor = roomCategoryColor(zn.category);
+  const stroke = zn.zoneColor || zn.fillColor || zoneCategoryColor || flow.color;
+  const fillColor = zn.fillColor || zn.zoneColor || zoneCategoryColor || flow.color;
   const contoursOnly = zn.contoursOnly || zoneContoursOnly;
   const hideFill = zn.hideFill || !showZoneFill || contoursOnly;
   let fillOp = hideFill ? 0 : (selected ? flow.fill + 0.04 : flow.fill);
+  const engineeringSheet = ["water", "drain", "wiring", "sockets", "light", "climate", "vent", "sanitary"].includes(display?.sheet?.id);
+  if (!hideFill && engineeringSheet) fillOp *= 0.45;
   if (!hideFill && zn.auto && interactive) fillOp = Math.max(fillOp, flow.fill);
-  const areaMm2 = zoneAreaMm2(zn);
-  const small = areaMm2 < 2_500_000;
+  const areaMm2 = zn.areaMm2 || zoneAreaMm2(zn);
+  const roomHeightMm = zn.heightMm || zn.height || room?.defaultRoomHeightMm || room?.height || 3000;
+  const small = areaMm2 < 4_000_000 || !!zn.labelPosition?.external;
   const rcx = room?.w ? room.w / 2 : cx;
   const rcy = room?.h ? room.h / 2 : cy;
   const dx = cx - rcx;
   const dy = cy - rcy;
   const distC = Math.hypot(dx, dy) || 1;
-  const labelX = small ? cx + (dx / distC) * Math.max(zn.w, zn.h) * 0.55 : cx;
-  const labelY = small ? cy + (dy / distC) * Math.max(zn.w, zn.h) * 0.55 : cy;
+  const autoLabelX = small ? cx + (dx / distC) * Math.max(zn.w || 0, zn.h || 0, 400) * 0.55 : cx;
+  const autoLabelY = small ? cy + (dy / distC) * Math.max(zn.w || 0, zn.h || 0, 400) * 0.55 : cy;
+  const labelX = zn.labelPosition?.x ?? autoLabelX;
+  const labelY = zn.labelPosition?.y ?? autoLabelY;
   const showArea = zn.showArea !== false && showZoneAreas;
   const showName = zn.showName !== false;
-  const showHeightLbl = zn.showHeight !== false && interactive && activeLayer === "zones";
+  const showHeightLbl = zn.showHeight !== false;
   const locked = zn.locked === true;
   const dash = contoursOnly ? `${8 * k} ${5 * k}` : (detail ? "none" : `${10 * k} ${6 * k}`);
   const zoneLabels = display ? labelsVisible("zones", activeLayer, display, display?.sheet) : true;
   const labelLines = [];
-  if (showName && zn.name) labelLines.push(zn.name);
+  if (showName && zn.name && !small) labelLines.push(zn.name);
   if (interactive && showFlow && zn.flow && zn.flow !== "neutral") labelLines.push(flow.label);
-  if (showArea) labelLines.push(`S = ${formatZoneAreaM2(zn)} м²`);
-  if (showHeightLbl && zn.height) labelLines.push(`H = ${(zn.height / 1000).toFixed(2)} м`);
+  if (showHeightLbl) labelLines.push(formatRoomHeightLabel(roomHeightMm));
+  if (showArea) labelLines.push(formatRoomAreaLabel(areaMm2));
 
   const handleDown = locked || !interactive ? undefined : onDown;
   const hitCursor = locked || !interactive ? "default" : "pointer";
 
   if (!interactive) {
-    if (!showRoomLabels || !zoneLabels || !showName) return null;
+    if (!showRoomLabels || !zoneLabels) return null;
     return (
       <g pointerEvents="none" data-ui="room-label">
+        {showName && zn.name && (
+          <text
+            x={labelX}
+            y={labelY - 18 * k}
+            fontSize={11 * k}
+            textAnchor="middle"
+            fill="#6b7d74"
+            fontWeight="500"
+            opacity={0.85}
+          >
+            {zn.name}
+          </text>
+        )}
         <text
-          x={cx}
-          y={cy - (showArea ? 6 * k : 0)}
+          x={labelX}
+          y={labelY - 2 * k}
           fontSize={11 * k}
           textAnchor="middle"
           fill="#6b7d74"
           fontWeight="500"
           opacity={0.85}
         >
-          {zn.name}
+          {formatRoomHeightLabel(roomHeightMm)}
         </text>
         {showArea && (
           <text
-            x={cx}
-            y={cy + 12 * k}
+            x={labelX}
+            y={labelY + 12 * k}
             fontSize={9 * k}
             textAnchor="middle"
             fill="#8f9a94"
             style={{ fontFamily: "var(--mono)" }}
           >
-            {formatZoneAreaM2(zn)} м²
+            {formatRoomAreaLabel(areaMm2)}
           </text>
         )}
       </g>
@@ -910,7 +1010,7 @@ export function ZoneEl({
       )}
       {detail && zoneLabels && labelLines.length > 0 && (
         <>
-          {small && (
+          {(small || zn.labelPosition?.external) && (
             <line x1={cx} y1={cy} x2={labelX} y2={labelY} stroke={DG_THEME.labelLeader} strokeWidth={1 * k} opacity={0.6} pointerEvents="none" />
           )}
           <LabelPlaque
@@ -920,9 +1020,21 @@ export function ZoneEl({
             k={k}
             zoom={k > 0 ? 1 / k : 0.1}
             align="center"
-            leaderTo={small ? { x: cx, y: cy } : null}
-            leaderFrom={small ? { x: labelX, y: labelY } : null}
+            leaderTo={(small || zn.labelPosition?.external) ? { x: cx, y: cy } : null}
+            leaderFrom={(small || zn.labelPosition?.external) ? { x: labelX, y: labelY } : null}
+            onDown={handleDown}
           />
+          {small && showName && zn.name && (
+            <LabelPlaque
+              x={labelX}
+              y={labelY - (labelLines.length * 12 * k) / 2 - 22 * k}
+              lines={[zn.name]}
+              k={k}
+              zoom={k > 0 ? 1 / k : 0.1}
+              align="center"
+              onDown={handleDown}
+            />
+          )}
         </>
       )}
       {selected && !locked && !zn.auto && (
@@ -982,13 +1094,102 @@ export function LineEl({ line, k, showDims, editable, selected, hovered = false,
   if (opacity === 0) return null;
   const st = resolveLineVisual(line);
   const pts = line.pts || [];
+  const lineColor = selected ? SEL_COLORS.select : hovered ? SEL_COLORS.hover : st.color;
+
+  if (isVentDuctLine(line)) {
+    return (
+      <g opacity={opacity}>
+        <VentDuctGraphic
+          pts={pts}
+          line={line}
+          k={k}
+          color={lineColor}
+          selected={selected}
+          hovered={hovered}
+          editable={editable}
+          locked={line.locked}
+          onPointerDown={(e) => {
+            if (editable && !line.locked) {
+              e.stopPropagation();
+              onSel();
+            }
+          }}
+          onHover={onHover ? (on) => onHover(on ? line.id : null) : undefined}
+        />
+        {showDims && selected &&
+          pts.map((p, i) => {
+            if (!i) return null;
+            const a = pts[i - 1];
+            return (
+              <SegDim
+                key={i}
+                a={a}
+                b={p}
+                label={fmtU(Math.hypot(p.x - a.x, p.y - a.y))}
+                k={k}
+                display={display}
+                offset={100}
+                offsetSide={-1}
+                state="active"
+              />
+            );
+          })}
+        {selected && pts.length >= 2 && (
+          <text
+            x={(pts[0].x + pts[pts.length - 1].x) / 2}
+            y={(pts[0].y + pts[pts.length - 1].y) / 2 - 16 * k}
+            fontSize={10 * k}
+            textAnchor="middle"
+            fill="#5a5f5c"
+            pointerEvents="none"
+            style={{ fontFamily: "var(--mono)" }}
+          >
+            Σ {fmtU(lineTotalLengthMm(line))} ({line.reservePct ?? 10}%)
+          </text>
+        )}
+        {editable && !line.locked &&
+          pts.map((p, i) => (
+            <circle
+              key={i}
+              cx={p.x}
+              cy={p.y}
+              r={5 * k}
+              fill="#fff"
+              stroke={lineColor}
+              strokeWidth={1.5 * k}
+              onPointerDown={(e) => onNode(e, "lines", line.id, i)}
+              style={{ cursor: "move" }}
+            />
+          ))}
+        {editable && selected && !line.locked && (
+          <text x={pts[0]?.x + 10 * k} y={pts[0]?.y - 10 * k} fontSize={13 * k} fill="#a5371f" style={{ cursor: "pointer" }} onClick={onDel}>
+            ✕
+          </text>
+        )}
+      </g>
+    );
+  }
+
   const d = pts.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ");
   const dash = st.dash ? st.dash.map((v) => v * k).join(" ") : "none";
   const sw = (selected ? st.w + 1 : hovered ? st.w + 0.6 : st.w) * k;
-  const lineColor = selected ? SEL_COLORS.select : hovered ? SEL_COLORS.hover : st.color;
   const arrowsOn = st.arrow && display.showLineArrows !== false;
-  const arrowPts = arrowsOn ? arrowPointsAlongLine(pts, 900, line.arrowReverse) : [];
+  const arrowSpacing = line.arrowSpacing ?? display.lineArrowSpacing ?? 2800;
+  const arrowPts = arrowsOn ? arrowPointsAlongLine(pts, arrowSpacing, line.arrowReverse) : [];
   const offset = st.double ? 2.5 * k : 0;
+  const pipeLine = isPipeLine(line);
+  const ductLine = !pipeLine && isDuctLine(line);
+  const longestSeg = pipeLine ? longestPipeSegment(line) : null;
+  const ductLongestSeg = ductLine ? longestPipeSegment({ points: pts }) : null;
+  const showPipeLabel = pipeLine && longestSeg && longestSeg.len >= 900;
+  const showDuctLabel = ductLine && ductLongestSeg && ductLongestSeg.len >= 800;
+  const pipeLabel = pipeLine ? resolvePipeLabel(line) : "";
+  const ductLabel = ductLine
+    ? `${line.lineType === "airflow_arrow" ? "Поток" : `Ø${Math.round(Number(line.diameterMm || 0) || 0)}`}`
+    : "";
+  const slopeLabel = pipeLine && line.slopePercent
+    ? `Уклон ${Number(line.slopePercent).toFixed(1)}%`
+    : "";
 
   const drawPath = (ox = 0, oy = 0) => (
     <path
@@ -1022,6 +1223,58 @@ export function LineEl({ line, k, showDims, editable, selected, hovered = false,
       {arrowsOn && arrowPts.map((ap, i) => (
         <LineArrow key={i} x={ap.x} y={ap.y} ang={ap.ang} k={k} color={st.color} />
       ))}
+      {showPipeLabel && (
+        <text
+          x={longestSeg.mx}
+          y={longestSeg.my - 10 * k}
+          fontSize={8.8 * k}
+          textAnchor="middle"
+          fill={st.color}
+          style={{ fontFamily: "var(--mono)" }}
+        >
+          {pipeLabel}
+        </text>
+      )}
+      {showPipeLabel && slopeLabel && (
+        <text
+          x={longestSeg.mx}
+          y={longestSeg.my + 3 * k}
+          fontSize={8.2 * k}
+          textAnchor="middle"
+          fill="#7a5c3e"
+          style={{ fontFamily: "var(--mono)" }}
+        >
+          {slopeLabel}
+        </text>
+      )}
+      {showDuctLabel && (
+        <text
+          x={ductLongestSeg.mx}
+          y={ductLongestSeg.my - 10 * k}
+          fontSize={8.4 * k}
+          textAnchor="middle"
+          fill={st.color}
+          style={{ fontFamily: "var(--mono)" }}
+        >
+          {ductLabel}
+        </text>
+      )}
+      {pipeLine && (line.endpointLinks || []).map((ln) => {
+        const p = pts[ln.endpointIndex];
+        if (!p) return null;
+        return (
+          <circle
+            key={`pipe-link-${line.id}-${ln.endpointIndex}-${ln.itemId}`}
+            cx={p.x}
+            cy={p.y}
+            r={4.4 * k}
+            fill="#17a24a"
+            stroke="#ffffff"
+            strokeWidth={1 * k}
+            pointerEvents="none"
+          />
+        );
+      })}
       {showDims && selected &&
         pts.map((p, i) => {
           if (!i) return null;
@@ -1033,6 +1286,7 @@ export function LineEl({ line, k, showDims, editable, selected, hovered = false,
               b={p}
               label={fmtU(Math.hypot(p.x - a.x, p.y - a.y))}
               k={k}
+              display={display}
               offset={100}
               offsetSide={-1}
               state="active"
@@ -1085,28 +1339,110 @@ function LineArrow({ x, y, ang, k, color }) {
   );
 }
 
-export function DraftLine({ pts, cursor, k, wall, thk, color, fmtU, snapPt, room, angleSnap }) {
+export function DraftLine({
+  pts, cursor, k, wall, thk, color, fmtU, snapPt, room, angleSnap, ventDuct, lineDraft,
+  allWalls = null, draftWallKind = null, draftWallMaterial = null, fmtDraftLen = null,
+}) {
   const all = cursor ? [...pts, cursor] : pts;
   const lenColor = wall ? "#2f3431" : color;
+  const fmtLen = fmtDraftLen || fmtU;
   const mockWall = wall ? { thk: thk || 100, thicknessSide: "center" } : null;
-  const faceW = wall ? 1.2 * k : 3 * k;
+  const faceW = wall ? wallFaceStrokeWidth(k, mockWall) : 3 * k;
+
+  if (ventDuct && !wall && all.length >= 2) {
+    return (
+      <g>
+        <VentDuctDraftGraphic pts={pts} cursor={cursor} line={lineDraft} k={k} color={color} />
+        {pts.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={5 * k} fill={color} />
+        ))}
+        {snapPt?.snapped && cursor && (
+          <>
+            <circle cx={cursor.x} cy={cursor.y} r={8 * k} fill="none" stroke="#116355" strokeWidth={2 * k} opacity={0.85} />
+            {snapPt.kind === "trass" && (
+              <text x={cursor.x} y={cursor.y - 14 * k} fontSize={9 * k} textAnchor="middle" fill="#116355" fontWeight="600">
+                Ответвление
+              </text>
+            )}
+            {(snapPt.kind === "port" || snapPt.kind === "object") && (
+              <text x={cursor.x} y={cursor.y - 14 * k} fontSize={9 * k} textAnchor="middle" fill="#116355" fontWeight="600">
+                {snapPt.kind === "port" ? "Порт" : "Объект"}
+              </text>
+            )}
+          </>
+        )}
+        {cursor && pts.length > 0 && (() => {
+          const a = pts[pts.length - 1];
+          const len = Math.hypot(cursor.x - a.x, cursor.y - a.y);
+          let ang = Math.round(angleSnap?.snappedAngle ?? (Math.atan2(cursor.y - a.y, cursor.x - a.x) * 180) / Math.PI);
+          if (ang > 180) ang -= 360;
+          if (ang <= -180) ang += 360;
+          const mx = (a.x + cursor.x) / 2;
+          const my = (a.y + cursor.y) / 2;
+          return (
+            <>
+              <SegDim a={a} b={cursor} label={fmtU(len)} k={k} offset={80} offsetSide={-1} state="draft" />
+              {angleSnap?.snapped && (
+                <text x={mx} y={my - 18 * k} fontSize={9 * k} textAnchor="middle" fill="#116355" fontWeight="600">
+                  {ang}°
+                </text>
+              )}
+            </>
+          );
+        })()}
+      </g>
+    );
+  }
+
   return (
     <g>
       {wall && all.length >= 2 ? (
-        <>
-          {Array.from({ length: all.length - 1 }, (_, i) => {
-            const a = all[i];
-            const b = all[i + 1];
-            const outer = wallFaceSegment(a, b, "outer", mockWall, room);
-            const inner = wallFaceSegment(a, b, "inner", mockWall, room);
-            return (
-              <g key={i}>
-                <line x1={outer.a.x} y1={outer.a.y} x2={outer.b.x} y2={outer.b.y} stroke="#2f3431" strokeWidth={faceW} opacity={0.7} strokeLinecap="square" />
-                <line x1={inner.a.x} y1={inner.a.y} x2={inner.b.x} y2={inner.b.y} stroke="#8a8580" strokeWidth={faceW * 0.92} opacity={0.55} strokeLinecap="square" />
-              </g>
-            );
-          })}
-        </>
+        (() => {
+          const draftWall = {
+            id: "__draft__",
+            thk: thk || 100,
+            thicknessSide: "center",
+            kind: draftWallKind || "new",
+            material: draftWallMaterial || "drywall",
+            pts: all,
+          };
+          const draftStroke = resolveWallStrokeColor(draftWall);
+          const draftFill = resolveWallFill(draftWall, k);
+          const { slabs } = collectWallParts(draftWall, [], room, allWalls);
+          return (
+            <>
+              {slabs.map(({ key, poly }) => {
+                const d = polyD(poly);
+                return (
+                  <g key={key}>
+                    <path d={d} fill="#ffffff" stroke="none" />
+                    <path d={d} fill={draftFill} stroke="none" opacity={0.95} />
+                  </g>
+                );
+              })}
+              <WallFaceOutlines
+                wall={draftWall}
+                openings={[]}
+                room={room}
+                k={k}
+                strokeOuter={WALL_ACTIVE_STROKE}
+                strokeInner={draftStroke}
+                strokeW={faceW}
+                dash={WALL_KINDS[draftWall.kind]?.dash || null}
+                highlight
+                allWalls={allWalls}
+              />
+              <path
+                d={all.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ")}
+                fill="none"
+                stroke="#116355"
+                strokeWidth={1.2 * k}
+                strokeDasharray={`${4 * k} ${3 * k}`}
+                opacity={0.8}
+              />
+            </>
+          );
+        })()
       ) : (
         <path
           d={all.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ")}
@@ -1123,7 +1459,7 @@ export function DraftLine({ pts, cursor, k, wall, thk, color, fmtU, snapPt, room
       ))}
       {snapPt?.snapped && cursor && (
         <>
-          <circle cx={cursor.x} cy={cursor.y} r={8 * k} fill="none" stroke="#116355" strokeWidth={2 * k} opacity={0.85} />
+          <circle cx={cursor.x} cy={cursor.y} r={8 * k} fill="none" stroke="#116355" strokeWidth={2 * k} opacity={wall ? 0.7 : 0.85} />
           {snapPt.kind === "close" && (
             <text x={cursor.x} y={cursor.y - 14 * k} fontSize={10 * k} textAnchor="middle" fill="#116355" fontWeight="600">
               Замкнуть помещение
@@ -1139,6 +1475,11 @@ export function DraftLine({ pts, cursor, k, wall, thk, color, fmtU, snapPt, room
               Трасса
             </text>
           )}
+          {wall && snapPt.label && (
+            <text x={cursor.x + 10 * k} y={cursor.y - 10 * k} fontSize={9 * k} textAnchor="start" fill="#116355" fontWeight="600">
+              {snapPt.label}
+            </text>
+          )}
         </>
       )}
       {cursor && pts.length > 0 && (() => {
@@ -1149,11 +1490,10 @@ export function DraftLine({ pts, cursor, k, wall, thk, color, fmtU, snapPt, room
         const midX = (a.x + cursor.x) / 2;
         const midY = (a.y + cursor.y) / 2;
         const snapSuffix = angleSnap?.isSnapped && angleSnap?.guideLabel ? ` · ${angleSnap.guideLabel}` : "";
-        const hint = wall
-          ? `${fmtU(len)} · ${ang}°${snapSuffix}`
-          : `${fmtU(len)} · ${ang}°${snapSuffix}`;
+        const hint = `${fmtLen(len)} · ${ang.toFixed(1)}°${snapSuffix}`;
         const hudX = cursor.x + 16 * k;
         const hudY = cursor.y - 12 * k;
+        const angleColor = wall ? "#e0312a" : "#116355";
         return (
           <>
             {angleSnap?.isSnapped && (
@@ -1162,13 +1502,13 @@ export function DraftLine({ pts, cursor, k, wall, thk, color, fmtU, snapPt, room
                 y1={a.y}
                 x2={cursor.x}
                 y2={cursor.y}
-                stroke="#8f9a94"
+                stroke={wall ? "#3d9970" : "#8f9a94"}
                 strokeWidth={1 * k}
                 strokeDasharray={`${4 * k} ${3 * k}`}
                 opacity={0.75}
               />
             )}
-            <SegDim a={a} b={cursor} label={fmtU(len)} k={k} offset={120} offsetSide={-1} active />
+            <SegDim a={a} b={cursor} label={fmtLen(len)} k={k} offset={120} offsetSide={-1} active />
             <g transform={`translate(${hudX},${hudY})`} pointerEvents="none">
               <rect x={-4 * k} y={-12 * k} width={Math.max(72 * k, hint.length * 5.2 * k)} height={18 * k} rx={4 * k} fill="#fff" stroke="#d9e0dc" strokeWidth={1 * k} />
               <text
@@ -1181,6 +1521,12 @@ export function DraftLine({ pts, cursor, k, wall, thk, color, fmtU, snapPt, room
                 {hint}
               </text>
             </g>
+            {wall && (
+              <text x={midX} y={midY - 18 * k} fontSize={10 * k} textAnchor="middle" fill={angleColor} fontWeight="600">
+                {ang.toFixed(1)}°
+              </text>
+            )}
+            {!wall && (
             <text
               x={cursor.x}
               y={cursor.y + 18 * k}
@@ -1192,6 +1538,7 @@ export function DraftLine({ pts, cursor, k, wall, thk, color, fmtU, snapPt, room
             >
               {fmtCoordMm(cursor.x)}, {fmtCoordMm(cursor.y)}
             </text>
+            )}
           </>
         );
       })()}
@@ -1285,7 +1632,7 @@ export function SelectionDims({ it, plan, k, fmtU, display = {} }) {
   return (
     <g data-ui="dim-selection">
       {showObj && !mounted && (
-        <RectDims x={it.x} y={it.y} w={it.w} h={it.h} k={k} fmtU={fmtU} offset={130} state="active" />
+        <RectDims x={it.x} y={it.y} w={it.w} h={it.h} k={k} fmtU={fmtU} offset={48} state="active" display={display} color={it.color} edgeOffset />
       )}
       {showObj && mounted && (
         <SegDim
@@ -1293,13 +1640,14 @@ export function SelectionDims({ it, plan, k, fmtU, display = {} }) {
           b={{ x: it.x + it.w, y: cy }}
           label={fmtU(it.w)}
           k={k}
-          offset={80}
-          offsetSide={-1}
+          display={display}
+          offset={isAcWallUnit(it.kind) ? 95 : 80}
+          offsetSide={isAcWallUnit(it.kind) ? 1 : -1}
           state="active"
         />
       )}
       {showClr && (
-        <ClearanceDims it={it} plan={plan} k={k} fmtU={fmtU} warnMm={warnMm} errorMm={errorMm} />
+        <ClearanceDims it={it} plan={plan} k={k} fmtU={fmtU} display={display} warnMm={warnMm} errorMm={errorMm} />
       )}
     </g>
   );

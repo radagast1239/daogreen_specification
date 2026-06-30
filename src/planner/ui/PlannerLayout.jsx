@@ -72,7 +72,7 @@ export function PlannerLayout({
         <PlannerCategoryRail
           activeCategoryId={activeCategoryId}
           onPick={onCategoryPick}
-          onSearch={() => onCategoryPick({ id: "search", sheetId: "source", label: "Поиск" })}
+          onSearch={() => onCategoryPick({ id: "search", sheetId: "base_plan", label: "Поиск" })}
           onHelp={() => window.open("https://daogreen.ru", "_blank")}
         />
 

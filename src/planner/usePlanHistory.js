@@ -1,64 +1,63 @@
 import { useCallback, useRef, useState } from "react";
-
-const MAX_HISTORY = 60;
+import { HistoryModel } from "./core/history/historyModel.js";
 
 export function usePlanHistory(initialPlan) {
-  const [plan, setPlanInner] = useState(initialPlan);
-  const pastRef = useRef([]);
-  const futureRef = useRef([]);
-  const skipRef = useRef(false);
+  const stackRef = useRef(null);
+  if (!stackRef.current) {
+    const seed = typeof initialPlan === "function" ? initialPlan() : initialPlan;
+    stackRef.current = new HistoryModel(seed);
+  }
+
+  const [, tick] = useState(0);
+  const bump = () => tick((n) => n + 1);
 
   const setPlan = useCallback((updater) => {
-    setPlanInner((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      if (!skipRef.current && next !== prev) {
-        pastRef.current.push(prev);
-        if (pastRef.current.length > MAX_HISTORY) pastRef.current.shift();
-        futureRef.current = [];
-      }
-      skipRef.current = false;
-      return next;
-    });
+    stackRef.current.setPlan(updater);
+    bump();
+  }, []);
+
+  const replacePlan = useCallback((updater) => {
+    stackRef.current.replace(updater);
+    bump();
+  }, []);
+
+  const commitPlan = useCallback((updater) => {
+    stackRef.current.commit(updater);
+    bump();
+  }, []);
+
+  const commitFrom = useCallback((previousState, nextState) => {
+    stackRef.current.commitFrom(previousState, nextState);
+    bump();
   }, []);
 
   const undo = useCallback(() => {
-    const past = pastRef.current;
-    if (!past.length) return;
-    setPlanInner((cur) => {
-      const prev = past[past.length - 1];
-      pastRef.current = past.slice(0, -1);
-      futureRef.current.push(cur);
-      skipRef.current = true;
-      return prev;
-    });
+    stackRef.current.undo();
+    bump();
   }, []);
 
   const redo = useCallback(() => {
-    const future = futureRef.current;
-    if (!future.length) return;
-    setPlanInner((cur) => {
-      const next = future[future.length - 1];
-      futureRef.current = future.slice(0, -1);
-      pastRef.current.push(cur);
-      skipRef.current = true;
-      return next;
-    });
+    stackRef.current.redo();
+    bump();
   }, []);
 
   const resetHistory = useCallback((nextPlan) => {
-    pastRef.current = [];
-    futureRef.current = [];
-    skipRef.current = true;
-    setPlanInner(nextPlan);
+    stackRef.current.reset(nextPlan);
+    bump();
   }, []);
 
+  const stack = stackRef.current;
+
   return {
-    plan,
+    plan: stack.current,
     setPlan,
+    replacePlan,
+    commitPlan,
+    commitFrom,
     undo,
     redo,
-    canUndo: pastRef.current.length > 0,
-    canRedo: futureRef.current.length > 0,
+    canUndo: stack.canUndo,
+    canRedo: stack.canRedo,
     resetHistory,
   };
 }

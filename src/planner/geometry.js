@@ -3,50 +3,23 @@ import {
   findWallIntersections, itemInAnyZone, nearestWallSegment,
   findWallOverlaps, findWallsOverItems,
 } from "./wallGeometry.js";
+import { resolvePlanWalls } from "./wallNetwork.js";
+import { orthogonalPoint, constrainedOrthoPoint } from "./core/geometry/index.js";
 import { itemHasLinkOfType } from "./linkGeometry.js";
 import { collectLinkWarnings } from "./linkRules.js";
 import { collectFarmWarnings } from "./farmRules.js";
 import { collectRoomPurposeWarnings } from "./roomZones.js";
 import { collectRackWarnings } from "./rackProperties.js";
 import { collectLineWarnings } from "./lineProperties.js";
+import { collectPipeWarnings } from "./pipes.js";
+import { collectElectricalWarnings } from "./electrical.js";
+import { collectClimateWarnings } from "./climate.js";
 import { collectLabelWarnings } from "./labelProperties.js";
 import { findServiceZoneCollisions } from "./objectProperties.js";
 import { isDoorKind, isWallOpeningKind, doorStyle } from "./doorTypes.js";
 import { doorSwingCollisions } from "./doorGeometry.js";
 
-/** Привязка точки к горизонтали/вертикали относительно предыдущей (как в CAD). */
-export function orthogonalPoint(from, to, step = 50, snapOn = true) {
-  const s = (v) => snap(v, step, snapOn);
-  if (!from) return { x: s(to.x), y: s(to.y) };
-  const dx = Math.abs(to.x - from.x);
-  const dy = Math.abs(to.y - from.y);
-  if (dx >= dy) return { x: s(to.x), y: s(from.y) };
-  return { x: s(from.x), y: s(to.y) };
-}
-
-const SNAP_ANGLES = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4, Math.PI, -Math.PI / 4, -Math.PI / 2, (-3 * Math.PI) / 4];
-
-/** Shift: ограничение 0° / 45° / 90° от предыдущей точки. */
-export function constrainedOrthoPoint(from, to, step = 50, snapOn = true) {
-  const s = (v) => snap(v, step, snapOn);
-  if (!from) return { x: s(to.x), y: s(to.y) };
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const len = Math.hypot(dx, dy);
-  if (len < 1) return { x: s(from.x), y: s(from.y) };
-  const ang = Math.atan2(dy, dx);
-  let best = SNAP_ANGLES[0];
-  let bestDiff = Infinity;
-  SNAP_ANGLES.forEach((a) => {
-    let diff = Math.abs(ang - a);
-    if (diff > Math.PI) diff = 2 * Math.PI - diff;
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      best = a;
-    }
-  });
-  return { x: s(from.x + Math.cos(best) * len), y: s(from.y + Math.sin(best) * len) };
-}
+export { orthogonalPoint, constrainedOrthoPoint };
 
 const BASE_LAYERS = new Set(["room", "zones", "partitions"]);
 const COMPOSITE_LAYERS = new Set(["client", "install"]);
@@ -57,14 +30,18 @@ const ITEM_LAYER_IDS = LAYERS.map((l) => l.id).filter(
 const CLIENT_HIDDEN = new Set([
   "drain", "irrigation", "supply", "power", "vent", "climate", "ac", "light", "staff", "sockets", "spec", "furn",
 ]);
+const ENGINEERING_SHEET_IDS = new Set([
+  "irrigation", "drainage", "water_treatment", "electrical", "lighting", "climate", "ventilation", "plumbing",
+  // legacy sheet ids
+  "water", "drain", "wiring", "panel", "light", "vent", "sanitary", "sockets",
+]);
 
 /**
- * Прозрачность слоя на холсте.
- * Стены (room/partitions) всегда видны. Активный слой — полный цвет. Остальные 0.18–0.35.
+ * Видимость слоя (0 = скрыт, 1 = рисуется). Приглушение неактивных — через isLayerMuted + PlanLayerGroup.
  */
 export function layerOpacity(layerId, activeId, visible, display = {}, sheet = null) {
   if (!visible) return 0;
-  const { dimInactive = true, hideInactive = false, highlightActive = true } = display;
+  const { hideInactive = false } = display;
   const sheetActive = sheet?.activeLayer || activeId;
 
   if (layerId === "room" || layerId === "partitions") return 1;
@@ -73,34 +50,54 @@ export function layerOpacity(layerId, activeId, visible, display = {}, sheet = n
 
   if (activeId === "client") {
     if (CLIENT_HIDDEN.has(layerId)) return 0;
-    if (layerId === "zones") return 0.25;
-    return layerId === "room" ? 1 : 0.35;
+    if (layerId === "zones") return 1;
+    if (layerId === "room") return 1;
+    if (hideInactive && layerId !== sheetActive) return 0;
+    return 1;
   }
 
   if (activeId === "install") {
     if (layerId === "spec") return 0;
-    return dimInactive && layerId !== sheetActive ? 0.72 : 0.9;
-  }
-
-  if (activeId === "spec") {
-    if (BASE_LAYERS.has(layerId)) return 0.35;
-    return dimInactive ? 0.22 : 0.35;
-  }
-
-  const isActive = layerId === sheetActive || layerId === activeId;
-  if (isActive) return highlightActive ? 1 : 0.95;
-
-  if (hideInactive && !BASE_LAYERS.has(layerId) && layerId !== "zones") return 0;
-
-  if (sheet?.mutedLayers?.includes(layerId)) {
-    return dimInactive ? 0.22 : 0.32;
-  }
-
-  if (layerId === "zones" && (activeId === "room" || activeId === "partitions" || sheetActive === "room")) {
     return 1;
   }
 
-  return dimInactive ? 0.25 : 0.35;
+  if (activeId === "spec") {
+    if (BASE_LAYERS.has(layerId)) return 1;
+    return hideInactive ? 0 : 1;
+  }
+
+  if (hideInactive && !BASE_LAYERS.has(layerId) && layerId !== "zones"
+    && layerId !== sheetActive && layerId !== activeId) {
+    return 0;
+  }
+
+  return 1;
+}
+
+/** Неактивный слой — светло-серый (контекст room/partitions и зоны на листе «Исходный план» остаются яркими). */
+export function isLayerMuted(layerId, activeId, display = {}, sheet = null) {
+  if (display.dimInactive === false) return false;
+  if (display.hideInactive) return false;
+
+  const sheetActive = sheet?.activeLayer || activeId;
+  const isEngineeringSheet = ENGINEERING_SHEET_IDS.has(sheet?.id || "");
+
+  if (layerId === "room" || layerId === "partitions") {
+    if (isEngineeringSheet && layerId !== sheetActive && layerId !== activeId) return true;
+    return false;
+  }
+  if (layerId === sheetActive || layerId === activeId) return false;
+
+  if (layerId === "zones") {
+    if (activeId === "room" || activeId === "partitions" || sheetActive === "room" || sheetActive === "partitions") {
+      return false;
+    }
+  }
+
+  if (activeId === "client") return false;
+  if (activeId === "spec" && BASE_LAYERS.has(layerId)) return true;
+
+  return true;
 }
 
 export { labelsVisible } from "./labelProperties.js";
@@ -137,7 +134,7 @@ export function boundsForActiveLayer(plan, activeId) {
     || LINE_LAYER_IDS.includes(activeId);
 
   if (includeWalls) {
-    wallsForLayer(plan.walls || [], activeId).forEach((w) => {
+    wallsForLayer(resolvePlanWalls(plan), activeId).forEach((w) => {
       (w.pts || []).forEach((p) => add(p.x, p.y));
     });
   }
@@ -173,8 +170,9 @@ export function collectPlannerWarnings(plan, sel = null, display = {}) {
   const racks = plan.items.filter((i) => i.layer === "racks");
   const minPass = 600;
   const zones = plan.zones || [];
+  const walls = resolvePlanWalls(plan);
 
-  findWallIntersections(plan.walls || []).forEach((h) => {
+  findWallIntersections(walls).forEach((h) => {
     warnings.push({
       id: h.id,
       severity: "critical",
@@ -184,7 +182,7 @@ export function collectPlannerWarnings(plan, sel = null, display = {}) {
     });
   });
 
-  findWallOverlaps(plan.walls || []).forEach((h) => {
+  findWallOverlaps(walls).forEach((h) => {
     warnings.push({
       id: h.id,
       severity: "critical",
@@ -194,7 +192,7 @@ export function collectPlannerWarnings(plan, sel = null, display = {}) {
     });
   });
 
-  findWallsOverItems(plan.walls || [], plan.items || []).forEach((h) => {
+  findWallsOverItems(walls, plan.items || []).forEach((h) => {
     warnings.push({
       id: h.id,
       severity: "warning",
@@ -204,10 +202,10 @@ export function collectPlannerWarnings(plan, sel = null, display = {}) {
     });
   });
 
-  const partitionWalls = (plan.walls || []).filter((w) => w.role !== "outer");
+  const partitionWalls = walls.filter((w) => w.role !== "outer");
   if (partitionWalls.length >= 2 && zones.length === 0) {
     warnings.push({
-      id: "no-zones",
+      id: "no-rooms",
       severity: "warning",
       objectIds: [],
       text: "Нет замкнутых помещений — замкните контур перегородок",
@@ -232,7 +230,7 @@ export function collectPlannerWarnings(plan, sel = null, display = {}) {
     const cx = it.x + it.w / 2;
     const cy = it.y + it.h / 2;
     const maxDist = isDoorKind(it.kind) || isWallOpeningKind(it.kind) ? 160 : 180;
-    const seg = nearestWallSegment({ x: cx, y: cy }, plan.walls || [], plan.room, maxDist);
+    const seg = nearestWallSegment({ x: cx, y: cy }, walls, plan.room, maxDist);
     if (!seg) {
       warnings.push({ id: `nowall-${it.id}`, objectIds: [it.id], text: `${it.label}: не на стене` });
     }
@@ -300,7 +298,7 @@ export function collectPlannerWarnings(plan, sel = null, display = {}) {
   if (sel?.coll === "items") {
     const it = plan.items.find((o) => o.id === sel.id);
     if (it) {
-      const overlapsWall = plan.walls.some((w) => wallHitsItem(w, it));
+      const overlapsWall = walls.some((w) => wallHitsItem(w, it));
       if (overlapsWall) {
         warnings.push({ id: `wall-${it.id}`, objectIds: [it.id], text: "Объект пересекает перегородку" });
       }
@@ -314,14 +312,28 @@ export function collectPlannerWarnings(plan, sel = null, display = {}) {
   warnings.push(...collectRoomPurposeWarnings(plan));
   warnings.push(...collectRackWarnings(plan));
   warnings.push(...collectLineWarnings(plan));
+  warnings.push(...collectPipeWarnings(plan));
+  warnings.push(...collectElectricalWarnings(plan));
+  warnings.push(...collectClimateWarnings(plan));
   warnings.push(...collectLinkWarnings(plan));
   warnings.push(...collectLabelWarnings(plan, display));
   warnings.push(...collectFarmWarnings(plan));
+  warnings.push(...((plan.validationWarnings || []).map((w) => ({
+    id: w.id,
+    severity: w.severity || (w.level === "error" ? "critical" : "warning"),
+    objectIds: w.objectIds || [],
+    wallIds: w.wallIds || [],
+    text: w.text || w.message || "",
+    source: w.source,
+    targetType: w.targetType,
+    targetId: w.targetId,
+  }))));
 
   return warnings;
 }
 
 function wallHitsItem(wall, it) {
+  if (!wall?.pts || wall.pts.length < 2) return false;
   for (let i = 1; i < wall.pts.length; i++) {
     const a = wall.pts[i - 1];
     const b = wall.pts[i];

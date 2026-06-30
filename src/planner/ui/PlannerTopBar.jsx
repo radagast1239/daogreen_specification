@@ -108,6 +108,11 @@ export function PlannerTopBar({
             В спецификацию
           </button>
         )}
+        {standalone && onSync && (
+          <button type="button" className="planner-btn planner-btn--primary" onClick={onSync} disabled={busy}>
+            Сформировать спецификацию
+          </button>
+        )}
         {standalone ? (
           <Link className="planner-btn" to="/planner">
             К черновикам

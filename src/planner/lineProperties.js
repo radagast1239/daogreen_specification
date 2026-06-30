@@ -1,6 +1,8 @@
 import { LINE_STYLE } from "./catalog.js";
-import { pointInZone } from "./wallGeometry.js";
+import { pointInZone, resolveWallPtsList } from "./wallGeometry.js";
 import { portPosition, defaultPortsForKind } from "./objectProperties.js";
+import { DEFAULT_DUCT_SIZE_H_MM, DEFAULT_DUCT_SIZE_W_MM, ductPlanHalfWidth, isVentDuctLine } from "./ventDuctRender.jsx";
+import { isPipeLine, normalizePipe, resolvePipeVisual } from "./pipes.js";
 
 export const STROKE_STYLES = {
   solid: { label: "Сплошная", dash: null },
@@ -27,18 +29,21 @@ export const LINE_TRAFFIC_TYPES = [
 ];
 
 const ATTACH_DIST_MM = 220;
-const ARROW_SPACING_MM = 900;
+const ARROW_SPACING_MM = 2800;
 
 export function defaultLineFields(layer) {
   const base = LINE_STYLE[layer] || LINE_STYLE.irrigation;
+  const isVent = layer === "vent";
   return {
-    strokeStyle: base?.dash ? "dashed" : "solid",
+    strokeStyle: isVent ? "duct" : (base?.dash ? "dashed" : "solid"),
     reservePct: layer === "power" || layer === "light" ? 15 : 10,
     routingHeight: layer === "vent" ? "ceiling" : layer === "light" ? "ceiling" : "floor",
-    showArrows: base?.arrow !== false,
+    showArrows: isVent ? false : base?.arrow !== false,
     arrowReverse: false,
     orthoRoute: true,
     traffic: layer === "staff" ? "staff" : "",
+    ductSizeWmm: isVent ? DEFAULT_DUCT_SIZE_W_MM : null,
+    ductSizeHmm: isVent ? DEFAULT_DUCT_SIZE_H_MM : null,
     fromItemId: null,
     toItemId: null,
     locked: false,
@@ -46,34 +51,65 @@ export function defaultLineFields(layer) {
 }
 
 export function resolveLineVisual(line) {
+  if (isPipeLine(line)) {
+    return {
+      ...resolvePipeVisual(line),
+      arrow: true,
+      double: false,
+    };
+  }
   const base = LINE_STYLE[line.layer] || LINE_STYLE.irrigation;
   const styleKey = line.strokeStyle || (base.dash ? "dashed" : "solid");
   const ss = STROKE_STYLES[styleKey] || STROKE_STYLES.solid;
   const traffic = LINE_TRAFFIC_TYPES.find((t) => t.id === line.traffic);
   let color = line.color || base.color;
+  if (line.type === "power_line" || line.layer === "power" || line.layer === "light") {
+    const lineType = line.lineType || line.lineTag || "wall_cable";
+    if (lineType === "sensor_wire" || line.lineTag === "sensor") color = line.color || "#6b7d74";
+    else if (lineType === "cable_tray") color = line.color || "#8b4a2b";
+    else if (lineType === "ceiling_cable") color = line.color || "#a5371f";
+    else if (lineType === "floor_cable") color = line.color || "#7a5c3e";
+    else if (line.layer === "light") color = line.color || "#d4a017";
+  }
   if (line.traffic === "raw") color = line.color || "#7a5c3e";
   if (line.traffic === "product") color = line.color || "#116355";
   if (line.traffic === "waste") color = line.color || "#a5371f";
+  if (line.type === "duct" || line.layer === "vent") {
+    const lt = line.lineType || line.lineTag || "duct";
+    if (lt === "supply_duct" || lt === "supply") color = line.color || "#2f6f8f";
+    else if (lt === "exhaust_duct" || lt === "exhaust") color = line.color || "#7a5c3e";
+    else if (lt === "recirculation_duct" || lt === "recirc") color = line.color || "#6b7d74";
+    else if (lt === "airflow_arrow" || lt === "airflow") color = line.color || "#5b7c9d";
+  }
+  const sensorLike = line.type === "power_line" && (line.lineType === "sensor_wire" || line.lineTag === "sensor");
+  const airflowArrow = line.type === "duct" && (line.lineType === "airflow_arrow" || line.lineTag === "airflow_arrow");
+  const ductLike = line.type === "duct" || line.layer === "vent";
   return {
     color,
-    w: (line.strokeW || base.w) * (ss.wMul || 1),
-    dash: ss.dash,
+    w: (line.strokeW || (ductLike ? Math.max(2.5, num(line.diameterMm, 200) / 70) : base.w)) * (ss.wMul || 1),
+    dash: airflowArrow ? [10, 5] : sensorLike ? [6, 6] : ss.dash,
     double: !!ss.double,
-    arrow: line.showArrows !== undefined ? line.showArrows : base.arrow !== false,
+    arrow: line.showArrows !== undefined ? line.showArrows : (airflowArrow || base.arrow !== false),
     label: traffic?.id ? traffic.label : base.label,
   };
 }
 
+function num(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 export function linePlanLengthMm(pts = []) {
+  const points = pts || [];
   let len = 0;
-  for (let i = 1; i < pts.length; i++) {
-    len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  for (let i = 1; i < points.length; i++) {
+    len += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
   }
   return len;
 }
 
 export function lineTotalLengthMm(line) {
-  const len = linePlanLengthMm(line.pts);
+  const len = linePlanLengthMm(line.pts || line.points || []);
   const pct = line.reservePct ?? 10;
   return len * (1 + Math.max(0, pct) / 100);
 }
@@ -88,7 +124,11 @@ function itemAttachPoints(it) {
     { x: cx, y: it.y, itemId: it.id },
     { x: cx, y: it.y + it.h, itemId: it.id },
   ];
-  const ports = it.ports?.length ? it.ports : defaultPortsForKind(it.kind);
+  const ports = it.connectionPorts?.length
+    ? it.connectionPorts
+    : it.ports?.length
+      ? it.ports
+      : defaultPortsForKind(it.kind);
   ports.forEach((port, portIndex) => {
     const p = portPosition(it, port);
     pts.push({
@@ -139,20 +179,43 @@ export function snapLinePoint(pt, items, snapOn = true) {
 }
 
 export function attachLineEndpoints(line, items) {
-  const pts = line.pts?.map((p) => ({ ...p })) || [];
+  const pts = (line.pts || line.points || []).map((p) => ({ ...p }));
   if (pts.length < 2) return line;
   const start = nearestItemAttach(pts[0], items);
   const end = nearestItemAttach(pts[pts.length - 1], items);
   if (start) pts[0] = { ...start.pt };
   if (end) pts[pts.length - 1] = { ...end.pt };
-  return {
+  const patched = {
     ...line,
     pts,
+    points: pts,
     fromItemId: start?.itemId || null,
     toItemId: end?.itemId || null,
     fromPortIndex: start?.portIndex ?? null,
     toPortIndex: end?.portIndex ?? null,
   };
+  if (isPipeLine(patched)) {
+    const normalized = normalizePipe(patched);
+    return {
+      ...normalized,
+      connectedObjectIds: [...new Set([start?.itemId, end?.itemId].filter(Boolean))],
+      endpointLinks: [
+        ...(start?.itemId ? [{
+          endpointIndex: 0,
+          itemId: start.itemId,
+          portType: start.portType || "inlet",
+          portId: start.portIndex != null ? `${start.itemId}-p${start.portIndex}` : null,
+        }] : []),
+        ...(end?.itemId ? [{
+          endpointIndex: pts.length - 1,
+          itemId: end.itemId,
+          portType: end.portType || "outlet",
+          portId: end.portIndex != null ? `${end.itemId}-p${end.portIndex}` : null,
+        }] : []),
+      ],
+    };
+  }
+  return patched;
 }
 
 export function distToSegment(p, a, b) {
@@ -167,8 +230,9 @@ export function distToSegment(p, a, b) {
 
 export function hitTestLine(mm, line, threshold = 120) {
   const pts = line.pts || [];
+  const thr = isVentDuctLine(line) ? Math.max(threshold, ductPlanHalfWidth(line) + 80) : threshold;
   for (let i = 1; i < pts.length; i++) {
-    if (distToSegment(mm, pts[i - 1], pts[i]) <= threshold) return true;
+    if (distToSegment(mm, pts[i - 1], pts[i]) <= thr) return true;
   }
   return false;
 }
@@ -259,7 +323,7 @@ export function arrowPointsAlongLine(pts, spacing = ARROW_SPACING_MM, reverse = 
     return reverse ? [{ a: b, b: a }] : [{ a, b }];
   }
   const out = [];
-  for (let d = spacing; d < total; d += spacing) {
+  for (let d = spacing; d < total - spacing * 0.35; d += spacing) {
     for (const s of segs) {
       if (d > s.start + s.len) continue;
       const t = (d - s.start) / s.len;
@@ -270,20 +334,13 @@ export function arrowPointsAlongLine(pts, spacing = ARROW_SPACING_MM, reverse = 
       break;
     }
   }
-  const last = pts[pts.length - 2];
-  const end = pts[pts.length - 1];
-  out.push({
-    x: end.x,
-    y: end.y,
-    ang: Math.atan2((reverse ? last.y - end.y : end.y - last.y), (reverse ? last.x - end.x : end.x - last.x)),
-  });
   return out;
 }
 
 export function collectLineWarnings(plan) {
   const warnings = [];
   const items = plan.items || [];
-  const walls = plan.walls || [];
+  const walls = resolveWallPtsList(plan.walls, plan.nodes);
   const zones = plan.zones || [];
 
   (plan.lines || []).forEach((line) => {
@@ -291,8 +348,9 @@ export function collectLineWarnings(plan) {
     const label = vis.label || "Трасса";
     const pts = line.pts || [];
     if (pts.length < 2) return;
+    const pipeLine = isPipeLine(line);
 
-    if (endpointFloating(pts[0], items, line.fromItemId)) {
+    if (!pipeLine && endpointFloating(pts[0], items, line.fromItemId)) {
       warnings.push({
         id: `line-start-${line.id}`,
         severity: "warning",
@@ -300,7 +358,7 @@ export function collectLineWarnings(plan) {
         text: `${label}: начало трассы не привязано к объекту`,
       });
     }
-    if (endpointFloating(pts[pts.length - 1], items, line.toItemId)) {
+    if (!pipeLine && endpointFloating(pts[pts.length - 1], items, line.toItemId)) {
       warnings.push({
         id: `line-end-${line.id}`,
         severity: "warning",

@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useId } from "react";
 import { isRackKind, rackIconForType } from "./rackProperties.js";
+import { acMountHeightPlanLabel } from "./acProperties.js";
 import { DG_THEME } from "./plannerVisualTheme.js";
 // Иконки объектов сверху. Локальные координаты (0..w, 0..h). k = 1/zoom.
 
@@ -170,6 +171,49 @@ function TableBase({ d, trays = false, zones = false, belt = false }) {
   return <g pointerEvents="none">{L}</g>;
 }
 
+function TankRect({ d }) {
+  const { w, h, cx, cy, rect, cir, ln, fill, sw } = d;
+  const pad = Math.min(w, h) * 0.03;
+  const outerX = pad;
+  const outerY = pad;
+  const outerW = w - pad * 2;
+  const outerH = h - pad * 2;
+  const outerR = Math.min(outerW, outerH) * 0.085;
+  const wall = Math.max(Math.min(outerW, outerH) * 0.042, sw * 2.2);
+  const innerX = outerX + wall;
+  const innerY = outerY + wall;
+  const innerW = outerW - wall * 2;
+  const innerH = outerH - wall * 2;
+  const innerR = Math.max(outerR * 0.55, sw * 1.5);
+  const lidR = Math.min(innerW, innerH) * 0.21;
+  const innerLidR = lidR * 0.52;
+  const ribX1 = cx - lidR * 1.38;
+  const ribX2 = cx + lidR * 1.38;
+  const slotLen = innerLidR * 0.88;
+  const slotAng = Math.PI / 4;
+
+  return (
+    <g pointerEvents="none">
+      {fill(outerX, outerY, outerW, outerH, outerR, 0.1)}
+      {rect(outerX, outerY, outerW, outerH, outerR, 0.92)}
+      {rect(innerX, innerY, innerW, innerH, innerR, 0.84)}
+      {ln(innerX, cy, innerX + innerW, cy, 0.4, 0.74)}
+      {ln(ribX1, innerY, ribX1, innerY + innerH, 0.4, 0.74)}
+      {ln(ribX2, innerY, ribX2, innerY + innerH, 0.4, 0.74)}
+      {cir(cx, cy, lidR, "none", 0.86)}
+      {cir(cx, cy, innerLidR, "none", 0.74)}
+      {ln(
+        cx - slotLen * Math.cos(slotAng),
+        cy + slotLen * Math.sin(slotAng),
+        cx + slotLen * Math.cos(slotAng),
+        cy - slotLen * Math.sin(slotAng),
+        0.72,
+        0.92,
+      )}
+    </g>
+  );
+}
+
 function TankRound({ d, waste = false }) {
   const { w, h, cx, cy, r, cir, rect, ln, fill } = d;
   const outer = r * 0.82;
@@ -198,17 +242,51 @@ function TankRound({ d, waste = false }) {
   );
 }
 
-function PumpInline({ d }) {
-  const { w, h, cx, cy, r, rect, cir, flowArrow } = d;
-  const bw = w * 0.55;
-  const bh = h * 0.65;
+/** Насосная станция: рама, насос с решёткой, гидробак, трубы, опоры. */
+function PumpStation({ d }) {
+  const { w, h, rect, cir, ln, sw } = d;
+  const frameX = w * 0.05;
+  const frameY = h * 0.16;
+  const frameW = w * 0.9;
+  const frameH = h * 0.68;
+  const frameR = Math.min(frameW, frameH) * 0.11;
+  const footW = Math.max(frameW * 0.07, sw * 5);
+  const footH = Math.max(h * 0.07, sw * 4);
+  const footCenters = [frameX + frameW * 0.16, frameX + frameW * 0.84];
+
+  const motorW = frameW * 0.36;
+  const motorH = frameH * 0.74;
+  const motorX = frameX + frameW * 0.07;
+  const motorY = frameY + (frameH - motorH) / 2;
+  const motorR = Math.min(motorW, motorH) * 0.14;
+
+  const tankS = Math.min(frameH * 0.8, frameW * 0.3);
+  const tankX = frameX + frameW * 0.61;
+  const tankY = frameY + (frameH - tankS) / 2;
+
+  const pipeY1 = frameY + frameH * 0.4;
+  const pipeY2 = frameY + frameH * 0.6;
+  const pipeX0 = frameX + frameW * 0.03;
+  const pipeX1 = frameX + frameW * 0.97;
+
   return (
     <g pointerEvents="none">
-      {rect(cx - bw / 2, cy - bh / 2, bw, bh, 3 * d.sw, 0.65)}
-      {cir(cx + bw * 0.15, cy, Math.min(bh, bw) * 0.38)}
-      {rect(0, cy - h * 0.12, w * 0.18, h * 0.24, 2 * d.sw, 0.6)}
-      {rect(w * 0.82, cy - h * 0.12, w * 0.18, h * 0.24, 2 * d.sw, 0.6)}
-      {flowArrow(w * 0.18, cy, w * 0.82, cy)}
+      {footCenters.map((fx, i) => (
+        <g key={`ft${i}`}>
+          {rect(fx - footW / 2, frameY - footH * 0.95, footW, footH, sw * 0.8, 0.86)}
+          {rect(fx - footW / 2, frameY + frameH - footH * 0.05, footW, footH, sw * 0.8, 0.86)}
+        </g>
+      ))}
+      {rect(frameX, frameY, frameW, frameH, frameR, 0.92)}
+      {ln(pipeX0, pipeY1, pipeX1, pipeY1, 0.46, 0.78)}
+      {ln(pipeX0, pipeY2, pipeX1, pipeY2, 0.46, 0.78)}
+      {rect(motorX, motorY, motorW, motorH, motorR, 0.84, 0.06)}
+      {[0.24, 0.38, 0.52, 0.66].map((t) => (
+        ln(motorX + motorW * 0.08, motorY + motorH * t, motorX + motorW * 0.5, motorY + motorH * t, 0.42, 0.72)
+      ))}
+      {cir(motorX + motorW * 0.74, motorY + motorH * 0.5, Math.min(motorW, motorH) * 0.13, "none", 0.78)}
+      {rect(tankX, tankY, tankS, tankS, sw * 1.2, 0.84, 0.04)}
+      {cir(tankX + tankS / 2, tankY + tankS / 2, tankS * 0.34, "none", 0.82)}
     </g>
   );
 }
@@ -229,32 +307,89 @@ function OsmosisFilters({ d }) {
   );
 }
 
+function drainCross({ cx, cy, d, r = 4 }) {
+  const { sw, ln, cir } = d;
+  const rr = r * d.sw;
+  return (
+    <g>
+      {cir(cx, cy, rr, "none", 0.72)}
+      {ln(cx - rr * 1.35, cy, cx + rr * 1.35, cy, 0.68, 0.9)}
+      {ln(cx, cy - rr * 1.35, cx, cy + rr * 1.35, 0.68, 0.9)}
+    </g>
+  );
+}
+
+function faucetMixer({ x, y, d, lever = 1 }) {
+  const { w, sw, ln, cir } = d;
+  const r = 3.8 * sw;
+  const lx = x + lever * w * 0.055;
+  const ly = y - d.h * 0.035;
+  return (
+    <g>
+      {cir(x, y, r, "fill", 0.78)}
+      {ln(x, y, lx, ly, 0.82, 0.95)}
+      {cir(lx, ly, sw * 0.85, "fill", 0.65)}
+    </g>
+  );
+}
+
+/** Раковина сверху: рама у стены, чаша «pill», смеситель, слив-крест. */
 function SinkSingle({ d }) {
-  const { w, h, cx, rect, elli, cir } = d;
+  const { w, h, cx, rect, fill, ln } = d;
+  const frameX = w * 0.03;
+  const frameY = h * 0.02;
+  const frameW = w * 0.94;
+  const frameH = h * 0.9;
+  const frameR = Math.min(frameW, frameH) * 0.07;
+  const basinW = frameW * 0.78;
+  const basinH = frameH * 0.58;
+  const basinX = cx - basinW / 2;
+  const basinY = h * 0.28;
+  const basinR = Math.min(basinW, basinH) * 0.38;
+  const basinCy = basinY + basinH * 0.52;
+
   return (
     <g pointerEvents="none">
-      {rect(w * 0.05, h * 0.15, w * 0.9, h * 0.8, 3 * d.sw, 0.5, 0.03)}
-      {elli(cx, cy + h * 0.05, w * 0.28, h * 0.28)}
-      {elli(cx, cy + h * 0.05, w * 0.18, h * 0.18, 0.4)}
-      {cir(cx, cy - h * 0.22, 4 * d.sw, "fill", 0.7)}
-      {cir(cx, cy + h * 0.28, 3 * d.sw, "none", 0.55)}
+      {fill(frameX, frameY, frameW, frameH, frameR, 0.14)}
+      {rect(frameX, frameY, frameW, frameH, frameR, 0.88)}
+      {fill(basinX, basinY, basinW, basinH, basinR, 0.1)}
+      {rect(basinX, basinY, basinW, basinH, basinR, 0.78, 0.06)}
+      {faucetMixer({ x: cx, y: h * 0.13, d, lever: 1 })}
+      {drainCross({ cx, cy: basinCy, d })}
+      {ln(frameX, frameY + frameH * 0.04, frameX + frameW, frameY + frameH * 0.04, 0.35, 0.55)}
     </g>
   );
 }
 
 function SinkDouble({ d }) {
-  const { w, h, rect, elli, cir } = d;
-  const hw = w * 0.42;
+  const { w, h, rect, fill } = d;
+  const frameX = w * 0.03;
+  const frameY = h * 0.02;
+  const frameW = w * 0.94;
+  const frameH = h * 0.9;
+  const frameR = Math.min(frameW, frameH) * 0.06;
+  const bowlW = frameW * 0.38;
+  const bowlH = frameH * 0.58;
+  const bowlY = h * 0.28;
+  const bowlR = Math.min(bowlW, bowlH) * 0.36;
+  const centers = [w * 0.28, w * 0.72];
+
   return (
     <g pointerEvents="none">
-      {rect(w * 0.04, h * 0.15, w * 0.92, h * 0.8, 3 * d.sw, 0.5, 0.03)}
-      {[0.27, 0.73].map((t, i) => (
-        <g key={i}>
-          {elli(w * t, h * 0.55, hw * 0.32, h * 0.28)}
-          {elli(w * t, h * 0.55, hw * 0.2, h * 0.18, 0.4)}
-        </g>
-      ))}
-      {cir(w * 0.5, h * 0.12, 3.5 * d.sw, "fill", 0.7)}
+      {fill(frameX, frameY, frameW, frameH, frameR, 0.14)}
+      {rect(frameX, frameY, frameW, frameH, frameR, 0.88)}
+      {centers.map((bx, i) => {
+        const bx0 = bx - bowlW / 2;
+        const bcy = bowlY + bowlH * 0.52;
+        return (
+          <g key={i}>
+            {fill(bx0, bowlY, bowlW, bowlH, bowlR, 0.1)}
+            {rect(bx0, bowlY, bowlW, bowlH, bowlR, 0.78, 0.06)}
+            {faucetMixer({ x: bx, y: h * 0.13, d, lever: i === 0 ? 1 : -1 })}
+            {drainCross({ cx: bx, cy: bcy, d })}
+          </g>
+        );
+      })}
     </g>
   );
 }
@@ -270,15 +405,43 @@ function ToiletTop({ d, bidet = false }) {
   );
 }
 
+/** Душевой поддон: двойной борт, штриховка чаши, слив в углу. */
 function ShowerPan({ d }) {
-  const { w, h, rect, ln, cir } = d;
+  const clipId = useId().replace(/:/g, "");
+  const { w, h, rect, ln, cir, sw } = d;
+  const pad = Math.min(w, h) * 0.04;
+  const outerX = pad;
+  const outerY = pad;
+  const outerW = w - pad * 2;
+  const outerH = h - pad * 2;
+  const outerR = Math.min(outerW, outerH) * 0.09;
+  const rim = Math.min(outerW, outerH) * 0.075;
+  const innerX = outerX + rim;
+  const innerY = outerY + rim;
+  const innerW = outerW - rim * 2;
+  const innerH = outerH - rim * 2;
+  const innerR = Math.max(outerR * 0.65, sw * 2);
+  const hatchStep = Math.max(Math.min(innerW, innerH) * 0.052, sw * 4.5);
+  const drainX = innerX + innerW * 0.14;
+  const drainY = innerY + innerH * 0.86;
+  const drainR = Math.max(3.2 * sw, Math.min(innerW, innerH) * 0.032);
+
+  const hatch = [];
+  for (let t = -innerH; t <= innerW + innerH; t += hatchStep) {
+    hatch.push(ln(innerX + t, innerY + innerH, innerX + t + innerH, innerY, 0.36, 0.72));
+  }
+
   return (
     <g pointerEvents="none">
-      {rect(w * 0.06, h * 0.06, w * 0.88, h * 0.88, 4 * d.sw, 0.55)}
-      {ln(w * 0.08, h * 0.08, w * 0.92, h * 0.92, 0.35, 0.6)}
-      {cir(w * 0.82, h * 0.18, 4 * d.sw)}
-      {cir(w * 0.5, h * 0.5, 4 * d.sw, "none", 0.5)}
-      {ln(w * 0.82, h * 0.18, w * 0.82, h * 0.02, 0.5, 0.7)}
+      <defs>
+        <clipPath id={clipId}>
+          <rect x={innerX} y={innerY} width={innerW} height={innerH} rx={innerR} />
+        </clipPath>
+      </defs>
+      {rect(outerX, outerY, outerW, outerH, outerR, 0.92)}
+      {rect(innerX, innerY, innerW, innerH, innerR, 0.84)}
+      <g clipPath={`url(#${clipId})`}>{hatch}</g>
+      {cir(drainX, drainY, drainR, "none", 0.88)}
     </g>
   );
 }
@@ -357,13 +520,57 @@ function ScalesBench({ d }) {
   );
 }
 
-function AcIndoor({ d }) {
-  const { w, h, ln, rect, detail } = d;
-  const n = 5;
-  const L = [rect(w * 0.04, h * 0.12, w * 0.92, h * 0.76, 2 * d.sw, 0.55)];
-  for (let i = 1; i <= n; i++) L.push(ln(w * 0.06, (h * i) / (n + 1), w * 0.94, (h * i) / (n + 1), 0.5, 0.65));
-  if (detail) for (let i = 0; i < 4; i++) L.push(ln(w * 0.5 + i * 8 * d.sw, h * 0.88, w * 0.5 + i * 8 * d.sw - 5 * d.sw, h * 1.05, 0.35, 0.5));
-  return <g pointerEvents="none">{L}</g>;
+function AcIndoor({ d, it }) {
+  const { w, h, cx, cy, color, sw, o, ln, rect } = d;
+  const bodyX = w * 0.05;
+  const bodyY = h * 0.04;
+  const bodyW = w * 0.9;
+  const bodyH = h * 0.92;
+  const cornerR = Math.min(bodyW, bodyH) * 0.14;
+  const mountLabel = acMountHeightPlanLabel(it?.mountHeightMm);
+
+  const louverY = [0.68, 0.78, 0.88].map((t) => bodyY + bodyH * t);
+
+  return (
+    <g pointerEvents="none">
+      {rect(bodyX, bodyY, bodyW, bodyH, cornerR, o, 0)}
+      {louverY.map((ly, i) => (
+        ln(bodyX + bodyW * 0.1, ly, bodyX + bodyW * 0.9, ly, 0.7, 0.95)
+      ))}
+      {mountLabel && (() => {
+        const fs = Math.max(8 * d.sw, Math.min(bodyH * 0.28, 11 * d.sw));
+        const padX = 5 * d.sw;
+        const padY = 3 * d.sw;
+        const boxW = mountLabel.length * fs * 0.58 + padX * 2;
+        const boxH = fs + padY * 2;
+        return (
+          <g>
+            <rect
+              x={cx - boxW / 2}
+              y={cy - boxH / 2}
+              width={boxW}
+              height={boxH}
+              rx={3 * d.sw}
+              fill="#fff"
+              stroke={DG_THEME.labelBorder}
+              strokeWidth={0.65 * d.sw}
+            />
+            <text
+              x={cx}
+              y={cy + fs * 0.35}
+              fontSize={fs}
+              textAnchor="middle"
+              fill={color}
+              fontWeight="600"
+              style={{ fontFamily: "var(--mono)" }}
+            >
+              {mountLabel}
+            </text>
+          </g>
+        );
+      })()}
+    </g>
+  );
 }
 
 function AcOutdoor({ d }) {
@@ -383,18 +590,71 @@ function AcOutdoor({ d }) {
 }
 
 function FanRound({ d }) {
-  const { cx, cy, r, cir, ln, flowArrow } = d;
-  const rr = r * 0.85;
-  const blades = 5;
+  const { w, h, cx, color, sw, o, elli, rect } = d;
+  const headY = h * 0.31;
+  const rx = w * 0.36;
+  const ry = h * 0.23;
+  const hubW = w * 0.075;
+  const hubH = h * 0.13;
+  const bodyTop = headY + ry * 0.88;
+  const bodyBot = h * 0.8;
+  const bodyHalf = w * 0.21;
+  const stemW = w * 0.085;
+  const stemTop = bodyBot;
+  const stemH = h * 0.11;
+
+  const pathEl = (dStr, op = o, wgt = 1) => (
+    <path
+      d={dStr}
+      fill="none"
+      stroke={color}
+      strokeWidth={sw * wgt}
+      opacity={op}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  );
+
+  const bladeLoop = (rotDeg) => {
+    const rad = (rotDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const p = (lx, ly) => {
+      const dx = lx * rx;
+      const dy = ly * ry;
+      return [cx + dx * cos - dy * sin, headY + dx * sin + dy * cos];
+    };
+    const [x0, y0] = p(0, -0.42);
+    const [x1, y1] = p(-0.42, -0.08);
+    const [x2, y2] = p(-0.28, 0.38);
+    const [x3, y3] = p(0.02, 0.18);
+    const [x4, y4] = p(0.28, 0.38);
+    const [x5, y5] = p(0.42, -0.08);
+    return pathEl(
+      `M ${x0} ${y0} C ${x1} ${y1}, ${x2} ${y2}, ${x3} ${y3} C ${x4} ${y4}, ${x5} ${y5}, ${x0} ${y0}`,
+      o * 0.92,
+      0.95,
+    );
+  };
+
+  const bodyPath = pathEl(
+    `M ${cx - bodyHalf * 0.52} ${bodyTop}`
+    + ` L ${cx - bodyHalf} ${bodyBot}`
+    + ` Q ${cx} ${bodyBot + h * 0.035} ${cx + bodyHalf} ${bodyBot}`
+    + ` L ${cx + bodyHalf * 0.52} ${bodyTop}`,
+    o,
+    1,
+  );
+
   return (
     <g pointerEvents="none">
-      {cir(cx, cy, rr)}
-      {Array.from({ length: blades }, (_, i) => {
-        const rad = ((i * 360) / blades) * Math.PI / 180;
-        return ln(cx, cy, cx + Math.cos(rad) * rr * 0.88, cy + Math.sin(rad) * rr * 0.88, 0.55, 0.7);
-      })}
-      {cir(cx, cy, rr * 0.16, "fill", 0.6)}
-      {flowArrow(cx + rr * 0.2, cy, cx + rr * 0.85, cy, 0.5)}
+      {bodyPath}
+      {rect(cx - stemW / 2, stemTop, stemW, stemH, stemW * 0.15, o, 0)}
+      {elli(cx, headY, rx, ry, o)}
+      {bladeLoop(0)}
+      {bladeLoop(120)}
+      {bladeLoop(-120)}
+      {rect(cx - hubW / 2, headY - hubH * 0.62, hubW, hubH, hubW * 0.45, o, 0)}
     </g>
   );
 }
@@ -503,12 +763,14 @@ const ICON_RENDERERS = {
   table_packaging: (d) => <TableBase d={d} zones />,
   table: (d) => <TableBase d={d} />,
 
+  tank_rect: (d) => <TankRect d={d} />,
   tank_round: (d) => <TankRound d={d} />,
-  tank: (d) => <TankRound d={d} />,
+  tank: (d, it) => (it?.icon === "tank_round" ? <TankRound d={d} /> : <TankRect d={d} />),
   tank_waste: (d) => <TankRound d={d} waste />,
 
-  pump_inline: (d) => <PumpInline d={d} />,
-  pump: (d) => <PumpInline d={d} />,
+  pump_inline: (d) => <PumpStation d={d} />,
+  pump_station: (d) => <PumpStation d={d} />,
+  pump: (d) => <PumpStation d={d} />,
 
   osmosis_filters: (d) => <OsmosisFilters d={d} />,
   osmosis: (d) => <OsmosisFilters d={d} />,
@@ -527,8 +789,8 @@ const ICON_RENDERERS = {
   scales_bench: (d) => <ScalesBench d={d} />,
   scales: (d) => <ScalesFloor d={d} />,
 
-  ac_indoor: (d) => <AcIndoor d={d} />,
-  ac: (d) => <AcIndoor d={d} />,
+  ac_indoor: (d, it) => <AcIndoor d={d} it={it} />,
+  ac: (d, it) => <AcIndoor d={d} it={it} />,
 
   fan_round: (d) => <FanRound d={d} />,
   fan: (d) => <FanRound d={d} />,
@@ -553,7 +815,28 @@ export function ObjectIcon({ it, k, stroke, fillOpacity, icon: iconOverride }) {
   const iconKey = iconOverride || it.icon || (isRackKind(it.kind) ? rackIconForType(it.rackType) : null);
 
   const render = iconKey ? ICON_RENDERERS[iconKey] : null;
-  if (render) return render(d, it);
+  if (render) {
+    const body = render(d, it);
+    if (isRackKind(it.kind)) {
+      return (
+        <g pointerEvents="none">
+          {body}
+          <rect
+            x={0}
+            y={0}
+            width={w}
+            height={h}
+            rx={Math.max(2 * k, 2)}
+            fill="none"
+            stroke={stroke || it.color || "#1a332c"}
+            strokeWidth={Math.max(d.sw * 2.4, 2.2 * k)}
+            opacity={1}
+          />
+        </g>
+      );
+    }
+    return body;
+  }
 
   switch (iconKey || it.icon) {
     case "chair":

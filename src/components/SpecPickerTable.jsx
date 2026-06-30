@@ -303,30 +303,6 @@ export default function SpecPickerTable({
     return rows;
   }, [catalogGrouped]);
 
-  const lineRowProps = {
-    materials,
-    selectedIds,
-    toggleSelected,
-    toggleLine,
-    staticNames,
-    resolveLineDisplayName,
-    normalizedLines,
-    emitLines,
-    categories,
-    suppliers,
-    unitOptions,
-    showCompositionGroups,
-    stellageGroups,
-    showFarmLineGroups,
-    farmLineGroups,
-    showRoom,
-    rooms,
-    showQty,
-    onSaveMaterial,
-    savingId,
-    saveLineToBase,
-  };
-
   const setAll = (included) => emitLines(normalizedLines.map((ln) => ({ ...ln, included })));
 
   const toggleLine = (ln, included) => {
@@ -398,6 +374,30 @@ export default function SpecPickerTable({
     } finally {
       setSavingId(null);
     }
+  };
+
+  const lineRowProps = {
+    materials,
+    selectedIds,
+    toggleSelected,
+    toggleLine,
+    staticNames,
+    resolveLineDisplayName,
+    normalizedLines,
+    emitLines,
+    categories,
+    suppliers,
+    unitOptions,
+    showCompositionGroups,
+    stellageGroups,
+    showFarmLineGroups,
+    farmLineGroups,
+    showRoom,
+    rooms,
+    showQty,
+    onSaveMaterial,
+    savingId,
+    saveLineToBase,
   };
 
   const createNewInBase = async () => {

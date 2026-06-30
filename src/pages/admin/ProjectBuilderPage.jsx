@@ -20,6 +20,7 @@ import {
   catalogLinesForModule,
   newStellageDraft,
 } from "../../lib/projectBuilder.js";
+import { resolveBuilderLineQty } from "../../../shared/flowSpecs.js";
 import { parseStellageModuleCatalogs, parseStellageModuleMeta, projectStellageLinesFromCatalog, resolveStellagePhoto, stellageModulePhoto } from "../../lib/stellageCatalogConfig.js";
 import StellagePhotoField, { StellagePhotoThumb } from "../../components/StellagePhotoField.jsx";
 import {
@@ -231,6 +232,10 @@ export default function ProjectBuilderPage() {
       error("Отметьте хотя бы одну позицию галочкой.");
       return;
     }
+    if (draft.items.some((ln) => ln.included && resolveBuilderLineQty(ln) <= 0)) {
+      error("У отмеченных позиций укажите количество: колонка «Кол-во» или шт в параметрах насоса/вытяжки.");
+      return;
+    }
     setStellages((list) => [...list, { ...draft, items: draft.items.map((ln) => ({ ...ln })) }]);
     setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 2, stellageCatalogs, stellageModuleMeta));
   };
@@ -435,6 +440,12 @@ export default function ProjectBuilderPage() {
               Далее: стеллажи →
             </button>
           </div>
+        </div>
+      )}
+
+      {step === "stellages" && !draft && (
+        <div className="card" style={{ padding: 20 }}>
+          <p className="muted" style={{ margin: 0 }}>Загрузка шага «Стеллажи»…</p>
         </div>
       )}
 
@@ -707,10 +718,10 @@ export default function ProjectBuilderPage() {
           <div className="card" style={{ padding: 16, marginTop: 16 }}>
             <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>Кондиционеры по комнатам</h4>
             <p className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>
-              Нагрузки по каждой комнате и привязка к сплит-системам из разделов фермы.
+              Сверху — расчёт нагрузки, ниже — спецификация для клиента (комната, шт × кВт, ссылка). Позиции попадут в проект автоматически.
             </p>
             <RoomsEditor rooms={rooms} onChange={setRooms} compact showCount={false} />
-            <RoomCoolingEditor rooms={rooms} items={draftProjectItems} onChange={setRooms} />
+            <RoomCoolingEditor rooms={rooms} onChange={setRooms} />
           </div>
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button type="button" className="btn" onClick={() => goToStep("general")}>← Ферма целиком</button>

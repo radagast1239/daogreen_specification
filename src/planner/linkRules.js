@@ -46,8 +46,8 @@ export const LINK_RULES = {
     label: "Кондиционирование",
     color: "#5b7c9d",
     layers: ["climate", "vent"],
-    from: new Set(["ac_indoor", "ac_floor", "ac_duct"]),
-    to: new Set(["ac_outdoor"]),
+    from: new Set(["ac_indoor", "ac_floor", "ac_duct", "indoor_unit", "air_conditioner", "dehumidifier", "humidifier"]),
+    to: new Set(["ac_outdoor", "outdoor_unit", "vent_unit", "supply", "exhaust"]),
   },
 };
 

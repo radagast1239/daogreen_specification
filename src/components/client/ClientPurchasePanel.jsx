@@ -49,16 +49,17 @@ const STATUS_PURCHASE_MODES = [
 const PURCHASE_FILTERS = [
   { id: "all", label: "Все" },
   { id: "todo", label: "Купить сейчас" },
-  { id: "ordered", label: "Заказано" },
+  { id: "closed", label: "Заказано/Куплено" },
   { id: "need_help", label: "Нужна помощь" },
   { id: "not_bought", label: "Не куплено" },
-  { id: "bought", label: "Куплено" },
 ];
 
 function applyPurchaseFilter(items, filterId) {
   if (filterId === "all") return items;
-  if (filterId === "todo") return items.filter((i) => !isBoughtStatus(i.status) && i.status !== "ordered");
-  if (filterId === "bought") return items.filter((i) => isBoughtStatus(i.status));
+  if (filterId === "todo") return items.filter((i) => !isClosedPurchaseStatus(i.status));
+  if (filterId === "closed" || filterId === "bought" || filterId === "ordered") {
+    return items.filter((i) => isClosedPurchaseStatus(i.status));
+  }
   return items.filter((i) => i.status === filterId);
 }
 
@@ -73,7 +74,7 @@ function itemsForMode(items, mode) {
   if (mode === "replacement_check") return items.filter((i) => i.status === "replacement_check");
   if (mode === "with_link") return items.filter(hasProductLink);
   if (mode === "without_link") return items.filter((i) => !hasProductLink(i));
-  if (mode === "ordered") return items.filter((i) => i.status === "ordered");
+  if (mode === "closed" || mode === "ordered") return items.filter((i) => isClosedPurchaseStatus(i.status));
   if (mode === "plumber") return itemsByResponsible(items, "plumber");
   if (mode === "electric") return itemsByResponsible(items, "electrician");
   if (mode === "installer") return itemsByResponsible(items, "installer");
@@ -256,8 +257,9 @@ export default function ClientPurchasePanel({
   compact = false,
 }) {
   const normalizedMode = useMemo(() => {
-    if (!simple) return mode === "all" ? "all" : mode;
-    if (isSimplePurchaseMode(mode)) return mode;
+    const m = mode === "ordered" ? "closed" : mode;
+    if (!simple) return m === "all" ? "all" : m;
+    if (isSimplePurchaseMode(m)) return m;
     return "categories";
   }, [simple, mode]);
 
@@ -265,19 +267,19 @@ export default function ClientPurchasePanel({
 
   const effectiveMode = normalizedMode;
   const isStatusMode = STATUS_PURCHASE_MODES.some((m) => m.id === effectiveMode);
-  const isOrderedMode = effectiveMode === "ordered";
+  const isClosedMode = effectiveMode === "closed";
 
   const scoped = useMemo(() => itemsForMode(items, normalizedMode === "all" ? "all" : normalizedMode), [items, normalizedMode]);
 
-  const mergeFilter = isOrderedMode || isStatusMode ? "all" : effectiveFilter;
+  const mergeFilter = isClosedMode || isStatusMode ? "all" : effectiveFilter;
 
   const mergedRows = useMemo(() => {
     if (isStatusMode || !isMergedPurchaseMode(effectiveMode)) return null;
     const pool = filterItemPool(scoped, { supplierFilter, purchaseQuery });
     let rows = mergedPurchaseRows(pool);
-    if (!isOrderedMode) rows = applyMergedPurchaseFilter(rows, mergeFilter);
+    if (!isClosedMode) rows = applyMergedPurchaseFilter(rows, mergeFilter);
     return sortMergedRows(rows, project.currency);
-  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, mergeFilter, project.currency, isStatusMode, isOrderedMode]);
+  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, mergeFilter, project.currency, isStatusMode, isClosedMode]);
 
   const filtered = useMemo(() => {
     if (!isStatusMode && isMergedPurchaseMode(effectiveMode)) return [];
@@ -297,7 +299,7 @@ export default function ClientPurchasePanel({
     return [...out].sort((a, b) => (a.name || "").localeCompare(b.name || "", "ru"));
   }, [isStatusMode, scoped, supplierFilter, purchaseQuery]);
 
-  const { todo, bought } = isOrderedMode || (isStatusMode && effectiveMode !== "bought")
+  const { todo, bought } = isClosedMode || (isStatusMode && effectiveMode !== "bought")
     ? { todo: mergedRows ?? filtered, bought: [] }
     : isStatusMode
       ? effectiveMode === "bought"
@@ -451,10 +453,11 @@ export default function ClientPurchasePanel({
           currency={project.currency}
           onModeSelect={(key) => {
             const map = {
-              ordered: () => onFilterChange("ordered"),
+              ordered: () => onModeChange("closed"),
+              closed: () => onModeChange("closed"),
               need_help: () => onModeChange("need_help"),
               replacement_check: () => onModeChange("replacement_check"),
-              bought: () => onModeChange("bought"),
+              bought: () => onModeChange("closed"),
             };
             if (map[key]) map[key]();
           }}
@@ -515,34 +518,34 @@ export default function ClientPurchasePanel({
               {f.label}
             </button>
           ))}
-        {simple && !isOrderedMode && (
-          <span className="muted" style={{ fontSize: 13 }}>
+        {simple && !isClosedMode && (
+          <span className="client-purchase-filters__count muted">
             {todo.length} к покупке
-            {boughtCount > 0 ? ` · ${boughtCount} уже куплено` : ""}
+            {boughtCount > 0 ? ` · ${boughtCount} заказано/куплено` : ""}
           </span>
         )}
-        {simple && isOrderedMode && (
-          <span className="muted" style={{ fontSize: 13 }}>
-            {todo.length} заказано
+        {simple && isClosedMode && (
+          <span className="client-purchase-filters__count muted">
+            {todo.length} заказано/куплено
           </span>
         )}
-        <label className="row" style={{ marginLeft: "auto", fontSize: 13, gap: 6 }}>
-          {!isOrderedMode && (
-            <>
-              <input type="checkbox" checked={showBought} onChange={(e) => onShowBoughtChange(e.target.checked)} />
+        {!isClosedMode && (
+          <label className="client-purchase-show-bought">
+            <input type="checkbox" checked={showBought} onChange={(e) => onShowBoughtChange(e.target.checked)} />
+            <span>
               Показать заказанные и купленные{boughtCount > 0 ? ` (${boughtCount})` : ""}
-            </>
-          )}
-        </label>
+            </span>
+          </label>
+        )}
       </div>
-      {effectiveMode === "ordered" && (
+      {effectiveMode === "closed" && (
         <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-          Позиции со статусом «Заказано» — ожидают доставки. После получения отметьте «Куплено» или «Доставлено».
+          Всё, что отмечено «Заказано» или «Куплено». После оплаты — одна кнопка на позиции, повторное нажатие — «Куплено».
         </p>
       )}
       {effectiveMode === "list" && (
         <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-          Крупные категории без дублирования. Позиции стеллажей смотрите в режиме «По разделам».
+          Полный список по крупным блокам — стеллажи, сантехника, электрика и т.д. Одинаковые позиции уже объединены.
         </p>
       )}
       {effectiveMode === "suppliers" && (
@@ -563,13 +566,13 @@ export default function ClientPurchasePanel({
       {todo.length > 0 ? (
         <>
           <h3 className="purchase-section-title">
-            {isOrderedMode ? `Заказано · ${todo.length}` : `К закупке · ${todo.length}`}
+            {isClosedMode ? `Заказано/Куплено · ${todo.length}` : `К закупке · ${todo.length}`}
           </h3>
-          {renderList(todo, isOrderedMode)}
+          {renderList(todo, isClosedMode)}
         </>
       ) : (
         <p className="muted" style={{ fontSize: 14, margin: "16px 0" }}>
-          {isOrderedMode ? "Пока нет позиций со статусом «Заказано»." : "Всё из фильтра уже куплено."}
+          {isClosedMode ? "Пока нет позиций со статусом «Заказано» или «Куплено»." : "Всё из фильтра уже куплено."}
         </p>
       )}
       {showBought && bought.length > 0 && (

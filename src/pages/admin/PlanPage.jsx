@@ -7,29 +7,77 @@ import {
   readPlanFile, renameStandalonePlan, deleteStandalonePlan,
 } from "../../planner/standalonePlans.js";
 import {
-  LAYERS, LINE_STYLE, PDF_SHEETS, catalogByKind, catalogForLayer, layerById,
-  clamp, snap, fmt, DEFAULT_PLAN, DEFAULT_DISPLAY, migrateLayerId, polyLength,
+  LAYERS, LINE_STYLE, catalogByKind, catalogForLayer, layerById,
+  clamp, snap, DEFAULT_PLAN, DEFAULT_DISPLAY, migrateLayerId, polyLength,
 } from "../../planner/catalog.js";
 import { exportLayeredPDF } from "../../planner/exportPdf.js";
 import { createPlannerSpecItems, defaultObjectSpecSettings, plannerSpecSummary } from "../../planner/specSync.js";
 import { collectPlannerWarnings, wallsForLayer, boundsForActiveLayer } from "../../planner/geometry.js";
-import { resolveDraftPoint, angleBetweenDeg } from "../../planner/draftSnap.js";
+import { resolveDraftPoint, angleBetweenDeg } from "../../planner/core/snap/index.js";
+import { runSnapEngine } from "../../planner/core/snap/snapEngine.js";
+import {
+  formatDimensionValue,
+  resolvePlanDimensions,
+  dimensionOffsetFromPoint,
+  DEFAULT_DIMENSION_DISPLAY_MODE,
+} from "../../planner/core/dimensions/index.js";
+import {
+  createWallDraftState, wallDraftStart, wallDraftContinueFrom,
+  wallDraftAddSegment, wallDraftBackspace, wallDraftFinishPts,
+} from "../../planner/core/walls/wallDraft.js";
+import { commitWallChain } from "../../planner/core/walls/wallCommit.js";
 import { computeItemPlacement, placementZoneLabel } from "../../planner/placementPreview.js";
 import { PlacementGhost } from "../../planner/objectOverlays.jsx";
+import { itemOverlapsAnyWall } from "../../planner/wallCollision.js";
+import { itemOverlapsBlocked } from "../../planner/itemOverlap.js";
+import { StructuralEl, StructuralDraft } from "../../planner/structuralRender.jsx";
+import { defaultStructuralFields, STRUCTURAL_KINDS } from "../../planner/structuralTypes.js";
+import { hitTestStructural, nearestStructural, itemHitsAnyStructural } from "../../planner/structuralGeometry.js";
 import { normalizeDisplay, roundMm, fmtCoord, fmtCoordMm, coordUnitLabel } from "../../planner/gridSettings.js";
+import { DEFAULT_VISUAL, loadVisualPrefs, saveVisualPrefs, VISUAL_PREF_KEYS } from "../../planner/plannerVisualSettings.js";
+import { PlannerVisualSettingsModal } from "../../planner/ui/PlannerVisualSettingsModal.jsx";
+import { PlannerMaterialPresetsModal } from "../../planner/ui/PlannerMaterialPresetsModal.jsx";
+import { PlannerLabelModal } from "../../planner/ui/PlannerLabelModal.jsx";
+import { resolveCatalogKind, getStructuralDefaultWidth } from "../../planner/plannerMaterialPresets.js";
 import { isStrictWallItem, isDoorKind } from "../../planner/doorTypes.js";
 import {
   snapWallPoint, placeOnWall, pointInPolygon, pointInZone, breakWallAt,
-  syncZonesFromWalls, applyWallNodeMove, refreshWallMountedItems,
+  applyWallNodeMove, refreshWallMountedItems,
   tryMergeWall, straightenWall, setWallSegmentLength, setWallSegmentLengthAt,
   wallSegmentLengthAt, wallSegmentIndexForNode, alignWallToNeighbor, weldWallNodes,
-} from "../../planner/wallGeometry.js";
+  refineWallDraftSnap, ensureWallNodesAtPoints, snapPointsToWallNodes, wallInteractionAt,
+  planWorkingBounds, planHasDrawnWalls,
+  alignmentGuides, angleAt, draftChainArea,
+} from "../../planner/core/walls/index.js";
+import { syncRooms } from "../../planner/core/rooms/index.js";
+import { validateRooms } from "../../planner/core/rooms/validateRooms.js";
+import {
+  resolvePlanWalls, commitWallEdge, deleteWallEdge, movePlanNode,
+  wallNodeIdAt, isNetworkPlan, ensureWallNetwork,
+  applyNetworkNodeAtWall, applyNetworkWallSegMove, nudgeWallInPlan,
+  tryMergeWallEdge, breakWallEdgeAt, straightenWallEdge, alignWallEdgeToNeighbor,
+} from "../../planner/wallNetwork.js";
 import { validateOpeningPlacement, nextDoorNumber, nextOpeningNumber } from "../../planner/doorGeometry.js";
 import { attachItemZoneFields } from "../../planner/roomZones.js";
+import {
+  createFarmObject,
+  farmCategoryForKind,
+  normalizePlannerObject,
+  resolveArrowMoveStepMm,
+  createRackGroup,
+} from "../../planner/farmObjects.js";
 import {
   defaultLineFields, attachLineEndpoints, snapLinePoint,
   insertPointOnLine, removeLineNode, reverseLine, hitTestLine,
 } from "../../planner/lineProperties.js";
+import {
+  snapPipeDraftPoint,
+  normalizePipe,
+  isPipeLine,
+  syncPlanPipes,
+} from "../../planner/pipes.js";
+import { syncElectricalPlan } from "../../planner/electrical.js";
+import { isDuctLine, normalizeDuct, syncClimatePlan } from "../../planner/climate.js";
 import {
   isRackKind, defaultRackFields, nextRackNumber, nextRowLabel,
   autoNumberRacks, buildRackGrid,
@@ -37,23 +85,30 @@ import {
 import { isOpeningKind, defaultOpeningFields } from "../../planner/openingTypes.js";
 import { isDoorItem } from "../../planner/doorTypes.js";
 import { defaultWallFields, WALL_KINDS, THICKNESS_SIDES } from "../../planner/wallTypes.js";
-import { wallFieldsFromTool } from "../../planner/wallToolPresets.js";
+import { wallFieldsFromTool, defaultWallThkForTool, wallMaterialForTool } from "../../planner/wallToolPresets.js";
 import { usePlanHistory } from "../../planner/usePlanHistory.js";
+import { normalizePlan } from "../../planner/planNormalize.js";
+import { DEFAULT_DUCT_SIZE_H_MM, DEFAULT_DUCT_SIZE_W_MM } from "../../planner/ventDuctRender.jsx";
 import {
-  PlanGridScreen, PlanAxesScreen, SheetBackdrop, RoomDims, WallEl, WallsTopOverlay, ItemEl, ZoneEl, LabelEl, LineEl,
-  DraftLine, SelectionDims, WallSelectionDims, MeasureEl, TypedLengthHint, LinkEl,
+  PlanGridScreen, PlanAxesScreen, SheetBackdrop, RoomDims, WallEl, WallsTopOverlay, PlannerWallDefs, PlannerLayerDefs, LayerMutedWrap, ItemEl, ZoneEl, LabelEl, LineEl,
+  DraftLine, SelectionDims, WallSelectionDims, WallDimChains, RulerEl, DimensionsLayer, DimensionDraftEl, TypedLengthHint, LinkEl,
   SelectionMarquee, MultiSelectBounds, PlanLayerGroup, RoomFloorEl,
 } from "../../planner/canvasPrimitives.jsx";
+import {
+  WallCursorPreview, WallSnapIndicator, WallAlignmentGuides,
+  WallAngleLabels, WallLiveChips,
+} from "../../planner/wallDraftOverlay.jsx";
 import { layerDisplayState } from "../../planner/canvasLayers.js";
-import { snapLineDraftPoint, snapRackNeighbor } from "../../planner/plannerSnap.js";
+import { snapRackNeighbor } from "../../planner/plannerSnap.js";
 import { snapObjectPosition, constrainAxisDelta, constrainAxisPoint, snapDistanceMm } from "../../planner/objectSnap.js";
 import {
   itemsInMarquee, boundsOfItems, groupMemberIds,
 } from "../../planner/selectionHelpers.js";
 import { warningIdsFromList } from "../../planner/selectionVisuals.js";
 import {
-  buildItemLabelLines, defaultFreeLabelFields, autoItemLabelPlacement,
-  resolveFreeLabelPosition,
+  buildItemLabelLines, defaultFreeLabelFields, autoCalloutPlacement, autoItemLabelPlacement,
+  resolveFreeLabelPosition, resolveItemLabelPlacement, pinItemLabelFromAuto, itemAnchor,
+  resolveLabelAnchor, DEFAULT_LABEL_FONT_PT,
 } from "../../planner/labelProperties.js";
 import {
   linkTypeForLayer, canCreateLink, linkLengthMm, linksVisibleOnLayer,
@@ -61,7 +116,8 @@ import {
 } from "../../planner/linkGeometry.js";
 import { PlannerLayout } from "../../planner/ui/PlannerLayout.jsx";
 import {
-  sheetById, sheetByLayerId, defaultToolForSheet, buildVisibilityFromSheet, sheetDisplayPatch,
+  REQUIRED_FARM_SHEET_IDS,
+  sheetById, sheetByLayerId, defaultToolForSheet, buildVisibilityFromSheet, sheetDisplayPatch, objectVisibleOnSheet,
 } from "../../planner/plannerSheets.js";
 import { categoryById } from "../../planner/plannerCategories.js";
 import { PlannerToolMenu } from "../../planner/ui/PlannerToolMenu.jsx";
@@ -70,6 +126,8 @@ import { toolStateFromDef, isItemVisibleOnSheet, isLineVisibleOnSheet } from "..
 import { resolveTool } from "../../planner/plannerTools.js";
 import { sheetAllowedInViewMode, viewModeForSheet } from "../../planner/plannerViewModes.js";
 import { PropertiesPanel } from "../../planner/ui/PropertiesPanel.jsx";
+import { PlannerErrorBoundary, PlannerOverlayBoundary } from "../../planner/ui/PlannerErrorBoundary.jsx";
+import { WallEditOverlay } from "../../planner/wallEditOverlay.jsx";
 import { ContextMenu, buildObjectMenu } from "../../planner/ui/ContextMenu.jsx";
 import { AttachPlanModal } from "../../planner/ui/AttachPlanModal.jsx";
 import "../../planner/planner.css";
@@ -89,6 +147,10 @@ function dragShiftOn(shiftHeld, altHeld) {
   return shiftHeld && !altHeld;
 }
 
+function modKey(e) {
+  return e.ctrlKey || e.metaKey;
+}
+
 export default function PlanPage() {
   const { id, draftId } = useParams();
   const navigate = useNavigate();
@@ -98,32 +160,56 @@ export default function PlanPage() {
   const [draftMeta, setDraftMeta] = useState(() => (standalone ? getStandalonePlan(draftId) : null));
 
   const initialPlan = () => {
-    if (standalone) return withDefaults(draftMeta?.plan || getStandalonePlan(draftId)?.plan);
-    return withDefaults(project?.plan);
+    if (standalone) return normalizePlan(draftMeta?.plan || getStandalonePlan(draftId)?.plan);
+    return normalizePlan(project?.plan);
   };
 
-  const { plan, setPlan, undo, redo, resetHistory } = usePlanHistory(initialPlan);
+  const {
+    plan, setPlan, replacePlan, commitPlan, commitFrom, undo, redo, resetHistory,
+  } = usePlanHistory(initialPlan);
   const [active, setActive] = useState("room");
   const [tool, setTool] = useState("select");
   const [pending, setPending] = useState(null);
   const [pendingSize, setPendingSize] = useState(null);
-  const [lineDraftMeta, setLineDraftMeta] = useState({ layer: null, tag: null });
+  const [pendingRotationDeg, setPendingRotationDeg] = useState(0);
+  const [lineDraftMeta, setLineDraftMeta] = useState({
+    layer: null,
+    tag: null,
+    pipeSystem: null,
+    pipeRole: null,
+    diameterMm: null,
+    material: null,
+    lineType: null,
+    ductType: null,
+    airflowM3h: null,
+    flowDirection: "forward",
+  });
   const [activeToolId, setActiveToolId] = useState("select");
   const [sheetFilters, setSheetFilters] = useState({});
   const [toolSearch, setToolSearch] = useState("");
   const [selection, setSelection] = useState(null);
   const [marquee, setMarquee] = useState(null);
-  const setSel = (v) => setSelection(v ? { coll: v.coll, ids: [v.id] } : null);
+  const setSel = (v) => setSelection(v ? {
+    coll: v.coll,
+    ids: [v.id],
+    ...(v.nodeIdx != null ? { nodeIdx: v.nodeIdx } : {}),
+  } : null);
   const clearSelection = () => setSelection(null);
   const [view, setView] = useState({ panX: 0, panY: 0, zoom: 0.08 });
-  const [display, setDisplay] = useState(() => normalizeDisplay(DEFAULT_DISPLAY()));
-  const [unit] = useState("mm");
+  const [display, setDisplay] = useState(() => normalizeDisplay({ ...DEFAULT_DISPLAY(), ...loadVisualPrefs() }));
+  const [visualSettingsOpen, setVisualSettingsOpen] = useState(false);
+  const [materialPresetsOpen, setMaterialPresetsOpen] = useState(false);
+  const [materialPresetsRev, setMaterialPresetsRev] = useState(0);
+  const [labelDraft, setLabelDraft] = useState(null);
   const [vis, setVis] = useState(Object.fromEntries(LAYERS.map((l) => [l.id, true])));
   const [draft, setDraft] = useState([]);
   const [cursor, setCursor] = useState(null);
   const [measure, setMeasure] = useState([]);
+  const [measureOffsetPt, setMeasureOffsetPt] = useState(null);
+  const [rulerSnap, setRulerSnap] = useState(null);
   const [guides, setGuides] = useState([]);
   const [wallThk, setWallThk] = useState(100);
+  const [structuralWidth, setStructuralWidth] = useState(STRUCTURAL_KINDS.beam.defaultWidth);
   const [hoverWallNode, setHoverWallNode] = useState(null);
   const [hoverHit, setHoverHit] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -139,8 +225,14 @@ export default function PlanPage() {
   const [draftAngleSnap, setDraftAngleSnap] = useState(null);
   const wallChainStartRef = useRef(null);
   const wallPrevAngleRef = useRef(null);
+  const wallDraftStateRef = useRef(createWallDraftState());
+  const wallDrawRef = useRef(null);
+  const structuralDrawRef = useRef(null);
+  const measureDrawRef = useRef(null);
+  const [dimensionEdit, setDimensionEdit] = useState(null);
+  const [ctrlSnapFine, setCtrlSnapFine] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
-  const [activeSheetId, setActiveSheetId] = useState("source");
+  const [activeSheetId, setActiveSheetId] = useState("base_plan");
   const [activeCategoryId, setActiveCategoryId] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [planLevel, setPlanLevel] = useState("Этаж 1");
@@ -150,6 +242,8 @@ export default function PlanPage() {
   const [warningsPanelOpen, setWarningsPanelOpen] = useState(false);
   const [viewMode, setViewMode] = useState("2d");
 
+  const structuralKind = tool === "structural" ? pending : null;
+
   const criticalWarnIdsRef = useRef(new Set());
 
   const openWarningsPanel = useCallback(() => {
@@ -157,11 +251,15 @@ export default function PlanPage() {
     setWarningsPanelOpen(true);
   }, []);
   const svgRef = useRef(null);
+  const backdropInputRef = useRef(null);
   const [svgSize, setSvgSize] = useState({ w: 1200, h: 800 });
   const dragRef = useRef(null);
+  const rackSnapStickyRef = useRef({ x: null, y: null, atX: null, atY: null });
+  const objectSnapStickyRef = useRef({ x: null, y: null, atX: null, atY: null });
   const clipboardRef = useRef(null);
   const shiftRef = useRef(false);
   const altSnapRef = useRef(false);
+  const ctrlRef = useRef(false);
   altSnapRef.current = altSnapOff;
   const typedLengthRef = useRef("");
   typedLengthRef.current = typedLength;
@@ -183,27 +281,25 @@ export default function PlanPage() {
   }, []);
 
   useEffect(() => {
-    const t = requestAnimationFrame(() => {
-      if (svgRef.current) fitView();
-    });
-    return () => cancelAnimationFrame(t);
-  }, [standalone ? draftId : project?.id]);
-
-  useEffect(() => {
     if (standalone) {
       const d = getStandalonePlan(draftId);
       if (d) {
         setDraftMeta(d);
-        resetHistory(withDefaults(d.plan));
+        resetHistory(normalizePlan(d.plan));
       }
       return;
     }
     let cancelled = false;
     actions.loadProject(id).then((p) => {
-      if (!cancelled && p?.plan && Object.keys(p.plan).length) resetHistory(withDefaults(p.plan));
+      if (!cancelled && p?.plan && Object.keys(p.plan).length) resetHistory(normalizePlan(p.plan));
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [id, draftId, standalone, actions, resetHistory]);
+
+  useEffect(() => {
+    if (!planHasDrawnWalls(plan.walls)) return;
+    setPlan((p) => syncAutoZones(p));
+  }, [standalone ? draftId : id, plan.walls, plan.zones?.length, plan.rooms?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (standalone) {
@@ -227,19 +323,35 @@ export default function PlanPage() {
   }, [plan, standalone, draftMeta?.id, draftMeta?.name, project?.id, actions]);
 
   const snapOn = display.snapOn && !altSnapOff;
-  const snapStep = display.snapStep ?? display.gridStep ?? 50;
-  const fmtU = (mm) => fmt(mm, unit);
+  const snapStep = (ctrlSnapFine || view.zoom >= 1.2) ? 10 : 50;
+  const unit = display.coordUnit || "mm";
+  const dimensionDisplayMode = display.dimensionDisplayMode || DEFAULT_DIMENSION_DISPLAY_MODE;
+  const fmtU = (mm, opts = {}) => formatDimensionValue(mm, dimensionDisplayMode, opts);
+  const fmtWallDraftLen = (mm) => {
+    const cm = mm / 10;
+    if (cm < 100) return `${Math.round(cm)} см`;
+    return `${(mm / 1000).toFixed(2)} м`;
+  };
   const fmtCoordU = (mm) => fmtCoord(mm, display.coordUnit || "mm");
   const toMM = (cx, cy) => {
-    const r = svgRef.current.getBoundingClientRect();
+    const r = svgRef.current?.getBoundingClientRect();
+    if (!r) return { x: 0, y: 0 };
     return { x: (cx - r.left - view.panX) / view.zoom, y: (cy - r.top - view.panY) / view.zoom };
   };
-  const sn = (v) => roundMm(snap(v, snapStep, snapOn && display.snapGrid), display.snapRoundMm || 1);
+  const sn = (v) => {
+    if (altSnapOff) return roundMm(v, 1);
+    return roundMm(snap(v, snapStep, snapOn && display.snapGrid), display.snapRoundMm || 1);
+  };
+  const fineMm = (v) => roundMm(v, display.snapRoundMm || 1);
 
-  const innerL = plan.room.wallThk / 2;
-  const innerT = plan.room.wallThk / 2;
-  const innerR = plan.room.w - plan.room.wallThk / 2;
-  const innerB = plan.room.h - plan.room.wallThk / 2;
+  const innerBounds = useMemo(
+    () => planWorkingBounds({ ...plan, walls: resolvePlanWalls(plan) }),
+    [plan.walls, plan.nodes, plan.zones, plan.room],
+  );
+  const innerL = innerBounds.l;
+  const innerT = innerBounds.t;
+  const innerR = innerBounds.r;
+  const innerB = innerBounds.b;
 
   const snapObj = useCallback((coll, obj, x, y) => {
     const gridSnap = (v) => roundMm(snap(v, snapStep, snapOn && display.snapGrid !== false), display.snapRoundMm || 1);
@@ -247,12 +359,20 @@ export default function PlanPage() {
       return { x: gridSnap(x), y: gridSnap(y), guides: [] };
     }
     const innerBounds = { l: innerL, t: innerT, r: innerR, b: innerB };
+    const thr = snapDistanceMm(view.zoom, display.snapDistancePx ?? 10);
+    const isRack = coll === "items" && isRackKind(obj.kind) && display.snapObjects !== false;
+
+    let rackSnap = null;
+    if (isRack) {
+      rackSnap = snapRackNeighbor(obj, x, y, plan.items, thr, rackSnapStickyRef.current);
+    }
+
     const base = snapObjectPosition({
       obj,
-      x,
-      y,
+      x: rackSnap?.snappedX ? rackSnap.x : x,
+      y: rackSnap?.snappedY ? rackSnap.y : y,
       items: plan.items,
-      walls: plan.walls,
+      walls: resolvePlanWalls(plan),
       room: plan.room,
       zoom: view.zoom,
       snapOn: true,
@@ -263,27 +383,26 @@ export default function PlanPage() {
       snapDistancePx: display.snapDistancePx ?? 10,
       innerBounds,
       gridSnap,
+      sticky: objectSnapStickyRef.current,
     });
-    let nx = base.x;
-    let ny = base.y;
+
+    let nx = rackSnap?.snappedX ? rackSnap.x : base.x;
+    let ny = rackSnap?.snappedY ? rackSnap.y : base.y;
     const g = [...base.guides];
-    if (coll === "items" && isRackKind(obj.kind) && display.snapObjects) {
-      const rackSnap = snapRackNeighbor(obj, nx, ny, plan.items, snapDistanceMm(view.zoom, display.snapDistancePx ?? 10));
-      nx = rackSnap.x;
-      ny = rackSnap.y;
-      g.push(...rackSnap.guides);
-    }
+    if (rackSnap) g.push(...rackSnap.guides);
+
     return { x: nx, y: ny, guides: g };
   }, [snapOn, snapStep, view.zoom, plan.walls, plan.items, plan.room, display.snapObjects, display.snapGrid, display.snapWalls, display.snapGuides, display.snapDistancePx, display.snapRoundMm, innerL, innerR, innerT, innerB]);
 
   const attachWall = (obj, x, y) => {
     const maxDist = isStrictWallItem(obj.kind) ? 220 : 350;
-    const placed = placeOnWall(obj, { x, y }, plan.walls, plan.room, maxDist);
+    const rw = resolvePlanWalls(plan);
+    const placed = placeOnWall(obj, { x, y }, rw, plan.room, maxDist);
     if (!placed) return null;
     const check = validateOpeningPlacement(
       obj,
       { x: placed.x, y: placed.y, wallSeg: placed.wallSeg, wallId: placed.wallId },
-      plan.walls,
+      rw,
     );
     if (!check.ok && isStrictWallItem(obj.kind)) {
       return { error: check.message };
@@ -304,73 +423,151 @@ export default function PlanPage() {
     toleranceDeg: display.angleTolerance ?? 5,
     snapStep,
     gridSnap: display.snapGrid !== false,
-    walls: plan.walls,
+    walls: resolvePlanWalls(plan),
     prevSegAngleDeg: wallPrevAngleRef.current,
-  }), [snapOn, snapStep, display.snapAngles, display.angleTolerance, display.snapGrid, plan.walls]);
+  }), [snapOn, snapStep, display.snapAngles, display.angleTolerance, display.snapGrid, plan.walls, plan.nodes]);
 
   const clearWallChain = () => {
     wallChainStartRef.current = null;
     wallPrevAngleRef.current = null;
+    wallDraftStateRef.current = createWallDraftState();
     setDraft([]);
     setDraftSnap(null);
     setDraftAngleSnap(null);
     setTypedLength("");
   };
 
+  const wallSnapOptions = useCallback(() => ({
+    snapOn: snapOn && !altSnapRef.current,
+    snapStep,
+    snapGrid: display.snapGrid !== false,
+    snapWalls: display.snapWalls !== false,
+    angleSnapOn: display.snapAngles !== false,
+    toleranceDeg: display.angleTolerance ?? 5,
+    snapDistancePx: display.snapDistancePx ?? 10,
+    wallThk,
+    prevSegAngleDeg: wallPrevAngleRef.current,
+    chainStart: wallChainStartRef.current,
+    snapGuides: display.snapGuides !== false,
+  }), [snapOn, snapStep, display, wallThk]);
+
+  const computeWallSnap = useCallback((raw, from) => {
+    const result = runSnapEngine({
+      point: raw,
+      mode: "wall",
+      plan,
+      draft: { pts: draft, chainStart: wallChainStartRef.current },
+      view,
+      modifiers: { shift: shiftRef.current, alt: altSnapRef.current },
+      options: { ...wallSnapOptions(), from },
+    });
+    return {
+      pt: result.point,
+      snap: result.snapped ? { snapped: true, kind: result.kind || result.type, ...result } : null,
+      angleSnap: result.angleSnap,
+      fromAdjust: result.fromAdjust,
+      guides: result.guides,
+    };
+  }, [plan, draft, view, wallSnapOptions]);
+
   const computeDraftPt = (raw, from) => {
-    const { point: draftPoint, angleSnap } = from
-      ? draftPt(from, raw, draftSnapOpts())
-      : { point: { x: sn(raw.x), y: sn(raw.y) }, angleSnap: null };
-    let pt = draftPoint;
-    let snap = null;
-    if (tool === "wall" && snapOn && display.snapWalls !== false) {
-      const chainStart = wallChainStartRef.current;
-      if (chainStart && from) {
-        const thr = (display.snapDistancePx ?? 10) / Math.max(view.zoom, 0.05);
-        const away = Math.hypot(from.x - chainStart.x, from.y - chainStart.y);
-        if (away > 200 && Math.hypot(pt.x - chainStart.x, pt.y - chainStart.y) <= thr) {
-          return { pt: { x: chainStart.x, y: chainStart.y }, snap: { snapped: true, kind: "close" }, angleSnap };
-        }
-      }
-      const s = snapWallPoint(pt, plan.walls, plan.room, view.zoom, true, snapStep);
-      if (s.snapped) {
-        pt = { x: s.x, y: s.y };
-        snap = s;
-      }
+    if (tool === "wall") {
+      return computeWallSnap(raw, from);
     }
-    if (tool === "line" && snapOn) {
-      const s = snapLineDraftPoint(pt, {
-        items: plan.items,
-        walls: plan.walls,
-        room: plan.room,
-        lines: plan.lines,
-        zoom: view.zoom,
-        snapOn: true,
-        snapGrid: display.snapGrid !== false,
-        snapWalls: display.snapWalls !== false,
-        snapObjects: display.snapObjects !== false,
-        snapStep,
-      });
-      if (s.snapped || s.kind === "grid") {
+    let angleSnap = null;
+    let pt;
+    if (from) {
+      const draftResult = draftPt(from, raw, draftSnapOpts());
+      pt = draftResult.point;
+      angleSnap = draftResult.angleSnap;
+    } else {
+      pt = { x: sn(raw.x), y: sn(raw.y) };
+    }
+    let snap = null;
+    let fromAdjust = null;
+    let guidesLocal = [];
+    if (tool === "line" && snapOn && !altSnapRef.current) {
+      const lineLayer = lineDraftMeta.layer || active;
+      const pipeDraft = lineLayer === "irrigation" || lineLayer === "drain";
+      const s = pipeDraft
+        ? snapPipeDraftPoint(pt, {
+          items: plan.items,
+          pipes: plan.lines.filter((ln) => isPipeLine(ln) || ln.layer === "irrigation" || ln.layer === "drain"),
+          walls: resolvePlanWalls(plan),
+          room: plan.room,
+          zoom: view.zoom,
+          snapOn: true,
+          snapGrid: display.snapGrid !== false,
+          snapWalls: display.snapWalls !== false,
+          snapObjects: display.snapObjects !== false,
+          snapStep,
+        })
+        : runSnapEngine({
+          point: pt,
+          mode: "line",
+          plan,
+          draft: { pts: draft },
+          view,
+          modifiers: { shift: shiftRef.current, alt: altSnapRef.current },
+          options: {
+            snapOn: true,
+            snapGrid: display.snapGrid !== false,
+            snapWalls: display.snapWalls !== false,
+            snapObjects: display.snapObjects !== false,
+            snapGuides: display.snapGuides !== false,
+            snapStep,
+            from,
+            prevSegAngleDeg: from && draft.length >= 2 ? angleBetweenDeg(draft[draft.length - 2], from) : null,
+            lines: plan.lines,
+          },
+        });
+      if (s?.point) {
+        pt = { x: s.point.x, y: s.point.y };
+        angleSnap = s.angleSnap || angleSnap;
+        guidesLocal = s.guides || [];
+        if (s.snapped) snap = { snapped: true, kind: s.kind || s.type, ...s };
+      } else if (s.snapped || s.kind === "grid") {
         pt = { x: s.x, y: s.y };
         if (s.snapped) snap = s;
       }
     }
-    return { pt, snap, angleSnap };
+    return { pt, snap, angleSnap, fromAdjust, guides: guidesLocal };
   };
+
+  const computeRulerPt = useCallback((raw, from = null) => {
+    const base = { x: sn(raw.x), y: sn(raw.y) };
+    if (!snapOn || altSnapRef.current) return { pt: base, snap: null, guides: [] };
+    const s = runSnapEngine({
+      point: base,
+      mode: "measure",
+      plan,
+      draft: { pts: measure },
+      view,
+      modifiers: { shift: shiftRef.current, alt: altSnapRef.current },
+      options: {
+        snapOn: true,
+        snapGrid: display.snapGrid !== false,
+        snapWalls: display.snapWalls !== false,
+        snapObjects: display.snapObjects !== false,
+        snapGuides: display.snapGuides !== false,
+        snapStep,
+        from,
+      },
+    });
+    const pt = s?.point ? { x: s.point.x, y: s.point.y } : base;
+    const snap = s?.snapped ? { snapped: true, kind: s.kind || s.type, ...s } : null;
+    return { pt, snap, guides: s?.guides || [] };
+  }, [snapOn, snapStep, display.snapGrid, display.snapWalls, display.snapObjects, display.snapGuides, plan, view, measure]);
 
   const syncAutoZones = (p) => {
     try {
-      const { manual, auto } = syncZonesFromWalls(p);
+      const synced = syncRooms({ ...p, walls: resolvePlanWalls(p) });
+      const dimWarnings = (p.validationWarnings || []).filter((w) => w.source === "dimensions");
       return {
         ...p,
-        zones: [
-          ...manual,
-          ...auto.map((z) => {
-            const { prevId, ...rest } = z;
-            return { ...rest, id: prevId || uid("zn") };
-          }),
-        ],
+        rooms: synced.rooms,
+        zones: synced.zones,
+        validationWarnings: [...dimWarnings, ...(synced.validationWarnings || [])],
       };
     } catch (e) {
       console.error("syncAutoZones failed", e);
@@ -386,8 +583,8 @@ export default function PlanPage() {
     const ang = angleSnap?.snappedAngle ?? angleBetweenDeg(from, pt);
     const end = { x: from.x + Math.cos((ang * Math.PI) / 180) * len, y: from.y + Math.sin((ang * Math.PI) / 180) * len };
     if (tool === "wall") {
-      commitWallSegment(from, end);
-      setDraft([end]);
+      addWallDraftSegment(from, end);
+      setDraft(wallDraftStateRef.current.pts);
       wallPrevAngleRef.current = ang;
     } else {
       setDraft((d) => [...d, end]);
@@ -396,6 +593,11 @@ export default function PlanPage() {
     return true;
   };
 
+  const syncEngineeringPlan = useCallback(
+    (nextPlan) => syncClimatePlan(syncElectricalPlan(syncPlanPipes(nextPlan))),
+    [],
+  );
+
   const updateObj = (coll, oid, patch) => {
     setPlan((p) => {
       let next = {
@@ -403,35 +605,199 @@ export default function PlanPage() {
         [coll]: p[coll].map((o) => (o.id === oid ? { ...o, ...patch } : o)),
       };
       if (coll === "walls") {
+        const resolved = resolvePlanWalls(next);
         next = {
           ...next,
-          items: refreshWallMountedItems(next.items, next.walls, next.room, oid),
+          items: refreshWallMountedItems(next.items, resolved, next.room, oid),
         };
         next = syncAutoZones(next);
+      } else if (coll === "zones") {
+        next = {
+          ...next,
+          rooms: (next.rooms || []).map((r) => {
+            if (r.id !== oid) return r;
+            return {
+              ...r,
+              name: patch.name ?? r.name,
+              category: patch.category ?? r.category,
+              heightMm: patch.heightMm ?? patch.height ?? r.heightMm,
+              fillColor: patch.fillColor ?? patch.zoneColor ?? r.fillColor,
+              climateZone: patch.climateZone ?? r.climateZone,
+              sanitationZone: patch.sanitationZone ?? r.sanitationZone,
+              productionZone: patch.productionZone ?? r.productionZone,
+              targetTemperatureC: patch.targetTemperatureC ?? r.targetTemperatureC,
+              targetRh: patch.targetRh ?? r.targetRh,
+              targetCo2Ppm: patch.targetCo2Ppm ?? r.targetCo2Ppm,
+              targetAirChanges: patch.targetAirChanges ?? r.targetAirChanges,
+              targetAirVelocityMs: patch.targetAirVelocityMs ?? r.targetAirVelocityMs,
+              notes: patch.notes ?? r.notes,
+              visible: patch.visible ?? r.visible,
+              locked: patch.locked ?? r.locked,
+            };
+          }),
+        };
+        next = syncEngineeringPlan(next);
+      } else if (coll === "lines") {
+        next = syncEngineeringPlan(next);
+      } else if (coll === "items") {
+        next = syncEngineeringPlan(next);
       }
       return next;
     });
   };
-  const delSel = () => {
-    if (!selection?.ids?.length) return;
+  const deleteHits = useCallback((coll, ids) => {
+    if (!ids?.length) return false;
+    if (coll === "zones") {
+      const z = plan.zones.find((o) => o.id === ids[0]);
+      if (z?.auto) return false;
+    }
+    if (coll === "item-label") {
+      const idSet = new Set(ids);
+      setPlan((p) => ({
+        ...p,
+        items: p.items.map((it) => (idSet.has(it.id) ? { ...it, labelHidden: true } : it)),
+      }));
+      clearSelection();
+      return true;
+    }
     setPlan((p) => {
-      const next = { ...p };
-      if (selection.coll === "items") {
-        const ids = new Set(selection.ids);
-        next.items = p.items.filter((o) => !ids.has(o.id));
-        next.links = (p.links || []).filter((l) => !ids.has(l.fromId) && !ids.has(l.toId));
+      let next = { ...p };
+      if (coll === "items") {
+        const idSet = new Set(ids);
+        next.items = p.items.filter((o) => !idSet.has(o.id));
+        next.links = (p.links || []).filter((l) => !idSet.has(l.fromId) && !idSet.has(l.toId));
+      } else if (coll === "walls") {
+        const id = ids[0];
+        if (isNetworkPlan(p)) {
+          next = deleteWallEdge(p, id);
+        } else {
+          next.walls = p.walls.filter((o) => o.id !== id);
+        }
+        next.items = refreshWallMountedItems(next.items, resolvePlanWalls(next), next.room, id);
+        next = syncAutoZones(next);
+      } else if (coll === "rulers") {
+        const idSet = new Set(ids);
+        next.rulers = (p.rulers || []).filter((r) => !idSet.has(r.id));
+      } else if (coll === "measurements") {
+        const idSet = new Set(ids);
+        next.measurements = (p.measurements || []).filter((m) => !idSet.has(m.id));
+        next.rulers = (p.rulers || []).filter((r) => !idSet.has(r.id));
+      } else if (coll === "dimensions") {
+        const idSet = new Set(ids);
+        next.dimensions = (p.dimensions || []).filter((d) => !idSet.has(d.id) || d.auto === true);
+      } else if (coll === "structurals") {
+        const idSet = new Set(ids);
+        next.structurals = (p.structurals || []).filter((s) => !idSet.has(s.id));
       } else {
-        const id = selection.ids[0];
-        if (selection.coll === "links") {
+        const id = ids[0];
+        if (coll === "links") {
           next.links = (p.links || []).filter((l) => l.id !== id);
         } else {
-          next[selection.coll] = p[selection.coll].filter((o) => o.id !== id);
+          next[coll] = p[coll].filter((o) => o.id !== id);
         }
+      }
+      if (coll === "items" || coll === "lines") {
+        next = syncEngineeringPlan(next);
       }
       return next;
     });
     clearSelection();
+    return true;
+  }, [plan.zones]);
+
+  const delSel = () => {
+    if (!selection?.ids?.length) return;
+    deleteHits(selection.coll, selection.ids);
   };
+
+  const deleteHit = useCallback((hit) => {
+    if (!hit?.id) return false;
+    return deleteHits(hit.coll, [hit.id]);
+  }, [deleteHits]);
+
+  const pickPlanHit = useCallback((mm) => {
+    for (const it of [...plan.items].reverse()) {
+      if (mm.x >= it.x && mm.x <= it.x + it.w && mm.y >= it.y && mm.y <= it.y + it.h) {
+        return { coll: "items", id: it.id };
+      }
+    }
+    for (const w of resolvePlanWalls(plan)) {
+      for (let i = 1; i < w.pts.length; i++) {
+        const a = w.pts[i - 1];
+        const b = w.pts[i];
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        if (Math.hypot(mm.x - mid.x, mm.y - mid.y) < Math.max(w.thk || 100, 120) * 0.65) {
+          return { coll: "walls", id: w.id };
+        }
+      }
+    }
+    for (const ln of plan.lines) {
+      if (hitTestLine(mm, ln, 140 / Math.max(view.zoom, 0.2))) {
+        return { coll: "lines", id: ln.id };
+      }
+    }
+    for (const link of linksVisibleOnLayer(plan.links, active, display)) {
+      const { pts } = linkLengthMm(link, plan.items, plan.room);
+      if (pts.length >= 2 && hitTestLine(mm, { pts }, 120 / Math.max(view.zoom, 0.2))) {
+        return { coll: "links", id: link.id };
+      }
+    }
+    for (const lb of plan.labels) {
+      const pos = resolveFreeLabelPosition(lb, plan.items.find((i) => i.id === lb.targetId));
+      if (pos && Math.hypot(mm.x - pos.x, mm.y - pos.y) < 180 / Math.max(view.zoom, 0.08)) {
+        return { coll: "labels", id: lb.id };
+      }
+    }
+    for (const m of (plan.rulers || plan.measurements || [])) {
+      const d = Math.hypot(mm.x - m.a.x, mm.y - m.a.y);
+      const d2 = Math.hypot(mm.x - m.b.x, mm.y - m.b.y);
+      const mid = { x: (m.a.x + m.b.x) / 2, y: (m.a.y + m.b.y) / 2 };
+      const dm = Math.hypot(mm.x - mid.x, mm.y - mid.y);
+      const thr = 180 / Math.max(view.zoom, 0.08);
+      if (d < thr || d2 < thr || dm < thr) {
+        return { coll: "rulers", id: m.id };
+      }
+    }
+    for (const s of (plan.structurals || [])) {
+      if (hitTestStructural(mm, s, 140 / Math.max(view.zoom, 0.2))) {
+        return { coll: "structurals", id: s.id };
+      }
+    }
+    for (const z of plan.zones) {
+      if (z.polygon?.length >= 3 && pointInPolygon(mm, z.polygon)) {
+        return { coll: "zones", id: z.id };
+      }
+      if (mm.x >= z.x && mm.x <= z.x + z.w && mm.y >= z.y && mm.y <= z.y + z.h) {
+        return { coll: "zones", id: z.id };
+      }
+    }
+    return null;
+  }, [plan.items, plan.walls, plan.lines, plan.links, plan.labels, plan.zones, plan.rulers, plan.measurements, plan.structurals, plan.room, active, display, view.zoom]);
+
+  const enterEraseMode = useCallback(() => {
+    setTool("erase");
+    setPending(null);
+    setLinkFrom(null);
+    clearWallChain();
+  }, []);
+
+  const handleDeleteAction = useCallback(() => {
+    if (selection?.ids?.length) {
+      deleteHits(selection.coll, selection.ids);
+      return;
+    }
+    if (tool === "erase") {
+      setTool("select");
+      return;
+    }
+    if ((plan.rulers || plan.measurements || []).length > 0 || (plan.dimensions || []).length > 0) {
+      setPlan((p) => ({ ...p, rulers: [], measurements: [], dimensions: [] }));
+      setMeasure([]);
+      setMeasureOffsetPt(null);
+      return;
+    }
+    enterEraseMode();
+  }, [selection, tool, deleteHits, enterEraseMode, plan.rulers, plan.measurements, plan.dimensions, setPlan]);
 
   const createLink = (fromId, toId, type) => {
     const fromItem = plan.items.find((i) => i.id === fromId);
@@ -474,7 +840,7 @@ export default function PlanPage() {
     }
     const base = preview.item;
     const c = catalogByKind(pending);
-    const item = {
+    const baseItem = {
       ...base,
       id: uid("eq"),
       doorSwing: "left",
@@ -484,96 +850,286 @@ export default function PlanPage() {
       openingNum: isOpeningKind(c.kind) ? nextOpeningNumber(plan.items) : null,
       ...(isOpeningKind(c.kind) ? defaultOpeningFields(c.kind) : {}),
       ...(isRackKind(c.kind) ? defaultRackFields(c.kind, plan.items) : {}),
-      params: c.params ? { ...c.params } : null,
+      params: { ...(c.params || {}), ...(pendingSize?.params || {}) },
       ...defaultObjectSpecSettings(c.kind),
     };
-    setPlan((p) => ({ ...p, items: [...p.items, item] }));
+    const farmCategory = farmCategoryForKind(c.kind);
+    const keepLegacy = isDoorKind(c.kind) || isOpeningKind(c.kind);
+    const item = keepLegacy
+      ? normalizePlannerObject({
+        ...baseItem,
+        type: "legacy_object",
+        rotationDeg: pendingRotationDeg,
+        angle: pendingRotationDeg || baseItem.angle || 0,
+      })
+      : createFarmObject(
+        {
+          ...baseItem,
+          category: farmCategory,
+          subtype: c.kind,
+          name: baseItem.label || c.label,
+          widthMm: baseItem.w,
+          depthMm: baseItem.h,
+          heightMm: baseItem.height || baseItem.rackHeightMm || plan.room?.height || 3000,
+          rotationDeg: pendingRotationDeg,
+          angle: pendingRotationDeg || baseItem.angle || 0,
+          params: {
+            ...(baseItem.params || {}),
+            ...(isRackKind(c.kind) ? {
+              rackType: pendingSize?.rackType || baseItem.rackType || "nft",
+              levels: baseItem.tierCount || baseItem.params?.tiers || 5,
+            } : {}),
+          },
+        },
+        { presetId: pendingSize?.farmPresetId || null },
+      );
+    setPlan((p) => syncEngineeringPlan({ ...p, items: [...p.items, item] }));
+    if (shiftRef.current && isRackKind(c.kind)) {
+      setGuides(preview.guides || []);
+      return;
+    }
     setSel({ coll: "items", id: item.id });
     setTool("select");
     setGuides([]);
   };
 
-  const addZoneAt = (mm) => {
-    const zw = 2000;
-    const zh = 1500;
-    const z = { id: uid("zn"), x: sn(mm.x - zw / 2), y: sn(mm.y - zh / 2), w: zw, h: zh, name: "Зона", height: plan.room.height || 3000, flow: "neutral" };
-    setPlan((p) => ({ ...p, zones: [...p.zones, z] }));
-    setSel({ coll: "zones", id: z.id });
-    setTool("select");
-  };
+  const beginLabelAnchor = useCallback((mm, targetId = null) => {
+    let tid = targetId;
+    if (!tid) {
+      for (const it of [...plan.items].reverse()) {
+        if (mm.x >= it.x && mm.x <= it.x + it.w && mm.y >= it.y && mm.y <= it.y + it.h) {
+          tid = it.id;
+          break;
+        }
+      }
+    }
+    const tgt = tid ? plan.items.find((i) => i.id === tid) : null;
+    setLabelDraft({
+      anchor: { x: sn(mm.x), y: sn(mm.y) },
+      targetId: tid,
+      targetName: tgt?.label || tgt?.rackNum || catalogByKind(tgt?.kind)?.label || null,
+    });
+  }, [plan.items, sn]);
 
-  const addLabelAt = (mm, targetId) => {
+  const cancelLabelDraft = useCallback(() => setLabelDraft(null), []);
+
+  const confirmLabelDraft = useCallback(({ text, fontSizePt = DEFAULT_LABEL_FONT_PT }) => {
+    if (!labelDraft) return;
+    const { anchor, targetId } = labelDraft;
     const tgt = targetId ? plan.items.find((i) => i.id === targetId) : null;
-    const place = tgt
-      ? autoItemLabelPlacement(tgt, plan.room)
-      : { x: sn(mm.x + 300), y: sn(mm.y - 300), anchor: { x: mm.x, y: mm.y } };
-    const text = tgt
-      ? buildItemLabelLines(tgt, plan, "full").join("\n")
-      : "Подпись";
+    const box = autoCalloutPlacement(anchor, plan.room, tgt);
     const l = {
       id: uid("lb"),
-      ...defaultFreeLabelFields(tgt, { x: sn(place.x), y: sn(place.y) }, text),
+      ...defaultFreeLabelFields({
+        anchor,
+        target: tgt,
+        textBox: { x: sn(box.x), y: sn(box.y) },
+        text: text || "Подпись",
+        fontSizePt,
+      }),
     };
     setPlan((p) => ({ ...p, labels: [...p.labels, l] }));
     setSel({ coll: "labels", id: l.id });
+    setLabelDraft(null);
     setTool("select");
+  }, [labelDraft, plan.items, plan.room, sn]);
+
+  const finishWallChain = () => {
+    const pts = wallDraftFinishPts(wallDraftStateRef.current) || (draft.length >= 2 ? draft : null);
+    if (!pts || pts.length < 2) {
+      clearWallChain();
+      return;
+    }
+    const role = active === "room" ? "outer" : "partition";
+    commitPlan((p) => {
+      const toolFields = wallFieldsFromTool(activeToolId, role, p.room, wallThk);
+      const props = {
+        ...defaultWallFields(toolFields.role || role, p.room),
+        ...toolFields,
+        thk: toolFields.thk ?? (role === "outer" ? (p.room.wallThk || wallThk) : wallThk),
+      };
+      let next = commitWallChain(p, pts, props, uid);
+      return syncAutoZones(next);
+    });
+    clearWallChain();
   };
 
+  const addWallDraftSegment = (from, to, fromOverride = null) => {
+    const start = fromOverride || from;
+    if (!start || !to || Math.hypot(to.x - start.x, to.y - start.y) < 50) return false;
+    const { state, added } = wallDraftAddSegment(wallDraftStateRef.current, to);
+    if (!added) return false;
+    wallDraftStateRef.current = state;
+    wallPrevAngleRef.current = angleBetweenDeg(start, to);
+    setDraft(state.pts);
+    return true;
+  };
+
+  /** @deprecated — используйте finishWallChain / addWallDraftSegment */
   const commitWallDraft = (pts) => {
     if (!pts || pts.length < 2) return;
-    let clean = pts.map((pt) => ({ x: pt.x, y: pt.y }));
-    if (clean.length >= 2) {
-      const f = clean[0];
-      const l = clean[clean.length - 1];
-      if (Math.hypot(f.x - l.x, f.y - l.y) < 5) clean = clean.slice(0, -1);
-    }
-    if (clean.length < 2) return;
-    const role = active === "room" ? "outer" : "partition";
-    const wallId = uid("wl");
-    setPlan((p) => {
-      const toolFields = wallFieldsFromTool(activeToolId, role, p.room, wallThk);
-      let walls = weldWallNodes([
-        ...p.walls,
-        {
-          id: wallId,
-          pts: clean,
-          ...defaultWallFields(toolFields.role || role, p.room),
-          ...toolFields,
-          thk: toolFields.thk ?? (role === "outer" ? (p.room.wallThk || wallThk) : wallThk),
-        },
-      ]);
-      const merged = tryMergeWall(walls, wallId);
-      if (merged) walls = weldWallNodes(merged.walls);
-      return syncAutoZones({ ...p, walls });
-    });
+    wallDraftStateRef.current = { ...wallDraftStateRef.current, pts };
+    finishWallChain();
   };
 
-  const commitWallSegment = (from, to) => {
-    if (!from || !to) return;
+  const commitWallSegment = (from, to, fromOverride = null) => {
+    addWallDraftSegment(from, to, fromOverride);
+  };
+
+  const commitDimension = (p1, p2, offsetPoint) => {
+    if (!p1 || !p2) return;
+    if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 20) return;
+    const orientation = Math.abs(p2.x - p1.x) >= Math.abs(p2.y - p1.y) ? "horizontal" : "vertical";
+    const offset = offsetPoint ? dimensionOffsetFromPoint(p1, p2, offsetPoint) : 120;
+    setPlan((p) => ({
+      ...p,
+      dimensions: [
+        ...(p.dimensions || []),
+        {
+          id: uid("dim"),
+          type: "dimension",
+          mode: "linear",
+          p1: { x: p1.x, y: p1.y },
+          p2: { x: p2.x, y: p2.y },
+          offset,
+          orientation,
+          attachedTo: null,
+          labelOverride: null,
+          locked: false,
+        },
+      ],
+    }));
+  };
+
+  const applyDimensionEdit = (dimId, value) => {
+    const dim = (plan.dimensions || []).find((d) => d.id === dimId);
+    if (!dim) return;
+    if (dim.attachedTo?.type === "wall" || dim.attachedTo?.type === "item") {
+      // TODO: change attached geometry/object by typed dimension value.
+      window.alert("Изменение геометрии по связанному размеру будет добавлено следующим шагом.");
+      return;
+    }
+    setPlan((p) => ({
+      ...p,
+      dimensions: (p.dimensions || []).map((d) => (d.id === dimId ? { ...d, labelOverride: value } : d)),
+    }));
+  };
+
+  /** @deprecated старый инструмент линейки. */
+  const commitRuler = (a, b) => {
+    if (!a || !b || Math.hypot(b.x - a.x, b.y - a.y) < 20) return;
+    setPlan((p) => ({
+      ...p,
+      rulers: [...(p.rulers || []), { id: uid("rl"), a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } }],
+    }));
+  };
+
+  const updateRuler = (id, patch) => {
+    setPlan((p) => ({
+      ...p,
+      rulers: (p.rulers || []).map((r) => (r.id === id ? { ...r, ...patch, a: patch.a ? { ...r.a, ...patch.a } : r.a, b: patch.b ? { ...r.b, ...patch.b } : r.b } : r)),
+    }));
+  };
+
+  const startRulerDrag = (e, id, end = null) => {
+    const r = (plan.rulers || []).find((x) => x.id === id);
+    if (!r) return;
+    const mm = toMM(e.clientX, e.clientY);
+    dragRef.current = {
+      mode: end ? `ruler-${end}` : "ruler-move",
+      id,
+      ox: r.a.x,
+      oy: r.a.y,
+      ox2: r.b.x,
+      oy2: r.b.y,
+      dx: mm.x,
+      dy: mm.y,
+    };
+    setSelection({ coll: "rulers", ids: [id] });
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+
+  const commitStructuralSegment = (from, to) => {
+    if (!from || !to || !structuralKind || structuralKind === "column") return;
     if (Math.hypot(to.x - from.x, to.y - from.y) < 50) return;
-    commitWallDraft([from, to]);
-    wallPrevAngleRef.current = angleBetweenDeg(from, to);
+    const fields = defaultStructuralFields(structuralKind, structuralWidth);
+    setPlan((p) => ({
+      ...p,
+      structurals: [...(p.structurals || []), { id: uid("st"), a: { ...from }, b: { ...to }, ...fields }],
+    }));
+  };
+
+  const commitStructuralColumn = (center) => {
+    if (!center || structuralKind !== "column") return;
+    const fields = defaultStructuralFields("column", structuralWidth);
+    setPlan((p) => ({
+      ...p,
+      structurals: [...(p.structurals || []), { id: uid("st"), center: { ...center }, ...fields }],
+    }));
+  };
+
+  const nudgeWallSelection = (dx, dy) => {
+    if (selection?.coll !== "walls" || selection.ids?.length !== 1) return;
+    const wid = selection.ids[0];
+    const nidx = selection.nodeIdx;
+    setPlan((p) => {
+      const plan = nudgeWallInPlan(p, wid, nidx, dx, dy, fineMm);
+      const resolved = resolvePlanWalls(plan);
+      return syncAutoZones({
+        ...plan,
+        items: refreshWallMountedItems(p.items, resolved, p.room, wid),
+      });
+    });
   };
 
   const finishDraft = (ptsOverride = null) => {
     const pts = ptsOverride || draft;
     if (tool === "wall") {
-      clearWallChain();
+      if (ptsOverride) wallDraftStateRef.current = { ...wallDraftStateRef.current, pts: ptsOverride };
+      finishWallChain();
       return;
     }
     if (pts.length >= 2) {
       const layer = lineDraftMeta.layer || migrateLayerId(active, null);
+      const draftLine = {
+        id: uid("ln"),
+        layer,
+        pts,
+        ...defaultLineFields(layer),
+        ...(lineDraftMeta.tag ? { lineTag: lineDraftMeta.tag } : {}),
+        ...(lineDraftMeta.lineType ? { lineType: lineDraftMeta.lineType } : {}),
+        ...(lineDraftMeta.diameterMm != null ? { diameterMm: lineDraftMeta.diameterMm } : {}),
+        ...(lineDraftMeta.airflowM3h != null ? { airflowM3h: lineDraftMeta.airflowM3h } : {}),
+        ...(lineDraftMeta.ductType ? { ductType: lineDraftMeta.ductType } : {}),
+        ...(lineDraftMeta.flowDirection ? { flowDirection: lineDraftMeta.flowDirection } : {}),
+      };
+      const isPipeDraft = layer === "irrigation" || layer === "drain" || !!lineDraftMeta.pipeSystem || isPipeLine(draftLine);
+      const isDuctDraft = !isPipeDraft && ((layer === "vent" || layer === "climate") || isDuctLine(draftLine));
+      const lineModel = isPipeDraft
+        ? normalizePipe({
+          ...draftLine,
+          type: "pipe",
+          pipeSystem: lineDraftMeta.pipeSystem || (layer === "drain" ? "drainage" : "irrigation"),
+          pipeRole: lineDraftMeta.pipeRole || (layer === "drain" ? "drain" : "supply"),
+          diameterMm: lineDraftMeta.diameterMm,
+          material: lineDraftMeta.material,
+          flowDirection: lineDraftMeta.flowDirection || "forward",
+          points: pts,
+        })
+        : isDuctDraft
+          ? normalizeDuct({
+            ...draftLine,
+            type: "duct",
+            points: pts,
+          })
+        : draftLine;
       const line = attachLineEndpoints(
         {
-          id: uid("ln"),
-          layer,
-          pts,
-          ...defaultLineFields(layer),
-          ...(lineDraftMeta.tag ? { lineTag: lineDraftMeta.tag } : {}),
+          ...lineModel,
         },
         plan.items,
       );
-      setPlan((p) => ({ ...p, lines: [...p.lines, line] }));
+      setPlan((p) => syncEngineeringPlan({ ...p, lines: [...p.lines, line] }));
     }
     setDraft([]);
     setDraftSnap(null);
@@ -597,9 +1153,16 @@ export default function PlanPage() {
     setTool(st.tool);
     setPending(st.pending);
     setPendingSize(st.pendingSize);
-    setLineDraftMeta({ layer: st.lineLayer, tag: st.lineTag });
+    setPendingRotationDeg(0);
+    setLineDraftMeta({
+      layer: st.lineLayer,
+      tag: st.lineTag,
+      ...(st.linePipe || {}),
+      ...(st.lineMeta || {}),
+      flowDirection: "forward",
+    });
     setActiveToolId(def?.id || "select");
-    setSelection((sel) => (layerId !== "zones" && sel?.coll === "zones" ? null : sel));
+    setSelection((sel) => (sel?.coll === "zones" ? null : sel));
     clearWallChain();
     setSel(null);
     setGuides([]);
@@ -623,7 +1186,7 @@ export default function PlanPage() {
     if (mode.disabled) return;
     setViewMode(mode.id);
     if (sheetAllowedInViewMode(activeSheetId, mode.id)) return;
-    const sheet = sheetById(mode.defaultSheetId || "source");
+    const sheet = sheetById(mode.defaultSheetId || "base_plan");
     if (sheet) applySheet(sheet);
   };
 
@@ -641,6 +1204,106 @@ export default function PlanPage() {
     setSheetFilters((prev) => ({ ...prev, [activeSheetId]: filterId }));
   };
 
+  const applyBackdropImage = (dataUrl, imgW, imgH) => {
+    const fitW = plan.room.w;
+    const fitH = imgW > 0 ? (imgH / imgW) * fitW : plan.room.h;
+    setPlan((p) => ({
+      ...p,
+      room: {
+        ...p.room,
+        showBoundary: true,
+        backdrop: {
+          dataUrl,
+          x: 0,
+          y: Math.max(0, (p.room.h - fitH) / 2),
+          w: fitW,
+          h: fitH,
+          opacity: 0.55,
+        },
+      },
+    }));
+  };
+
+  const handleBackdropFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      const img = new Image();
+      img.onload = () => applyBackdropImage(dataUrl, img.naturalWidth, img.naturalHeight);
+      img.onerror = () => window.alert("Не удалось прочитать изображение");
+      img.src = dataUrl;
+    };
+    reader.onerror = () => window.alert("Не удалось загрузить файл");
+    reader.readAsDataURL(file);
+  };
+
+  const scaleBackdrop = () => {
+    const bd = plan.room?.backdrop;
+    if (!bd?.dataUrl) {
+      window.alert("Сначала загрузите подложку");
+      return;
+    }
+    const nextW = +(prompt("Ширина подложки на плане, мм:", String(Math.round(bd.w || plan.room.w))) || 0);
+    if (!nextW || nextW < 100) return;
+    const ratio = (bd.h || plan.room.h) / (bd.w || plan.room.w);
+    setPlan((p) => ({
+      ...p,
+      room: {
+        ...p.room,
+        backdrop: { ...bd, w: nextW, h: Math.round(nextW * ratio) },
+      },
+    }));
+  };
+
+  const clearBackdrop = () => {
+    setPlan((p) => {
+      const { backdrop, ...restRoom } = p.room || {};
+      return { ...p, room: restRoom };
+    });
+  };
+
+  const addLightForRack = useCallback((rack) => {
+    if (!rack || !isRackKind(rack.kind)) return;
+    const rackLevels = Math.max(1, Number(rack.params?.levels || rack.tierCount || 1));
+    const lightType = prompt(
+      "Тип светильника (linear_60, linear_100, linear_120, quantum_board, service_light, germination_light):",
+      "linear_100",
+    );
+    if (!lightType) return;
+    const perLevel = Math.max(1, +(prompt("Количество на ярус:", "2") || 0));
+    const lengthMm = Math.max(300, +(prompt("Длина светильника, мм:", "1000") || 0));
+    const powerW = Math.max(1, +(prompt("Мощность одного светильника, Вт:", "40") || 0));
+    const levels = Math.max(1, +(prompt("Ярусов для света:", String(rackLevels)) || 0));
+    const groupName = (prompt("Группа света:", "D") || "D").trim() || "D";
+    const offsetX = Math.round((rack.w || rack.widthMm || 1000) * 0.15);
+    const offsetY = Math.round((rack.h || rack.depthMm || 600) * 0.15);
+    const light = createFarmObject({
+      id: uid("eq"),
+      kind: "light_panel",
+      layer: "light",
+      x: rack.x + offsetX,
+      y: rack.y + offsetY,
+      w: Math.max(300, Math.min(lengthMm, rack.w || lengthMm)),
+      h: 120,
+      label: "Свет стеллажа",
+      category: "light",
+      params: {
+        lightType,
+        lengthMm,
+        powerW,
+        linkedRackId: rack.id,
+        groupName,
+        perLevel,
+        levels,
+        count: perLevel * levels,
+        offsetX,
+        offsetY,
+      },
+    });
+    setPlan((p) => syncEngineeringPlan({ ...p, items: [...p.items, attachItemZoneFields(p, light)] }));
+  }, [syncEngineeringPlan]);
+
   const handleToolPick = (toolDef) => {
     if (!toolDef) return;
     setActiveToolId(toolDef.id);
@@ -654,15 +1317,56 @@ export default function PlanPage() {
     }
     if (toolDef.mode === "action") {
       if (toolDef.action === "sync_spec") syncSpec();
-      else if (toolDef.action === "rack_number") setPlan((p) => ({ ...p, items: autoNumberRacks(p.items) }));
+      else if (toolDef.action === "backdrop_upload") backdropInputRef.current?.click();
+      else if (toolDef.action === "backdrop_scale") scaleBackdrop();
+      else if (toolDef.action === "backdrop_clear") clearBackdrop();
+      else if (toolDef.action === "rack_add_light") {
+        const obj = selObj && isRackKind(selObj.kind) ? selObj : plan.items.find((i) => isRackKind(i.kind));
+        if (!obj) { window.alert("Выберите стеллаж на плане"); return; }
+        addLightForRack(obj);
+      }
+      else if (toolDef.action === "rack_number") setPlan((p) => syncEngineeringPlan({ ...p, items: autoNumberRacks(p.items) }));
       else if (toolDef.action === "rack_grid" || toolDef.action === "rack_row") {
         const obj = selObj && isRackKind(selObj.kind) ? selObj : plan.items.find((i) => isRackKind(i.kind));
         if (!obj) { window.alert("Выберите стеллаж на плане"); return; }
         const cols = toolDef.action === "rack_row" ? 1 : +(prompt("Колонок:", "3") || 0);
         const rows = toolDef.action === "rack_row" ? +(prompt("Стеллажей в ряду:", "5") || 0) : +(prompt("Рядов:", "2") || 0);
-        const gap = +(prompt("Зазор, мм:", "800") || 800);
+        const gap = +(prompt("Расстояние между стеллажами, мм:", "800") || 800);
+        const aisle = +(prompt("Проход между рядами, мм:", "900") || 900);
         if (cols > 0 && rows > 0) {
-          setPlan((p) => placeRackCopies(p, obj, buildRackGrid(obj, { cols, rows, gapMm: gap })));
+          setPlan((p) => {
+            const countInRow = toolDef.action === "rack_row" ? rows : cols;
+            const rowCount = toolDef.action === "rack_row" ? 1 : rows;
+            const { group, children } = createRackGroup(
+              obj,
+              { count: countInRow, rows: rowCount, spacingMm: gap, aisleMm: aisle, direction: "x" },
+              uid,
+            );
+            let items = [...p.items];
+            const nextChildren = children.map((child, idx) => {
+              const patch = idx === 0 && child.id === obj.id
+                ? child
+                : { ...child, id: uid("eq") };
+              const numbered = isRackKind(patch.kind)
+                ? { ...patch, rackNum: nextRackNumber(items, patch.id, patch.rowNum || obj.rowNum || "") }
+                : patch;
+              const normalized = normalizePlannerObject(numbered);
+              if (idx === 0) {
+                items = items.map((it) => (it.id === obj.id ? normalized : it));
+              } else {
+                items.push(normalized);
+              }
+              return normalized;
+            });
+            return syncEngineeringPlan({
+              ...p,
+              items: items.map((it) => attachItemZoneFields({ ...p, items }, it)),
+              farmObjectGroups: [
+                ...(p.farmObjectGroups || []).filter((g) => g.id !== group.id),
+                { ...group, childrenIds: nextChildren.map((c) => c.id) },
+              ],
+            });
+          });
         }
       }
       return;
@@ -671,9 +1375,28 @@ export default function PlanPage() {
     setTool(st.tool);
     setPending(st.pending);
     setPendingSize(st.pendingSize);
-    setLineDraftMeta({ layer: st.lineLayer, tag: st.lineTag });
+    setLineDraftMeta({
+      layer: st.lineLayer,
+      tag: st.lineTag,
+      ...(st.linePipe || {}),
+      ...(st.lineMeta || {}),
+      flowDirection: "forward",
+    });
     setLinkFrom(null);
     if (st.tool === "wall" || st.tool === "line") clearWallChain();
+    if (st.tool !== "measure") {
+      measureDrawRef.current = null;
+      setMeasure([]);
+      setMeasureOffsetPt(null);
+      setRulerSnap(null);
+    }
+    if (st.tool === "wall" && toolDef.id) {
+      setWallThk(defaultWallThkForTool(toolDef.id, wallThk));
+    }
+    if (st.tool === "structural" && st.pending) {
+      setStructuralWidth(getStructuralDefaultWidth(st.pending));
+      structuralDrawRef.current = null;
+    }
   };
 
   useEffect(() => {
@@ -696,20 +1419,46 @@ export default function PlanPage() {
     setTool(t);
     setLinkFrom(null);
     if (t === "wall" || t === "line") clearWallChain();
+    if (t !== "measure") {
+      measureDrawRef.current = null;
+      setMeasure([]);
+      setMeasureOffsetPt(null);
+      setRulerSnap(null);
+    }
     if (t === "add" && !pending && catalogForLayer(active).length) setPending(catalogForLayer(active)[0].kind);
+    if (t !== "add") setPendingRotationDeg(0);
   };
 
-  const handlePending = (kind) => { setPending(kind); setTool("add"); };
+  const handlePending = (kind, size) => {
+    setPending(kind);
+    if (size?.w != null) {
+      setPendingSize({ ...size });
+    } else {
+      const c = resolveCatalogKind(kind);
+      setPendingSize(c?.w != null ? { w: c.w, h: c.h } : null);
+    }
+    setPendingRotationDeg(0);
+    setTool("add");
+  };
 
   const toggleDisplay = (key) => setDisplay((d) => normalizeDisplay({ ...d, [key]: !d[key] }));
-  const patchDisplay = (patch) => setDisplay((d) => normalizeDisplay({ ...d, ...patch }));
+  const patchDisplay = (patch) => {
+    setDisplay((d) => {
+      const next = normalizeDisplay({ ...d, ...patch });
+      if (Object.keys(patch).some((k) => VISUAL_PREF_KEYS.includes(k))) saveVisualPrefs(next);
+      return next;
+    });
+  };
 
   const fitView = () => {
     const r = svgRef.current?.getBoundingClientRect();
     if (!r) return;
+    const b = planWorkingBounds(plan);
+    const bw = b.r - b.l;
+    const bh = b.b - b.t;
     const m = 160;
-    const z = clamp(Math.min((r.width - m) / plan.room.w, (r.height - m) / plan.room.h), 0.015, 3);
-    setView({ zoom: z, panX: (r.width - plan.room.w * z) / 2, panY: (r.height - plan.room.h * z) / 2 });
+    const z = clamp(Math.min((r.width - m) / bw, (r.height - m) / bh), 0.015, 3);
+    setView({ zoom: z, panX: (r.width - bw * z) / 2 - b.l * z, panY: (r.height - bh * z) / 2 - b.t * z });
   };
 
   const fitActiveLayer = () => {
@@ -739,6 +1488,11 @@ export default function PlanPage() {
     }));
   };
 
+  useEffect(() => {
+    const id = requestAnimationFrame(() => fitView());
+    return () => cancelAnimationFrame(id);
+  }, [standalone ? draftId : id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const setZoomTo = (nz) => {
     const r = svgRef.current?.getBoundingClientRect();
     if (!r) return;
@@ -755,8 +1509,7 @@ export default function PlanPage() {
     if (!window.confirm(`Очистить объекты листа «${name}»?`)) return;
     setPlan((p) => {
       const next = { ...p };
-      if (active === "zones") next.zones = [];
-      else if (active === "partitions") next.walls = p.walls.filter((w) => w.role === "outer");
+      if (active === "partitions") next.walls = p.walls.filter((w) => w.role === "outer");
       else if (active === "room") next.items = p.items.filter((i) => i.layer !== "room");
       else if (LINE_LAYER_IDS.includes(active)) next.lines = p.lines.filter((l) => l.layer !== active && migrateLayerId(l.layer) !== active);
       else if (ITEM_LAYER_IDS.includes(active)) next.items = p.items.filter((i) => i.layer !== active);
@@ -766,63 +1519,54 @@ export default function PlanPage() {
   };
 
   const copySel = () => {
-    if (!selection || selection.coll !== "items") return;
-    const items = plan.items.filter((o) => selection.ids.includes(o.id));
+    if (!selection?.ids?.length || selection.coll !== "items") return;
+    let ids = selection.ids;
+    if (selection.ids.length === 1) {
+      const only = plan.items.find((it) => it.id === selection.ids[0]);
+      if (only?.groupId) ids = groupMemberIds(plan.items, only);
+    }
+    const idSet = new Set(ids);
+    const items = plan.items.filter((o) => idSet.has(o.id));
     if (items.length) clipboardRef.current = items.map((it) => ({ ...it }));
   };
 
   const pasteSel = () => {
     const src = clipboardRef.current;
-    if (!src) return;
-    const list = Array.isArray(src) ? src : [src];
-    const newItems = list.map((it) => ({
-      ...it,
-      id: uid("eq"),
-      x: it.x + 200,
-      y: it.y + 200,
-      groupId: null,
-    }));
-    const gid = newItems.length > 1 ? uid("grp") : null;
-    if (gid) newItems.forEach((it) => { it.groupId = gid; });
-    setPlan((p) => ({ ...p, items: [...p.items, ...newItems] }));
-    setSelection({ coll: "items", ids: newItems.map((it) => it.id) });
+    if (!src?.length) return;
+    setPlan((p) => {
+      let items = [...p.items];
+      const newItems = src.map((it) => {
+        const copy = {
+          ...it,
+          id: uid("eq"),
+          x: it.x + 200,
+          y: it.y + 200,
+          groupId: null,
+        };
+        if (isRackKind(copy.kind)) copy.rackNum = nextRackNumber(items);
+        if (isDoorKind(copy.kind)) copy.doorNum = nextDoorNumber(items);
+        if (isOpeningKind(copy.kind)) copy.openingNum = nextOpeningNumber(items);
+        const placed = attachItemZoneFields(p, copy);
+        items.push(placed);
+        return placed;
+      });
+      const gid = newItems.length > 1 ? uid("grp") : null;
+      if (gid) newItems.forEach((c) => { c.groupId = gid; });
+      setSelection({ coll: "items", ids: newItems.map((c) => c.id) });
+      return { ...p, items };
+    });
   };
 
   const moveSelByKeys = (e) => {
     if (!selection?.ids?.length) return;
-    const baseStep = display.arrowStepMm ?? 10;
-    const step = e.shiftKey ? (display.arrowStepShiftMm ?? 100) : e.altKey ? (display.arrowStepAltMm ?? 1) : baseStep;
+    const step = resolveArrowMoveStepMm(e, display);
     const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
     const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
     if (!dx && !dy) return;
     e.preventDefault();
 
     if (selection.coll === "walls" && selection.ids.length === 1) {
-      const wid = selection.ids[0];
-      const nidx = selection.nodeIdx;
-      setPlan((p) => {
-        let walls = p.walls.map((w) => {
-          if (w.id !== wid) return w;
-          if (nidx != null) {
-            return {
-              ...w,
-              pts: w.pts.map((pt, i) => (i === nidx ? { x: sn(pt.x + dx), y: sn(pt.y + dy) } : pt)),
-            };
-          }
-          return { ...w, pts: w.pts.map((pt) => ({ x: sn(pt.x + dx), y: sn(pt.y + dy) })) };
-        });
-        if (nidx != null) {
-          const w = walls.find((x) => x.id === wid);
-          const moved = w?.pts[nidx];
-          if (moved) walls = applyWallNodeMove(walls, wid, nidx, moved);
-        }
-        walls = weldWallNodes(walls);
-        return syncAutoZones({
-          ...p,
-          walls,
-          items: refreshWallMountedItems(p.items, walls, p.room, wid),
-        });
-      });
+      nudgeWallSelection(dx, dy);
       return;
     }
 
@@ -845,6 +1589,28 @@ export default function PlanPage() {
       return;
     }
 
+    if (selection.coll === "structurals" && selection.ids.length === 1) {
+      const sid = selection.ids[0];
+      setPlan((p) => ({
+        ...p,
+        structurals: (p.structurals || []).map((s) => {
+          if (s.id !== sid) return s;
+          if (s.kind === "column" && s.center) {
+            return { ...s, center: { x: sn(s.center.x + dx), y: sn(s.center.y + dy) } };
+          }
+          if (s.a && s.b) {
+            return {
+              ...s,
+              a: { x: sn(s.a.x + dx), y: sn(s.a.y + dy) },
+              b: { x: sn(s.b.x + dx), y: sn(s.b.y + dy) },
+            };
+          }
+          return s;
+        }),
+      }));
+      return;
+    }
+
     if (selection.coll === "items") {
       const ids = new Set(selection.ids);
       setPlan((p) => ({
@@ -854,6 +1620,7 @@ export default function PlanPage() {
         )),
         labels: p.labels.map((lb) => {
           if (lb.pinned || !lb.targetId || !ids.has(lb.targetId)) return lb;
+          if (lb.anchorRelX != null) return lb;
           return { ...lb, x: (lb.x || 0) + dx, y: (lb.y || 0) + dy };
         }),
       }));
@@ -867,6 +1634,31 @@ export default function PlanPage() {
         labels: p.labels.map((lb) => (
           ids.has(lb.id) ? { ...lb, x: (lb.x || 0) + dx, y: (lb.y || 0) + dy, pinned: true } : lb
         )),
+      }));
+      return;
+    }
+
+    if (selection.coll === "item-label" && selection.ids.length) {
+      const ids = new Set(selection.ids);
+      setPlan((p) => ({
+        ...p,
+        items: p.items.map((it) => {
+          if (!ids.has(it.id)) return it;
+          if (!it.labelPinned) {
+            const pinned = pinItemLabelFromAuto(it, p.room);
+            return {
+              ...it,
+              ...pinned,
+              labelOffsetX: pinned.labelOffsetX + dx,
+              labelOffsetY: pinned.labelOffsetY + dy,
+            };
+          }
+          return {
+            ...it,
+            labelOffsetX: (it.labelOffsetX ?? 0) + dx,
+            labelOffsetY: (it.labelOffsetY ?? 0) + dy,
+          };
+        }),
       }));
       return;
     }
@@ -929,9 +1721,11 @@ export default function PlanPage() {
   };
 
   const placeRackCopies = (planState, source, grid) => {
+    const groupId = uid("fog");
     const row = source.rowNum || nextRowLabel(planState.items);
     const base = {
       ...source,
+      groupId,
       rowNum: grid[0]?.rowNum || row,
       rackNum: source.rackNum || nextRackNumber(planState.items, source.id, grid[0]?.rowNum || row),
     };
@@ -951,15 +1745,40 @@ export default function PlanPage() {
         ...pos,
         id: uid("eq"),
         rackNum: nextRackNumber([...items, ...placed], null, pos.rowNum),
-        groupId: null,
+        groupId,
       };
       delete copy._gridIdx;
       placed.push(attachItemZoneFields({ ...planState, items: [...items, ...placed] }, copy));
     });
-    return { ...planState, items: [...items, ...placed] };
+    const childrenIds = [source.id, ...placed.map((p) => p.id)];
+    return {
+      ...planState,
+      items: [...items, ...placed],
+      farmObjectGroups: [
+        ...(planState.farmObjectGroups || []).filter((g) => g.id !== groupId),
+        {
+          id: groupId,
+          type: "farm_object_group",
+          category: "rack_group",
+          childrenIds,
+          params: {
+            sourceKind: source.kind,
+            count: grid.length,
+          },
+        },
+      ],
+    };
   };
 
   const handleCtxAction = (actionId) => {
+    if (actionId === "wall-draft-finish") {
+      finishWallChain();
+      return;
+    }
+    if (actionId === "wall-draft-cancel") {
+      clearWallChain();
+      return;
+    }
     if (actionId === "group") { groupSelection(); return; }
     if (actionId === "ungroup") { ungroupSelection(); return; }
 
@@ -975,9 +1794,12 @@ export default function PlanPage() {
     }
 
     if (!sel) return;
-    const obj = plan[sel.coll]?.find((o) => o.id === sel.id);
+    const obj = findSelObject(sel.coll, sel.id);
     if (!obj) return;
-    if (actionId === "delete") delSel();
+    if (actionId === "delete") {
+      if (sel.coll === "zones" && obj.auto) return;
+      delSel();
+    }
     else if (actionId === "rotate90" && sel.coll === "items") rotateItem(obj, 90);
     else if (actionId === "mirror-h" && sel.coll === "items") mirrorItem(obj, "h");
     else if (actionId === "mirror-v" && sel.coll === "items") mirrorItem(obj, "v");
@@ -1004,23 +1826,27 @@ export default function PlanPage() {
     }
     else if (actionId === "spec" && sel.coll === "items") syncSpec();
     else if (actionId === "add-label" && sel.coll === "items") {
-      addLabelAt({ x: obj.x + obj.w / 2, y: obj.y + obj.h / 2 }, obj.id);
+      beginLabelAnchor({ x: obj.x + obj.w / 2, y: obj.y + obj.h / 2 }, obj.id);
     }
     else if (actionId === "item-lock" && sel.coll === "items") {
       updateObj("items", obj.id, { locked: !obj.locked });
+    }
+    else if (actionId === "item-dims" && sel.coll === "items") {
+      const show = obj.dimensions?.display !== false;
+      updateObj("items", obj.id, { dimensions: { ...(obj.dimensions || {}), display: !show } });
     }
     else if (actionId === "rack-num" && sel.coll === "items" && isRackKind(obj.kind)) {
       const num = prompt("Номер стеллажа:", obj.rackNum || nextRackNumber(plan.items, obj.id));
       if (num != null) updateObj("items", obj.id, { rackNum: num.trim() });
     }
     else if (actionId === "rack-auto-num" && sel.coll === "items") {
-      setPlan((p) => ({ ...p, items: autoNumberRacks(p.items) }));
+      setPlan((p) => syncEngineeringPlan({ ...p, items: autoNumberRacks(p.items) }));
     }
     else if (actionId === "rack-row" && sel.coll === "items" && isRackKind(obj.kind)) {
       const count = parseInt(prompt("Сколько стеллажей в ряду?", "4"), 10);
       if (!count || count < 2) return;
       const gap = parseInt(prompt("Зазор между стеллажами, мм:", "800"), 10) || 800;
-      setPlan((p) => placeRackCopies(p, obj, buildRackGrid(obj, { cols: count, rows: 1, gapMm: gap })));
+      setPlan((p) => syncEngineeringPlan(placeRackCopies(p, obj, buildRackGrid(obj, { cols: count, rows: 1, gapMm: gap }))));
     }
     else if (actionId === "rack-link-tank" && sel.coll === "items" && isRackKind(obj.kind)) {
       const target = findRackLinkTarget(plan.items, obj, RACK_LINK_ACTIONS[0]);
@@ -1042,6 +1868,9 @@ export default function PlanPage() {
       if (!target) { window.alert("Не найдено освещение или розетка рядом."); return; }
       if (!createLink(obj.id, target.id, "light")) window.alert("Не удалось создать связь.");
     }
+    else if (actionId === "rack-add-light" && sel.coll === "items" && isRackKind(obj.kind)) {
+      addLightForRack(obj);
+    }
     else if (actionId === "rack-grid" && sel.coll === "items" && isRackKind(obj.kind)) {
       const cols = parseInt(prompt("Стеллажей в ряду (по горизонтали)?", "4"), 10);
       const rows = parseInt(prompt("Количество рядов?", "2"), 10);
@@ -1049,9 +1878,9 @@ export default function PlanPage() {
       const gap = parseInt(prompt("Зазор между стеллажами, мм:", "800"), 10) || 800;
       const rowGap = parseInt(prompt("Проход между рядами, мм:", "1200"), 10) || 1200;
       const dir = prompt("Направление рядов (h — горизонтально, v — вертикально):", "h");
-      setPlan((p) => placeRackCopies(p, obj, buildRackGrid(obj, {
+      setPlan((p) => syncEngineeringPlan(placeRackCopies(p, obj, buildRackGrid(obj, {
         cols, rows, gapMm: gap, rowGapMm: rowGap, direction: dir === "v" ? "v" : "h",
-      })));
+      }))));
     }
     else if (actionId === "wall-kind" && sel.coll === "walls") {
       const pick = prompt(
@@ -1081,7 +1910,15 @@ export default function PlanPage() {
       const len = prompt(`Длина сегмента ${segIdx + 1}, мм:`, String(Math.round(segLen)));
       if (len) {
         const nw = setWallSegmentLengthAt(obj, segIdx, Math.max(100, +len || 0));
-        updateObj("walls", obj.id, { pts: nw.pts });
+        setPlan((p) => {
+          let next = movePlanNode(p, obj.a, nw.pts[0]);
+          next = movePlanNode(next, obj.b, nw.pts[1]);
+          const resolved = resolvePlanWalls(next);
+          return syncAutoZones({
+            ...next,
+            items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
+          });
+        });
       }
     }
     else if (actionId === "wall-length-total" && sel.coll === "walls") {
@@ -1098,7 +1935,15 @@ export default function PlanPage() {
       if (len) {
         const lastLen = Math.max(100, (+len || 0) - sumOther);
         const nw = setWallSegmentLength(obj, lastLen);
-        updateObj("walls", obj.id, { pts: nw.pts });
+        setPlan((p) => {
+          let next = movePlanNode(p, obj.a, nw.pts[0]);
+          next = movePlanNode(next, obj.b, nw.pts[1]);
+          const resolved = resolvePlanWalls(next);
+          return syncAutoZones({
+            ...next,
+            items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
+          });
+        });
       }
     }
     else if (actionId === "wall-role-outer" && sel.coll === "walls") {
@@ -1108,55 +1953,66 @@ export default function PlanPage() {
       updateObj("walls", obj.id, { role: "partition", kind: obj.kind || "new" });
     }
     else if (actionId === "wall-straight-h" && sel.coll === "walls") {
-      const nw = straightenWall(obj, "h");
-      updateObj("walls", obj.id, { pts: nw.pts });
+      setPlan((p) => {
+        const next = straightenWallEdge(p, obj.id, "h");
+        const resolved = resolvePlanWalls(next);
+        return syncAutoZones({
+          ...next,
+          items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
+        });
+      });
     }
     else if (actionId === "wall-straight-v" && sel.coll === "walls") {
-      const nw = straightenWall(obj, "v");
-      updateObj("walls", obj.id, { pts: nw.pts });
+      setPlan((p) => {
+        const next = straightenWallEdge(p, obj.id, "v");
+        const resolved = resolvePlanWalls(next);
+        return syncAutoZones({
+          ...next,
+          items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
+        });
+      });
     }
     else if (actionId === "wall-align" && sel.coll === "walls") {
       setPlan((p) => {
-        const walls = alignWallToNeighbor(p.walls, obj.id);
-        if (!walls) {
+        const next = alignWallEdgeToNeighbor(p, obj.id);
+        if (!next) {
           window.alert("Нет соседней стены с общим узлом для выравнивания.");
           return p;
         }
+        const resolved = resolvePlanWalls(next);
         return syncAutoZones({
-          ...p,
-          walls,
-          items: refreshWallMountedItems(p.items, walls, p.room, obj.id),
+          ...next,
+          items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
         });
       });
     }
     else if (actionId === "wall-merge" && sel.coll === "walls") {
-      const res = tryMergeWall(plan.walls, obj.id);
-      if (!res) {
-        window.alert("Не найдена соседняя стена с общим узлом для объединения.");
-        return;
-      }
-      setPlan((p) => syncAutoZones({
-        ...p,
-        walls: res.walls,
-        items: refreshWallMountedItems(p.items, res.walls, p.room),
-      }));
-      setSel({ coll: "walls", id: res.mergedId });
+      setPlan((p) => {
+        const res = tryMergeWallEdge(p, obj.id);
+        if (!res) {
+          window.alert("Не найдена соседняя стена с общим узлом для объединения.");
+          return p;
+        }
+        const resolved = resolvePlanWalls(res.plan);
+        return syncAutoZones({
+          ...res.plan,
+          items: refreshWallMountedItems(p.items, resolved, p.room),
+        });
+      });
+      setSel({ coll: "walls", id: obj.id });
     }
     else if (actionId === "wall-break" && sel.coll === "walls") {
       const mm = ctxMenuRef.current?.mm;
       if (!mm) return;
-      const parts = breakWallAt(obj, mm);
-      if (!parts) {
-        window.alert("Не удалось разорвать стену — кликните ближе к сегменту.");
-        return;
-      }
-      const [w1, w2] = parts;
-      w2.id = uid("wl");
-      setPlan((p) => syncAutoZones({
-        ...p,
-        walls: p.walls.flatMap((w) => (w.id === obj.id ? [w1, w2] : [w])),
-      }));
-      setSel({ coll: "walls", id: w2.id });
+      setPlan((p) => {
+        const res = breakWallEdgeAt(p, obj.id, mm, uid);
+        if (!res) {
+          window.alert("Не удалось разорвать стену — кликните ближе к сегменту.");
+          return p;
+        }
+        setSel({ coll: "walls", id: res.newWallId });
+        return syncAutoZones(res.plan);
+      });
     }
     else if (actionId === "rename" && sel.coll === "zones") {
       const name = prompt("Название помещения:", obj.name || "Помещение");
@@ -1189,6 +2045,20 @@ export default function PlanPage() {
 
   const onContextMenu = (e) => {
     if (active === "spec") return;
+    if (tool === "wall" && draft.length > 0) {
+      e.preventDefault();
+      const mm = toMM(e.clientX, e.clientY);
+      setCtxMenu({
+        x: e.clientX,
+        y: e.clientY,
+        mm,
+        items: [
+          { id: "wall-draft-finish", label: "Завершить цепочку (Enter)" },
+          { id: "wall-draft-cancel", label: "Отменить цепочку (Esc)", danger: true },
+        ],
+      });
+      return;
+    }
     const mm = toMM(e.clientX, e.clientY);
     let hit = null;
     for (const it of [...plan.items].reverse()) {
@@ -1198,7 +2068,7 @@ export default function PlanPage() {
       }
     }
     if (!hit) {
-      for (const w of plan.walls) {
+      for (const w of resolvePlanWalls(plan)) {
         for (let i = 1; i < w.pts.length; i++) {
           const a = w.pts[i - 1];
           const b = w.pts[i];
@@ -1228,9 +2098,9 @@ export default function PlanPage() {
         }
       }
     }
-    if (!hit && (active === "zones" || activeSheetId === "zones")) {
+    if (!hit) {
       for (const z of plan.zones) {
-        if (pointInZone(mm, z)) {
+        if (z.polygon?.length >= 3 && pointInPolygon(mm, z.polygon)) {
           hit = { coll: "zones", id: z.id };
           break;
         }
@@ -1251,19 +2121,44 @@ export default function PlanPage() {
       return;
     }
     setSel(hit);
-    const obj = plan[hit.coll]?.find((o) => o.id === hit.id);
+    const obj = hit.coll === "walls"
+      ? resolvePlanWalls(plan).find((o) => o.id === hit.id)
+      : plan[hit.coll]?.find((o) => o.id === hit.id);
     setCtxMenu({ x: e.clientX, y: e.clientY, mm, items: buildObjectMenu(obj || {}, hit.coll, { nodeIdx: selection?.nodeIdx }) });
   };
 
-  const orthoTools = tool === "line" || tool === "wall" || tool === "measure";
+  const orthoTools = tool === "line" || tool === "wall" || tool === "measure" || tool === "structural";
 
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       if (e.key === "Shift") shiftRef.current = true;
+      if (e.key === "Control") { ctrlRef.current = true; setCtrlSnapFine(true); }
       if (e.key === "Alt") { altSnapRef.current = true; setAltSnapOff(true); }
       if (e.key === " " && document.activeElement === document.body) { e.preventDefault(); setSpacePan(true); }
       if (e.key === "Escape") {
+        if (labelDraft) { cancelLabelDraft(); return; }
+        if (tool === "wall" && draft.length > 0) {
+          e.preventDefault();
+          clearWallChain();
+          return;
+        }
+        if (tool === "line" && draft.length > 0) {
+          e.preventDefault();
+          setDraft([]);
+          setDraftSnap(null);
+          setDraftAngleSnap(null);
+          setTypedLength("");
+          return;
+        }
+        if (tool === "measure" && (measureDrawRef.current || measure.length)) {
+          e.preventDefault();
+          measureDrawRef.current = null;
+          setMeasure([]);
+          setMeasureOffsetPt(null);
+          setRulerSnap(null);
+          return;
+        }
         clearWallChain(); setMeasure([]); clearSelection(); setGuides([]);
         setTool("select"); setPending(null); setTypedLength(""); setDraftSnap(null);
         setMarquee(null);
@@ -1274,10 +2169,43 @@ export default function PlanPage() {
           applyTypedLength();
           return;
         }
+        if (tool === "wall" && draft.length >= 1) {
+          e.preventDefault();
+          finishWallChain();
+          return;
+        }
+        if (tool === "measure" && measureDrawRef.current?.stage === 2 && measure.length === 2 && measureOffsetPt) {
+          e.preventDefault();
+          commitDimension(measure[0], measure[1], measureOffsetPt);
+          measureDrawRef.current = null;
+          setMeasure([]);
+          setMeasureOffsetPt(null);
+          setRulerSnap(null);
+          return;
+        }
         if (draft.length >= 2) finishDraft();
-        else if (tool === "wall" && draft.length >= 1) finishDraft();
       }
-      if ((e.key === "Delete" || e.key === "Backspace") && selection?.ids?.length && document.activeElement === document.body && !typedLengthRef.current) delSel();
+      if ((e.key === "Delete" || e.key === "Backspace") && document.activeElement === document.body && !typedLengthRef.current) {
+        if (tool === "wall" && draft.length >= 1) {
+          e.preventDefault();
+          const { state } = wallDraftBackspace(wallDraftStateRef.current);
+          wallDraftStateRef.current = state;
+          if (state.pts.length) {
+            setDraft(state.pts);
+            if (!state.chainStart) wallChainStartRef.current = null;
+          } else {
+            clearWallChain();
+          }
+          return;
+        }
+        if (tool === "line" && draft.length >= 1) {
+          e.preventDefault();
+          setDraft((d) => d.slice(0, -1));
+          return;
+        }
+        e.preventDefault();
+        handleDeleteAction();
+      }
       if (/^\d$/.test(e.key) && (tool === "wall" || tool === "line") && draft.length >= 1) {
         e.preventDefault();
         setTypedLength((s) => s + e.key);
@@ -1286,11 +2214,47 @@ export default function PlanPage() {
         e.preventDefault();
         setTypedLength((s) => s.slice(0, -1));
       }
+      if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && tool === "line") {
+        e.preventDefault();
+        if (selection?.coll === "lines" && selection.ids.length) {
+          selection.ids.forEach((id) => {
+            const ln = plan.lines.find((l) => l.id === id);
+            if (!ln || (!isPipeLine(ln) && !isDuctLine(ln))) return;
+            updateObj("lines", id, reverseLine({
+              ...ln,
+              flowDirection: ln.flowDirection === "reverse" ? "forward" : "reverse",
+            }));
+          });
+        } else {
+          setLineDraftMeta((prev) => ({
+            ...prev,
+            flowDirection: prev.flowDirection === "reverse" ? "forward" : "reverse",
+          }));
+        }
+        return;
+      }
+      if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && tool === "add" && pending) {
+        e.preventDefault();
+        setPendingRotationDeg((v) => (v + 90) % 360);
+        setPendingSize((prev) => {
+          const baseSize = prev?.w != null ? prev : (() => {
+            const c = resolveCatalogKind(pending);
+            return c?.w != null ? { w: c.w, h: c.h } : null;
+          })();
+          if (!baseSize) return prev;
+          return {
+            ...baseSize,
+            w: baseSize.h,
+            h: baseSize.w,
+          };
+        });
+        return;
+      }
       if (e.key === "f" || e.key === "F") fitView();
       if (e.ctrlKey && e.key === "z") { e.preventDefault(); undo(); }
       if (e.ctrlKey && (e.key === "y" || (e.shiftKey && e.key === "z"))) { e.preventDefault(); redo(); }
-      if (e.ctrlKey && e.key === "c") { e.preventDefault(); copySel(); }
-      if (e.ctrlKey && e.key === "v") { e.preventDefault(); pasteSel(); }
+      if (modKey(e) && (e.code === "KeyC" || e.key === "c" || e.key === "с")) { e.preventDefault(); copySel(); }
+      if (modKey(e) && (e.code === "KeyV" || e.key === "v" || e.key === "м")) { e.preventDefault(); pasteSel(); }
       if (e.ctrlKey && !e.shiftKey && (e.key === "g" || e.key === "G")) { e.preventDefault(); groupSelection(); }
       if (e.ctrlKey && e.shiftKey && (e.key === "g" || e.key === "G")) { e.preventDefault(); ungroupSelection(); }
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) && document.activeElement === document.body) moveSelByKeys(e);
@@ -1306,6 +2270,7 @@ export default function PlanPage() {
     };
     const onKeyUp = (e) => {
       if (e.key === "Shift") shiftRef.current = false;
+      if (e.key === "Control") { ctrlRef.current = false; setCtrlSnapFine(false); }
       if (e.key === "Alt") { altSnapRef.current = false; setAltSnapOff(false); }
       if (e.key === " ") setSpacePan(false);
     };
@@ -1349,7 +2314,7 @@ export default function PlanPage() {
   const handleImportJson = async (file) => {
     try {
       const { plan: imported } = await readPlanFile(file);
-      resetHistory(withDefaults(imported));
+      resetHistory(normalizePlan(imported));
       setSaved(false);
     } catch (e) {
       alert("Не удалось импортировать: " + (e?.message || e));
@@ -1364,7 +2329,7 @@ export default function PlanPage() {
     )) return;
     setBusy(true);
     try {
-      const snapshot = withDefaults(plan);
+      const snapshot = normalizePlan(plan);
       await actions.projectUpdate(targetProject.id, {
         plan: snapshot,
         plannerAttachedAt: new Date().toISOString(),
@@ -1385,7 +2350,20 @@ export default function PlanPage() {
 
   const specSummary = plannerSpecSummary(plan);
 
+  const onDblClick = (e) => {
+    if (tool === "wall" && draft.length >= 1) {
+      finishWallChain();
+      return;
+    }
+    if (draft.length >= 2) finishDraft();
+  };
+
   const onDown = (e) => {
+    if (e.button === 2) return;
+    if (ctrlRef.current !== !!e.ctrlKey) {
+      ctrlRef.current = !!e.ctrlKey;
+      setCtrlSnapFine(!!e.ctrlKey);
+    }
     svgRef.current.setPointerCapture(e.pointerId);
     const mm = toMM(e.clientX, e.clientY);
     const panTool = tool === "pan" || spacePan || e.button === 1;
@@ -1396,39 +2374,91 @@ export default function PlanPage() {
       return;
     }
     if (active === "spec") return;
+    if (tool === "erase") {
+      const hit = pickPlanHit(mm);
+      if (hit) deleteHit(hit);
+      return;
+    }
     if (tool === "add" && pending) return addItemAt(mm);
-    if (tool === "zone") return addZoneAt(mm);
-    if (tool === "label") return addLabelAt(mm, null);
-    if (tool === "line" || tool === "wall") {
-      const last = draft[draft.length - 1];
-      const { pt, snap, angleSnap } = computeDraftPt(mm, last);
-      setDraftAngleSnap(angleSnap);
-      if (tool === "wall") {
-        if (!last) {
-          wallChainStartRef.current = pt;
-          setDraft([pt]);
-          setDraftSnap(snap);
-          return;
-        }
-        if (snap?.kind === "close" && wallChainStartRef.current) {
-          commitWallSegment(last, wallChainStartRef.current);
-          clearWallChain();
-          return;
-        }
-        commitWallSegment(last, pt);
-        setDraft([pt]);
-        setDraftSnap(snap);
-        return;
+    if (tool === "label") return beginLabelAnchor(mm);
+    if (tool === "wall") {
+      if (e.button !== 0) return;
+      const chainFrom = draft.length >= 1 ? draft[draft.length - 1] : null;
+      let from;
+      if (chainFrom) {
+        from = chainFrom;
+        wallDraftStateRef.current = wallDraftContinueFrom(wallDraftStateRef.current, from);
+      } else {
+        const computed = computeWallSnap(mm, null);
+        from = computed.pt;
+        wallChainStartRef.current = from;
+        wallDraftStateRef.current = wallDraftStart(createWallDraftState(), from);
+        setDraftSnap(computed.snap);
       }
+      wallDrawRef.current = { from };
+      setDraft((d) => (chainFrom ? d : [from, from]));
+      try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
+    if (tool === "line") {
+      const last = draft[draft.length - 1];
+      const { pt, snap, angleSnap, guides: snapGuides = [] } = computeDraftPt(mm, last);
+      setDraftAngleSnap(angleSnap);
       setDraftSnap(snap);
+      setGuides(snapGuides);
       setDraft((d) => [...d, pt]);
       return;
     }
     if (tool === "measure") {
-      const pt = measure.length === 1
-        ? draftPt(measure[0], mm, { ...draftSnapOpts(), snapOn: snapOn && !altSnapRef.current }).point
-        : { x: sn(mm.x), y: sn(mm.y) };
-      setMeasure((m) => (m.length >= 2 ? [pt] : [...m, pt]));
+      if (e.button !== 0) return;
+      const st = measureDrawRef.current;
+      if (!st) {
+        const { pt, snap, guides: snapGuides = [] } = computeRulerPt(mm);
+        measureDrawRef.current = { stage: 1, p1: pt };
+        setMeasure([pt, pt]);
+        setMeasureOffsetPt(null);
+        setRulerSnap(snap);
+        setGuides(snapGuides);
+        return;
+      }
+      if (st.stage === 1) {
+        const { pt, snap, guides: snapGuides = [] } = computeRulerPt(mm, st.p1);
+        if (Math.hypot(pt.x - st.p1.x, pt.y - st.p1.y) < 20) return;
+        measureDrawRef.current = { stage: 2, p1: st.p1, p2: pt };
+        setMeasure([st.p1, pt]);
+        setMeasureOffsetPt(pt);
+        setRulerSnap(snap);
+        setGuides(snapGuides);
+        return;
+      }
+      if (st.stage === 2) {
+        const { pt, snap, guides: snapGuides = [] } = computeRulerPt(mm);
+        commitDimension(st.p1, st.p2, pt);
+        measureDrawRef.current = null;
+        setMeasure([]);
+        setMeasureOffsetPt(null);
+        setRulerSnap(snap);
+        setGuides(snapGuides);
+      }
+      return;
+    }
+    if (tool === "structural") {
+      if (e.button !== 0) return;
+      if (structuralKind === "column") {
+        const computed = computeDraftPt(mm, null);
+        commitStructuralColumn(computed.pt);
+        return;
+      }
+      const chainFrom = draft.length === 1 ? draft[0] : null;
+      let from;
+      if (chainFrom) from = chainFrom;
+      else {
+        const computed = computeDraftPt(mm, null);
+        from = computed.pt;
+      }
+      structuralDrawRef.current = { from };
+      setDraft([from, from]);
+      try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
       return;
     }
     if (tool === "select" && bgClick && e.button === 0) {
@@ -1449,16 +2479,56 @@ export default function PlanPage() {
   };
 
   const onMove = (e) => {
+    if (ctrlRef.current !== !!e.ctrlKey) {
+      ctrlRef.current = !!e.ctrlKey;
+      setCtrlSnapFine(!!e.ctrlKey);
+    }
     const raw = toMM(e.clientX, e.clientY);
     let mm = raw;
-    if (orthoTools && draft.length > 0) {
-      const { pt, snap, angleSnap } = computeDraftPt(raw, draft[draft.length - 1]);
+    if (wallDrawRef.current && tool === "wall") {
+      const { from } = wallDrawRef.current;
+      const { pt, snap, angleSnap, fromAdjust } = computeWallSnap(raw, from);
+      const start = fromAdjust || from;
+      if (fromAdjust) wallDrawRef.current = { from: start };
       setDraftSnap(snap);
       setDraftAngleSnap(angleSnap);
+      const base = wallDraftStateRef.current.pts.length
+        ? wallDraftStateRef.current.pts
+        : [start];
+      setDraft([...base.slice(0, -1), base[base.length - 1] || start, pt]);
+      mm = pt;
+    } else if (structuralDrawRef.current && tool === "structural") {
+      const { from } = structuralDrawRef.current;
+      const { pt, snap, angleSnap } = computeDraftPt(raw, from);
+      setDraftSnap(snap);
+      setDraftAngleSnap(angleSnap);
+      setDraft([from, pt]);
+      mm = pt;
+    } else if (measureDrawRef.current && tool === "measure") {
+      if (measureDrawRef.current.stage === 1) {
+        const { p1 } = measureDrawRef.current;
+        const { pt, snap, guides: snapGuides = [] } = computeRulerPt(raw, p1);
+        setMeasure([p1, pt]);
+        setRulerSnap(snap);
+        setGuides(snapGuides);
+        mm = pt;
+      } else if (measureDrawRef.current.stage === 2) {
+        const { pt, snap, guides: snapGuides = [] } = computeRulerPt(raw);
+        setMeasureOffsetPt(pt);
+        setRulerSnap(snap);
+        setGuides(snapGuides);
+        mm = pt;
+      }
+    } else if (orthoTools && draft.length > 0) {
+      const { pt, snap, angleSnap, guides: snapGuides = [] } = computeDraftPt(raw, draft[draft.length - 1]);
+      setDraftSnap(snap);
+      setDraftAngleSnap(angleSnap);
+      if (tool === "line") setGuides(snapGuides);
       mm = pt;
     } else {
       setDraftSnap(null);
       setDraftAngleSnap(null);
+      if (tool === "line" || tool === "measure") setGuides([]);
     }
     setCursor(mm);
     const d = dragRef.current;
@@ -1484,34 +2554,82 @@ export default function PlanPage() {
         if (!placed || placed.error) return;
         x = placed.x;
         y = placed.y;
-        updateObj(d.coll, d.id, attachItemZoneFields(plan, {
-          ...obj, x, y,
-          angle: placed.angle || obj.angle || 0,
-          wallId: placed.wallId,
-          wallSeg: placed.wallSeg,
+        replacePlan((p) => syncEngineeringPlan({
+          ...p,
+          items: p.items.map((it) => (
+            it.id === d.id
+              ? attachItemZoneFields(p, {
+                ...it,
+                x,
+                y,
+                angle: placed.angle || it.angle || 0,
+                wallId: placed.wallId,
+                wallSeg: placed.wallSeg,
+              })
+              : it
+          )),
         }));
         setGuides([]);
       } else {
         const s = snapObj(d.coll, obj, x, y);
         x = s.x; y = s.y;
         setGuides(s.guides);
+        if (d.coll === "items" && !obj.wall && itemOverlapsAnyWall({ ...obj, x, y }, resolvePlanWalls(plan))) return;
+        if (d.coll === "items" && !obj.wall && itemOverlapsBlocked({ ...obj, x, y }, plan.items, { excludeId: d.id }).blocked) return;
         if (d.coll === "items") {
           const ldx = x - obj.x;
           const ldy = y - obj.y;
-          setPlan((p) => ({
+          replacePlan((p) => syncEngineeringPlan({
             ...p,
             items: p.items.map((it) => (
               it.id === d.id ? attachItemZoneFields(p, { ...it, x, y }) : it
             )),
             labels: p.labels.map((lb) => {
               if (lb.pinned || lb.targetId !== d.id) return lb;
+              if (lb.anchorRelX != null) return lb;
               return { ...lb, x: (lb.x || 0) + ldx, y: (lb.y || 0) + ldy };
             }),
           }));
+        } else if (d.coll === "labels") {
+          const tgt = obj.targetId ? plan.items.find((i) => i.id === obj.targetId) : null;
+          const anchor = resolveLabelAnchor(obj, tgt);
+          const patch = { x, y, pinned: true };
+          if (anchor) {
+            patch.offsetX = x - anchor.x;
+            patch.offsetY = y - anchor.y;
+          }
+          updateObj("labels", obj.id, patch);
         } else {
           updateObj(d.coll, d.id, { x, y });
         }
       }
+    } else if (d.mode === "ruler-move") {
+      const dx = mm.x - d.dx;
+      const dy = mm.y - d.dy;
+      updateRuler(d.id, {
+        a: { x: d.ox + dx, y: d.oy + dy },
+        b: { x: d.ox2 + dx, y: d.oy2 + dy },
+      });
+    } else if (d.mode === "ruler-a" || d.mode === "ruler-b") {
+      const { pt } = computeRulerPt(mm);
+      updateRuler(d.id, d.mode === "ruler-a" ? { a: pt } : { b: pt });
+    } else if (d.mode === "move-item-label") {
+      const obj = plan.items.find((o) => o.id === d.id);
+      if (!obj) return;
+      let dx = mm.x - d.dx;
+      let dy = mm.y - d.dy;
+      if (dragShiftOn(shiftRef.current, altSnapRef.current)) {
+        ({ dx, dy } = constrainAxisDelta(dx, dy, true));
+      }
+      const x = d.ox + dx;
+      const y = d.oy + dy;
+      const anchor = itemAnchor(obj);
+      updateObj("items", d.id, {
+        labelPinned: true,
+        labelHidden: false,
+        labelOffsetX: x - anchor.x,
+        labelOffsetY: y - anchor.y,
+      });
     } else if (d.mode === "move-items" || d.mode === "move-pending") {
       const anchorX = d.mode === "move-pending" ? d.mm.x : d.dx;
       const anchorY = d.mode === "move-pending" ? d.mm.y : d.dy;
@@ -1524,6 +2642,7 @@ export default function PlanPage() {
       let origins = d.origins;
       let ids = d.ids;
       if (d.mode === "move-pending") {
+        commitPlan((p) => p);
         ids = selection?.coll === "items" && selection.ids.includes(d.triggerId)
           ? [...selection.ids]
           : [d.triggerId];
@@ -1534,13 +2653,20 @@ export default function PlanPage() {
           if (o) origins[id] = { x: o.x, y: o.y };
         });
         plan.labels.forEach((lb) => {
-          if (!lb.pinned && lb.targetId && ids.includes(lb.targetId)) {
+          if (!lb.pinned && lb.targetId && ids.includes(lb.targetId) && lb.anchorRelX == null) {
             labelOrigins[lb.id] = { x: lb.x || 0, y: lb.y || 0 };
           }
         });
-        dragRef.current = { mode: "move-items", ids, origins, labelOrigins, dx: d.mm.x, dy: d.mm.y };
+        dragRef.current = {
+          mode: "move-items",
+          ids,
+          origins,
+          labelOrigins,
+          dx: d.mm.x,
+          dy: d.mm.y,
+        };
       }
-      setPlan((p) => {
+      replacePlan((p) => {
         const lead = ids.map((id) => p.items.find((i) => i.id === id)).find(Boolean);
         let snapDx = 0;
         let snapDy = 0;
@@ -1553,7 +2679,7 @@ export default function PlanPage() {
         }
         setGuides(snapGuides);
         const labelOrigins = d.labelOrigins || {};
-        return {
+        return syncEngineeringPlan({
           ...p,
           labels: p.labels.map((lb) => {
             const lo = labelOrigins[lb.id];
@@ -1575,6 +2701,9 @@ export default function PlanPage() {
             });
             if (!inside) return it;
           }
+          if (itemHitsAnyStructural({ ...it, x, y }, p.structurals)) return it;
+          if (!it.wall && itemOverlapsAnyWall({ ...it, x, y }, resolvePlanWalls(p))) return it;
+          if (!it.wall && itemOverlapsBlocked({ ...it, x, y }, p.items, { excludeIds: ids }).blocked) return it;
           if (it.wall) {
             const placed = attachWall({ ...it, kind: it.kind }, x, y);
             if (!placed || placed.error) return it;
@@ -1583,36 +2712,32 @@ export default function PlanPage() {
           if (snapDx || snapDy) {
             return attachItemZoneFields(p, { ...it, x, y });
           }
-          const s = snapObj("items", it, x, y);
-          return attachItemZoneFields(p, { ...it, x: s.x, y: s.y });
+          return attachItemZoneFields(p, { ...it, x, y });
         }),
-        };
+        });
       });
     } else if (d.mode === "marquee") {
       setMarquee({ x1: d.x1, y1: d.y1, x2: mm.x, y2: mm.y });
-    } else if (d.mode === "wall-move") {
-      let dx = mm.x - d.dx;
-      let dy = mm.y - d.dy;
-      if (dragShiftOn(shiftRef.current, altSnapRef.current)) {
-        ({ dx, dy } = constrainAxisDelta(dx, dy, true));
-      }
-      setPlan((p) => {
-        const walls = p.walls.map((w) => (w.id !== d.id ? w : {
-          ...w,
-          pts: d.origPts.map((pt) => ({ x: sn(pt.x + dx), y: sn(pt.y + dy) })),
-        }));
-        return syncAutoZones({
-          ...p,
-          walls,
-          items: refreshWallMountedItems(p.items, walls, p.room, d.id),
-        });
-      });
     } else if (d.mode === "resize") {
       const obj = plan[d.coll].find((o) => o.id === d.id);
       if (!obj) return;
       if (d.coll === "zones" && (obj.locked || obj.auto)) return;
       if (obj.locked) return;
       const axis = d.axis || "corner";
+      const nextPatch = axis === "w"
+        ? { w: Math.max(50, sn(mm.x - obj.x)) }
+        : axis === "h"
+          ? { h: Math.max(50, sn(mm.y - obj.y)) }
+          : { w: Math.max(50, sn(mm.x - obj.x)), h: Math.max(50, sn(mm.y - obj.y)) };
+      if (d.coll === "items") {
+        replacePlan((p) => syncEngineeringPlan({
+          ...p,
+          items: p.items.map((it) => (
+            it.id === d.id ? attachItemZoneFields(p, { ...it, ...nextPatch }) : it
+          )),
+        }));
+        return;
+      }
       if (axis === "w") {
         updateObj(d.coll, d.id, { w: Math.max(50, sn(mm.x - obj.x)) });
       } else if (axis === "h") {
@@ -1620,22 +2745,51 @@ export default function PlanPage() {
       } else {
         updateObj(d.coll, d.id, { w: Math.max(50, sn(mm.x - obj.x)), h: Math.max(50, sn(mm.y - obj.y)) });
       }
+    } else if (d.mode === "move-wall-seg-pending") {
+      if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 4) {
+        dragRef.current = { ...d, mode: "move-wall-seg" };
+      }
+    } else if (d.mode === "move-wall-seg") {
+      const wall = resolvePlanWalls(plan).find((w) => w.id === d.id);
+      if (!wall || wall.pts.length !== 2 || !d.origPts?.length) return;
+      let dx = mm.x - d.dx;
+      let dy = mm.y - d.dy;
+      if (dragShiftOn(shiftRef.current, altSnapRef.current)) {
+        ({ dx, dy } = constrainAxisDelta(dx, dy, true));
+      }
+      const a0 = d.origPts[0];
+      const b0 = d.origPts[1];
+      const segLen = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1;
+      const nx = -(b0.y - a0.y) / segLen;
+      const ny = (b0.x - a0.x) / segLen;
+      const move = dx * nx + dy * ny;
+      const newA = { x: fineMm(a0.x + nx * move), y: fineMm(a0.y + ny * move) };
+      const newB = { x: fineMm(b0.x + nx * move), y: fineMm(b0.y + ny * move) };
+      replacePlan((p) => {
+        const next = applyNetworkWallSegMove(p, d.id, newA, newB);
+        const resolved = resolvePlanWalls(next);
+        return syncAutoZones({
+          ...next,
+          items: refreshWallMountedItems(p.items, resolved, p.room, d.id),
+        });
+      });
     } else if (d.mode === "node") {
       if (d.coll === "walls") {
-        const wall = plan.walls.find((w) => w.id === d.id);
+        const wall = resolvePlanWalls(plan).find((w) => w.id === d.id);
         let pt = { x: mm.x, y: mm.y };
         if (wall?.pts?.length >= 2) {
           const anchorIdx = d.idx > 0 ? d.idx - 1 : 1;
           const anchor = wall.pts[anchorIdx];
           pt = constrainAxisPoint(anchor, pt, dragShiftOn(shiftRef.current, altSnapRef.current));
         }
-        const snapped = snapWallPoint(pt, plan.walls, plan.room, view.zoom, snapOn && display.snapWalls !== false && !altSnapRef.current, snapStep);
-        setPlan((p) => {
-          let walls = weldWallNodes(applyWallNodeMove(p.walls, d.id, d.idx, { x: snapped.x, y: snapped.y }));
+        const resolved = resolvePlanWalls(plan);
+        const snapped = snapWallPoint(pt, resolved, plan.room, view.zoom, snapOn && display.snapWalls !== false && !altSnapRef.current, snapStep);
+        replacePlan((p) => {
+          const next = applyNetworkNodeAtWall(p, d.id, d.idx, { x: snapped.x, y: snapped.y });
+          const rw = resolvePlanWalls(next);
           return syncAutoZones({
-            ...p,
-            walls,
-            items: refreshWallMountedItems(p.items, walls, p.room),
+            ...next,
+            items: refreshWallMountedItems(p.items, rw, p.room),
           });
         });
       } else {
@@ -1648,7 +2802,7 @@ export default function PlanPage() {
           const lines = p.lines.map((l) => {
             if (l.id !== d.id || l.locked) return l;
             const pts = l.pts.map((pt, i) => (i === d.idx ? { x: snapped.x, y: snapped.y } : pt));
-            const patch = { pts };
+            const patch = { pts, points: pts };
             if (d.idx === 0 && snapped.itemId) {
               patch.fromItemId = snapped.itemId;
               patch.fromPortIndex = snapped.portIndex ?? null;
@@ -1659,13 +2813,45 @@ export default function PlanPage() {
             }
             return { ...l, ...patch };
           });
-          return { ...p, lines };
+          return syncEngineeringPlan({ ...p, lines });
         });
       }
     }
   };
 
   const onUp = (e) => {
+    if (wallDrawRef.current && tool === "wall") {
+      const { from } = wallDrawRef.current;
+      wallDrawRef.current = null;
+      const raw = toMM(e.clientX, e.clientY);
+      const { pt, snap, fromAdjust } = computeWallSnap(raw, from);
+      const start = fromAdjust || from;
+      if (snap?.kind === "close" && wallChainStartRef.current) {
+        const end = { x: wallChainStartRef.current.x, y: wallChainStartRef.current.y };
+        addWallDraftSegment(start, end, fromAdjust);
+        finishWallChain();
+      } else if (Math.hypot(pt.x - start.x, pt.y - start.y) >= 50) {
+        addWallDraftSegment(start, pt, fromAdjust);
+        setDraftSnap(snap);
+      } else if (
+        wallChainStartRef.current &&
+        Math.hypot(from.x - wallChainStartRef.current.x, from.y - wallChainStartRef.current.y) < 5
+      ) {
+        clearWallChain();
+      }
+    }
+    if (structuralDrawRef.current && tool === "structural") {
+      const { from } = structuralDrawRef.current;
+      structuralDrawRef.current = null;
+      const raw = toMM(e.clientX, e.clientY);
+      const { pt } = computeDraftPt(raw, from);
+      if (Math.hypot(pt.x - from.x, pt.y - from.y) >= 50) {
+        commitStructuralSegment(from, pt);
+        setDraft([pt]);
+      } else {
+        setDraft([]);
+      }
+    }
     const d = dragRef.current;
     if (d?.mode === "marquee") {
       const mm = toMM(e.clientX, e.clientY);
@@ -1679,8 +2865,14 @@ export default function PlanPage() {
     } else if (d?.mode === "move" && d.coll === "labels") {
       const obj = plan.labels.find((o) => o.id === d.id);
       if (obj && !obj.pinned) updateObj("labels", obj.id, { pinned: true });
+    } else if (d?.mode === "move-wall-seg" && d.basePlan && d.basePlan !== plan) {
+      commitFrom(d.basePlan, plan);
+    } else if (d?.mode === "node" && d.coll === "walls" && d.basePlan && d.basePlan !== plan) {
+      commitFrom(d.basePlan, plan);
     }
     dragRef.current = null;
+    rackSnapStickyRef.current = { x: null, y: null, atX: null, atY: null };
+    objectSnapStickyRef.current = { x: null, y: null, atX: null, atY: null };
     setMarquee(null);
     setGuides([]);
     setHoverWallNode(null);
@@ -1700,8 +2892,26 @@ export default function PlanPage() {
 
   const z = view.zoom;
   const k = 1 / z;
+  const resolvedWalls = useMemo(() => resolvePlanWalls(plan), [plan.walls, plan.nodes]);
+  const weldedWalls = useMemo(() => weldWallNodes(resolvedWalls), [resolvedWalls]);
+  const runtimeDimensionData = useMemo(
+    () => resolvePlanDimensions(plan, { dimensionDisplayMode }),
+    [plan.walls, plan.nodes, plan.items, plan.zones, plan.room, plan.dimensions, dimensionDisplayMode],
+  );
+  const runtimeRoomWarnings = useMemo(
+    () => validateRooms(plan, plan.rooms || []),
+    [plan.rooms, plan.items, plan.links, plan.walls],
+  );
+  const runtimeDimensions = runtimeDimensionData.dimensions;
+  const useWallChainDims = planHasDrawnWalls(weldedWalls);
   const sel = selection?.ids?.length === 1 ? { coll: selection.coll, id: selection.ids[0] } : null;
-  const selObj = sel ? plan[sel.coll]?.find((o) => o.id === sel.id) : null;
+  const findSelObject = (coll, id) => {
+    if (coll === "walls") return resolvePlanWalls(plan).find((o) => o.id === id);
+    if (coll === "dimensions") return runtimeDimensions.find((o) => o.id === id);
+    if (coll === "item-label") return plan.items.find((o) => o.id === id);
+    return plan[coll]?.find((o) => o.id === id);
+  };
+  const selObj = sel ? findSelObject(sel.coll, sel.id) : null;
   const multiBounds = selection?.coll === "items" && selection.ids.length > 1
     ? boundsOfItems(plan.items, selection.ids)
     : null;
@@ -1709,6 +2919,7 @@ export default function PlanPage() {
   const startMoveItems = (ids, mm) => {
     const movable = ids.filter((id) => !plan.items.find((i) => i.id === id)?.locked);
     if (!movable.length) return;
+    commitPlan((p) => p);
     const origins = {};
     const labelOrigins = {};
     movable.forEach((id) => {
@@ -1716,11 +2927,18 @@ export default function PlanPage() {
       if (o) origins[id] = { x: o.x, y: o.y };
     });
     plan.labels.forEach((lb) => {
-      if (!lb.pinned && lb.targetId && movable.includes(lb.targetId)) {
+      if (!lb.pinned && lb.targetId && movable.includes(lb.targetId) && lb.anchorRelX == null) {
         labelOrigins[lb.id] = { x: lb.x || 0, y: lb.y || 0 };
       }
     });
-    dragRef.current = { mode: "move-items", ids: movable, origins, labelOrigins, dx: mm.x, dy: mm.y };
+    dragRef.current = {
+      mode: "move-items",
+      ids: movable,
+      origins,
+      labelOrigins,
+      dx: mm.x,
+      dy: mm.y,
+    };
   };
 
   const startMove = (e, coll, obj) => {
@@ -1740,9 +2958,48 @@ export default function PlanPage() {
         updateObj("labels", obj.id, { x: ox, y: oy, pinned: true });
       }
     }
+    if (coll === "items") commitPlan((p) => p);
     setSel({ coll, id: obj.id });
-    dragRef.current = { mode: "move", coll, id: obj.id, ox, oy, dx: mm.x, dy: mm.y };
+    dragRef.current = {
+      mode: "move",
+      coll,
+      id: obj.id,
+      ox,
+      oy,
+      dx: mm.x,
+      dy: mm.y,
+    };
   };
+
+  const startMoveItemLabel = (e, it) => {
+    if (tool === "erase") {
+      e.stopPropagation();
+      deleteHits("item-label", [it.id]);
+      return;
+    }
+    e.stopPropagation();
+    if (tool !== "select" && tool !== "label") return;
+    svgRef.current.setPointerCapture(e.pointerId);
+    const mm = toMM(e.clientX, e.clientY);
+    let place = resolveItemLabelPlacement(it, plan.room);
+    if (!place) {
+      place = autoItemLabelPlacement(it, plan.room);
+      const pinned = pinItemLabelFromAuto(it, plan.room);
+      updateObj("items", it.id, { ...pinned, labelHidden: false });
+    } else if (!it.labelPinned) {
+      updateObj("items", it.id, pinItemLabelFromAuto(it, plan.room));
+    }
+    setSel({ coll: "item-label", id: it.id });
+    dragRef.current = {
+      mode: "move-item-label",
+      id: it.id,
+      ox: place.x,
+      oy: place.y,
+      dx: mm.x,
+      dy: mm.y,
+    };
+  };
+
   const startRotate = (e, it) => {
     e.stopPropagation();
     svgRef.current.setPointerCapture(e.pointerId);
@@ -1761,25 +3018,110 @@ export default function PlanPage() {
     if (coll === "items" && obj.locked) return;
     e.stopPropagation();
     svgRef.current.setPointerCapture(e.pointerId);
+    if (coll === "items") commitPlan((p) => p);
     setSel({ coll, id: obj.id });
-    dragRef.current = { mode: "resize", coll, id: obj.id, axis };
+    dragRef.current = {
+      mode: "resize",
+      coll,
+      id: obj.id,
+      axis,
+    };
   };
+  const startWallMidNode = (e, wall) => {
+    if (!wall?.pts || wall.pts.length !== 2) return;
+    e.stopPropagation();
+    e.preventDefault();
+    if (tool === "erase") {
+      deleteHit({ coll: "walls", id: wall.id });
+      return;
+    }
+    const mm = toMM(e.clientX, e.clientY);
+    setSelection({ coll: "walls", ids: [wall.id], nodeIdx: -1 });
+    dragRef.current = {
+      mode: "move-wall-seg-pending",
+      id: wall.id,
+      origPts: wall.pts.map((p) => ({ x: p.x, y: p.y })),
+      basePlan: plan,
+      sx: e.clientX,
+      sy: e.clientY,
+      dx: mm.x,
+      dy: mm.y,
+    };
+    setHoverWallNode({ wallId: wall.id, idx: -1 });
+    try { svgRef.current?.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+
+  const wallChainIdsFor = (wall, walls) => {
+    const chainId = wall.chainId || wall.id;
+    return walls.filter((w) => (w.chainId || w.id) === chainId).map((w) => w.id);
+  };
+
+  const wallContourIdsFor = (wall, walls, thr = 10) => {
+    const map = new Map((walls || []).map((w) => [w.id, w]));
+    const queue = [wall.id];
+    const seen = new Set(queue);
+    const endpoints = (w) => (w?.pts?.length >= 2 ? [w.pts[0], w.pts[w.pts.length - 1]] : []);
+
+    while (queue.length) {
+      const id = queue.shift();
+      const cur = map.get(id);
+      if (!cur) continue;
+      const curEnds = endpoints(cur);
+      for (const w of walls) {
+        if (seen.has(w.id)) continue;
+        const ends = endpoints(w);
+        const touches = curEnds.some((a) => ends.some((b) => Math.hypot(a.x - b.x, a.y - b.y) <= thr));
+        if (touches) {
+          seen.add(w.id);
+          queue.push(w.id);
+        }
+      }
+    }
+    return [...seen];
+  };
+
+  const selectWall = (e, wall) => {
+    if (tool === "erase") {
+      deleteHit({ coll: "walls", id: wall.id });
+      return;
+    }
+    e.stopPropagation();
+    const mm = toMM(e.clientX, e.clientY);
+    const hit = wallInteractionAt(wall, mm, view.zoom);
+    const walls = resolvePlanWalls(plan);
+    if (e.detail >= 2) {
+      setSelection({ coll: "walls", ids: wallContourIdsFor(wall, walls) });
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      setSelection({ coll: "walls", ids: wallChainIdsFor(wall, walls) });
+      return;
+    }
+    setSel({
+      coll: "walls",
+      id: wall.id,
+      nodeIdx: hit.kind === "node" ? hit.idx : (hit.kind === "segment" ? -1 : undefined),
+    });
+  };
+
   const startNode = (e, coll, oid, idx) => {
     e.stopPropagation();
+    if (tool === "erase") {
+      deleteHit({ coll, id: oid });
+      return;
+    }
     svgRef.current.setPointerCapture(e.pointerId);
     setSelection({ coll, ids: [oid], nodeIdx: idx });
-    dragRef.current = { mode: "node", coll, id: oid, idx };
+    dragRef.current = { mode: "node", coll, id: oid, idx, basePlan: plan };
     if (coll === "walls") setHoverWallNode({ wallId: oid, idx });
-  };
-  const startWallMove = (e, wall) => {
-    e.stopPropagation();
-    svgRef.current.setPointerCapture(e.pointerId);
-    const mm = toMM(e.clientX, e.clientY);
-    setSel({ coll: "walls", id: wall.id });
-    dragRef.current = { mode: "wall-move", id: wall.id, dx: mm.x, dy: mm.y, origPts: wall.pts.map((p) => ({ ...p })) };
   };
 
   const onItemDown = (e, it) => {
+    if (tool === "erase") {
+      e.stopPropagation();
+      deleteHit({ coll: "items", id: it.id });
+      return;
+    }
     if (it.locked) {
       e.stopPropagation();
       setSel({ coll: "items", id: it.id });
@@ -1807,7 +3149,7 @@ export default function PlanPage() {
       setLinkFrom(null);
       return;
     }
-    if (tool === "label") { e.stopPropagation(); addLabelAt({ x: it.x + it.w / 2, y: it.y + it.h / 2 }, it.id); return; }
+    if (tool === "label") { e.stopPropagation(); beginLabelAnchor(mm, it.id); return; }
 
     e.stopPropagation();
     svgRef.current.setPointerCapture(e.pointerId);
@@ -1848,24 +3190,54 @@ export default function PlanPage() {
       await exportLayeredPDF(
         svgRef.current,
         plan.room,
-        PDF_SHEETS.map((l) => ({ id: l.id, sheet: l.sheet })),
+        REQUIRED_FARM_SHEET_IDS.map((sid) => {
+          const s = sheetById(sid);
+          return { id: s.id, sheet: s.pdfSheetName || s.name };
+        }),
         { projectName: planTitle, projectId: planMetaId, version: "1" },
         mode,
-        { pdfGridInstall: display.pdfGridInstall, pdfGridTechnical: display.pdfGridTechnical, pdfGridMajorOnly: display.pdfGridMajorOnly },
+        {
+          pdfGridInstall: display.pdfGridInstall,
+          pdfGridTechnical: display.pdfGridTechnical,
+          pdfGridMajorOnly: display.pdfGridMajorOnly,
+          plan,
+          warnings: warnList,
+        },
       );
     } catch (e) { alert("Не удалось собрать PDF: " + e.message); }
     setBusy(false);
   };
 
   const syncSpec = async () => {
-    if (standalone) return;
     setBusy(true);
     try {
       const materials = state.materialsLoaded ? state.materials : await actions.ensureMaterials();
       const modules = state.modulesLoaded ? state.modules : await actions.ensureModules();
-      const res = createPlannerSpecItems({ plan, materials, modules, existingItems: project.items || [] });
-      await actions.projectUpdate(project.id, { items: res.items, plan, plannerSyncAt: new Date().toISOString() });
-      alert(`Спецификация обновлена из плана.\nПозиции: ${res.generatedCount}\nКомплекты: ${res.kitCount || 0}\nОбъекты: ${res.objectCount}\nТрассы: ${res.lineCount}\nСвязи: ${res.linkCount || 0}`);
+      const res = createPlannerSpecItems({
+        plan,
+        materials,
+        modules,
+        existingItems: standalone ? (draftMeta?.specItems || []) : (project.items || []),
+      });
+      if (standalone) {
+        const nextDraft = saveStandalonePlan({
+          ...draftMeta,
+          specItems: res.items,
+          specSummary: {
+            objects: res.objectCount,
+            lines: res.lineCount,
+            links: res.linkCount,
+            kitObjects: res.kitCount,
+            generated: res.generatedCount,
+          },
+          plannerSyncAt: new Date().toISOString(),
+        });
+        setDraftMeta(nextDraft);
+        alert(`Спецификация сформирована из черновика.\nПозиции: ${res.generatedCount}\nКомплекты: ${res.kitCount || 0}\nОбъекты: ${res.objectCount}\nТрассы: ${res.lineCount}\n\nПривяжите черновик к проекту, чтобы записать в таблицу.`);
+      } else {
+        await actions.projectUpdate(project.id, { items: res.items, plan, plannerSyncAt: new Date().toISOString() });
+        alert(`Спецификация обновлена из плана.\nПозиции: ${res.generatedCount}\nКомплекты: ${res.kitCount || 0}\nОбъекты: ${res.objectCount}\nТрассы: ${res.lineCount}\nСвязи: ${res.linkCount || 0}`);
+      }
     } catch (e) {
       alert("Не удалось обновить спецификацию: " + (e?.message || e));
     } finally {
@@ -1885,6 +3257,7 @@ export default function PlanPage() {
     let items;
     if (lid === "sockets") items = plan.items.filter((it) => it.layer === "sockets" || (it.kind === "socket" && it.layer === "power"));
     else items = plan.items.filter((it) => it.layer === lid);
+    items = items.filter((it) => objectVisibleOnSheet(it, activeSheetId));
     if (activeSheet.filters?.length && lid === active) {
       items = items.filter((it) => isItemVisibleOnSheet(it, activeSheetId, activeFilterId, active));
     }
@@ -1899,6 +3272,32 @@ export default function PlanPage() {
   };
 
   const visibleLinks = () => linksVisibleOnLayer(plan.links, active, display);
+
+  useEffect(() => {
+    const nextWarn = runtimeDimensionData.validationWarnings || [];
+    setPlan((p) => {
+      const prevAll = p.validationWarnings || [];
+      const prevDims = prevAll.filter((w) => w.source === "dimensions");
+      const same = prevDims.length === nextWarn.length
+        && prevDims.every((w, i) => w.id === nextWarn[i].id && w.text === nextWarn[i].text);
+      if (same) return p;
+      const withoutDims = prevAll.filter((w) => w.source !== "dimensions");
+      return { ...p, validationWarnings: [...withoutDims, ...nextWarn] };
+    });
+  }, [runtimeDimensionData.validationWarnings, setPlan]);
+
+  useEffect(() => {
+    const nextWarn = runtimeRoomWarnings || [];
+    setPlan((p) => {
+      const prevAll = p.validationWarnings || [];
+      const prevRooms = prevAll.filter((w) => w.source === "rooms");
+      const same = prevRooms.length === nextWarn.length
+        && prevRooms.every((w, i) => w.id === nextWarn[i].id && (w.message || w.text) === (nextWarn[i].message || nextWarn[i].text));
+      if (same) return p;
+      const withoutRooms = prevAll.filter((w) => w.source !== "rooms");
+      return { ...p, validationWarnings: [...withoutRooms, ...nextWarn] };
+    });
+  }, [runtimeRoomWarnings, setPlan]);
 
   const warnList = collectPlannerWarnings(plan, sel, display);
   const { critical: criticalWarnIds, warning: warningWarnIds } = useMemo(
@@ -1923,10 +3322,43 @@ export default function PlanPage() {
   }, [warnList, openWarningsPanel]);
 
   const clientItems = plan.items.filter((it) => it.visibleToClient !== false);
-  const partitionWalls = wallsForLayer(plan.walls, "partitions");
-  const roomWalls = wallsForLayer(plan.walls, "room");
+  const partitionWalls = wallsForLayer(weldedWalls, "partitions");
+  const roomWalls = wallsForLayer(weldedWalls, "room");
 
   const draftCursor = orthoTools && draft.length > 0 ? cursor : null;
+
+  const activeWallMaterial = useMemo(
+    () => wallMaterialForTool(activeToolId).id,
+    [activeToolId],
+  );
+
+  const wallDraftFrom = draft.length > 0 ? draft[draft.length - 1] : null;
+
+  const wallDraftGuides = useMemo(() => {
+    if (tool !== "wall" || !cursor || display.snapGuides === false || altSnapRef.current) return [];
+    if (draftSnap?.guides?.length) {
+      const projected = draftSnap.guides
+        .filter((g) => g.type === "V" || g.type === "H")
+        .map((g) => ({ ...g }));
+      if (projected.length) return projected;
+    }
+    const from = wallDraftFrom || (draft.length === 1 ? draft[0] : null);
+    if (!from && !wallDraftFrom) return [];
+    return alignmentGuides(plan.nodes, resolvedWalls, cursor, plan.room, wallDraftFrom || from);
+  }, [tool, cursor, draft, wallDraftFrom, plan.nodes, resolvedWalls, plan.room, display.snapGuides, draftSnap]);
+
+  const wallDraftArea = useMemo(() => {
+    if (tool !== "wall" || draftSnap?.kind !== "close") return null;
+    const start = draft[0] || wallChainStartRef.current;
+    if (!start || !cursor) return null;
+    const pts = draft.length >= 2 ? [...draft, cursor] : [start, draft[0] || cursor, cursor];
+    return draftChainArea(pts);
+  }, [tool, draft, cursor, draftSnap]);
+
+  const wallDraftNodeAngles = useMemo(() => {
+    if (tool !== "wall" || !cursor || !wallDraftFrom) return [];
+    return angleAt(wallDraftFrom, resolvedWalls);
+  }, [tool, cursor, wallDraftFrom, resolvedWalls]);
 
   const itemPlacementPreview = useMemo(() => {
     if (tool !== "add" || !pending || !cursor) return null;
@@ -1953,11 +3385,6 @@ export default function PlanPage() {
 
   const showLabelFor = (lid) => layerState(lid).showLabels;
   const showDimsFor = (lid) => layerState(lid).showDims;
-  const selectZone = (e, zn) => {
-    e.stopPropagation();
-    setSel({ coll: "zones", id: zn.id });
-    if (!zn.auto && !zn.locked) startMove(e, "zones", zn);
-  };
 
   const itemProps = (it, lid, extra = {}) => (
     <ItemEl
@@ -1967,6 +3394,7 @@ export default function PlanPage() {
       selected={selection?.coll === "items" && selection.ids.includes(it.id)}
       hovered={hoverHit?.coll === "items" && hoverHit.id === it.id}
       showDims={showDimsFor(lid)}
+      fmtU={fmtU}
       showLabel={showLabelFor(lid)}
       activeLayer={active}
       vis={vis}
@@ -1981,6 +3409,8 @@ export default function PlanPage() {
       onResizeW={(e) => startResize(e, "items", it, "w")}
       onResizeH={(e) => startResize(e, "items", it, "h")}
       onRotateStart={(e) => startRotate(e, it)}
+      labelSelected={selection?.coll === "item-label" && selection.ids.includes(it.id)}
+      onLabelDown={startMoveItemLabel}
     />
   );
 
@@ -2010,6 +3440,18 @@ export default function PlanPage() {
 
   const focusPlanWarning = (w) => {
     if (!w) return;
+    if (w.targetType === "room" && w.targetId) {
+      const room = (plan.rooms || []).find((r) => r.id === w.targetId);
+      const zone = (plan.zones || []).find((z) => z.id === w.targetId);
+      const poly = room?.polygon || zone?.polygon;
+      if (poly?.length) {
+        const cx = poly.reduce((s, p) => s + p.x, 0) / poly.length;
+        const cy = poly.reduce((s, p) => s + p.y, 0) / poly.length;
+        setSel({ coll: "zones", id: w.targetId });
+        centerOnMm(cx, cy, 0.12);
+        return;
+      }
+    }
     if (w.objectIds?.[0]) {
       const id = w.objectIds[0];
       const it = plan.items.find((i) => i.id === id);
@@ -2019,7 +3461,7 @@ export default function PlanPage() {
       return;
     }
     if (w.wallIds?.[0]) {
-      const wall = plan.walls.find((x) => x.id === w.wallIds[0]);
+      const wall = resolvePlanWalls(plan).find((x) => x.id === w.wallIds[0]);
       if (!wall?.pts?.length) return;
       const cx = wall.pts.reduce((s, p) => s + p.x, 0) / wall.pts.length;
       const cy = wall.pts.reduce((s, p) => s + p.y, 0) / wall.pts.length;
@@ -2048,17 +3490,12 @@ export default function PlanPage() {
     }
   };
 
-  const cursorStyle = spacePan || tool === "pan" ? "grab" : tool === "add" || tool === "zone" || tool === "label" ? "copy" : tool === "link" ? "crosshair" : "default";
+  const cursorStyle = spacePan || tool === "pan" ? "grab" : tool === "wall" || tool === "structural" ? "crosshair" : tool === "add" || tool === "label" ? "copy" : tool === "link" ? "crosshair" : tool === "erase" ? "not-allowed" : "default";
   const drawerTitle = activeCategoryId
     ? (categoryById(activeCategoryId)?.label || layerById(active).name)
     : layerById(active).name;
-  const zonesEditMode = active === "zones" || activeSheetId === "zones";
   const hasSelection = !!(selection?.ids?.length);
-  const showProperties = (
-    (hasSelection && (selection?.coll !== "zones" || zonesEditMode))
-    || pinnedProperties
-    || warningsPanelOpen
-  );
+  const showProperties = hasSelection || pinnedProperties || warningsPanelOpen;
 
   const statusBar = (
     <div className="planner-coords no-print">
@@ -2070,6 +3507,9 @@ export default function PlanPage() {
           <span className="planner-coords__unit"> · {coordUnitLabel(display.coordUnit)}</span>
         </span>
       ) : "—"}
+      {tool === "erase" && (
+        <span className="planner-coords__sel"> · режим удаления — клик по объекту · Esc — выход</span>
+      )}
       {warnList.length > 0 && (
         <button
           type="button"
@@ -2096,6 +3536,10 @@ export default function PlanPage() {
             <>{selObj.name || "Помещение"} · {fmtCoordU(selObj.x)}, {fmtCoordU(selObj.y)}</>
           ) : sel.coll === "labels" ? (
             <><b>X</b> {fmtCoordU(selObj.x)} · <b>Y</b> {fmtCoordU(selObj.y)}</>
+          ) : sel.coll === "item-label" ? (
+            <>подпись · {buildItemLabelLines(selObj, plan)[0] || "—"}</>
+          ) : sel.coll === "dimensions" ? (
+            <>размер · {selObj.labelOverride || fmtU(Math.hypot((selObj.p2?.x || 0) - (selObj.p1?.x || 0), (selObj.p2?.y || 0) - (selObj.p1?.y || 0)))}</>
           ) : null}
         </span>
       )}
@@ -2109,27 +3553,50 @@ export default function PlanPage() {
           Выбрано: {selection.ids.length} · Shift+рамка · Ctrl+G
         </span>
       )}
-      {tool === "select" && zonesEditMode && (
-        <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
+      {tool === "select" && (
+        <span className="planner-coords__hint">
           ЛКМ — панорама · Shift+ЛКМ — рамка · Shift+drag — по оси
         </span>
       )}
-      {tool === "select" && !zonesEditMode && (
-        <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
-          Свободная расстановка · помещения — лист «Помещения»
+      {tool === "wall" && (
+        <span className="planner-coords__hint">
+          Зажать и тянуть — стена · замкнуть на стартовый узел · Esc — выход
+        </span>
+      )}
+      {tool === "structural" && structuralKind && (
+        <span className="planner-coords__hint">
+          {STRUCTURAL_KINDS[structuralKind]?.label}
+          {structuralKind === "column" ? " · клик — поставить" : " · тянуть — длина"}
+          {" · ширина "}
+          <input
+            type="number"
+            min={50}
+            step={10}
+            value={structuralWidth}
+            onChange={(e) => setStructuralWidth(Math.max(50, +e.target.value || STRUCTURAL_KINDS[structuralKind]?.defaultWidth || 200))}
+            style={{ width: 64, marginLeft: 4, padding: "2px 6px", borderRadius: 4, border: "1px solid #d9e0dc" }}
+          />
+          {" мм"}
+        </span>
+      )}
+      {tool === "measure" && (
+        <span className="planner-coords__hint">
+          1-й клик — точка A · 2-й — точка B · 3-й — отступ · Enter/Esc — завершить/отмена
         </span>
       )}
       {tool === "add" && pending && (
-        <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
-          Клик по полу — поставить объект
+        <span className="planner-coords__hint">
+          Клик — поставить{isRackKind(pending) ? " · Shift — несколько подряд" : ""}
+          {" · Ctrl+C / Ctrl+V — копировать"}
         </span>
       )}
       {linkFrom && (
         <span style={{ marginLeft: 10, color: "#1f6f8b" }}>Связь: выберите второй объект</span>
       )}
       {measure.length === 2 && (
-        <span style={{ marginLeft: 10, color: "#116355" }}>
-          Δ {fmtU(Math.hypot(measure[1].x - measure[0].x, measure[1].y - measure[0].y))}
+        <span style={{ marginLeft: 10, color: "#e0312a" }}>
+          Размер: {fmtU(Math.round(Math.hypot(measure[1].x - measure[0].x, measure[1].y - measure[0].y)))}
+          {rulerSnap?.angleSnap?.isSnapped ? ` · ${rulerSnap.angleSnap.snappedAngle}°` : ""}
         </span>
       )}
     </div>
@@ -2170,6 +3637,7 @@ export default function PlanPage() {
         toolDrawerContent={(
           <>
             <ObjectPalette
+              key={`presets-${materialPresetsRev}`}
               embedded
               active={active}
               tool={tool}
@@ -2181,7 +3649,7 @@ export default function PlanPage() {
               onWallThk={setWallThk}
               onRoomPatch={(patch) => setPlan((p) => ({ ...p, room: { ...p.room, ...patch } }))}
               specSummary={specSummary}
-              onSync={standalone ? undefined : syncSpec}
+              onSync={syncSpec}
               onSyncZones={() => setPlan((p) => syncAutoZones(p))}
               onSelectPlanItem={handlePickPlanItem}
               projectId={project?.id}
@@ -2201,7 +3669,7 @@ export default function PlanPage() {
                 onPick={handleToolPick}
                 onWallThk={setWallThk}
                 onRoomPatch={(patch) => setPlan((p) => ({ ...p, room: { ...p.room, ...patch } }))}
-                onSync={standalone ? undefined : syncSpec}
+                onSync={syncSpec}
                 onSyncZones={() => setPlan((p) => syncAutoZones(p))}
                 onSelectPlanItem={handlePickPlanItem}
                 projectId={project?.id}
@@ -2213,6 +3681,7 @@ export default function PlanPage() {
           zoom: z,
           display,
           unit,
+          onUnitChange: (id) => patchDisplay({ coordUnit: id }),
           onZoomPreset: setZoomTo,
           onToggle: toggleDisplay,
           onSetDisplay: patchDisplay,
@@ -2223,13 +3692,16 @@ export default function PlanPage() {
           activeLayerName: activeSheet.name,
           onUndo: undo,
           onRedo: redo,
-          onDelete: delSel,
+          onDelete: handleDeleteAction,
+          eraseMode: tool === "erase",
           onCopy: copySel,
           onGroup: groupSelection,
           onMeasure: () => handleToolPick(resolveTool("measure")),
           onLabel: () => handleToolPick(resolveTool("label")),
           onComment: () => handleToolPick(resolveTool("comment")),
           onExportPdf: () => exportPDF("full"),
+          onOpenVisualSettings: () => setVisualSettingsOpen(true),
+          onOpenMaterialPresets: () => setMaterialPresetsOpen(true),
         }}
         zoomProps={{
           zoom: z,
@@ -2251,7 +3723,8 @@ export default function PlanPage() {
         pinnedProperties={pinnedProperties}
         onTogglePinProperties={() => setPinnedProperties((p) => !p)}
         propertiesPanel={(
-          <PropertiesPanel
+          <PlannerErrorBoundary resetKey={selection?.ids?.[0] || ""}>
+            <PropertiesPanel
             tab={propsTab}
             onTabChange={setPropsTab}
             sel={sel}
@@ -2268,13 +3741,14 @@ export default function PlanPage() {
             onGroup={groupSelection}
             onUngroup={ungroupSelection}
             fmtU={fmtU}
-            onSync={standalone ? undefined : syncSpec}
+            onSync={syncSpec}
             specSummary={specSummary}
             allWarnings={warnList}
             onFocusWarning={focusPlanWarning}
             onClose={closePropertiesPanel}
             onSelectLink={handleSelectLink}
-          />
+            />
+          </PlannerErrorBoundary>
         )}
         canvas={(
           <svg
@@ -2284,15 +3758,21 @@ export default function PlanPage() {
             onPointerMove={onMove}
             onPointerUp={onUp}
             onWheel={onWheel}
-            onDoubleClick={() => (draft.length >= 2 ? finishDraft() : null)}
+            onDoubleClick={onDblClick}
             onContextMenu={onContextMenu}
             style={{ cursor: cursorStyle }}
           >
             <rect width="100%" height="100%" fill="#f7f8f6" data-canvas-bg="1" />
+            <PlannerWallDefs display={canvasDisplay} />
+            <PlannerLayerDefs />
             <PlanGridScreen view={view} width={svgSize.w} height={svgSize.h} display={canvasDisplay} />
             <PlanAxesScreen view={view} width={svgSize.w} height={svgSize.h} display={canvasDisplay} />
             <g data-main transform={`translate(${view.panX},${view.panY}) scale(${z})`}>
-              <SheetBackdrop room={plan.room} k={k} showBoundary={plan.room.showBoundary} />
+              <SheetBackdrop
+                room={plan.room}
+                k={k}
+                showBoundary={!useWallChainDims && (plan.room.showBoundary || !!plan.room.backdrop?.dataUrl)}
+              />
               {display.roomWhiteFill !== false && (
                 <g data-room-floors pointerEvents="none">
                   {plan.zones.map((zn) => (
@@ -2308,23 +3788,50 @@ export default function PlanPage() {
                     wall={w}
                     k={k}
                     editable={active === "room" && (tool === "select" || tool === "wall")}
+                    eraseMode={tool === "erase"}
                     selected={selection?.coll === "walls" && selection.ids[0] === w.id}
                     hovered={hoverHit?.coll === "walls" && hoverHit.id === w.id}
                     hasError={warnWallIds.has(w.id)}
                     hoverNodeIdx={hoverWallNode?.wallId === w.id ? hoverWallNode.idx : null}
                     fmtU={fmtU}
                     showDims={showDimsFor("room")}
-                    onSel={() => setSel({ coll: "walls", id: w.id })}
+                    chainDims={useWallChainDims}
+                    onSel={(e) => selectWall(e, w)}
                     onHover={(id) => setHoverHit(id ? { coll: "walls", id } : null)}
                     onNodeHover={(idx) => setHoverWallNode(idx == null ? null : { wallId: w.id, idx })}
                     onNode={startNode}
                     onDel={delSel}
-                    onWallMove={startWallMove}
+                    onMidNode={startWallMidNode}
                     openings={plan.items}
                     room={plan.room}
+                    allWalls={weldedWalls}
+                    display={canvasDisplay}
                   />
                 ))}
-                {showDimsFor("room") && plan.room.showBoundary && <RoomDims room={plan.room} k={k} fmtU={fmtU} />}
+                {showDimsFor("room") && plan.room.showBoundary && !planHasDrawnWalls(weldedWalls) && (
+                  <RoomDims room={plan.room} k={k} fmtU={fmtU} display={canvasDisplay} />
+                )}
+                {(plan.structurals || []).map((s) => (
+                  <StructuralEl
+                    key={s.id}
+                    s={s}
+                    k={k}
+                    editable={active === "room" && (tool === "select" || tool === "structural")}
+                    selected={selection?.coll === "structurals" && selection.ids[0] === s.id}
+                    hovered={hoverHit?.coll === "structurals" && hoverHit.id === s.id}
+                    fmtU={fmtU}
+                    showDims={showDimsFor("room")}
+                    chainDims={useWallChainDims}
+                    onSel={() => {
+                      if (tool === "erase") {
+                        deleteHit({ coll: "structurals", id: s.id });
+                        return;
+                      }
+                      setSel({ coll: "structurals", id: s.id });
+                    }}
+                    onDel={delSel}
+                  />
+                ))}
               </PlanLayerGroup>
               <PlanLayerGroup layerId="partitions" activeLayer={active} vis={vis} display={canvasDisplay}>
                 {partitionWalls.map((w) => (
@@ -2333,47 +3840,44 @@ export default function PlanPage() {
                     wall={w}
                     k={k}
                     editable={active === "partitions" && (tool === "select" || tool === "wall")}
+                    eraseMode={tool === "erase"}
                     selected={selection?.coll === "walls" && selection.ids[0] === w.id}
                     hovered={hoverHit?.coll === "walls" && hoverHit.id === w.id}
                     hasError={warnWallIds.has(w.id)}
                     hoverNodeIdx={hoverWallNode?.wallId === w.id ? hoverWallNode.idx : null}
                     fmtU={fmtU}
                     showDims={showDimsFor("partitions")}
-                    onSel={() => setSel({ coll: "walls", id: w.id })}
+                    chainDims={useWallChainDims}
+                    onSel={(e) => selectWall(e, w)}
                     onHover={(id) => setHoverHit(id ? { coll: "walls", id } : null)}
                     onNodeHover={(idx) => setHoverWallNode(idx == null ? null : { wallId: w.id, idx })}
                     onNode={startNode}
                     onDel={delSel}
-                    onWallMove={startWallMove}
+                    onMidNode={startWallMidNode}
                     openings={plan.items}
                     room={plan.room}
-                  />
-                ))}
-              </PlanLayerGroup>
-              <PlanLayerGroup layerId="zones" activeLayer={active} vis={vis} display={canvasDisplay}>
-                {plan.zones.map((zn) => (
-                  <ZoneEl
-                    key={zn.id}
-                    zn={zn}
-                    k={k}
-                    room={plan.room}
-                    selected={zonesEditMode && selection?.coll === "zones" && selection.ids[0] === zn.id}
-                    activeLayer={active}
-                    vis={vis}
+                    allWalls={weldedWalls}
                     display={canvasDisplay}
-                    interactive={zonesEditMode}
-                    showRoomLabels={display.showZoneNames !== false}
-                    showDetail={layerState("zones").showZoneDetail && display.showZoneNames}
-                    showFlow={display.showZoneFlow}
-                    showZoneAreas={display.showZoneAreas}
-                    showZoneFill={display.showZoneFill}
-                    zoneContoursOnly={display.zoneContoursOnly}
-                    onDown={(e) => selectZone(e, zn)}
-                    onResize={(e) => startResize(e, "zones", zn)}
-                    fmtU={fmtU}
                   />
                 ))}
               </PlanLayerGroup>
+              <g data-room-labels pointerEvents="none">
+                <LayerMutedWrap muted={layerState("zones").isMuted}>
+                  {plan.zones.map((zn) => (
+                    <ZoneEl
+                      key={`lbl-${zn.id}`}
+                      zn={zn}
+                      k={k}
+                      room={plan.room}
+                      interactive={false}
+                      showRoomLabels={display.showZoneNames !== false}
+                      showZoneAreas={display.showZoneAreas}
+                      showZoneFill={false}
+                      fmtU={fmtU}
+                    />
+                  ))}
+                </LayerMutedWrap>
+              </g>
               {LINE_LAYER_IDS.map((lid) => (
                 <PlanLayerGroup key={lid} layerId={lid} activeLayer={active} vis={vis} display={canvasDisplay}>
                   {linesByLayer(lid).map((l) => (
@@ -2388,7 +3892,13 @@ export default function PlanPage() {
                       activeLayer={active}
                       vis={vis}
                       display={canvasDisplay}
-                      onSel={() => setSel({ coll: "lines", id: l.id })}
+                      onSel={() => {
+                        if (tool === "erase") {
+                          deleteHit({ coll: "lines", id: l.id });
+                          return;
+                        }
+                        setSel({ coll: "lines", id: l.id });
+                      }}
                       onHover={(id) => setHoverHit(id ? { coll: "lines", id } : null)}
                       onNode={startNode}
                       onDel={delSel}
@@ -2411,6 +3921,10 @@ export default function PlanPage() {
                     onHover={(id) => setHoverHit(id ? { coll: "links", id } : null)}
                     onDown={(e) => {
                       e.stopPropagation();
+                      if (tool === "erase") {
+                        deleteHit({ coll: "links", id: link.id });
+                        return;
+                      }
                       if (tool === "select" || tool === "link") setSel({ coll: "links", id: link.id });
                     }}
                     onDel={() => { setSel({ coll: "links", id: link.id }); delSel(); }}
@@ -2438,26 +3952,146 @@ export default function PlanPage() {
                     display={canvasDisplay}
                     selected={selection?.coll === "labels" && selection.ids[0] === lb.id}
                     activeLayer={active}
-                    onDown={(e) => startMove(e, "labels", lb)}
+                    onDown={(e) => {
+                      if (tool === "erase") {
+                        e.stopPropagation();
+                        deleteHit({ coll: "labels", id: lb.id });
+                        return;
+                      }
+                      startMove(e, "labels", lb);
+                    }}
                   />
                 ))}
               </PlanLayerGroup>
-              <WallsTopOverlay walls={plan.walls} k={k} warnWallIds={warnWallIds} openings={plan.items} room={plan.room} />
+              <PlannerOverlayBoundary resetKey={`${selection?.coll}-${selection?.ids?.[0]}-${selection?.nodeIdx ?? ""}`}>
+              <WallsTopOverlay
+                walls={weldedWalls}
+                k={k}
+                warnWallIds={warnWallIds}
+                openings={plan.items}
+                room={plan.room}
+                display={canvasDisplay}
+                selectedWallId={selection?.coll === "walls" ? selection.ids[0] : null}
+                hoveredWallId={hoverHit?.coll === "walls" ? hoverHit.id : null}
+              />
+              </PlannerOverlayBoundary>
+              <PlannerOverlayBoundary resetKey={`wall-dims-${weldedWalls.length}`}>
+              {display.showDims && useWallChainDims && runtimeDimensions.length === 0 && (
+                <WallDimChains
+                  walls={weldedWalls}
+                  room={plan.room}
+                  items={plan.items}
+                  k={k}
+                  fmtU={fmtU}
+                  display={canvasDisplay}
+                />
+              )}
+              </PlannerOverlayBoundary>
+              <PlannerOverlayBoundary resetKey={`dims-${selection?.ids?.[0] || ""}`}>
               <g data-ui="dims-top" pointerEvents="none">
                 {selObj && sel.coll === "items" && display.showDims && selection?.ids?.length === 1 && (
                   <SelectionDims it={selObj} plan={plan} k={k} fmtU={fmtU} display={display} />
                 )}
                 {selection?.coll === "walls" && selection?.ids?.length === 1 && display.showDims && (() => {
-                  const w = plan.walls.find((wl) => wl.id === selection.ids[0]);
-                  return w ? <WallSelectionDims wall={w} room={plan.room} k={k} fmtU={fmtU} /> : null;
+                  const w = weldedWalls.find((wl) => wl.id === selection.ids[0]);
+                  return w ? <WallSelectionDims wall={w} room={plan.room} k={k} fmtU={fmtU} display={canvasDisplay} /> : null;
                 })()}
               </g>
+              </PlannerOverlayBoundary>
+              {display.showDims && (
+                <PlannerOverlayBoundary resetKey={`runtime-dims-${runtimeDimensions.length}`}>
+                <DimensionsLayer
+                  dimensions={runtimeDimensions}
+                  k={k}
+                  fmtDim={fmtU}
+                  display={canvasDisplay}
+                  selectedId={selection?.coll === "dimensions" ? selection.ids[0] : null}
+                  onSelect={(e, dim) => {
+                    if (dim.auto) return;
+                    if (tool === "erase") {
+                      deleteHit({ coll: "dimensions", id: dim.id });
+                      return;
+                    }
+                    setSelection({ coll: "dimensions", ids: [dim.id] });
+                  }}
+                  onDoubleClick={(e, dim, pos) => {
+                    if (dim.auto || dim.locked) return;
+                    setSelection({ coll: "dimensions", ids: [dim.id] });
+                    setDimensionEdit({
+                      id: dim.id,
+                      value: dim.labelOverride || "",
+                      x: pos.x,
+                      y: pos.y,
+                    });
+                  }}
+                />
+                </PlannerOverlayBoundary>
+              )}
               <g data-ui="overlay">
-                {guides.map((g, i) => (g.type === "V" ? (
-                  <line key={i} x1={g.at} y1={g.y0 ?? 0} x2={g.at} y2={g.y1 ?? plan.room.h} stroke="#116355" strokeWidth={1 * k} strokeDasharray={`${5 * k} ${4 * k}`} opacity={0.45} />
-                ) : (
-                  <line key={i} x1={g.x0 ?? 0} y1={g.at} x2={g.x1 ?? plan.room.w} y2={g.at} stroke="#116355" strokeWidth={1 * k} strokeDasharray={`${5 * k} ${4 * k}`} opacity={0.45} />
-                )))}
+                {tool !== "wall" && guides.map((g, i) => {
+                  if (g.type === "V") {
+                    return <line key={i} x1={g.at} y1={g.y0 ?? 0} x2={g.at} y2={g.y1 ?? plan.room.h} stroke="#116355" strokeWidth={1 * k} strokeDasharray={`${5 * k} ${4 * k}`} opacity={0.45} />;
+                  }
+                  if (g.type === "H") {
+                    return <line key={i} x1={g.x0 ?? 0} y1={g.at} x2={g.x1 ?? plan.room.w} y2={g.at} stroke="#116355" strokeWidth={1 * k} strokeDasharray={`${5 * k} ${4 * k}`} opacity={0.45} />;
+                  }
+                  if (g.a && g.b) {
+                    const isPerpLike = g.type === "perpendicular" || g.type === "wall-perp";
+                    const isExtLike = g.type === "continue" || g.type === "wall-extension" || g.type === "parallel" || g.type === "wall-parallel";
+                    return (
+                      <line
+                        key={i}
+                        x1={g.a.x}
+                        y1={g.a.y}
+                        x2={g.b.x}
+                        y2={g.b.y}
+                        stroke={g.color || "#116355"}
+                        strokeWidth={(isPerpLike ? 1.2 : 1) * k}
+                        strokeDasharray={isExtLike ? `${7 * k} ${5 * k}` : `${4 * k} ${3 * k}`}
+                        opacity={0.7}
+                      />
+                    );
+                  }
+                  if (g.type === "angle" && g.at && Number.isFinite(g.angle)) {
+                    const r = Math.max(plan.room.w, plan.room.h) * 1.5;
+                    const rad = (g.angle * Math.PI) / 180;
+                    const dx = Math.cos(rad) * r;
+                    const dy = Math.sin(rad) * r;
+                    return (
+                      <line
+                        key={i}
+                        x1={g.at.x - dx}
+                        y1={g.at.y - dy}
+                        x2={g.at.x + dx}
+                        y2={g.at.y + dy}
+                        stroke={g.color || "#116355"}
+                        strokeWidth={1 * k}
+                        strokeDasharray={`${7 * k} ${5 * k}`}
+                        opacity={0.5}
+                      />
+                    );
+                  }
+                  return null;
+                })}
+                {tool === "wall" && snapOn && display.snapGuides !== false && (
+                  <WallAlignmentGuides
+                    guides={wallDraftGuides}
+                    k={k}
+                    bounds={{ l: innerL, t: innerT, r: innerR, b: innerB }}
+                  />
+                )}
+                {tool === "wall" && draft.length === 0 && cursor && (
+                  <WallCursorPreview cursor={cursor} materialId={activeWallMaterial} thk={wallThk} k={k} />
+                )}
+                {tool === "wall" && (
+                  <WallSnapIndicator cursor={cursor} snapPt={draftSnap} k={k} angleSnapOn={draftAngleSnap?.isSnapped} />
+                )}
+                {tool === "wall" && wallDraftFrom && wallDraftNodeAngles.length > 0 && (
+                  <WallAngleLabels nodePt={wallDraftFrom} angles={wallDraftNodeAngles} k={k} />
+                )}
+                {tool === "wall" && cursor && (
+                  <WallLiveChips cursor={cursor} roomHeight={plan.room.height} areaM2={wallDraftArea} k={k} />
+                )}
                 {draft.length > 0 && (
                   <DraftLine
                     pts={draft}
@@ -2467,15 +4101,136 @@ export default function PlanPage() {
                     thk={wallThk}
                     color={tool === "wall" ? "#116355" : (LINE_STYLE[active] || LINE_STYLE.irrigation)?.color || "#1f6f8b"}
                     fmtU={fmtU}
+                    fmtDraftLen={tool === "wall" ? fmtWallDraftLen : fmtU}
                     snapPt={draftSnap}
                     angleSnap={draftAngleSnap}
                     room={plan.room}
+                    ventDuct={tool !== "wall" && (lineDraftMeta.layer || active) === "vent"}
+                    allWalls={tool === "wall" ? resolvedWalls : null}
+                    draftWallKind={tool === "wall" ? wallFieldsFromTool(activeToolId, active === "room" ? "outer" : "partition", plan.room, wallThk).kind : null}
+                    draftWallMaterial={tool === "wall" ? activeWallMaterial : null}
+                    lineDraft={{
+                      layer: lineDraftMeta.layer || active,
+                      ductSizeWmm: DEFAULT_DUCT_SIZE_W_MM,
+                      ductSizeHmm: DEFAULT_DUCT_SIZE_H_MM,
+                    }}
                   />
                 )}
                 {marquee && <SelectionMarquee rect={marquee} k={k} />}
                 {multiBounds && <MultiSelectBounds bounds={multiBounds} k={k} />}
-                {measure.length > 0 && (
-                  <MeasureEl pts={measure} cursor={measure.length === 1 && cursor ? draftPt(measure[0], cursor, draftSnapOpts()).point : cursor} k={k} fmtU={fmtU} />
+                {labelDraft && (
+                  <g data-ui="label-draft" pointerEvents="none">
+                    <circle
+                      cx={labelDraft.anchor.x}
+                      cy={labelDraft.anchor.y}
+                      r={4 * k}
+                      fill="#111"
+                      stroke="#fff"
+                      strokeWidth={0.6 * k}
+                    />
+                    <circle
+                      cx={labelDraft.anchor.x}
+                      cy={labelDraft.anchor.y}
+                      r={14 * k}
+                      fill="none"
+                      stroke="#116355"
+                      strokeWidth={1 * k}
+                      strokeDasharray={`${4 * k} ${3 * k}`}
+                      opacity={0.7}
+                    />
+                  </g>
+                )}
+                {display.showRulers !== false && (
+                  <g data-rulers pointerEvents={tool === "erase" || tool === "select" || tool === "measure" ? "all" : "none"}>
+                    {(plan.rulers || []).map((r) => (
+                      <RulerEl
+                        key={r.id}
+                        ruler={r}
+                        k={k}
+                        fmtU={fmtU}
+                        display={canvasDisplay}
+                        selected={selection?.coll === "rulers" && selection.ids[0] === r.id}
+                        onSel={() => {
+                          if (tool === "erase") {
+                            deleteHit({ coll: "rulers", id: r.id });
+                            return;
+                          }
+                          setSelection({ coll: "rulers", ids: [r.id] });
+                        }}
+                        onDel={(id) => deleteHit({ coll: "rulers", id })}
+                        onDragStart={startRulerDrag}
+                      />
+                    ))}
+                  </g>
+                )}
+                {measure.length === 2 && (
+                  <DimensionDraftEl
+                    p1={measure[0]}
+                    p2={measure[1]}
+                    offsetPoint={measureOffsetPt}
+                    k={k}
+                    fmtDim={fmtU}
+                    display={canvasDisplay}
+                    snapPt={rulerSnap}
+                  />
+                )}
+                {dimensionEdit && (
+                  <foreignObject
+                    x={dimensionEdit.x - 80 * k}
+                    y={dimensionEdit.y - 16 * k}
+                    width={160 * k}
+                    height={30 * k}
+                  >
+                    <input
+                      autoFocus
+                      value={dimensionEdit.value}
+                      onChange={(e) => setDimensionEdit((d) => ({ ...d, value: e.target.value }))}
+                      onBlur={() => {
+                        if (dimensionEdit.id) applyDimensionEdit(dimensionEdit.id, dimensionEdit.value.trim());
+                        setDimensionEdit(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          applyDimensionEdit(dimensionEdit.id, dimensionEdit.value.trim());
+                          setDimensionEdit(null);
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          setDimensionEdit(null);
+                        }
+                      }}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        border: "1px solid #d9e0dc",
+                        borderRadius: "5px",
+                        padding: "2px 6px",
+                        fontSize: `${11 * k}px`,
+                        fontFamily: "var(--mono)",
+                      }}
+                    />
+                  </foreignObject>
+                )}
+                {tool === "structural" && draft.length >= 1 && (
+                  <StructuralDraft
+                    kind={structuralKind}
+                    a={draft[0]}
+                    b={draft[1] || cursor}
+                    width={structuralWidth}
+                    k={k}
+                    fmtU={fmtU}
+                  />
+                )}
+                {tool === "select" && selection?.coll === "walls" && selection.ids?.length === 1 && (
+                  <PlannerOverlayBoundary resetKey={`edit-${selection.ids[0]}-${selection.nodeIdx ?? ""}`}>
+                  <WallEditOverlay
+                    walls={weldedWalls}
+                    selection={selection}
+                    k={k}
+                    stepMm={display.arrowStepMm ?? 10}
+                    onNudge={nudgeWallSelection}
+                  />
+                  </PlannerOverlayBoundary>
                 )}
                 {itemPlacementPreview?.item && (
                   <PlacementGhost
@@ -2493,6 +4248,17 @@ export default function PlanPage() {
           </svg>
         )}
       />
+      <input
+        ref={backdropInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleBackdropFile(file);
+          e.target.value = "";
+        }}
+      />
       <ContextMenu menu={ctxMenu} onClose={() => setCtxMenu(null)} onAction={handleCtxAction} />
       {standalone && (
         <AttachPlanModal
@@ -2504,37 +4270,23 @@ export default function PlanPage() {
           onAttach={handleAttachToProject}
         />
       )}
+      <PlannerVisualSettingsModal
+        open={visualSettingsOpen}
+        display={display}
+        onPatch={patchDisplay}
+        onClose={() => setVisualSettingsOpen(false)}
+      />
+      <PlannerMaterialPresetsModal
+        open={materialPresetsOpen}
+        onClose={() => setMaterialPresetsOpen(false)}
+        onChanged={() => setMaterialPresetsRev((n) => n + 1)}
+      />
+      <PlannerLabelModal
+        open={!!labelDraft}
+        targetName={labelDraft?.targetName}
+        onConfirm={confirmLabelDraft}
+        onCancel={cancelLabelDraft}
+      />
     </>
   );
-}
-
-function withDefaults(plan) {
-  const d = DEFAULT_PLAN();
-  if (!plan) return d;
-  return {
-    ...d,
-    ...plan,
-    room: { ...d.room, height: 3000, showBoundary: false, ...plan.room },
-    zones: plan.zones || [],
-    labels: plan.labels || [],
-    walls: (plan.walls || []).map((w) => ({
-      role: "partition",
-      kind: "new",
-      thicknessSide: "center",
-      height: plan.room?.height || 3000,
-      material: "",
-      ...w,
-    })),
-    lines: (plan.lines || []).map((l) => ({
-      ...l,
-      layer: migrateLayerId(l.layer, null),
-    })),
-    links: (plan.links || []).map((l) => ({ ortho: true, riseMm: null, ...l })),
-    items: (plan.items || []).map((i) => {
-      const base = { angle: 0, ...defaultObjectSpecSettings(i.kind), ...i };
-      const layer = migrateLayerId(base.layer, base.kind);
-      if (base.kind === "socket" && layer === "power") return { ...base, layer: "sockets" };
-      return { ...base, layer };
-    }),
-  };
 }

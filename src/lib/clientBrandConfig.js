@@ -25,7 +25,7 @@ export const CLIENT_SIMPLE_PURCHASE_MODES = [
   { id: "plumber", label: "Сантехник" },
   { id: "with_link", label: "С ссылкой" },
   { id: "without_link", label: "Без ссылки" },
-  { id: "ordered", label: "Заказано" },
+  { id: "closed", label: "Заказано/Куплено" },
 ];
 
 /** Основные режимы вкладки «Закупка» */

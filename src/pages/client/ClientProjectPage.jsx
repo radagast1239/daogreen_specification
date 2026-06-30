@@ -16,7 +16,7 @@ import { isClosedPurchaseStatus } from "../../lib/itemHelpers.js";
 import { applyClientSectionsFromSettings } from "../../lib/clientSectionsConfig.js";
 import ClientPurchaseGuide from "../../components/client/ClientPurchaseGuide.jsx";
 import ClientPurchaseViewToggles from "../../components/client/ClientPurchaseViewToggles.jsx";
-import ClientReplacementModal from "../../components/client/ClientReplacementModal.jsx";
+import ClientPdfExportModal from "../../components/client/ClientPdfExportModal.jsx";
 import {
   getClientCompactMode,
   getClientPurchaseLayout,
@@ -55,8 +55,23 @@ export default function ClientProjectPage() {
   const [loading, setLoading] = useState(true);
   const [qrUrl, setQrUrl] = useState("");
   const [replacementItem, setReplacementItem] = useState(null);
+  const [pdfExportOpen, setPdfExportOpen] = useState(false);
   const [purchaseLayout, setPurchaseLayoutState] = useState(() => getClientPurchaseLayout());
   const [clientCompact, setClientCompactState] = useState(() => getClientCompactMode());
+  const [topbarExpanded, setTopbarExpanded] = useState(() =>
+    typeof window !== "undefined" ? !window.matchMedia("(max-width: 860px)").matches : true
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(max-width: 860px)");
+    const onChange = () => {
+      if (mq.matches) setTopbarExpanded(false);
+    };
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   useEffect(() => {
     if (token) setClientScope(decodeURIComponent(token));
@@ -145,7 +160,8 @@ export default function ClientProjectPage() {
   const delta = versionInfo?.summary?.delta;
 
   const openPurchase = (mode = "categories") => {
-    setPurchaseMode(mode === "all" ? "categories" : mode);
+    const m = mode === "all" ? "categories" : mode === "ordered" ? "closed" : mode;
+    setPurchaseMode(m);
     setTab("purchase");
   };
 
@@ -226,6 +242,7 @@ export default function ClientProjectPage() {
       purchaseStatuses,
       pageUrl: typeof window !== "undefined" ? window.location.href : "",
       mode,
+      clientToken: token,
     });
   };
 
@@ -252,7 +269,13 @@ export default function ClientProjectPage() {
       </div>
 
       <div className="client-wrap">
-      <header className="client-topbar no-print" style={{ "--topbar-brand": branding.brandColor || "#116355" }}>
+      <header
+        className={
+          "client-topbar no-print" +
+          (topbarExpanded ? " client-topbar--expanded" : " client-topbar--compact")
+        }
+        style={{ "--topbar-brand": branding.brandColor || "#116355" }}
+      >
         <div className="client-topbar__row">
           <div className="client-topbar__brand">
             {branding.logoUrl ? (
@@ -270,11 +293,20 @@ export default function ClientProjectPage() {
               </p>
             </div>
           </div>
+          <button
+            type="button"
+            className="client-topbar__toggle btn btn-ghost btn-sm"
+            aria-expanded={topbarExpanded}
+            aria-label={topbarExpanded ? "Свернуть шапку" : "Развернуть шапку"}
+            onClick={() => setTopbarExpanded((v) => !v)}
+          >
+            {topbarExpanded ? "▲" : "▼"}
+          </button>
           <div className="client-topbar__actions">
             <button type="button" className="btn btn-sm" onClick={exportExcel}>
               Excel
             </button>
-            <button type="button" className="btn btn-sm" onClick={() => exportPdf("client_full")}>
+            <button type="button" className="btn btn-sm" onClick={() => setPdfExportOpen(true)}>
               PDF
             </button>
             <button type="button" className="btn btn-sm btn-primary" onClick={() => openPurchase("categories")}>
@@ -377,11 +409,7 @@ export default function ClientProjectPage() {
           documents={documents}
           qrUrl={qrUrl}
           onExportExcel={exportExcel}
-          onPdfFull={() => exportPdf("client_full")}
-          onPdfMerged={() => exportPdf("merged")}
-          onPdfPlumber={() => exportPdf("plumber")}
-          onPdfElectric={() => exportPdf("electric")}
-          onPdfInstaller={() => exportPdf("installer")}
+          onOpenPdf={() => setPdfExportOpen(true)}
         />
       )}
 
@@ -435,6 +463,12 @@ export default function ClientProjectPage() {
         onClose={() => setReplacementItem(null)}
         onSubmit={proposeReplacement}
       />
+      <ClientPdfExportModal
+        open={pdfExportOpen}
+        items={visibleItems}
+        onClose={() => setPdfExportOpen(false)}
+        onExport={exportPdf}
+      />
     </div>
   );
 }
@@ -456,12 +490,13 @@ function ClientBrandFooter({ branding }) {
   );
 }
 
-function DocsTab({ documents, qrUrl, onExportExcel, onPdfFull, onPdfMerged, onPdfPlumber, onPdfElectric, onPdfInstaller }) {
+function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
   return (
     <div className="card" style={{ padding: 22, marginTop: 16 }}>
       <h3>Документы</h3>
       <p className="muted" style={{ fontSize: 13 }}>
-        Книга закупки в Excel (11 листов со склеенными строками) и PDF по разделам / для специалистов.
+        Excel — полная книга закупки (11 листов). PDF — выберите формат: компактный список или полный
+        комплект с разделами и специалистами.
       </p>
       <div style={{ marginTop: 14 }}>
         <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>Excel</div>
@@ -474,33 +509,11 @@ function DocsTab({ documents, qrUrl, onExportExcel, onPdfFull, onPdfMerged, onPd
       <div style={{ marginTop: 16 }}>
         <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>PDF</div>
         <div className="row wrap" style={{ gap: 8 }}>
-          {onPdfFull && (
-            <button type="button" className="btn" onClick={onPdfFull}>
-              PDF — полный
-            </button>
-          )}
-          {onPdfMerged && (
-            <button type="button" className="btn" onClick={onPdfMerged}>
-              PDF — всё к покупке
-            </button>
-          )}
-          {onPdfPlumber && (
-            <button type="button" className="btn" onClick={onPdfPlumber}>
-              PDF — сантехник
-            </button>
-          )}
-          {onPdfElectric && (
-            <button type="button" className="btn" onClick={onPdfElectric}>
-              PDF — электрик
-            </button>
-          )}
-          {onPdfInstaller && (
-            <button type="button" className="btn" onClick={onPdfInstaller}>
-              PDF — монтажник
-            </button>
-          )}
+          <button type="button" className="btn btn-primary" onClick={onOpenPdf}>
+            Скачать PDF…
+          </button>
           <button type="button" className="btn" onClick={printPDF}>
-            Печать
+            Печать страницы
           </button>
         </div>
       </div>

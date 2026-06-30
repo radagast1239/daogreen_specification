@@ -97,10 +97,19 @@ function resolveMergedLink(items) {
   }
   return "";
 }
+function pickMergedPhoto(items) {
+  for (const it of items || []) {
+    const u = it?.imageUrl || it?.photoUrl;
+    if (u) return u;
+  }
+  return "";
+}
+
 function finalizeMergedRow(row) {
   const rep = row.sourceItems?.[0];
   row.supplier = resolveMergedSupplier(row.sourceItems) || row.supplier || "";
   row.link = resolveMergedLink(row.sourceItems) || row.link || "";
+  row.imageUrl = row.imageUrl || pickMergedPhoto(row.sourceItems);
   const resolved = resolveClientSection(rep || {});
   row.clientSection = resolved.section;
   row.clientSubsection = resolved.subsection || row.clientSubsection || "";
@@ -146,6 +155,9 @@ export function mergedPurchaseRows(items) {
     row.qty += Number(it.qty) || 0;
     row.sum += lineNet(it);
     row.sumVat += lineGross(it);
+    if (!row.imageUrl && (it.imageUrl || it.photoUrl)) {
+      row.imageUrl = it.imageUrl || it.photoUrl;
+    }
     row.sources.push({ id: it.id, module: it.module, qty: Number(it.qty) || 0, unit: it.unit });
     row.sourceItems.push(it);
   }

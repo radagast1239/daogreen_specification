@@ -37,6 +37,7 @@ const { default: projectsApi, clientRouter } = await import("./routes/projects.j
 const { default: adminApi } = await import("./routes/admin.js");
 const { default: presetsApi } = await import("./routes/presets.js");
 const { default: suppliersApi } = await import("./routes/suppliersApi.js");
+const { default: mediaApi } = await import("./routes/media.js");
 
 const isProd = process.env.NODE_ENV === "production";
 const corsOrigins = process.env.CORS_ORIGIN?.split(",").map((s) => s.trim()).filter(Boolean);
@@ -82,6 +83,7 @@ app.use("/api/projects", adminAuth, projectsApi);
 app.use("/api/presets", adminAuth, presetsApi);
 app.use("/api/suppliers", adminAuth, suppliersApi);
 app.use("/api/admin", adminAuth, adminApi);
+app.use("/api/media", adminAuth, mediaApi);
 app.use("/api/client", clientRouter);
 
 if (isProd) {

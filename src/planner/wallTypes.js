@@ -5,10 +5,14 @@ export const WALL_KINDS = {
   new: { label: "Новая", color: "#2f3431", dash: null },
   demolish: { label: "Демонтируемая", color: "#a5371f", dash: "10 6 2 6" },
   technical: { label: "Техническая", color: "#5a5f5c", dash: "6 4" },
-  sandwich: { label: "Сэндвич-панель", color: "#3d5a4c", dash: null },
-  brick: { label: "Кирпич", color: "#6b4a3a", dash: null },
-  drywall: { label: "Гипсокартон", color: "#5c6b62", dash: "8 4" },
+  sandwich: { label: "Сэндвич-панель PIR/PUR", color: "#3d6b52", dash: null },
+  food_panel: { label: "Пищевая моющаяся панель", color: "#2f8f6a", dash: null },
   cold_panel: { label: "Холодильная панель", color: "#1f6f8b", dash: null },
+  pvc_panel: { label: "ПВХ / санитарная облицовка", color: "#5a7a9e", dash: null },
+  brick: { label: "Кирпичная перегородка", color: "#8b5a42", dash: null },
+  drywall: { label: "ГКЛ влагостойкий", color: "#7a8478", dash: "8 4" },
+  glass: { label: "Стеклянная перегородка", color: "#4a9eb5", dash: "5 7" },
+  light_mesh: { label: "Лёгкая перегородка / сетка", color: "#9aa89e", dash: "6 5 2 5" },
 };
 
 export const THICKNESS_SIDES = [
@@ -45,8 +49,19 @@ export function displayWallThickness(wall) {
   return Math.max((wall?.thk || 100) * vs.strokeMul, vs.minStroke);
 }
 
-/** Толщина линии грани стены на экране (мм плана), стабильная при zoom. */
+/** Толщина контура грани в координатах плана → ~const px на экране (группа scale(z), k=1/z). */
 export function wallFaceStrokeWidth(k, wall) {
   const outer = wall?.role === "outer";
-  return (outer ? 1.35 : 1.15) * k;
+  const base = outer ? 2.35 : 2.1;
+  return base * k;
+}
+
+/** Толщина внутреннего контура относительно внешнего. */
+export function wallInnerFaceStrokeWidth(outerW) {
+  return Math.max(outerW * 0.86, outerW - 0.35 * (outerW / 2.1));
+}
+
+/** Толщина стены на экране, px (для упрощения отрисовки вдали). */
+export function wallScreenThicknessPx(wall, k) {
+  return (wall?.thk || 100) / Math.max(k, 0.001);
 }

@@ -3,8 +3,10 @@ import autoTable from "jspdf-autotable";
 import QRCode from "qrcode";
 import { money, num, mergedPurchaseRows } from "../store/helpers.js";
 import { lineGross, resolveResponsible, isBoughtStatus } from "./itemHelpers.js";
-import { groupByClientSection, getClientSectionLabelMap } from "../../shared/clientSections.js";
+import { getClientSectionLabelMap } from "../../shared/clientSections.js";
 import { generateProjectPdf } from "./pdfExport.js";
+import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdfFontSetup.js";
+import { buildPdfPhotoMap, pdfPhotoTableHooks, PDF_PHOTO_COL_WIDTH_MM } from "./pdfImageHelpers.js";
 
 function hexToRgb(hex) {
   const h = (hex || "#116355").replace("#", "");
@@ -63,13 +65,17 @@ function budgetLines(doc, items, project, y) {
   return y + 16;
 }
 
-function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStatuses, compact = false) {
+async function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStatuses, compact = false, pdfOpts = {}) {
+  const photoCol = 1;
+  const nameCol = 2;
+  const photoMap = await buildPdfPhotoMap(rows, undefined, pdfOpts);
   const head = compact
-    ? [["№", "Наименование", "Кол", "Ед", "Сумма", "Поставщик"]]
-    : [["№", "Наименование", "Кол", "Ед", "Сумма", "Поставщик", "Откуда"]];
+    ? [["№", "Фото", "Наименование", "Кол", "Ед", "Сумма", "Поставщик"]]
+    : [["№", "Фото", "Наименование", "Кол", "Ед", "Сумма", "Поставщик", "Откуда"]];
   const body = rows.map((r, i) => {
     const base = [
       i + 1,
+      "",
       r.name,
       num(r.qty),
       r.unit || "шт.",
@@ -83,9 +89,13 @@ function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStatuses, 
     startY,
     head,
     body,
-    styles: { fontSize: 7.5, cellPadding: 1.8 },
-    headStyles: { fillColor: brandRgb },
-    columnStyles: { 1: { cellWidth: compact ? 72 : 58 } },
+    styles: { fontSize: 7.5, cellPadding: 1.8, ...pdfTableFontStyles() },
+    headStyles: { fillColor: brandRgb, ...pdfTableHeadFontStyles() },
+    columnStyles: {
+      [photoCol]: { cellWidth: PDF_PHOTO_COL_WIDTH_MM },
+      [nameCol]: { cellWidth: compact ? 64 : 50 },
+    },
+    ...pdfPhotoTableHooks(photoMap, photoCol),
   });
   return doc.lastAutoTable.finalY + 8;
 }
@@ -137,9 +147,9 @@ function instructionBlock(doc, y) {
   y += 6;
   doc.setFontSize(9);
   const lines = [
-    "1. Начните с общего списка — одинаковые позиции уже объединены.",
-    "2. Отмечайте «заказано» и «куплено» в онлайн-версии по ссылке проекта.",
-    "3. Списки для сантехника, электрика и монтажника — в отдельных PDF.",
+    "1. «Общий список» — уникальные позиции (одинаковые с разных модулей уже объединены).",
+    "2. Ниже — те же позиции по разделам и для специалистов (не новые строки, а другой вид).",
+    "3. Отмечайте «заказано» и «куплено» в онлайн-версии по ссылке проекта.",
     "4. Если товара нет — оставьте комментарий в онлайн-версии.",
   ];
   for (const line of lines) {
@@ -149,38 +159,48 @@ function instructionBlock(doc, y) {
   return y + 6;
 }
 
-function categorySummaryTable(doc, items, project, y, brandRgb) {
+function categorySummaryTable(doc, merged, project, y, brandRgb) {
   y = ensureSpace(doc, y, 30);
   doc.setFontSize(11);
   doc.text("Сводка по разделам", 14, y);
-  y += 4;
-  const sections = groupByClientSection(items);
+  doc.setFontSize(8);
+  doc.setTextColor(100, 100, 100);
+  doc.text("Уникальные позиции после склейки одинаковых строк", 14, y + 5);
+  doc.setTextColor(30, 30, 30);
+  y += 10;
+  const bySection = new Map();
+  for (const row of merged || []) {
+    const title = row.clientSectionLabel || "Прочее";
+    if (!bySection.has(title)) bySection.set(title, []);
+    bySection.get(title).push(row);
+  }
+  const sections = [...bySection.entries()].sort(([a], [b]) => a.localeCompare(b, "ru"));
   autoTable(doc, {
     startY: y,
     head: [["Раздел", "Поз.", "Сумма", "Готово"]],
     body: sections.map(([title, list]) => {
-      const sum = list.reduce((s, i) => s + lineGross(i), 0);
-      const done = list.filter((i) => isBoughtStatus(i.status)).length;
+      const sum = list.reduce((s, r) => s + (r.sumVat || 0), 0);
+      const done = list.filter((r) => (r.sourceItems || []).every((i) => isBoughtStatus(i.status))).length;
       return [title, list.length, money(sum, project.currency), list.length ? `${Math.round((done / list.length) * 100)}%` : "0%"];
     }),
-    styles: { fontSize: 8 },
-    headStyles: { fillColor: brandRgb },
+    styles: { fontSize: 8, ...pdfTableFontStyles() },
+    headStyles: { fillColor: brandRgb, ...pdfTableHeadFontStyles() },
   });
   return doc.lastAutoTable.finalY + 10;
 }
 
-function renderFullPdf(doc, project, items, branding, brandRgb, purchaseStatuses) {
+async function renderFullPdf(doc, project, items, branding, brandRgb, purchaseStatuses, pdfOpts) {
   let y = drawTitleBlock(doc, project, branding, brandRgb, "Закупочный лист — полная версия");
   y = budgetLines(doc, items, project, y);
   y = instructionBlock(doc, y);
-  y = categorySummaryTable(doc, items, project, y, brandRgb);
-
   const merged = mergedPurchaseRows(items);
+  y = categorySummaryTable(doc, merged, project, y, brandRgb);
+
   y = ensureSpace(doc, y, 20);
   doc.setFontSize(11);
-  doc.text("Общий список закупки", 14, y);
+  doc.text(`Общий список закупки · ${merged.length} уникальных позиций`, 14, y);
   y += 4;
-  y = tableForMerged(doc, merged, project, y, brandRgb, purchaseStatuses);
+  y = await tableForMerged(doc, merged, project, y, brandRgb, purchaseStatuses, false, pdfOpts);
 
   const bySection = new Map();
   for (const row of merged) {
@@ -190,7 +210,7 @@ function renderFullPdf(doc, project, items, branding, brandRgb, purchaseStatuses
   }
   y = ensureSpace(doc, y, 20);
   doc.setFontSize(11);
-  doc.text("Закупка по категориям", 14, y);
+  doc.text("Закупка по разделам (те же позиции, другая группировка)", 14, y);
   y += 8;
   for (const [title, list] of bySection) {
     y = ensureSpace(doc, y, 30);
@@ -198,7 +218,7 @@ function renderFullPdf(doc, project, items, branding, brandRgb, purchaseStatuses
     doc.setFontSize(10);
     doc.text(`${title} — ${money(sum, project.currency)}`, 14, y);
     y += 4;
-    y = tableForMerged(doc, list, project, y, brandRgb, purchaseStatuses, true);
+    y = await tableForMerged(doc, list, project, y, brandRgb, purchaseStatuses, true, pdfOpts);
   }
 
   for (const [label, role] of [
@@ -212,13 +232,13 @@ function renderFullPdf(doc, project, items, branding, brandRgb, purchaseStatuses
     doc.setFontSize(11);
     doc.text(`Список для ${label.toLowerCase()}а`, 14, y);
     y += 4;
-    y = tableForMerged(doc, list, project, y, brandRgb, purchaseStatuses);
+    y = await tableForMerged(doc, list, project, y, brandRgb, purchaseStatuses, false, pdfOpts);
   }
 
   return contactsBlock(doc, branding, y);
 }
 
-function renderMergedPdf(doc, project, items, branding, brandRgb, purchaseStatuses) {
+async function renderMergedPdf(doc, project, items, branding, brandRgb, purchaseStatuses, pdfOpts) {
   let y = drawTitleBlock(doc, project, branding, brandRgb, "Всё к покупке");
   y = budgetLines(doc, items, project, y);
   const merged = mergedPurchaseRows(items);
@@ -226,10 +246,10 @@ function renderMergedPdf(doc, project, items, branding, brandRgb, purchaseStatus
   doc.setFontSize(11);
   doc.text(`Общий список · ${merged.length} позиций`, 14, y);
   y += 4;
-  tableForMerged(doc, merged, project, y, brandRgb, purchaseStatuses);
+  await tableForMerged(doc, merged, project, y, brandRgb, purchaseStatuses, false, pdfOpts);
 }
 
-function renderSpecialistPdf(doc, project, items, branding, brandRgb, purchaseStatuses, mode) {
+async function renderSpecialistPdf(doc, project, items, branding, brandRgb, purchaseStatuses, mode, pdfOpts) {
   const titles = {
     plumber: "Список для сантехника",
     electric: "Список для электрика",
@@ -270,14 +290,14 @@ function renderSpecialistPdf(doc, project, items, branding, brandRgb, purchaseSt
       const sum = list.reduce((s, r) => s + (r.sumVat || 0), 0);
       doc.text(`${title} — ${money(sum, project.currency)}`, 14, y);
       y += 4;
-      y = tableForMerged(doc, list, project, y, brandRgb, purchaseStatuses);
+      y = await tableForMerged(doc, list, project, y, brandRgb, purchaseStatuses, false, pdfOpts);
     }
   } else {
     y = ensureSpace(doc, y, 20);
     doc.setFontSize(11);
     doc.text(titles[mode] || "Список", 14, y);
     y += 4;
-    tableForMerged(doc, source, project, y, brandRgb, purchaseStatuses);
+    await tableForMerged(doc, source, project, y, brandRgb, purchaseStatuses, false, pdfOpts);
   }
 }
 
@@ -288,6 +308,7 @@ export async function generateClientPurchasePdf({
   purchaseStatuses,
   pageUrl,
   mode = "client_full",
+  clientToken,
 }) {
   if (mode === "flat") {
     return generateProjectPdf({ project, items, branding, purchaseStatuses, pageUrl });
@@ -295,18 +316,20 @@ export async function generateClientPurchasePdf({
 
   const purchaseItems = (items || []).filter((i) => i.itemRole !== "installation");
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  await setupPdfFonts(doc);
   const brandRgb = hexToRgb(branding.brandColor);
+  const pdfOpts = clientToken ? { clientToken } : {};
 
   const resolvedMode = mode === "client" ? "client_full" : mode;
 
   if (resolvedMode === "client_full") {
-    renderFullPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses);
+    await renderFullPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
   } else if (resolvedMode === "merged") {
-    renderMergedPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses);
+    await renderMergedPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
   } else if (["plumber", "electric", "installer", "consumables"].includes(resolvedMode)) {
-    renderSpecialistPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, resolvedMode);
+    await renderSpecialistPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, resolvedMode, pdfOpts);
   } else {
-    renderMergedPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses);
+    await renderMergedPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
   }
 
   await addQr(doc, branding, pageUrl);

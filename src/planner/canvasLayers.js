@@ -1,22 +1,16 @@
 /**
  * Отображение слоёв на холсте (этап 3): видимость, приглушение, подписи, размеры.
  */
-import { layerOpacity } from "./geometry.js";
+import { isLayerMuted, layerOpacity } from "./geometry.js";
 import { labelsVisible } from "./labelProperties.js";
 
 export const CONTEXT_LAYERS = new Set(["room", "partitions"]);
 
+export const MUTED_LAYER_OPACITY = 0.84;
+
 export function isLayerOnSheet(sheet, layerId, vis = {}) {
   if (vis[layerId] === false) return false;
   if (sheet?.hiddenLayers?.includes(layerId)) return false;
-  if (
-    sheet?.visibleLayers?.length
-    && !sheet.visibleLayers.includes(layerId)
-    && !CONTEXT_LAYERS.has(layerId)
-    && layerId !== "labels"
-  ) {
-    return false;
-  }
   return true;
 }
 
@@ -35,12 +29,13 @@ export function layerDisplayState(layerId, activeLayer, vis, display = {}, sheet
   const opacity = onSheet ? layerOpacity(layerId, activeLayer, true, display, sheet) : 0;
   const sheetActive = sheet?.activeLayer || activeLayer;
   const isActive = layerId === sheetActive || layerId === activeLayer;
+  const muted = opacity > 0 && isLayerMuted(layerId, activeLayer, display, sheet);
   return {
     opacity,
     visible: opacity > 0,
     isActive,
     isContext: CONTEXT_LAYERS.has(layerId),
-    isMuted: opacity > 0 && opacity < 0.92 && !isActive && !CONTEXT_LAYERS.has(layerId),
+    isMuted: muted,
     showLabels: labelsVisible(layerId, activeLayer, display, sheet),
     showDims: dimsVisible(layerId, activeLayer, display, sheet),
     showZoneDetail: isActive || activeLayer === "install" || activeLayer === "zones",

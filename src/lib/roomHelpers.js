@@ -25,6 +25,8 @@ export function newRoom(name = "") {
     recommendedCoolingKw: "",
     selectedItemId: "",
     actualCoolingKw: "",
+    acUnits: [],
+    acItemId: "",
     comment: "",
   };
 }

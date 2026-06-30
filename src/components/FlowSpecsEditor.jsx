@@ -9,6 +9,7 @@ import {
   flowSpecsClientNote,
   aggregateFlowM3,
   primaryFlowLink,
+  sumFlowSpecQty,
 } from "../../shared/flowSpecs.js";
 
 /** Вытяжка / насос: шт × м³/ч + ссылка */
@@ -28,11 +29,13 @@ export default function FlowSpecsEditor({
 
   const emit = (next) => {
     const draft = draftFlowSpecs(next);
+    const specQty = sumFlowSpecQty(draft);
     onChange({
       flowSpecs: draft,
       clientNote: flowSpecsClientNote(draft, name),
       exhaustM3: aggregateFlowM3(draft),
       link: primaryFlowLink(draft),
+      ...(specQty > 0 ? { qty: specQty, defaultQty: specQty } : {}),
     });
   };
 

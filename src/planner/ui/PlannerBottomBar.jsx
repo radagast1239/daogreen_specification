@@ -4,12 +4,18 @@ import {
   SNAP_ROUND_OPTIONS,
   ARROW_STEP_OPTIONS,
   COORD_UNITS,
-  GRID_FINE_STEP,
   GRID_MINOR_STEP,
   GRID_MEDIUM_STEP,
   GRID_MAJOR_STEP,
-  GRID_XL_STEP,
 } from "../gridSettings.js";
+import { DIMENSION_DISPLAY_MODES } from "../core/dimensions/display.js";
+
+const DIMENSION_MODE_LABELS = {
+  mm: "мм",
+  cm: "см",
+  m: "м",
+  remplanner_cm: "Rem CM",
+};
 
 const HIGHLIGHT_TOGGLES = [
   { key: "highlightRacks", label: "Стеллажи" },
@@ -20,13 +26,10 @@ const HIGHLIGHT_TOGGLES = [
 ];
 
 const LAYER_TOGGLES = [
-  { key: "dimInactive", label: "Приглушать слои" },
+  { key: "dimInactive", label: "Серые фоновые слои" },
   { key: "highlightActive", label: "Активный ярче" },
-  { key: "showZoneFlow", label: "Типы зон" },
   { key: "showZoneAreas", label: "Площади помещений" },
-  { key: "showZoneFill", label: "Заливка помещений" },
   { key: "roomWhiteFill", label: "Белый пол" },
-  { key: "zoneContoursOnly", label: "Только контуры" },
 ];
 
 export function PlannerBottomBar({
@@ -44,6 +47,7 @@ export function PlannerBottomBar({
   activeLayerName,
   onUndo,
   onRedo,
+  eraseMode = false,
   onDelete,
   onCopy,
   onGroup,
@@ -51,6 +55,8 @@ export function PlannerBottomBar({
   onLabel,
   onComment,
   onExportPdf,
+  onOpenVisualSettings,
+  onOpenMaterialPresets,
   footerLeft,
 }) {
   const [showDisplay, setShowDisplay] = useState(false);
@@ -71,8 +77,8 @@ export function PlannerBottomBar({
             <button
               key={id}
               type="button"
-              className={"planner-bottom-btn planner-bottom-btn--sm" + ((unit || display.coordUnit || "mm") === id ? " planner-bottom-btn--on" : "")}
-              onClick={() => onUnitChange?.(id) || onSetDisplay({ coordUnit: id })}
+              className={"planner-bottom-btn planner-bottom-btn--sm" + ((display.coordUnit || unit || "mm") === id ? " planner-bottom-btn--on" : "")}
+              onClick={() => (onUnitChange ? onUnitChange(id) : onSetDisplay?.({ coordUnit: id }))}
             >
               {label}
             </button>
@@ -80,7 +86,14 @@ export function PlannerBottomBar({
         </div>
         <button type="button" className="planner-bottom-btn" onClick={onUndo} title="Отменить (Ctrl+Z)">↶</button>
         <button type="button" className="planner-bottom-btn" onClick={onRedo} title="Повторить (Ctrl+Y)">↷</button>
-        <button type="button" className="planner-bottom-btn" onClick={onDelete} title="Удалить (Del)">⌫</button>
+        <button
+          type="button"
+          className={"planner-bottom-btn" + (eraseMode ? " planner-bottom-btn--on" : "")}
+          onClick={onDelete}
+          title="Удалить выделенное (Del) или режим удаления по клику"
+        >
+          ⌫
+        </button>
         <button type="button" className="planner-bottom-btn" onClick={onCopy} title="Копировать (Ctrl+C)">⧉</button>
         <button type="button" className="planner-bottom-btn" onClick={onGroup} title="Группировать (Ctrl+G)">⊞</button>
         <button type="button" className="planner-bottom-btn" onClick={onMeasure} title="Размер">⊢</button>
@@ -98,10 +111,10 @@ export function PlannerBottomBar({
           <div className="planner-display-pop planner-display-pop--wide planner-display-pop--up">
             <div className="planner-display-pop__section">Сетка</div>
             <Toggle label="Показывать сетку" on={display.showGrid !== false} onClick={() => onToggle("showGrid")} />
-            <Toggle label={`Тонкая (${GRID_FINE_STEP} мм)`} on={display.showFineGrid !== false} onClick={() => onToggle("showFineGrid")} />
             <Toggle label={`Мелкая (${GRID_MINOR_STEP} мм)`} on={display.showMinorGrid !== false} onClick={() => onToggle("showMinorGrid")} />
             <Toggle label={`Средняя (${GRID_MEDIUM_STEP} мм)`} on={display.showMediumGrid !== false} onClick={() => onToggle("showMediumGrid")} />
-            <Toggle label={`Крупная (${GRID_MAJOR_STEP} / ${GRID_XL_STEP} мм)`} on={display.showMajorGrid !== false} onClick={() => onToggle("showMajorGrid")} />
+            <Toggle label={`Крупная (${GRID_MAJOR_STEP} мм)`} on={display.showMajorGrid !== false} onClick={() => onToggle("showMajorGrid")} />
+            <Toggle label="Оси X/Y" on={!!display.showAxes} onClick={() => onToggle("showAxes")} />
             <div className="planner-display-pop__section">Магнит</div>
             <Toggle label="Привязка к сетке" on={display.snapGrid !== false} onClick={() => onToggle("snapGrid")} />
             <Toggle label="К стенам" on={display.snapWalls !== false} onClick={() => onToggle("snapWalls")} />
@@ -109,13 +122,13 @@ export function PlannerBottomBar({
             <Toggle label="Углы 0/45/90" on={display.snapAngles !== false} onClick={() => onToggle("snapAngles")} />
             <Toggle label="Направляющие" on={display.snapGuides !== false} onClick={() => onToggle("snapGuides")} />
             <Toggle label="Только внутри помещений" on={!!display.onlyInsideRooms} onClick={() => onToggle("onlyInsideRooms")} />
-            <div className="planner-display-pop__hint">Шаг сетки (мм)</div>
+            <div className="planner-display-pop__hint">Шаг привязки (мм) · Alt — без магнита</div>
             {SNAP_STEPS.map((step) => (
               <button
                 key={step}
                 type="button"
                 className={"planner-bottom-btn" + (snapStep === step ? " planner-bottom-btn--on" : "")}
-                onClick={() => onSetDisplay({ snapStep: step, gridStep: step })}
+                onClick={() => onSetDisplay({ snapStep: step })}
               >
                 {step}
               </button>
@@ -138,6 +151,26 @@ export function PlannerBottomBar({
         <Toggle label="Подписи" on={display.showLabels} onClick={() => onToggle("showLabels")} />
         <Toggle label="Размеры" on={display.showDims} onClick={() => onToggle("showDims")} />
         <Toggle label="Подсказки" on={display.showHints} onClick={() => onToggle("showHints")} />
+        {onOpenVisualSettings && (
+          <button
+            type="button"
+            className="planner-bottom-btn"
+            onClick={onOpenVisualSettings}
+            title="Настройки отображения: сетка, размеры, стены, подписи"
+          >
+            ◐
+          </button>
+        )}
+        {onOpenMaterialPresets && (
+          <button
+            type="button"
+            className="planner-bottom-btn"
+            onClick={onOpenMaterialPresets}
+            title="Типовые размеры материалов: ёмкости, стеллажи, насосы и др."
+          >
+            мм
+          </button>
+        )}
         <button type="button" className="planner-bottom-btn" onClick={onCenter} title="Центрировать">⊙</button>
         <button
           type="button"
@@ -163,7 +196,21 @@ export function PlannerBottomBar({
             <Toggle label="Связи" on={display.showLinks} onClick={() => onToggle("showLinks")} />
             <div className="planner-display-pop__section">Размеры</div>
             <Toggle label="Габариты" on={display.showObjectDims !== false} onClick={() => onToggle("showObjectDims")} />
+            <Toggle label="Линейки" on={display.showRulers !== false} onClick={() => onToggle("showRulers")} />
+            <Toggle label="Чистовые цепочки" on={display.showWallChainFinishing !== false} onClick={() => onToggle("showWallChainFinishing")} />
+            <Toggle label="Габаритные цепочки" on={display.showWallChainGross !== false} onClick={() => onToggle("showWallChainGross")} />
             <Toggle label="Отступы" on={display.showClearanceDims !== false} onClick={() => onToggle("showClearanceDims")} />
+            <div className="planner-display-pop__hint">Формат размерных подписей</div>
+            {DIMENSION_DISPLAY_MODES.map((mode) => (
+              <button
+                key={`dim-mode-${mode}`}
+                type="button"
+                className={"planner-bottom-btn" + ((display.dimensionDisplayMode || "remplanner_cm") === mode ? " planner-bottom-btn--on" : "")}
+                onClick={() => onSetDisplay({ dimensionDisplayMode: mode })}
+              >
+                {DIMENSION_MODE_LABELS[mode] || mode}
+              </button>
+            ))}
             <div className="planner-display-pop__section">PDF</div>
             <Toggle label="Сетка в монтажном PDF" on={!!display.pdfGridInstall} onClick={() => onToggle("pdfGridInstall")} />
             <Toggle label="Сетка в тех. листах PDF" on={!!display.pdfGridTechnical} onClick={() => onToggle("pdfGridTechnical")} />

@@ -137,3 +137,21 @@ export function primaryFlowLink(specs, fallback = "") {
   const list = normalizeFlowSpecs(specs);
   return list.find((s) => s.link)?.link || fallback;
 }
+
+/** Сумма шт из строк насоса/вытяжки (для колонки «Кол-во» в сборщике проекта). */
+export function sumFlowSpecQty(specs) {
+  const list = normalizeFlowSpecs(specs);
+  if (!list.length) return 0;
+  const sum = list.reduce((acc, s) => acc + (s.qty > 0 ? s.qty : 0), 0);
+  if (sum > 0) return sum;
+  if (list.some((s) => s.m3h > 0 || s.link)) return 1;
+  return 0;
+}
+
+/** Кол-во строки при сборке проекта: колонка qty или шт из flowSpecs. */
+export function resolveBuilderLineQty(line) {
+  const qty = Number(line?.qty) || 0;
+  if (qty > 0) return qty;
+  if (!isFlowSpecName(line?.name)) return 0;
+  return sumFlowSpecQty(line?.flowSpecs ?? resolveFlowSpecs(line));
+}

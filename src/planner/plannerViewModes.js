@@ -6,20 +6,20 @@ export const PLANNER_VIEW_MODES = [
     label: "2D",
     title: "Все листы — полный набор вкладок",
     sheetIds: null,
-    defaultSheetId: "source",
+    defaultSheetId: "base_plan",
   },
   {
     id: "walls",
     label: "Стены",
-    title: "Чертёж: исходный план, демонтаж, перегородки, помещения",
-    sheetIds: ["source", "demolition", "partitions", "zones"],
+    title: "Чертёж: исходный план, перегородки, зоны фермы",
+    sheetIds: ["base_plan", "partitions", "farm_zones"],
     defaultSheetId: "partitions",
   },
   {
     id: "objects",
     label: "Объекты",
     title: "Оборудование: стеллажи, мебель, сантехника",
-    sheetIds: ["racks", "furn", "sanitary"],
+    sheetIds: ["racks", "equipment", "plumbing"],
     defaultSheetId: "racks",
   },
   {
@@ -27,10 +27,10 @@ export const PLANNER_VIEW_MODES = [
     label: "Инженерка",
     title: "Инженерные системы: вода, дренаж, электрика, климат, вентиляция…",
     sheetIds: [
-      "water", "drain", "sockets", "light", "wiring", "panel",
-      "climate", "ac", "vent", "routes", "safety", "hygiene",
+      "irrigation", "drainage", "water_treatment", "electrical", "lighting",
+      "climate", "ventilation", "plumbing", "safety", "specification",
     ],
-    defaultSheetId: "water",
+    defaultSheetId: "irrigation",
   },
   {
     id: "3d",

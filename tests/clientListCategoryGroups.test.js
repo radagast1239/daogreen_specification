@@ -6,9 +6,9 @@ import {
 } from "../shared/clientListCategoryGroups.js";
 
 describe("clientListCategoryGroups", () => {
-  it("исключает стеллажи из списка", () => {
+  it("относит стеллажи к группе stellage", () => {
     expect(isStellagePurchaseModule({ module: "Стеллаж 1 — подтопление" })).toBe(true);
-    expect(resolveListCategoryGroupId({ module: "Стеллаж 1", category: "Каркас" })).toBeNull();
+    expect(resolveListCategoryGroupId({ module: "Стеллаж 1", category: "Каркас" })).toBe("stellage");
   });
 
   it("относит полив к сантехнике", () => {
@@ -22,11 +22,14 @@ describe("clientListCategoryGroups", () => {
 
   it("группирует merged rows без дублирования", () => {
     const rows = [
+      { sourceItems: [{ module: "Стеллаж 1", category: "Каркас" }], sumVat: 5 },
       { sourceItems: [{ module: "Общая магистраль полива и дренажа", category: "x" }], sumVat: 10 },
       { sourceItems: [{ module: "Электрика и щит", category: "y" }], sumVat: 20 },
     ];
     const groups = groupMergedByListCategories(rows);
-    expect(groups.map((g) => g.sectionId)).toEqual(expect.arrayContaining(["plumbing", "electrics"]));
-    expect(groups.reduce((n, g) => n + g.count, 0)).toBe(2);
+    expect(groups.map((g) => g.sectionId)).toEqual(
+      expect.arrayContaining(["stellage", "plumbing", "electrics"])
+    );
+    expect(groups.reduce((n, g) => n + g.count, 0)).toBe(3);
   });
 });

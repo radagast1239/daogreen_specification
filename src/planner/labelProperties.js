@@ -20,14 +20,23 @@ export const LABEL_AUDIENCES = [
   { id: "client", label: "Клиентская" },
 ];
 
+export const LABEL_FONT_SIZES = [8, 9, 10, 11, 12, 14, 16];
+
+export const DEFAULT_LABEL_FONT_PT = 11;
+
 const TANK_KINDS = new Set(["tank", "osmosis", "water_prep", "pump"]);
 const LIGHT_KINDS = new Set(["light_panel"]);
 
+function heightTag(heightMm, fallback = 1200) {
+  return `H=${Math.round((Number(heightMm ?? fallback) || fallback) / 10)}`;
+}
+
 /** Минимальный читаемый размер на экране (мм в мире плана). */
-export function labelFontSize(k, zoom) {
+export function labelFontSize(k, zoom, display, fontSizePt = null) {
   const z = zoom ?? (k > 0 ? 1 / k : 0.1);
-  const screenPt = Math.max(9, Math.min(14, 11));
-  return screenPt / z;
+  const screenPt = fontSizePt ?? Math.max(9, Math.min(14, DEFAULT_LABEL_FONT_PT));
+  const scale = display ? (display.labelScale ?? 1) : 1;
+  return (screenPt / z) * scale;
 }
 
 export function labelModeForItem(it, display = {}) {
@@ -76,6 +85,8 @@ export function buildItemLabelLines(it, plan, mode = "short") {
   const cat = catalogByKind(it.kind);
   const links = plan?.links || [];
   const items = plan?.items || [];
+  const p = it.params || {};
+  const category = it.category || "";
 
   if (mode === "number") {
     const num = it.rackNum || it.doorNum || it.openingNum || it.zoneNum || it.label;
@@ -104,6 +115,64 @@ export function buildItemLabelLines(it, plan, mode = "short") {
   if (isOpeningKind(it.kind)) {
     const base = it.openingNum ? `Проём ${it.openingNum}` : (it.label || cat?.label);
     return mode === "full" ? [base, cat?.label].filter(Boolean) : [base];
+  }
+
+  if (category === "electrical_panel" || it.kind === "panel") {
+    const line1 = `Электрощит ${p.groupName || "A"}`;
+    if (mode === "short") return [line1];
+    const h = heightTag(p.heightMm || it.mountHeightMm || 1200);
+    const line2 = `${h} · ${p.maxPowerKw || 0} кВт`;
+    return [line1, line2];
+  }
+
+  if (category === "socket" || it.kind === "socket") {
+    const ip = String(p.protectionIp || "").toUpperCase();
+    const ipNum = Number(ip.replace(/[^0-9]/g, "").slice(0, 2) || 0);
+    const wp = p.waterproof === true || ipNum >= 44;
+    const line1 = `Розетка ${p.groupName || "A"}`;
+    const line2 = [heightTag(p.heightMm || it.mountHeightMm || 1200), wp ? (ip || "IP") : null].filter(Boolean).join(" · ");
+    return mode === "short" ? [line1, line2].filter(Boolean) : [line1, line2, p.socketType || "standard_220"].filter(Boolean);
+  }
+
+  if (category === "light" || it.kind === "light_panel") {
+    const perLevel = Number(p.perLevel || 1);
+    const levels = Number(p.levels || 1);
+    const totalPowerW = Number(p.powerW || 0) * Math.max(1, Number(p.count || perLevel * levels));
+    if (p.linkedRackId) {
+      return [
+        `${perLevel}×${Math.round((Number(p.lengthMm || it.w || 1000) || 1000) / 10)} см / ярус`,
+        `${levels} ярусов`,
+        `${Math.round(totalPowerW)} Вт`,
+      ];
+    }
+    const base = it.label || cat?.label || "Светильник";
+    return mode === "short" ? [base] : [base, `${Math.round(Number(p.lengthMm || it.w || 0))} мм · ${Math.round(Number(p.powerW || 0))} Вт`];
+  }
+
+  if (["air_conditioner", "indoor_unit", "outdoor_unit"].includes(category) || ["ac_indoor", "ac_outdoor", "ac_floor", "ac_duct", "air_conditioner"].includes(it.kind)) {
+    const base = it.label || cat?.label || "Кондиционер";
+    if (mode === "short") return [base, `${Math.round(Number(p.airflowM3h || 0))} м3/ч`];
+    return [base, `${Math.round(Number(p.coolingPowerKw || 0))} кВт · ${Math.round(Number(p.airflowM3h || 0))} м3/ч`];
+  }
+
+  if (["fan", "circulation_fan", "supply", "exhaust"].includes(category) || ["blade_fan", "vent_unit", "recirc", "supply", "exhaust"].includes(it.kind)) {
+    const base = it.label || cat?.label || "Вентиляция";
+    return mode === "short" ? [base] : [base, `${Math.round(Number(p.airflowM3h || 0))} м3/ч`];
+  }
+
+  if (category === "dehumidifier") {
+    const base = it.label || cat?.label || "Осушитель";
+    return mode === "short" ? [base] : [base, `${Math.round(Number(p.capacityLDay || 0))} л/сут`];
+  }
+
+  if (category === "humidifier") {
+    const base = it.label || cat?.label || "Увлажнитель";
+    return mode === "short" ? [base] : [base, `${Math.round(Number(p.capacityLh || 0))} л/ч`];
+  }
+
+  if (["temperature_sensor", "humidity_sensor", "co2_sensor", "air_quality_sensor", "dew_point_sensor", "pressure_sensor"].includes(category)) {
+    const base = it.label || cat?.label || "Датчик";
+    return mode === "short" ? [base] : [base, p.sensorType || category];
   }
 
   const base = it.label || cat?.label || "?";
@@ -146,31 +215,94 @@ export function autoItemLabelPlacement(it, room = null) {
   };
 }
 
+/** Зафиксировать текущую авто-позицию подписи на объекте. */
+export function pinItemLabelFromAuto(it, room = null) {
+  const place = autoItemLabelPlacement(it, room);
+  const anchor = itemAnchor(it);
+  return {
+    labelPinned: true,
+    labelOffsetX: place.x - anchor.x,
+    labelOffsetY: place.y - anchor.y,
+  };
+}
+
+/** Позиция подписи объекта: авто или сохранённая пользователем. */
+export function resolveItemLabelPlacement(it, room = null) {
+  if (it.labelHidden) return null;
+  const anchor = itemAnchor(it);
+  if (it.labelPinned) {
+    const ox = it.labelOffsetX ?? 0;
+    const oy = it.labelOffsetY ?? 0;
+    const dist = Math.hypot(ox, oy);
+    const external = dist > Math.max(it.w, it.h) * 0.35 + 120;
+    return {
+      anchor,
+      x: anchor.x + ox,
+      y: anchor.y + oy,
+      external,
+    };
+  }
+  return autoItemLabelPlacement(it, room);
+}
+
+export function resolveLabelAnchor(lb, target) {
+  if (target && lb.anchorRelX != null && lb.anchorRelY != null) {
+    return { x: target.x + lb.anchorRelX, y: target.y + lb.anchorRelY };
+  }
+  if (lb.anchorX != null && lb.anchorY != null) {
+    return { x: lb.anchorX, y: lb.anchorY };
+  }
+  if (target) return itemAnchor(target);
+  return null;
+}
+
 export function resolveFreeLabelPosition(lb, target) {
-  if (!target) return { x: lb.x, y: lb.y, anchor: null };
-  const anchor = itemAnchor(target);
-  if (lb.pinned) return { x: lb.x, y: lb.y, anchor };
+  const anchor = resolveLabelAnchor(lb, target);
+  if (lb.pinned || !anchor) {
+    return { x: lb.x, y: lb.y, anchor };
+  }
   const ox = lb.offsetX ?? (lb.x - anchor.x);
   const oy = lb.offsetY ?? (lb.y - anchor.y);
   return { x: anchor.x + ox, y: anchor.y + oy, anchor };
 }
 
-export function defaultFreeLabelFields(target, pos, text) {
-  const anchor = target ? itemAnchor(target) : { x: pos.x, y: pos.y };
+/** Авторазмещение плашки выноски относительно точки привязки. */
+export function autoCalloutPlacement(anchor, room = null, target = null) {
+  const rcx = room?.w ? room.w / 2 : anchor.x;
+  const rcy = room?.h ? room.h / 2 : anchor.y;
+  const dx = anchor.x - rcx;
+  const dy = anchor.y - rcy;
+  const dist = Math.hypot(dx, dy) || 1;
+  const size = target ? Math.max(target.w, target.h) : 400;
+  const push = size * 0.55 + 350;
+  return {
+    x: anchor.x + (dx / dist) * push,
+    y: anchor.y + (dy / dist) * push - 60,
+  };
+}
+
+export function defaultFreeLabelFields({ anchor, target = null, textBox, text, fontSizePt = DEFAULT_LABEL_FONT_PT }) {
+  const ax = anchor.x;
+  const ay = anchor.y;
   return {
     text: text || "Подпись",
     targetId: target?.id || null,
-    x: pos.x,
-    y: pos.y,
-    offsetX: pos.x - anchor.x,
-    offsetY: pos.y - anchor.y,
+    anchorX: ax,
+    anchorY: ay,
+    anchorRelX: target ? ax - target.x : null,
+    anchorRelY: target ? ay - target.y : null,
+    x: textBox.x,
+    y: textBox.y,
+    offsetX: textBox.x - ax,
+    offsetY: textBox.y - ay,
+    fontSizePt,
     pinned: false,
     audience: "internal",
   };
 }
 
-export function labelBoxMetrics(lines, k, zoom) {
-  const fs = labelFontSize(k, zoom);
+export function labelBoxMetrics(lines, k, zoom, fontSizePt = null) {
+  const fs = labelFontSize(k, zoom, null, fontSizePt);
   const padX = 6 * k;
   const padY = 5 * k;
   const lineH = fs * 1.35;
@@ -193,7 +325,8 @@ export function collectLabelWarnings(plan, display = {}) {
     const mode = labelModeForItem(it, display);
     if (mode === "number" && display.labelMode === "off") return;
     const lines = buildItemLabelLines(it, plan, mode);
-    const place = autoItemLabelPlacement(it, plan.room);
+    const place = resolveItemLabelPlacement(it, plan.room);
+    if (!place) return;
     const k = 1;
     const { w, h } = labelBoxMetrics(lines, k, 0.1);
     addBox(it.id, place.x - w / 2, place.y, w, h, lines[0]);
@@ -203,7 +336,7 @@ export function collectLabelWarnings(plan, display = {}) {
     const tgt = lb.targetId ? plan.items.find((i) => i.id === lb.targetId) : null;
     const pos = resolveFreeLabelPosition(lb, tgt);
     const lines = (lb.text || "").split("\n").filter(Boolean);
-    const { w, h } = labelBoxMetrics(lines, 1, 0.1);
+    const { w, h } = labelBoxMetrics(lines, 1, 0.1, lb.fontSizePt);
     addBox(lb.id, pos.x, pos.y, w, h, lines[0]);
   });
 

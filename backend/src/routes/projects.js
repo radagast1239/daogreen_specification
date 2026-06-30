@@ -1174,6 +1174,17 @@ export const clientRouter = Router();
 clientRouter.use(clientAuthMiddleware);
 
 clientRouter.get("/p/:token", serveClientProject);
+clientRouter.get("/p/:token/media", async (req, res) => {
+  try {
+    const { loadProxyImage } = await import("../services/imageProxy.js");
+    const { buffer, contentType } = await loadProxyImage(req.query.url);
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(buffer);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || "Image fetch failed" });
+  }
+});
 clientRouter.patch("/p/:token/items/bulk", bulkPatchClientItems);
 clientRouter.patch("/p/:token/items/:itemId", patchClientItem);
 clientRouter.post("/p/:token/items/:itemId/propose-replacement", proposeClientReplacement);
