@@ -1,0 +1,1 @@
+import{r as a,j as n}from"./vendor-Bmlq3N-q.js";import{L as c,N as r}from"./index-C_FrrS5D.js";function i(){const[t,e]=a.useState(c()),s=()=>{const o=!t;r(o),e(o)};return n.jsx("button",{type:"button",className:`btn btn-sm ${t?"btn-primary":""}`,onClick:s,title:"Плотнее строки в таблицах",children:t?"Компактно ✓":"Компактные таблицы"})}export{i as C};

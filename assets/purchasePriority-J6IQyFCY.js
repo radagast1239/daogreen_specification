@@ -1,0 +1,1 @@
+const e=[{id:"urgent",label:"Срочно",today:!0},{id:"before_install",label:"До монтажа",today:!0},{id:"before_launch",label:"До запуска",today:!1},{id:"later",label:"Позже",today:!1},{id:"optional",label:"Опционально",today:!1}],t=new Set(e.filter(a=>a.today).map(a=>a.id));function l(a){return t.has(a)}export{e as P,l as i};
