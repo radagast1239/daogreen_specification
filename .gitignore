@@ -10,6 +10,7 @@ build
 .env.*
 !.env.example
 backend/.env
+backend/.env.*
 !backend/.env.example
 
 backend/node_modules
@@ -29,7 +30,13 @@ materials-photos/*
 import-sources/
 backend/import-sources/
 
+coverage/
+
 tmp-*
+tmp*
+*.zip
+*_backup*
+*_old*
 
 # Duplicate workspace copies (must not ship in archive)
 daogreen-spec 1/
