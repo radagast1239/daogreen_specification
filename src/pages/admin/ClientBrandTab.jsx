@@ -5,9 +5,12 @@ import {
   CLIENT_TAB_OPTIONS,
   clientBrandToSettings,
   DEFAULT_PDF_COLUMN_IDS,
+  DEFAULT_PDF_FOOTER_PLACEHOLDER,
   DEFAULT_TRUST_LINES,
   DEFAULT_VISIBLE_TAB_IDS,
+  detectPdfColumnPreset,
   PDF_COLUMN_OPTIONS,
+  PDF_COLUMN_PRESETS,
 } from "../../lib/clientBrandConfig.js";
 
 function ColorField({ label, value, onChange }) {
@@ -52,6 +55,14 @@ export default function ClientBrandTab({ settings, onSaved }) {
     if (!set.has("name")) set.add("name");
     patch("pdfColumns", PDF_COLUMN_OPTIONS.map((c) => c.id).filter((cid) => set.has(cid)));
   };
+
+  const applyPdfPreset = (presetId) => {
+    const preset = PDF_COLUMN_PRESETS.find((p) => p.id === presetId);
+    if (!preset || !preset.columns) return;
+    patch("pdfColumns", PDF_COLUMN_OPTIONS.map((c) => c.id).filter((cid) => preset.columns.includes(cid)));
+  };
+
+  const activePreset = detectPdfColumnPreset(brand.pdfColumns);
 
   const save = async () => {
     setSaving(true);
@@ -201,19 +212,46 @@ export default function ClientBrandTab({ settings, onSaved }) {
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
           Снимите галочку, чтобы скрыть вкладку (минимум одна должна остаться). «Охлаждение» видна только если в проекте есть расчёт.
         </p>
+        <div style={{ fontSize: 13, fontWeight: 600, margin: "4px 0 6px" }}>Основные</div>
         <div className="row wrap" style={{ gap: 8 }}>
-          {CLIENT_TAB_OPTIONS.map((t) => (
+          {CLIENT_TAB_OPTIONS.filter((t) => t.group !== "extra").map((t) => (
             <label key={t.id} className="chip row" style={{ gap: 6, cursor: "pointer" }}>
               <input type="checkbox" checked={brand.clientVisibleTabs.includes(t.id)} onChange={() => toggleTab(t.id)} />
               {t.label}
             </label>
           ))}
         </div>
+        <div style={{ fontSize: 13, fontWeight: 600, margin: "14px 0 6px" }}>Дополнительные</div>
+        <div className="row wrap" style={{ gap: 8 }}>
+          {CLIENT_TAB_OPTIONS.filter((t) => t.group === "extra").map((t) => (
+            <label key={t.id} className="chip row" style={{ gap: 6, cursor: "pointer" }}>
+              <input type="checkbox" checked={brand.clientVisibleTabs.includes(t.id)} onChange={() => toggleTab(t.id)} />
+              {t.label}
+            </label>
+          ))}
+        </div>
+        <p className="muted" style={{ fontSize: 11, margin: "10px 0 0" }}>
+          «По поставщикам» и «Проблемы» — режимы внутри вкладки «Купить сейчас», отдельными вкладками пока не выносятся.
+        </p>
       </div>
 
       <div className="card" style={{ padding: 20, marginBottom: 16 }}>
         <h3 style={{ marginTop: 0 }}>PDF закупки</h3>
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Колонки таблицы в файле, который клиент скачивает с вкладки «Обзор».</p>
+        <div className="row wrap" style={{ gap: 6, marginBottom: 12 }}>
+          <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>Пресет:</span>
+          {PDF_COLUMN_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={"btn btn-sm" + (activePreset === p.id ? " btn-primary" : "")}
+              disabled={p.id === "custom"}
+              onClick={() => applyPdfPreset(p.id)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
         <div className="row wrap" style={{ gap: 8, marginBottom: 14 }}>
           {PDF_COLUMN_OPTIONS.map((c) => (
             <label key={c.id} className="chip row" style={{ gap: 6, cursor: c.required ? "default" : "pointer", opacity: c.required ? 0.7 : 1 }}>
@@ -231,7 +269,7 @@ export default function ClientBrandTab({ settings, onSaved }) {
           <label>Подвал PDF</label>
           <input
             value={brand.pdfFooter}
-            placeholder="Daogreen · spec@example.com · актуально на дату выгрузки"
+            placeholder={DEFAULT_PDF_FOOTER_PLACEHOLDER}
             onChange={(e) => patch("pdfFooter", e.target.value)}
           />
         </div>

@@ -1,21 +1,28 @@
+// group: "primary" (Основные) | "extra" (Дополнительные) — влияет только на подачу в настройках.
+// ВАЖНО: ids не менять (старые ссылки/настройки), меняем только label и группировку.
 export const CLIENT_TAB_OPTIONS = [
-  { id: "purchase", label: "Список закупки" },
-  { id: "docs", label: "Документы" },
-  { id: "overview", label: "Обзор" },
-  // legacy — скрыты от клиента по умолчанию
-  { id: "merged", label: "Всё к покупке", legacy: true },
-  // legacy — для настроек бренда и миграции старых ссылок
-  { id: "cooling", label: "Охлаждение", legacy: true },
-  { id: "categories", label: "По категориям", legacy: true },
-  { id: "modules", label: "По стеллажам", legacy: true },
-  { id: "install", label: "Монтаж", legacy: true },
-  { id: "plumber", label: "Сантехник", legacy: true },
-  { id: "electric", label: "Электрик", legacy: true },
-  { id: "installer", label: "Монтажник", legacy: true },
-  { id: "consumables", label: "Расходники", legacy: true },
+  { id: "overview", label: "Обзор", group: "primary" },
+  { id: "purchase", label: "Купить сейчас", group: "primary" },
+  { id: "categories", label: "По разделам", group: "primary", legacy: true },
+  { id: "docs", label: "Документы", group: "primary" },
+  // legacy — режимы закупки / миграция старых ссылок, по умолчанию скрыты
+  { id: "merged", label: "Вся закупка", group: "extra", legacy: true },
+  { id: "modules", label: "По стеллажам", group: "extra", legacy: true },
+  { id: "install", label: "Монтаж", group: "extra", legacy: true },
+  { id: "plumber", label: "Сантехник", group: "extra", legacy: true },
+  { id: "electric", label: "Электрик", group: "extra", legacy: true },
+  { id: "installer", label: "Монтажник", group: "extra", legacy: true },
+  { id: "consumables", label: "Расходники", group: "extra", legacy: true },
+  { id: "cooling", label: "Охлаждение", group: "extra", legacy: true },
 ];
 
-export const DEFAULT_VISIBLE_TAB_IDS = ["purchase", "docs"];
+// TODO CLIENT-TABS-PDF-SETTINGS-001: «По поставщикам» и «Проблемы» пока не отдельные
+// клиентские вкладки, а режимы/блоки внутри вкладки «Купить сейчас»
+// (see ClientPurchasePanel: mode "suppliers" и блок ProblemsSummary).
+// Сделать их самостоятельными вкладками = менять роутинг ClientProjectPage и
+// маппинг tab↔purchaseMode — вынесено в отдельную задачу, чтобы не ломать клиентский экран.
+
+export const DEFAULT_VISIBLE_TAB_IDS = ["overview", "purchase", "docs"];
 
 /** Режимы закупки для клиента */
 export const CLIENT_SIMPLE_PURCHASE_MODES = [
@@ -30,8 +37,8 @@ export const CLIENT_SIMPLE_PURCHASE_MODES = [
 
 /** Основные режимы вкладки «Закупка» */
 export const PRIMARY_PURCHASE_MODES = [
-  { id: "all", label: "Все к закупке" },
-  { id: "categories", label: "По категориям" },
+  { id: "all", label: "Вся закупка" },
+  { id: "categories", label: "По разделам" },
   { id: "suppliers", label: "По поставщикам" },
   { id: "modules", label: "По стеллажам" },
 ];
@@ -78,9 +85,9 @@ export function normalizeVisibleTabIds(raw) {
     (id) => id === "purchase" || id === "merged" || LEGACY_PURCHASE_TABS.has(id)
   );
   const out = [];
+  if (incoming.includes("overview")) out.push("overview");
   if (wantsPurchase) out.push("purchase");
   if (incoming.includes("docs")) out.push("docs");
-  if (incoming.includes("overview")) out.push("overview");
   if (!out.length) return [...DEFAULT_VISIBLE_TAB_IDS];
   return out;
 }
@@ -108,6 +115,42 @@ export const PDF_COLUMN_OPTIONS = [
 ];
 
 export const DEFAULT_PDF_COLUMN_IDS = ["name", "qty", "unit", "price", "sum", "supplier"];
+
+/** Пресеты набора колонок PDF закупки */
+export const PDF_CLIENT_COLUMN_IDS = [
+  "name",
+  "qty",
+  "unit",
+  "price",
+  "sum",
+  "supplier",
+  "clientSection",
+  "link",
+  "status",
+];
+
+export const PDF_FULL_COLUMN_IDS = PDF_COLUMN_OPTIONS.map((c) => c.id);
+
+export const PDF_COLUMN_PRESETS = [
+  { id: "client", label: "Для клиента", columns: PDF_CLIENT_COLUMN_IDS },
+  { id: "full", label: "Внутренний полный", columns: PDF_FULL_COLUMN_IDS },
+  { id: "custom", label: "Кастомный", columns: null },
+];
+
+const sameColumnSet = (a = [], b = []) =>
+  a.length === b.length && a.every((id) => b.includes(id)) && b.every((id) => a.includes(id));
+
+/** Какому пресету соответствует текущий набор колонок ("custom", если ни одному) */
+export function detectPdfColumnPreset(columns = []) {
+  for (const preset of PDF_COLUMN_PRESETS) {
+    if (preset.columns && sameColumnSet(columns, preset.columns)) return preset.id;
+  }
+  return "custom";
+}
+
+/** Дефолтный подвал PDF (placeholder, не подставляется в файл — только подсказка в настройках) */
+export const DEFAULT_PDF_FOOTER_PLACEHOLDER =
+  "Daogreen · спецификация актуальна на дату выгрузки · укажите контакт";
 
 export const DEFAULT_TRUST_LINES = [
   "Фото, цены и статусы закупки",
@@ -194,7 +237,7 @@ export function clientTabDefs(brand) {
   const tabs = CLIENT_TAB_OPTIONS.filter((t) => !t.legacy && visible.has(t.id)).map((t) => [t.id, t.label]);
   if (tabs.length) return tabs;
   return [
-    ["purchase", "Список закупки"],
+    ["purchase", "Купить сейчас"],
     ["docs", "Документы"],
   ];
 }
