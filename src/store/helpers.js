@@ -81,6 +81,11 @@ export function groupBy(items, key) {
 }
 
 import { purchaseMergeKey } from "../../shared/purchaseMerge.js";
+import {
+  isProfilePipeName,
+  mergePipeCutsFromItems,
+  pipeCutsClientNote,
+} from "../../shared/profilePipeCuts.js";
 
 function resolveMergedSupplier(items) {
   for (const it of items || []) {
@@ -122,7 +127,15 @@ function finalizeMergedRow(row) {
   row.sourceText = buildMergedSourceText(row);
   row.statusSummary = summarizeMergedStatus(row.sourceItems);
   row.status = row.statusSummary.status;
-  if (!row.clientNote && rep?.clientNote) row.clientNote = rep.clientNote;
+  if (isProfilePipeName(row.name) && row.sourceItems?.length) {
+    const mergedCuts = mergePipeCutsFromItems(row.sourceItems);
+    if (mergedCuts.length) {
+      row.pipeCuts = mergedCuts;
+      row.clientNote = pipeCutsClientNote(mergedCuts);
+    }
+  } else if (!row.clientNote && rep?.clientNote) {
+    row.clientNote = rep.clientNote;
+  }
   return row;
 }
 

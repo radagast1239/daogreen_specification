@@ -78,6 +78,22 @@ export function pipeCutsClientNote(cuts) {
   return label ? `Сегменты: ${label}` : "";
 }
 
+/** Склеивает отрезки из нескольких строк (стеллажей): одинаковые длины суммируются */
+export function mergePipeCutsFromItems(items) {
+  const byLen = new Map();
+  for (const it of items || []) {
+    for (const c of resolvePipeCuts(it)) {
+      const len = Number(c.lengthMm) || 0;
+      const qty = Number(c.qty) || 0;
+      if (!len || !qty) continue;
+      byLen.set(len, (byLen.get(len) || 0) + qty);
+    }
+  }
+  return [...byLen.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([lengthMm, qty]) => ({ lengthMm, qty }));
+}
+
 export function profilePipeSubtitle(matOrLine) {
   if (!isProfilePipeName(matOrLine?.name)) return "";
   const label = formatPipeCutsLabel(resolvePipeCuts(matOrLine));
