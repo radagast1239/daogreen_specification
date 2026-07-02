@@ -53,6 +53,7 @@ const blank = {
   farmSections: [],
   itemType: "material",
   supplier: "",
+  responsible: "general",
   link: "",
   linkAlt: "",
   imageUrl: "",
@@ -180,7 +181,7 @@ export default function MaterialsPage() {
       activeModules.includes(m)
     );
     const payload = patchMaterialFarmSections(
-      patchMaterialModules({ ...editing, defaultQty: 0 }, mods),
+      patchMaterialModules({ ...editing, defaultQty: 0, responsible: editing.responsible || "general" }, mods),
       editing.farmSections ?? resolveMaterialFarmSections(editing)
     );
     if (payload.id) await actions.materialUpdate(payload.id, payload);
@@ -451,6 +452,24 @@ export default function MaterialsPage() {
             </select>
             <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
               <a href="/suppliers">Создать поставщика</a>
+            </p>
+          </div>
+          <div className="field">
+            <label>Ответственный по умолчанию</label>
+            <select
+              value={editing.responsible || "general"}
+              onChange={(e) => setEditing({ ...editing, responsible: e.target.value })}
+            >
+              <option value="general">Не назначено / Общее</option>
+              <option value="plumber">Сантехник</option>
+              <option value="electrician">Электрик</option>
+              <option value="installer">Монтажник</option>
+              <option value="client">Клиент</option>
+              <option value="purchaser">Закупщик</option>
+              <option value="consumables">Расходники</option>
+            </select>
+            <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
+              Копируется в позицию при добавлении материала в проект. Старые проекты не меняются.
             </p>
           </div>
           {!isFlowSpecName(editing.name) && (

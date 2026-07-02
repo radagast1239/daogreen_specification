@@ -26,6 +26,20 @@ export const num = (n) => {
   return Number.isInteger(v) ? String(v) : v.toFixed(2);
 };
 
+/**
+ * Клиентское форматирование количества.
+ * Для штучных единиц («шт.») округляем вверх — не показываем «10.10 шт.».
+ * Для остальных единиц убираем хвостовые нули (10.10 → «10,1», 10.00 → «10»).
+ */
+export const formatQty = (qty, unit) => {
+  const v = Number(qty) || 0;
+  const u = String(unit || "").trim().toLowerCase();
+  const isPieces = u === "" || u.startsWith("шт") || u.startsWith("компл") || u.startsWith("pcs");
+  if (isPieces) return String(Math.ceil(Math.round(v * 1000) / 1000));
+  const r = Math.round(v * 100) / 100;
+  return Number.isInteger(r) ? String(r) : String(r).replace(".", ",");
+};
+
 const factGross = (it) => {
   const q = Number(it.qty) || 0;
   const p = it.actualPrice != null ? Number(it.actualPrice) : Number(it.price) || 0;

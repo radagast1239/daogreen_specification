@@ -1,30 +1,45 @@
 import { mergedPurchaseRows } from "../store/helpers.js";
 import { clientPurchaseItems, itemsByResponsible } from "./itemHelpers.js";
 
-/** Варианты PDF для клиента — подписи и пояснения */
+/** Вариант PDF для клиента, выбранный по умолчанию */
+export const DEFAULT_CLIENT_PDF_OPTION = "client_purchase";
+
+/** Варианты PDF для клиента — подписи и пояснения. group: "primary" | "specialist" */
 export const CLIENT_PDF_EXPORT_OPTIONS = [
   {
-    id: "merged",
-    label: "Список к закупке",
+    id: "client_purchase",
+    label: "Закупочный PDF для клиента",
+    group: "primary",
     recommended: true,
-    summary: "Одна таблица — только уникальные позиции.",
+    summary: "Без дублей. Для закупки и контроля.",
     detail:
-      "Одинаковые товары с разных стеллажей и модулей уже объединены в одну строку с суммарным количеством. Без повторов.",
-    useWhen: "Печать, закупка, отправка клиенту — обычно достаточно этого.",
+      "Итоги, закупка по поставщикам, отдельный блок «без ссылок / требует подбора», закупка по разделам и QR на онлайн-версию. Без списков специалистов, чтобы не было ощущения повторов.",
+    useWhen: "Обычный вариант для клиента — покупка по одному списку без дублей.",
+  },
+  {
+    id: "supplier",
+    label: "PDF по поставщикам",
+    group: "primary",
+    recommended: false,
+    summary: "Каждый поставщик — отдельным блоком.",
+    detail: "Удобно закупать по магазинам: позиции сгруппированы по поставщикам, с количеством и суммой по каждому.",
+    useWhen: "Когда закупка идёт магазин за магазином.",
   },
   {
     id: "client_full",
-    label: "Полный комплект",
+    label: "Полный технический комплект",
+    group: "primary",
     recommended: false,
-    summary: "Общий список + разделы + списки для специалистов.",
+    summary: "Общий список + разделы + специалисты.",
     detail:
-      "Те же позиции показываются несколько раз: сначала общий список, затем по разделам (полив, электрика…), затем срезы для сантехника, электрика и монтажника. Это не дубли закупки — один товар не нужно покупать дважды.",
+      "Те же позиции показываются несколько раз: общий список, затем по разделам, затем срезы для специалистов. Это не дубли закупки — один товар не нужно покупать повторно.",
     useWhen: "Передать бригаде по блокам или раздать специалистам одним файлом.",
     largeFile: true,
   },
   {
     id: "plumber",
-    label: "Только сантехник",
+    label: "Сантехник",
+    group: "specialist",
     recommended: false,
     summary: "Полив, дренаж, ёмкости, водоподготовка, насосы.",
     detail: "Склеенный список позиций, которые относятся к сантехнику. С указанием, из каких модулей взялось количество.",
@@ -32,7 +47,8 @@ export const CLIENT_PDF_EXPORT_OPTIONS = [
   },
   {
     id: "electric",
-    label: "Только электрик",
+    label: "Электрик",
+    group: "specialist",
     recommended: false,
     summary: "Щит, кабель, автоматика, освещение, датчики.",
     detail: "Склеенный список для электромонтажа и автоматики.",
@@ -40,11 +56,21 @@ export const CLIENT_PDF_EXPORT_OPTIONS = [
   },
   {
     id: "installer",
-    label: "Только монтажник",
+    label: "Монтажник",
+    group: "specialist",
     recommended: false,
     summary: "Каркас, стеллажи, климат, расходники монтажа.",
     detail: "Склеенный список для монтажника и сборки стеллажей.",
     useWhen: "Отдельный лист для монтажной бригады.",
+  },
+  {
+    id: "client_role",
+    label: "Список для клиента",
+    group: "specialist",
+    recommended: false,
+    summary: "Позиции с ответственным «Клиент».",
+    detail: "Склеенный список позиций, которые клиент закупает или обеспечивает сам.",
+    useWhen: "Отдельный лист для клиента.",
   },
 ];
 
@@ -57,6 +83,7 @@ export function getClientPdfExportStats(items) {
   const plumberMerged = mergedPurchaseRows(itemsByResponsible(purchase, "plumber")).length;
   const electricMerged = mergedPurchaseRows(itemsByResponsible(purchase, "electrician")).length;
   const installerMerged = mergedPurchaseRows(itemsByResponsible(purchase, "installer")).length;
+  const clientMerged = mergedPurchaseRows(itemsByResponsible(purchase, "client")).length;
 
   const fullPdfTableRows =
     mergedCount * 2 + plumberMerged + electricMerged + installerMerged;
@@ -67,6 +94,7 @@ export function getClientPdfExportStats(items) {
     plumberMerged,
     electricMerged,
     installerMerged,
+    clientMerged,
     fullPdfTableRows,
     savedByMerge: Math.max(0, rawCount - mergedCount),
   };
@@ -74,16 +102,22 @@ export function getClientPdfExportStats(items) {
 
 export function pdfExportOptionStats(optionId, stats) {
   switch (optionId) {
+    case "client_purchase":
+      return `${stats.mergedCount} уникальных позиций. Без дублей.`;
+    case "supplier":
+      return `${stats.mergedCount} позиций по поставщикам`;
     case "merged":
       return `${stats.mergedCount} строк в PDF`;
     case "client_full":
-      return `~${stats.fullPdfTableRows} строк в файле · ${stats.mergedCount} уникальных позиций`;
+      return `В закупке ${stats.mergedCount} уникальных позиций. В полном комплекте строк больше, потому что те же позиции повторяются в разделах и списках специалистов.`;
     case "plumber":
       return stats.plumberMerged ? `${stats.plumberMerged} строк` : "нет позиций";
     case "electric":
       return stats.electricMerged ? `${stats.electricMerged} строк` : "нет позиций";
     case "installer":
       return stats.installerMerged ? `${stats.installerMerged} строк` : "нет позиций";
+    case "client_role":
+      return stats.clientMerged ? `${stats.clientMerged} строк` : "нет позиций";
     default:
       return "";
   }

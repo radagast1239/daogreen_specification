@@ -1,7 +1,14 @@
 import * as XLSX from "xlsx";
-import { mergedPurchaseRows, num, groupBy } from "../store/helpers.js";
-import { lineGross, resolveResponsible, isBoughtStatus } from "./itemHelpers.js";
+import { mergedPurchaseRows, formatQty, groupBy } from "../store/helpers.js";
+import { lineGross, isBoughtStatus } from "./itemHelpers.js";
+import { rowsForResponsibleRole } from "./responsibleResolve.js";
 import { groupByClientSection } from "../../shared/clientSections.js";
+
+/** Включить автофильтр по всему диапазону листа */
+function withAutofilter(ws) {
+  if (ws && ws["!ref"]) ws["!autofilter"] = { ref: ws["!ref"] };
+  return ws;
+}
 
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -43,7 +50,7 @@ function mergedDataRow(r, index, purchaseStatuses) {
     Раздел: r.clientSectionLabel || "",
     Подраздел: r.clientSubsection || "",
     Наименование: r.name,
-    "Кол-во всего": num(r.qty),
+    "Кол-во всего": formatQty(r.qty, r.unit),
     "Ед.": r.unit || "шт.",
     Цена: r.price ?? "",
     Сумма: Math.round(r.sumVat || 0),
@@ -115,11 +122,11 @@ function sheetFromRowsWithLinks(rows, linkHeader = "Ссылка", linkText = "�
 
 function instructionSheet() {
   const rows = [
-    { Шаг: "1", Действие: "Откройте лист «03 Общий список» — там все позиции к закупке в одном виде." },
-    { Шаг: "2", Действие: "Покупайте по поставщикам (лист 05) или по разделам (лист 04)." },
-    { Шаг: "3", Действие: "В онлайн-версии отмечайте статусы «заказано» / «куплено» — они сохраняются автоматически." },
-    { Шаг: "4", Действие: "Если товара нет — откройте ссылку в колонке «Открыть товар» и напишите комментарий в онлайн-версии." },
-    { Шаг: "5", Действие: "Лист «10 Детализация» — для проверки расчёта по стеллажам и модулям (не для закупки)." },
+    { Шаг: "1", Действие: "Покупайте по листу «03 К закупке по поставщикам» — магазин за магазином." },
+    { Шаг: "2", Действие: "Лист «04 К закупке по разделам» — тот же список, сгруппированный по блокам фермы." },
+    { Шаг: "3", Действие: "Лист «05 Без ссылок» — позиции, которым нужна ссылка или поставщик (требуют подбора)." },
+    { Шаг: "4", Действие: "В онлайн-версии отмечайте статусы «заказано» / «куплено» — они сохраняются автоматически." },
+    { Шаг: "5", Действие: "Листы 06–09 — срезы по ответственным (сантехник/электрик/монтажник/клиент). Лист «10 Детализация по модулям» — для проверки расчёта (не для закупки)." },
   ];
   return sheetFromRows(rows, { Действие: 72 });
 }
@@ -174,7 +181,7 @@ function supplierMergedSheet(merged) {
   const rows = merged.map((r) => ({
     Поставщик: r.supplier || "—",
     Позиция: r.name,
-    "Кол-во": num(r.qty),
+    "Кол-во": formatQty(r.qty, r.unit),
     "Ед.": r.unit || "шт.",
     Сумма: Math.round(r.sumVat || 0),
     Ссылка: r.link ? "Открыть товар" : "без ссылки",
@@ -184,10 +191,27 @@ function supplierMergedSheet(merged) {
   return sheetFromRowsWithLinks(rows, "Ссылка");
 }
 
+/** Лист «Без ссылок / требует подбора»: строки без ссылки или без поставщика */
+function noLinkSheet(merged, purchaseStatuses) {
+  const rows = merged.filter((r) => !(r.link || "").trim() || !(r.supplier || "").trim());
+  if (!rows.length) return null;
+  const out = rows.map((r, i) => ({
+    "№": i + 1,
+    Наименование: r.name,
+    "Кол-во": formatQty(r.qty, r.unit),
+    "Ед.": r.unit || "шт.",
+    Раздел: r.clientSectionLabel || "",
+    Поставщик: r.supplier || "— нет поставщика —",
+    Проблема: !(r.link || "").trim()
+      ? (!(r.supplier || "").trim() ? "без ссылки и поставщика" : "без ссылки")
+      : "без поставщика",
+    Статус: statusLabel(r.status, purchaseStatuses),
+  }));
+  return sheetFromRows(out, { Наименование: 42, Проблема: 22, Поставщик: 20 });
+}
+
 function mergedForRole(items, role) {
-  return mergedPurchaseRows(items).filter((row) =>
-    (row.sourceItems || []).some((it) => resolveResponsible(it) === role)
-  );
+  return rowsForResponsibleRole(mergedPurchaseRows(items), role);
 }
 
 function moduleDetailSheet(items, project, purchaseStatuses) {
@@ -213,7 +237,7 @@ function moduleDetailSheet(items, project, purchaseStatuses) {
         Модуль: mod || "",
         Наименование: it.name,
         Ед: it.unit,
-        Кол: num(it.qty),
+        Кол: formatQty(it.qty, it.unit),
         Цена: it.price,
         Сумма: Math.round(lineGross(it)),
         Поставщик: it.supplier || "",
@@ -234,31 +258,31 @@ export function downloadClientWorkbook(project, items, { purchaseStatuses = [], 
   const merged = mergedPurchaseRows(purchaseItems);
   const wb = XLSX.utils.book_new();
 
-  const append = (ws, name) => {
-    if (ws) XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+  const append = (ws, name, filter = false) => {
+    if (ws) XLSX.utils.book_append_sheet(wb, filter ? withAutofilter(ws) : ws, name.slice(0, 31));
   };
 
   append(instructionSheet(), "01 Инструкция");
   append(summarySheet(project, purchaseItems, branding, purchaseStatuses), "02 Итоги");
-  append(sheetFromMergedRows(merged, purchaseStatuses), "03 Общий список");
-  append(mergedByCategorySheet(merged, purchaseStatuses), "04 По категориям");
-  append(supplierMergedSheet(merged), "05 По поставщикам");
+  append(supplierMergedSheet(merged), "03 К закупке по поставщикам", true);
+  append(mergedByCategorySheet(merged, purchaseStatuses), "04 К закупке по разделам", true);
+  append(noLinkSheet(merged, purchaseStatuses), "05 Без ссылок", true);
 
   for (const [sheetName, role] of [
     ["06 Сантехник", "plumber"],
     ["07 Электрик", "electrician"],
     ["08 Монтажник", "installer"],
-    ["09 Расходники", "consumables"],
+    ["09 Клиент", "client"],
   ]) {
     const roleMerged = mergedForRole(purchaseItems, role);
-    if (roleMerged.length) append(sheetFromMergedRows(roleMerged, purchaseStatuses), sheetName);
+    if (roleMerged.length) append(sheetFromMergedRows(roleMerged, purchaseStatuses), sheetName, true);
   }
 
   if (installItems.length) {
-    append(sheetFromMergedRows(mergedPurchaseRows(installItems), purchaseStatuses), "09б Монтаж");
+    append(sheetFromMergedRows(mergedPurchaseRows(installItems), purchaseStatuses), "09б Монтаж", true);
   }
 
-  append(moduleDetailSheet(purchaseItems, project, purchaseStatuses), "10 Детализация");
+  append(moduleDetailSheet(purchaseItems, project, purchaseStatuses), "10 Детализация по модулям");
 
   if (versionInfo?.summary) {
     append(

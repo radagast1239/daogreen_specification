@@ -1,8 +1,9 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import QRCode from "qrcode";
-import { money, num, mergedPurchaseRows } from "../store/helpers.js";
-import { lineGross, resolveResponsible, isBoughtStatus } from "./itemHelpers.js";
+import { money, formatQty, mergedPurchaseRows } from "../store/helpers.js";
+import { lineGross, isBoughtStatus } from "./itemHelpers.js";
+import { rowsForResponsibleRole } from "./responsibleResolve.js";
 import { getClientSectionLabelMap } from "../../shared/clientSections.js";
 import { generateProjectPdf } from "./pdfExport.js";
 import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdfFontSetup.js";
@@ -77,7 +78,7 @@ async function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStat
       i + 1,
       "",
       r.name,
-      num(r.qty),
+      formatQty(r.qty, r.unit),
       r.unit || "шт.",
       money(r.sumVat ?? lineGross(r), project.currency),
       (r.supplier || "—").slice(0, 28),
@@ -101,17 +102,30 @@ async function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStat
 }
 
 function mergedForRole(items, role) {
-  return mergedPurchaseRows(items).filter((row) =>
-    (row.sourceItems || []).some((it) => resolveResponsible(it) === role)
-  );
+  return rowsForResponsibleRole(mergedPurchaseRows(items), role);
 }
 
-const PLUMBER_SECTIONS = new Set(["irrigation", "drainage", "tanks", "water_prep"]);
-const ELECTRIC_SECTIONS = new Set(["electrics", "lighting", "automation"]);
-const INSTALLER_SECTIONS = new Set(["stellage", "climate", "consumables"]);
+/** Строки без ссылки на товар — «требуют подбора» */
+export function rowsWithoutLink(rows) {
+  return (rows || []).filter((r) => !(r.link || "").trim());
+}
 
-function mergedBySections(merged, sectionIds) {
-  return merged.filter((r) => sectionIds.has(r.clientSection));
+/** Группировка строк по поставщику (без поставщика — отдельным ключом) */
+export function groupRowsBySupplier(rows) {
+  const map = new Map();
+  for (const r of rows || []) {
+    const key = (r.supplier || "").trim() || "— без поставщика —";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(r);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, "ru"))
+    .map(([supplier, list]) => ({
+      supplier,
+      rows: list,
+      count: list.length,
+      sum: list.reduce((s, r) => s + (r.sumVat || 0), 0),
+    }));
 }
 
 async function addQr(doc, branding, pageUrl) {
@@ -189,8 +203,91 @@ function categorySummaryTable(doc, merged, project, y, brandRgb) {
   return doc.lastAutoTable.finalY + 10;
 }
 
+function purchaseInstruction(doc, y) {
+  doc.setFontSize(9);
+  doc.setTextColor(80, 80, 80);
+  const lines = [
+    "Покупайте по поставщикам. После оплаты отмечайте статус в онлайн-версии.",
+    "Позиции без ссылок требуют подбора — они собраны отдельным блоком.",
+  ];
+  for (const line of lines) {
+    doc.text(line, 14, y);
+    y += 5;
+  }
+  doc.setTextColor(30, 30, 30);
+  return y + 4;
+}
+
+async function supplierBlocks(doc, rows, project, y, brandRgb, purchaseStatuses, pdfOpts) {
+  for (const g of groupRowsBySupplier(rows)) {
+    y = ensureSpace(doc, y, 30);
+    doc.setFontSize(10);
+    doc.text(`${g.supplier} — ${g.count} поз. · ${money(g.sum, project.currency)}`, 14, y);
+    y += 4;
+    y = await tableForMerged(doc, g.rows, project, y, brandRgb, purchaseStatuses, true, pdfOpts);
+  }
+  return y;
+}
+
+/** «Закупочный PDF для клиента»: итоги + по поставщикам + без ссылок + по разделам. Без специалистов. */
+async function renderClientPurchasePdf(doc, project, items, branding, brandRgb, purchaseStatuses, pdfOpts) {
+  let y = drawTitleBlock(doc, project, branding, brandRgb, "Закупочный лист");
+  y = budgetLines(doc, items, project, y);
+  y = purchaseInstruction(doc, y);
+  const merged = mergedPurchaseRows(items);
+
+  y = ensureSpace(doc, y, 20);
+  doc.setFontSize(11);
+  doc.text(`Закупка по поставщикам · ${merged.length} уникальных позиций`, 14, y);
+  y += 6;
+  y = await supplierBlocks(doc, merged, project, y, brandRgb, purchaseStatuses, pdfOpts);
+
+  const noLink = rowsWithoutLink(merged);
+  if (noLink.length) {
+    y = ensureSpace(doc, y, 30);
+    doc.setFontSize(11);
+    doc.text(`Позиции без ссылок / требуют подбора · ${noLink.length}`, 14, y);
+    y += 4;
+    y = await tableForMerged(doc, noLink, project, y, brandRgb, purchaseStatuses, true, pdfOpts);
+  }
+
+  // Раздел — только сводка (раздел / кол-во / сумма / готовность), без повтора товарных строк.
+  // Полная детализация по разделам — в «Полном техническом комплекте», Excel и онлайн-версии.
+  y = categorySummaryTable(doc, merged, project, y, brandRgb);
+  return contactsBlock(doc, branding, y);
+}
+
+/** «PDF по поставщикам»: итоги + блоки по поставщикам. */
+async function renderSupplierPdf(doc, project, items, branding, brandRgb, purchaseStatuses, pdfOpts) {
+  let y = drawTitleBlock(doc, project, branding, brandRgb, "Закупка по поставщикам");
+  y = budgetLines(doc, items, project, y);
+  const merged = mergedPurchaseRows(items);
+  y = ensureSpace(doc, y, 20);
+  doc.setFontSize(11);
+  doc.text(`По поставщикам · ${merged.length} позиций`, 14, y);
+  y += 6;
+  y = await supplierBlocks(doc, merged, project, y, brandRgb, purchaseStatuses, pdfOpts);
+  return contactsBlock(doc, branding, y);
+}
+
+function fullKitWarning(doc, y) {
+  y = ensureSpace(doc, y, 24);
+  doc.setFillColor(255, 248, 225);
+  doc.rect(12, y - 4, 186, 18, "F");
+  doc.setFontSize(9);
+  doc.setTextColor(150, 90, 0);
+  const text =
+    "Это полный технический комплект. Одни и те же товары могут повторяться в разных представлениях: " +
+    "в общем списке, в разделах и в списках специалистов. Покупать повторно не нужно.";
+  const wrapped = doc.splitTextToSize(text, 180);
+  doc.text(wrapped, 14, y + 1);
+  doc.setTextColor(30, 30, 30);
+  return y + 4 + wrapped.length * 4 + 6;
+}
+
 async function renderFullPdf(doc, project, items, branding, brandRgb, purchaseStatuses, pdfOpts) {
   let y = drawTitleBlock(doc, project, branding, brandRgb, "Закупочный лист — полная версия");
+  y = fullKitWarning(doc, y);
   y = budgetLines(doc, items, project, y);
   y = instructionBlock(doc, y);
   const merged = mergedPurchaseRows(items);
@@ -225,6 +322,7 @@ async function renderFullPdf(doc, project, items, branding, brandRgb, purchaseSt
     ["Сантехник", "plumber"],
     ["Электрик", "electrician"],
     ["Монтажник", "installer"],
+    ["Клиент", "client"],
   ]) {
     const list = mergedForRole(items, role);
     if (!list.length) continue;
@@ -255,49 +353,45 @@ async function renderSpecialistPdf(doc, project, items, branding, brandRgb, purc
     electric: "Список для электрика",
     installer: "Список для монтажника",
     consumables: "Расходники",
-  };
-  const sectionSets = {
-    plumber: PLUMBER_SECTIONS,
-    electric: ELECTRIC_SECTIONS,
-    installer: INSTALLER_SECTIONS,
+    client_role: "Список для клиента",
   };
   const roles = {
     plumber: "plumber",
     electric: "electrician",
     installer: "installer",
     consumables: "consumables",
+    client_role: "client",
   };
 
   let y = drawTitleBlock(doc, project, branding, brandRgb, titles[mode] || "Список");
   y = budgetLines(doc, items, project, y);
 
-  const roleMerged = mergedForRole(items, roles[mode]);
-  const sectionIds = sectionSets[mode];
-  const merged = sectionIds ? mergedBySections(mergedPurchaseRows(items), sectionIds) : roleMerged;
-  const source = merged.length ? merged : roleMerged;
+  // Та же фильтрация по роли, что в полном PDF и Excel (resolveResponsibleFull),
+  // а не старые жёсткие section-наборы — чтобы составы совпадали.
+  const source = mergedForRole(items, roles[mode] || mode);
 
-  if (sectionIds && source.length) {
-    const groups = new Map();
-    for (const row of source) {
-      const labelMap = getClientSectionLabelMap();
-      const label = labelMap[row.clientSection] || row.clientSectionLabel || "Прочее";
-      if (!groups.has(label)) groups.set(label, []);
-      groups.get(label).push(row);
-    }
-    for (const [title, list] of groups) {
-      y = ensureSpace(doc, y, 30);
-      doc.setFontSize(10);
-      const sum = list.reduce((s, r) => s + (r.sumVat || 0), 0);
-      doc.text(`${title} — ${money(sum, project.currency)}`, 14, y);
-      y += 4;
-      y = await tableForMerged(doc, list, project, y, brandRgb, purchaseStatuses, false, pdfOpts);
-    }
-  } else {
+  if (!source.length) {
     y = ensureSpace(doc, y, 20);
     doc.setFontSize(11);
-    doc.text(titles[mode] || "Список", 14, y);
+    doc.text("Нет позиций для этого специалиста", 14, y);
+    return;
+  }
+
+  // Группировка по клиентскому разделу — только для читаемости вывода, не для фильтрации.
+  const labelMap = getClientSectionLabelMap();
+  const groups = new Map();
+  for (const row of source) {
+    const label = labelMap[row.clientSection] || row.clientSectionLabel || "Прочее";
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(row);
+  }
+  for (const [title, list] of groups) {
+    y = ensureSpace(doc, y, 30);
+    doc.setFontSize(10);
+    const sum = list.reduce((s, r) => s + (r.sumVat || 0), 0);
+    doc.text(`${title} — ${money(sum, project.currency)}`, 14, y);
     y += 4;
-    await tableForMerged(doc, source, project, y, brandRgb, purchaseStatuses, false, pdfOpts);
+    y = await tableForMerged(doc, list, project, y, brandRgb, purchaseStatuses, false, pdfOpts);
   }
 }
 
@@ -322,11 +416,15 @@ export async function generateClientPurchasePdf({
 
   const resolvedMode = mode === "client" ? "client_full" : mode;
 
-  if (resolvedMode === "client_full") {
+  if (resolvedMode === "client_purchase") {
+    await renderClientPurchasePdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
+  } else if (resolvedMode === "supplier") {
+    await renderSupplierPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
+  } else if (resolvedMode === "client_full") {
     await renderFullPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
   } else if (resolvedMode === "merged") {
     await renderMergedPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
-  } else if (["plumber", "electric", "installer", "consumables"].includes(resolvedMode)) {
+  } else if (["plumber", "electric", "installer", "consumables", "client_role"].includes(resolvedMode)) {
     await renderSpecialistPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, resolvedMode, pdfOpts);
   } else {
     await renderMergedPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
@@ -341,12 +439,15 @@ export async function generateClientPurchasePdf({
   }
 
   const modeSuffix = {
-    client_full: "",
+    client_purchase: "_закупка",
+    supplier: "_по_поставщикам",
+    client_full: "_полный",
     merged: "_общий",
     plumber: "_сантехник",
     electric: "_электрик",
     installer: "_монтажник",
     consumables: "_расходники",
+    client_role: "_клиент",
   };
   const safeName = (project.name || "проект").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
   const ver = project.version > 1 ? `_v${project.version}` : "";
