@@ -148,7 +148,7 @@ export function DimensionLinearEl({
   const style = dimStyleFromKind(dim);
   const mx = (dim.p1.x + dim.p2.x) / 2;
   const my = (dim.p1.y + dim.p2.y) / 2;
-  const label = dim.labelOverride || fmtDim(Math.round(len), { roomChain: dim.kind === "room_width" || dim.kind === "room_height" });
+  const label = dim.labelOverride || fmtDim(Math.round(len));
   return (
     <g data-dimension={dim.id} pointerEvents="all">
       <line
@@ -485,11 +485,11 @@ export function WallSelectionDims({ wall, room, k, fmtU, display }) {
 
 /** Цепочки размеров стен (чистовые/габаритные + общий габарит + толщина). */
 export function WallDimChains({ walls, room, items, k, fmtU, display }) {
-  const { chains, thickness, overall } = computeWallDimChains(walls, room, items, {
+  const { chains, overall } = computeWallDimChains(walls, room, items, {
     showFinishing: display.showWallChainFinishing !== false,
     showGross: display.showWallChainGross !== false,
   });
-  const all = [...chains, ...overall, ...thickness];
+  const all = [...chains, ...overall];
   if (!all.length) return null;
   return (
     <g data-ui="dim-wall-chains" pointerEvents="none">

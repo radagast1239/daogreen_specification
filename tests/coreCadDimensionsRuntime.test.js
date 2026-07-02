@@ -31,7 +31,7 @@ describe("dimension formatting modes", () => {
 });
 
 describe("generateWallDimensions", () => {
-  it("builds exterior chains with 300/600 offsets", () => {
+  it("builds exterior chains with 300/600 offsets without duplicate spans", () => {
     const plan = basePlan();
     plan.walls = [
       { id: "w1", pts: [{ x: 0, y: 0 }, { x: 4000, y: 0 }], thk: 100 },
@@ -40,20 +40,19 @@ describe("generateWallDimensions", () => {
       { id: "w4", pts: [{ x: 0, y: 3000 }, { x: 0, y: 0 }], thk: 100 },
     ];
     const out = generateWallDimensions(plan, { dimensionDisplayMode: "remplanner_cm" });
-    const overall = out.dimensions.filter((d) => d.kind === "external_overall");
-    expect(overall.length).toBe(2);
-    expect(overall.some((d) => Math.abs(d.offset) === 600)).toBe(true);
-    expect(out.dimensions.some((d) => d.kind === "external_segment" && Math.abs(d.offset) === 300)).toBe(true);
+    const linear = out.dimensions.filter((d) => d.mode === "linear");
+    const keys = linear.map((d) => `${d.kind}:${d.orientation}:${Math.round(Math.min(d.p1.x, d.p2.x))}-${Math.round(Math.max(d.p1.x, d.p2.x))}-${Math.round(Math.min(d.p1.y, d.p2.y))}-${Math.round(Math.max(d.p1.y, d.p2.y))}`);
+    expect(keys.length).toBe(new Set(keys).size);
+    expect(out.dimensions.some((d) => d.kind === "internal_clear" && Math.abs(d.offset) === 300)).toBe(true);
   });
 
-  it("generates internal room chain labels in remplanner centimeters", () => {
+  it("no room_meta/room_width/room_height dims generated (labels handled by ZoneEl)", () => {
     const plan = basePlan();
     plan.zones = [{ id: "zn1", x: 0, y: 0, w: 2500, h: 3680, height: 3000 }];
     const out = generateWallDimensions(plan, { dimensionDisplayMode: "remplanner_cm" });
-    const rw = out.dimensions.find((d) => d.kind === "room_width");
-    const rh = out.dimensions.find((d) => d.kind === "room_height");
-    expect(rw?.labelOverride).toBe("250");
-    expect(rh?.labelOverride).toBe("368");
+    expect(out.dimensions.find((d) => d.kind === "room_meta")).toBeUndefined();
+    expect(out.dimensions.find((d) => d.kind === "room_width")).toBeUndefined();
+    expect(out.dimensions.find((d) => d.kind === "room_height")).toBeUndefined();
   });
 
   it("creates aisle warning when rack gap is below 700 mm", () => {
