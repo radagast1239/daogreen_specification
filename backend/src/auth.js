@@ -17,12 +17,14 @@ function initAdminUsers() {
     );
   `);
   if (ENV_KEY) {
-    const exists = db.prepare("SELECT 1 FROM admin_users WHERE api_key = ?").get(ENV_KEY);
-    if (!exists) {
-      db.prepare(
-        "INSERT INTO admin_users (id, name, api_key, active) VALUES ('env-primary', 'Primary (env)', ?, 1)"
-      ).run(ENV_KEY);
-    }
+    db.prepare(`
+      INSERT INTO admin_users (id, name, api_key, active)
+      VALUES ('env-primary', 'Primary (env)', ?, 1)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        api_key = excluded.api_key,
+        active = excluded.active
+    `).run(ENV_KEY);
   }
 }
 
