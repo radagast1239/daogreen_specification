@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { groupBy, mergedPurchaseRows, money } from "../../store/helpers.js";
 import {
   lineGross,
@@ -23,6 +23,10 @@ import {
   groupMergedFlat,
   flattenMergedBySectionOrder,
   groupMergedByListCategories,
+  computeSectionStats,
+  detectRowProblems,
+  isRowReadyToBuy,
+  problemGroupCounts,
 } from "../../lib/clientPurchaseGroups.js";
 import Collapsible from "../Collapsible.jsx";
 import { Empty } from "../ui.jsx";
@@ -129,6 +133,93 @@ function MergedRowsList({ rows, layout, currency, patch, patchBulk, bought, purc
   ));
 }
 
+const PROBLEM_LABELS = {
+  no_link: "Без ссылки",
+  no_supplier: "Без поставщика",
+  need_help: "Нужна помощь",
+  on_review: "На проверке",
+  replacement_check: "Замена",
+  no_price: "Без цены",
+};
+
+// Порядок вывода групп проблем (по важности для клиента)
+const PROBLEM_ORDER = ["no_link", "no_supplier", "need_help", "on_review", "replacement_check", "no_price"];
+
+function BuyNowInstructions() {
+  return (
+    <div
+      className="client-buy-now-hint no-print"
+      style={{
+        background: "var(--bg-info, #eef6ff)",
+        border: "1px solid var(--border-info, #cfe3fb)",
+        borderRadius: 8,
+        padding: "10px 14px",
+        marginBottom: 12,
+        fontSize: 13,
+        lineHeight: 1.45,
+      }}
+    >
+      Откройте раздел, перейдите по ссылкам товаров и отметьте статус: <b>Заказано</b>, <b>Куплено</b> или{" "}
+      <b>Нужна помощь</b>. Позиции без ссылок и с вопросами собраны в блоке «Проблемы».
+    </div>
+  );
+}
+
+function ProblemsSummary({ sectionStats }) {
+  let total = 0;
+  for (const key of Object.keys(sectionStats || {})) {
+    total += (sectionStats[key].problemRows || []).length;
+  }
+  if (!total) return null;
+
+  const counts = problemGroupCounts(sectionStats);
+  const causes = [
+    ...PROBLEM_ORDER.filter((c) => counts[c]),
+    ...Object.keys(counts).filter((c) => !PROBLEM_ORDER.includes(c)),
+  ];
+
+  return (
+    <div className="client-purchase-problems no-print" style={{ background: "var(--bg-warn, #fff8e1)", border: "1px solid var(--border-warn, #ffe082)", borderRadius: 8, padding: "12px 16px", marginBottom: 12 }}>
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>⚠ Проблемы · {total} поз.</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {causes.map((cause) => (
+          <span key={cause} style={{ fontSize: 13, background: "var(--bg-surface, #fff)", borderRadius: 4, padding: "2px 8px", border: "1px solid var(--border-light, #e0e0e0)" }}>
+            {PROBLEM_LABELS[cause] || cause}: {counts[cause]}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SectionCardActions({ section }) {
+  const done = section.totalCount > 0 && section.boughtCount >= section.totalCount;
+  return (
+    <span className="client-section-card__meta" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, fontSize: 12 }}>
+      {done ? (
+        <span style={{ color: "var(--ok, #2e7d32)", fontWeight: 600 }}>Готово</span>
+      ) : (
+        <span className="muted">Куплено {section.boughtCount}/{section.totalCount}</span>
+      )}
+      {section.problemCount > 0 && (
+        <span style={{ color: "var(--warn-text, #b26a00)" }}>⚠ {section.problemCount} проблем</span>
+      )}
+    </span>
+  );
+}
+
+function SectionBodySummary({ section }) {
+  const parts = [`Сумма: ${section.sumLabel}`];
+  if (section.supplierCount) parts.push(`Поставщиков: ${section.supplierCount}`);
+  parts.push(`Куплено: ${section.boughtCount}/${section.totalCount}`);
+  if (section.problemCount) parts.push(`Проблемных: ${section.problemCount}`);
+  return (
+    <div className="client-section-card__summary muted no-print" style={{ fontSize: 12, padding: "0 0 8px", borderBottom: "1px solid var(--border-light, #eee)", marginBottom: 8 }}>
+      {parts.join(" · ")}
+    </div>
+  );
+}
+
 function MergedSectionGroups({
   groups,
   currency,
@@ -141,15 +232,24 @@ function MergedSectionGroups({
   defaultOpenFirst = false,
   layout = "cards",
   compact = false,
+  richSections = false,
 }) {
-  return groups.map((section, sectionIndex) => (
+  return groups.map((section, sectionIndex) => {
+    const rich = richSections && section.totalCount > 0;
+    const title = rich ? <span style={{ fontWeight: 700 }}>{section.title}</span> : section.title;
+    const subtitle = rich
+      ? `${section.count} позиций · ${section.sumLabel}${section.supplierCount ? ` · ${section.supplierCount} поставщиков` : ""}`
+      : `${section.count} поз. · ${section.sumLabel}${section.hint ? ` · ${section.hint}` : ""}`;
+    return (
     <Collapsible
       key={section.sectionId || section.title}
       className="client-purchase-section"
-      title={section.title}
-      subtitle={`${section.count} поз. · ${section.sumLabel}${section.hint ? ` · ${section.hint}` : ""}`}
+      title={title}
+      subtitle={subtitle}
+      actions={rich ? <SectionCardActions section={section} /> : undefined}
       defaultOpen={defaultOpenFirst && sectionIndex === 0}
     >
+      {rich && <SectionBodySummary section={section} />}
       {withSubsections
         ? section.subsections.map((sub) =>
             sub.title ? (
@@ -170,7 +270,8 @@ function MergedSectionGroups({
             <MergedRowsList rows={section.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} />
           )}
     </Collapsible>
-  ));
+    );
+  });
 }
 
 function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, materials, modules, stellageGroups, onProposeReplacement, compact = false }) {
@@ -256,6 +357,8 @@ export default function ClientPurchasePanel({
   layout = "cards",
   compact = false,
 }) {
+  const [readyOnly, setReadyOnly] = useState(false);
+
   const normalizedMode = useMemo(() => {
     const m = mode === "ordered" ? "closed" : mode;
     if (!simple) return m === "all" ? "all" : m;
@@ -280,6 +383,17 @@ export default function ClientPurchasePanel({
     if (!isClosedMode) rows = applyMergedPurchaseFilter(rows, mergeFilter);
     return sortMergedRows(rows, project.currency);
   }, [effectiveMode, scoped, supplierFilter, purchaseQuery, mergeFilter, project.currency, isStatusMode, isClosedMode]);
+
+  const allMergedForStats = useMemo(() => {
+    if (!simple || effectiveMode !== "categories") return null;
+    const pool = filterItemPool(scoped, { supplierFilter, purchaseQuery });
+    return mergedPurchaseRows(pool);
+  }, [simple, effectiveMode, scoped, supplierFilter, purchaseQuery]);
+
+  const sectionStats = useMemo(() => {
+    if (!allMergedForStats) return null;
+    return computeSectionStats(allMergedForStats);
+  }, [allMergedForStats]);
 
   const filtered = useMemo(() => {
     if (!isStatusMode && isMergedPurchaseMode(effectiveMode)) return [];
@@ -314,16 +428,20 @@ export default function ClientPurchasePanel({
     const pass = { onProposeReplacement, layout, compact, patchBulk };
     const openFirst = simple && !isBought && effectiveMode === "categories";
     if (effectiveMode === "categories" || effectiveMode === "plumber" || effectiveMode === "with_link" || effectiveMode === "without_link") {
+      const isClientCategories = simple && effectiveMode === "categories";
+      const statsOpt = effectiveMode === "categories" && sectionStats ? { sectionStats } : undefined;
+      const displayList = isClientCategories && readyOnly && !isBought ? list.filter(isRowReadyToBuy) : list;
       return (
         <MergedSectionGroups
           key={`sections-${effectiveMode}-${isBought}`}
-          groups={groupMergedBySectionHierarchy(list, project.currency)}
+          groups={groupMergedBySectionHierarchy(displayList, project.currency, statsOpt)}
           currency={project.currency}
           patch={patch}
           bought={isBought}
           purchaseStatuses={purchaseStatuses}
           withSubsections
           defaultOpenFirst={openFirst}
+          richSections={isClientCategories && !isBought}
           {...pass}
         />
       );
@@ -529,6 +647,12 @@ export default function ClientPurchasePanel({
             {todo.length} заказано/куплено
           </span>
         )}
+        {simple && effectiveMode === "categories" && !isClosedMode && (
+          <label className="client-purchase-show-bought">
+            <input type="checkbox" checked={readyOnly} onChange={(e) => setReadyOnly(e.target.checked)} />
+            <span>Только готовые к покупке</span>
+          </label>
+        )}
         {!isClosedMode && (
           <label className="client-purchase-show-bought">
             <input type="checkbox" checked={showBought} onChange={(e) => onShowBoughtChange(e.target.checked)} />
@@ -562,6 +686,10 @@ export default function ClientPurchasePanel({
         <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
           Склеенный список для передачи специалисту — с расшифровкой, из каких модулей взялось количество.
         </p>
+      )}
+      {simple && effectiveMode === "categories" && <BuyNowInstructions />}
+      {simple && effectiveMode === "categories" && sectionStats && (
+        <ProblemsSummary sectionStats={sectionStats} />
       )}
       {todo.length > 0 ? (
         <>

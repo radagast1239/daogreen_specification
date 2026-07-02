@@ -1,6 +1,88 @@
 import { money } from "../store/helpers.js";
 import { getClientSections, resolveClientSection } from "../../shared/clientSections.js";
 import { groupMergedByListCategories as buildListCategoryGroups } from "../../shared/clientListCategoryGroups.js";
+import { isClosedPurchaseStatus } from "./itemHelpers.js";
+
+const PROBLEM_STATUSES = new Set(["need_help", "replacement_check", "on_review"]);
+
+export function detectRowProblems(row) {
+  const problems = [];
+  if (!(row.link || "").trim()) problems.push("no_link");
+  if (!Number(row.price)) problems.push("no_price");
+  if (!(row.supplier || "").trim()) problems.push("no_supplier");
+  const statuses = (row.sourceItems || []).map((i) => i.status);
+  for (const st of PROBLEM_STATUSES) {
+    if (statuses.includes(st)) problems.push(st);
+  }
+  return problems;
+}
+
+function rowIsClosed(row) {
+  const src = row.sourceItems || [];
+  return src.length > 0 && src.every((i) => isClosedPurchaseStatus(i.status));
+}
+
+/**
+ * Готова ли строка к покупке прямо сейчас:
+ * есть ссылка, есть поставщик, не закрыта (не заказано/куплено/доставлено/уже есть),
+ * нет проблемных статусов (нужна помощь / замена / на проверке).
+ */
+export function isRowReadyToBuy(row) {
+  if (!row) return false;
+  if (!(row.link || "").trim()) return false;
+  if (!(row.supplier || "").trim()) return false;
+  if (rowIsClosed(row)) return false;
+  const statuses = (row.sourceItems || []).map((i) => i.status);
+  for (const st of PROBLEM_STATUSES) {
+    if (statuses.includes(st)) return false;
+  }
+  return true;
+}
+
+/** Счётчики проблем по причинам, агрегированные из sectionStats */
+export function problemGroupCounts(sectionStats) {
+  const counts = {};
+  for (const key of Object.keys(sectionStats || {})) {
+    for (const pr of sectionStats[key].problemRows || []) {
+      for (const p of pr.problems || []) counts[p] = (counts[p] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+export function computeSectionStats(allRows) {
+  const stats = new Map();
+  for (const row of allRows || []) {
+    const rep = row.sourceItems?.[0];
+    const { section } = resolveClientSection(rep || row);
+    const sKey = section || "__misc__";
+    if (!stats.has(sKey)) {
+      stats.set(sKey, { totalCount: 0, boughtCount: 0, suppliers: new Set(), problemCount: 0, problemRows: [] });
+    }
+    const st = stats.get(sKey);
+    st.totalCount += 1;
+    const closed = (row.sourceItems || []).every((i) => isClosedPurchaseStatus(i.status));
+    if (closed && (row.sourceItems || []).length > 0) st.boughtCount += 1;
+    const supplier = (row.supplier || "").trim();
+    if (supplier) st.suppliers.add(supplier);
+    const probs = detectRowProblems(row);
+    if (probs.length > 0 && !closed) {
+      st.problemCount += 1;
+      st.problemRows.push({ row, problems: probs });
+    }
+  }
+  const result = {};
+  for (const [key, val] of stats) {
+    result[key] = {
+      totalCount: val.totalCount,
+      boughtCount: val.boughtCount,
+      supplierCount: val.suppliers.size,
+      problemCount: val.problemCount,
+      problemRows: val.problemRows,
+    };
+  }
+  return result;
+}
 
 function sectionOrderKey(sectionId) {
   const order = [...getClientSections().map((s) => s.id), "__misc__"];
@@ -8,7 +90,7 @@ function sectionOrderKey(sectionId) {
 }
 
 /** Раздел → подраздел → склеенные строки */
-export function groupMergedBySectionHierarchy(rows, currency) {
+export function groupMergedBySectionHierarchy(rows, currency, { sectionStats } = {}) {
   const sections = new Map();
   for (const row of rows || []) {
     const rep = row.sourceItems?.[0];
@@ -35,20 +117,32 @@ export function groupMergedBySectionHierarchy(rows, currency) {
 
   return [...sections.entries()]
     .sort(([a], [b]) => sectionOrderKey(a) - sectionOrderKey(b))
-    .map(([, sec]) => ({
-      title: sec.title,
-      sectionId: sec.sectionId,
-      sum: sec.sum,
-      count: sec.count,
-      sumLabel: money(sec.sum, currency),
-      subsections: [...sec.subsections.entries()].map(([, sub]) => ({
-        title: sub.title,
-        rows: sub.rows,
-        sum: sub.sum,
-        count: sub.count,
-        sumLabel: money(sub.sum, currency),
-      })),
-    }));
+    .map(([, sec]) => {
+      const stats = sectionStats?.[sec.sectionId];
+      const hints = [];
+      if (stats?.boughtCount) hints.push(`${stats.boughtCount}/${stats.totalCount} куплено`);
+      if (stats?.supplierCount) hints.push(`${stats.supplierCount} пост.`);
+      if (stats?.problemCount) hints.push(`⚠ ${stats.problemCount}`);
+      return {
+        title: sec.title,
+        sectionId: sec.sectionId,
+        sum: sec.sum,
+        count: sec.count,
+        sumLabel: money(sec.sum, currency),
+        hint: hints.join(" · ") || undefined,
+        boughtCount: stats?.boughtCount || 0,
+        totalCount: stats?.totalCount || 0,
+        supplierCount: stats?.supplierCount || 0,
+        problemCount: stats?.problemCount || 0,
+        subsections: [...sec.subsections.entries()].map(([, sub]) => ({
+          title: sub.title,
+          rows: sub.rows,
+          sum: sub.sum,
+          count: sub.count,
+          sumLabel: money(sub.sum, currency),
+        })),
+      };
+    });
 }
 
 export function groupMergedBySupplier(rows, currency) {
