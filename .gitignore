@@ -42,3 +42,9 @@ tmp*
 daogreen-spec 1/
 _planner-kits/
 _planner-specsync/
+
+# Local server backups / restore snapshots (contain .env, *.db, uploads, photos)
+local-backup-before-server-restore/
+server-restore/
+server-restore-full/
+scripts/vps-download-restore.mjs
