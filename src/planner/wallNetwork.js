@@ -216,22 +216,9 @@ export function nudgeWallInPlan(plan, wallId, nodeIdx, dx, dy, round = (v) => v)
     if (!nodeId) return plan;
     return movePlanNode(plan, nodeId, { x: round(pt.x + dx), y: round(pt.y + dy) });
   }
-  if (nodeIdx === -1 && rw.pts.length === 2) {
-    const a = rw.pts[0];
-    const b = rw.pts[1];
-    const segLen = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-    const nx = -(b.y - a.y) / segLen;
-    const ny = (b.x - a.x) / segLen;
-    const move = dx * nx + dy * ny;
-    return applyNetworkWallSegMove(
-      plan,
-      wallId,
-      { x: round(a.x + nx * move), y: round(a.y + ny * move) },
-      { x: round(b.x + nx * move), y: round(b.y + ny * move) },
-    );
-  }
   let p = plan;
-  for (let i = 0; i < rw.pts.length; i++) {
+  const limit = rw.pts.length === 2 ? 2 : rw.pts.length;
+  for (let i = 0; i < limit; i++) {
     const nodeId = wallNodeIdAt(rw, i);
     const pt = rw.pts[i];
     if (nodeId) p = movePlanNode(p, nodeId, { x: round(pt.x + dx), y: round(pt.y + dy) });

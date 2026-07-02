@@ -254,6 +254,31 @@ function collectWallParts(wall, openings, room, allWalls = null) {
   return { slabs, jambs, bridges };
 }
 
+/** Невидимый hit-layer по оси стены. strokeWidth покрывает всю толщину стены. */
+export function WallBodyHitAreas({
+  wall, allWalls, room, editable = false, eraseMode = false, onDown,
+}) {
+  if ((!editable && !eraseMode) || !wall?.pts?.length || wall.pts.length < 2) return null;
+  const thk = wall.thk || 100;
+  const hitStroke = Math.max(thk, 80) + 16;
+  const d = wall.pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+  return (
+    <path
+      data-ui="wall-body-hit"
+      d={d}
+      fill="none"
+      stroke="rgba(0,0,0,0)"
+      strokeWidth={hitStroke}
+      pointerEvents="stroke"
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onDown?.(e);
+      }}
+      style={{ cursor: editable || eraseMode ? "pointer" : "default" }}
+    />
+  );
+}
+
 /** Заливка стены штриховкой + перемычки проёмов. */
 export function WallSlabFill({ wall, openings, room, k = 1, isDemolish = false, allWalls = null }) {
   const { slabs, jambs, bridges } = collectWallParts(wall, openings, room, allWalls);

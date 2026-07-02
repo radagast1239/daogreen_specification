@@ -23,7 +23,7 @@ import {
 } from "../../planner/core/dimensions/index.js";
 import {
   createWallDraftState, wallDraftStart, wallDraftContinueFrom,
-  wallDraftAddSegment, wallDraftBackspace, wallDraftFinishPts,
+  wallDraftAddSegment, wallDraftBackspace, wallDraftFinishPts, wallDraftFinishMeta,
 } from "../../planner/core/walls/wallDraft.js";
 import { commitWallChain } from "../../planner/core/walls/wallCommit.js";
 import { computeItemPlacement, placementZoneLabel } from "../../planner/placementPreview.js";
@@ -46,6 +46,7 @@ import {
   tryMergeWall, straightenWall, setWallSegmentLength, setWallSegmentLengthAt,
   wallSegmentLengthAt, wallSegmentIndexForNode, alignWallToNeighbor, weldWallNodes,
   refineWallDraftSnap, ensureWallNodesAtPoints, snapPointsToWallNodes, wallInteractionAt,
+  hitTestWallBody, pickWallBodyHit,
   planWorkingBounds, planHasDrawnWalls,
   alignmentGuides, angleAt, draftChainArea,
 } from "../../planner/core/walls/index.js";
@@ -96,7 +97,7 @@ import {
 } from "../../planner/canvasPrimitives.jsx";
 import {
   WallCursorPreview, WallSnapIndicator, WallAlignmentGuides,
-  WallAngleLabels, WallLiveChips,
+  WallAngleLabels, WallLiveChips, fmtWallDraftLen,
 } from "../../planner/wallDraftOverlay.jsx";
 import { layerDisplayState } from "../../planner/canvasLayers.js";
 import { snapRackNeighbor } from "../../planner/plannerSnap.js";
@@ -128,6 +129,7 @@ import { sheetAllowedInViewMode, viewModeForSheet } from "../../planner/plannerV
 import { PropertiesPanel } from "../../planner/ui/PropertiesPanel.jsx";
 import { PlannerErrorBoundary, PlannerOverlayBoundary } from "../../planner/ui/PlannerErrorBoundary.jsx";
 import { WallEditOverlay } from "../../planner/wallEditOverlay.jsx";
+import { WallBodyHitAreas } from "../../planner/wallRender.jsx";
 import { ContextMenu, buildObjectMenu } from "../../planner/ui/ContextMenu.jsx";
 import { AttachPlanModal } from "../../planner/ui/AttachPlanModal.jsx";
 import "../../planner/planner.css";
@@ -327,11 +329,6 @@ export default function PlanPage() {
   const unit = display.coordUnit || "mm";
   const dimensionDisplayMode = display.dimensionDisplayMode || DEFAULT_DIMENSION_DISPLAY_MODE;
   const fmtU = (mm, opts = {}) => formatDimensionValue(mm, dimensionDisplayMode, opts);
-  const fmtWallDraftLen = (mm) => {
-    const cm = mm / 10;
-    if (cm < 100) return `${Math.round(cm)} см`;
-    return `${(mm / 1000).toFixed(2)} м`;
-  };
   const fmtCoordU = (mm) => fmtCoord(mm, display.coordUnit || "mm");
   const toMM = (cx, cy) => {
     const r = svgRef.current?.getBoundingClientRect();
@@ -721,7 +718,10 @@ export default function PlanPage() {
         return { coll: "items", id: it.id };
       }
     }
-    for (const w of resolvePlanWalls(plan)) {
+    const resolvedWalls = resolvePlanWalls(plan);
+    const bodyWall = pickWallBodyHit(mm, resolvedWalls, plan.room);
+    if (bodyWall) return { coll: "walls", id: bodyWall.wall.id };
+    for (const w of resolvedWalls) {
       for (let i = 1; i < w.pts.length; i++) {
         const a = w.pts[i - 1];
         const b = w.pts[i];
@@ -935,7 +935,11 @@ export default function PlanPage() {
   }, [labelDraft, plan.items, plan.room, sn]);
 
   const finishWallChain = () => {
-    const pts = wallDraftFinishPts(wallDraftStateRef.current) || (draft.length >= 2 ? draft : null);
+    const meta = wallDraftFinishMeta(wallDraftStateRef.current) || (
+      draft.length >= 2 ? { pts: draft, closed: false } : null
+    );
+    const pts = meta?.pts;
+    const closed = meta?.closed === true;
     if (!pts || pts.length < 2) {
       clearWallChain();
       return;
@@ -948,7 +952,7 @@ export default function PlanPage() {
         ...toolFields,
         thk: toolFields.thk ?? (role === "outer" ? (p.room.wallThk || wallThk) : wallThk),
       };
-      let next = commitWallChain(p, pts, props, uid);
+      let next = commitWallChain(p, pts, props, uid, { closed });
       return syncAutoZones(next);
     });
     clearWallChain();
@@ -2461,6 +2465,10 @@ export default function PlanPage() {
       try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
       return;
     }
+    if (tool === "select" && e.button === 0) {
+      const wallHit = pickWallBodyHit(mm, resolvePlanWalls(plan), plan.room);
+      if (wallHit) { selectWall(e, wallHit.wall); return; }
+    }
     if (tool === "select" && bgClick && e.button === 0) {
       if (e.shiftKey) {
         dragRef.current = {
@@ -2829,6 +2837,7 @@ export default function PlanPage() {
       if (snap?.kind === "close" && wallChainStartRef.current) {
         const end = { x: wallChainStartRef.current.x, y: wallChainStartRef.current.y };
         addWallDraftSegment(start, end, fromAdjust);
+        wallDraftStateRef.current = { ...wallDraftStateRef.current, closedLoop: true };
         finishWallChain();
       } else if (Math.hypot(pt.x - start.x, pt.y - start.y) >= 50) {
         addWallDraftSegment(start, pt, fromAdjust);
@@ -3087,8 +3096,8 @@ export default function PlanPage() {
     }
     e.stopPropagation();
     const mm = toMM(e.clientX, e.clientY);
-    const hit = wallInteractionAt(wall, mm, view.zoom);
     const walls = resolvePlanWalls(plan);
+    const hit = wallInteractionAt(wall, mm, view.zoom, { allWalls: walls, room: plan.room });
     if (e.detail >= 2) {
       setSelection({ coll: "walls", ids: wallContourIdsFor(wall, walls) });
       return;
@@ -3783,6 +3792,17 @@ export default function PlanPage() {
               <PlanLayerGroup layerId="room" activeLayer={active} vis={vis} display={canvasDisplay}>
                 {itemsByLayer("room").map((it) => itemProps(it, "room"))}
                 {roomWalls.map((w) => (
+                  <WallBodyHitAreas
+                    key={`wh-${w.id}`}
+                    wall={w}
+                    allWalls={weldedWalls}
+                    room={plan.room}
+                    editable={tool === "select" || tool === "wall"}
+                    eraseMode={tool === "erase"}
+                    onDown={(e) => selectWall(e, w)}
+                  />
+                ))}
+                {roomWalls.map((w) => (
                   <WallEl
                     key={w.id}
                     wall={w}
@@ -3834,6 +3854,17 @@ export default function PlanPage() {
                 ))}
               </PlanLayerGroup>
               <PlanLayerGroup layerId="partitions" activeLayer={active} vis={vis} display={canvasDisplay}>
+                {partitionWalls.map((w) => (
+                  <WallBodyHitAreas
+                    key={`wh-pt-${w.id}`}
+                    wall={w}
+                    allWalls={weldedWalls}
+                    room={plan.room}
+                    editable={active === "partitions" && (tool === "select" || tool === "wall")}
+                    eraseMode={tool === "erase"}
+                    onDown={(e) => selectWall(e, w)}
+                  />
+                ))}
                 {partitionWalls.map((w) => (
                   <WallEl
                     key={`pt-${w.id}`}

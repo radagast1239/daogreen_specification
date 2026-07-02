@@ -2,7 +2,7 @@
  * Черновик цепочки стен (wall-chain).
  * React хранит state; логика — здесь.
  */
-import { dist, clonePoint } from "../geometry/point.js";
+import { dist, clonePoint, near } from "../geometry/point.js";
 import { simplifyPolyline, closePolylineIfNear } from "../geometry/polyline.js";
 import { MIN_SEGMENT_MM } from "./wallModel.js";
 
@@ -15,6 +15,7 @@ export function createWallDraftState() {
     prevAngleDeg: null,
     dragging: false,
     dragFrom: null,
+    closedLoop: false,
   };
 }
 
@@ -73,7 +74,9 @@ export function wallDraftAddSegment(state, endPt, minLen = WALL_DRAFT_MIN_SEG) {
 
 export function wallDraftCloseLoop(state, closePt) {
   if (!state.chainStart || state.pts.length < 2) return { state, closed: false };
-  return wallDraftAddSegment(state, closePt, WALL_DRAFT_MIN_SEG);
+  const { state: next, added } = wallDraftAddSegment(state, closePt, WALL_DRAFT_MIN_SEG);
+  if (!added) return { state, closed: false };
+  return { state: { ...next, closedLoop: true }, closed: true };
 }
 
 export function wallDraftBackspace(state) {
@@ -101,10 +104,24 @@ export function wallDraftCanFinish(state) {
 }
 
 export function wallDraftFinishPts(state, closeThr = 200) {
+  const meta = wallDraftFinishMeta(state, closeThr);
+  return meta?.pts ?? null;
+}
+
+/** Точки и флаг замыкания для коммита цепочки. */
+export function wallDraftFinishMeta(state, closeThr = 200) {
   if (!wallDraftCanFinish(state)) return null;
   let pts = simplifyPolyline(state.pts, 5);
-  pts = closePolylineIfNear(pts, closeThr);
-  return pts.length >= 2 ? pts : null;
+  const snapClosed = state.closedLoop === true;
+  const endsNear = pts.length >= 3 && near(pts[0], pts[pts.length - 1], closeThr);
+  const closed = snapClosed || endsNear;
+  if (closed && endsNear) {
+    pts = pts.slice(0, -1);
+  } else if (!snapClosed) {
+    pts = closePolylineIfNear(pts, closeThr);
+  }
+  if (pts.length < 2) return null;
+  return { pts, closed: closed && pts.length >= 3 };
 }
 
 export function wallDraftPtsForRender(state, cursor = null) {

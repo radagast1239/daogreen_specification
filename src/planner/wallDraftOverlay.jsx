@@ -201,4 +201,10 @@ export function WallLiveChips({ cursor, roomHeight, areaM2, k }) {
   );
 }
 
+/** Формат длины сегмента стены для preview: < 1000 мм → "NNN мм", ≥ 1000 мм → "N.NN м". */
+export function fmtWallDraftLen(mm) {
+  if (mm < 1000) return `${Math.round(mm)} мм`;
+  return `${(mm / 1000).toFixed(2)} м`;
+}
+
 export { WALL_ACTIVE_STROKE };

@@ -17,7 +17,7 @@ import {
   projectPointToAngle,
 } from "../geometry/index.js";
 import { isDoorKind, isWallOpeningKind } from "../../doorTypes.js";
-import { inwardNormal, wallFacePoint, wallFaceDistances } from "../../wallParallelGeometry.js";
+import { inwardNormal, wallFacePoint, wallFaceDistances, wallFaceSegment } from "../../wallParallelGeometry.js";
 
 const SNAP_DIST = 80;
 export const NODE_LINK_THR = 85;
@@ -829,8 +829,34 @@ export function nearestWallSegment(pt, walls, room, maxDist = 200) {
   return best;
 }
 
+function wallSlabQuad(a, b, wall, room) {
+  const outer = wallFaceSegment(a, b, "outer", wall, room);
+  const inner = wallFaceSegment(a, b, "inner", wall, room);
+  return [outer.a, outer.b, inner.b, inner.a];
+}
+
+/** Попадание точки в видимое тело стены (parallel slab). */
+export function hitTestWallBody(mm, wall, allWalls, room = null) {
+  if (!wall?.id || !mm || !wall?.pts?.length) return null;
+  for (let i = 1; i < wall.pts.length; i++) {
+    const quad = wallSlabQuad(wall.pts[i - 1], wall.pts[i], wall, room);
+    if (pointInPolygon(mm, quad)) return { wallId: wall.id, segIdx: i - 1 };
+  }
+  return null;
+}
+
+/** Ближайшая стена по телу (для pick/erase). */
+export function pickWallBodyHit(mm, walls, room = null) {
+  for (let i = (walls?.length || 0) - 1; i >= 0; i--) {
+    const w = walls[i];
+    const hit = hitTestWallBody(mm, w, walls, room);
+    if (hit) return { wall: w, ...hit };
+  }
+  return null;
+}
+
 /** Клик по стене: узел, середина сегмента или вся стена. */
-export function wallInteractionAt(wall, mm, zoom = 0.1) {
+export function wallInteractionAt(wall, mm, zoom = 0.1, opts = {}) {
   if (!wall?.pts?.length) return { kind: "wall" };
   const nodeThr = 320 / Math.max(zoom, 0.05);
   let bestNode = null;
@@ -844,6 +870,20 @@ export function wallInteractionAt(wall, mm, zoom = 0.1) {
   });
   if (bestNode != null) return { kind: "node", idx: bestNode };
 
+  const allWalls = opts.allWalls || null;
+  const room = opts.room ?? null;
+  if (allWalls && hitTestWallBody(mm, wall, allWalls, room)) {
+    if (wall.pts.length === 2) {
+      const a = wall.pts[0];
+      const b = wall.pts[1];
+      const proj = projectOnSegment(mm, a, b);
+      const segLen = dist(a, b) || 1;
+      const t = dist(a, proj) / segLen;
+      if (t >= 0.12 && t <= 0.88) return { kind: "segment" };
+    }
+    return { kind: "wall" };
+  }
+
   if (wall.pts.length === 2) {
     const a = wall.pts[0];
     const b = wall.pts[1];
@@ -855,6 +895,7 @@ export function wallInteractionAt(wall, mm, zoom = 0.1) {
       if (t >= 0.12 && t <= 0.88) return { kind: "segment" };
     }
   }
+  if (allWalls) return { kind: "none" };
   return { kind: "wall" };
 }
 

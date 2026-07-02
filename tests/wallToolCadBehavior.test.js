@@ -7,6 +7,7 @@ import {
   wallDraftFinishPts,
   wallDraftCancel,
 } from "../src/planner/core/walls/wallDraft.js";
+import { fmtWallDraftLen } from "../src/planner/wallDraftOverlay.jsx";
 import { normalizeWalls } from "../src/planner/core/walls/wallNormalize.js";
 import { runSnapEngine } from "../src/planner/core/snap/snapEngine.js";
 import { SNAP_TYPES } from "../src/planner/core/snap/snapTypes.js";
@@ -110,6 +111,23 @@ describe("wall tool CAD behavior", () => {
     });
     expect(r.type).toBe(SNAP_TYPES.GRID);
     expect(r.point).toEqual({ x: 124, y: 456 });
+  });
+
+  it("Backspace with one point clears draft", () => {
+    let s = createWallDraftState();
+    s = wallDraftStart(s, { x: 0, y: 0 });
+    expect(s.pts).toHaveLength(1);
+    const { state, removed } = wallDraftBackspace(s);
+    expect(removed).toBe("all");
+    expect(state.pts).toHaveLength(0);
+  });
+
+  it("format wall preview length: < 1000mm shows мм, >= 1000mm shows м", () => {
+    expect(fmtWallDraftLen(850)).toBe("850 мм");
+    expect(fmtWallDraftLen(999)).toBe("999 мм");
+    expect(fmtWallDraftLen(1000)).toBe("1.00 м");
+    expect(fmtWallDraftLen(2350)).toBe("2.35 м");
+    expect(fmtWallDraftLen(100)).toBe("100 мм");
   });
 
   it("midpoint drag moves segment parallel", () => {
