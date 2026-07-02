@@ -7,12 +7,13 @@ export default function Collapsible({
   defaultOpen = true,
   children,
   className = "",
+  id,
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const bodyId = useId();
 
   return (
-    <section className={`collapsible ${className}`}>
+    <section id={id} className={`collapsible ${className}`}>
       <button
         type="button"
         className="collapsible__head"

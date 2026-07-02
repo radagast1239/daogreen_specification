@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { groupBy, mergedPurchaseRows, money } from "../../store/helpers.js";
 import {
   lineGross,
@@ -233,6 +233,7 @@ function MergedSectionGroups({
   layout = "cards",
   compact = false,
   richSections = false,
+  openSectionId = null,
 }) {
   return groups.map((section, sectionIndex) => {
     const rich = richSections && section.totalCount > 0;
@@ -240,14 +241,18 @@ function MergedSectionGroups({
     const subtitle = rich
       ? `${section.count} позиций · ${section.sumLabel}${section.supplierCount ? ` · ${section.supplierCount} поставщиков` : ""}`
       : `${section.count} поз. · ${section.sumLabel}${section.hint ? ` · ${section.hint}` : ""}`;
+    const openThis = openSectionId
+      ? section.sectionId === openSectionId
+      : defaultOpenFirst && sectionIndex === 0;
     return (
     <Collapsible
       key={section.sectionId || section.title}
+      id={richSections ? `client-sec-${section.sectionId}` : undefined}
       className="client-purchase-section"
       title={title}
       subtitle={subtitle}
       actions={rich ? <SectionCardActions section={section} /> : undefined}
-      defaultOpen={defaultOpenFirst && sectionIndex === 0}
+      defaultOpen={openThis}
     >
       {rich && <SectionBodySummary section={section} />}
       {withSubsections
@@ -356,6 +361,8 @@ export default function ClientPurchasePanel({
   simple = true,
   layout = "cards",
   compact = false,
+  targetSection = null,
+  onTargetConsumed,
 }) {
   const [readyOnly, setReadyOnly] = useState(false);
 
@@ -424,6 +431,14 @@ export default function ClientPurchasePanel({
         : splitPurchaseItems(filtered);
   const boughtCount = scoped.filter((i) => isClosedPurchaseStatus(i.status)).length;
 
+  // Проскроллить к разделу, выбранному в «Обзоре», затем сбросить цель
+  useEffect(() => {
+    if (!targetSection || !(simple && effectiveMode === "categories")) return;
+    const el = typeof document !== "undefined" && document.getElementById(`client-sec-${targetSection}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    onTargetConsumed?.();
+  }, [targetSection, simple, effectiveMode, onTargetConsumed]);
+
   const renderMergedList = (list, isBought) => {
     const pass = { onProposeReplacement, layout, compact, patchBulk };
     const openFirst = simple && !isBought && effectiveMode === "categories";
@@ -442,6 +457,7 @@ export default function ClientPurchasePanel({
           withSubsections
           defaultOpenFirst={openFirst}
           richSections={isClientCategories && !isBought}
+          openSectionId={isClientCategories && !isBought ? targetSection : null}
           {...pass}
         />
       );
@@ -559,7 +575,9 @@ export default function ClientPurchasePanel({
 
   const modeButtons = simple ? CLIENT_SIMPLE_PURCHASE_MODES : PRIMARY_PURCHASE_MODES;
 
-  if (!todo.length && !bought.length) {
+  // В режиме «Заказано/Куплено» не прячем панель фильтров при пустом списке —
+  // показываем понятный текст ниже, а фильтры/режимы остаются доступны.
+  if (!todo.length && !bought.length && !isClosedMode) {
     return <Empty title="Нет позиций по фильтру" />;
   }
 
@@ -700,7 +718,9 @@ export default function ClientPurchasePanel({
         </>
       ) : (
         <p className="muted" style={{ fontSize: 14, margin: "16px 0" }}>
-          {isClosedMode ? "Пока нет позиций со статусом «Заказано» или «Куплено»." : "Всё из фильтра уже куплено."}
+          {isClosedMode
+            ? "Пока нет заказанных или купленных позиций. Когда вы отметите товар как заказанный или купленный, он появится здесь."
+            : "Всё из фильтра уже куплено."}
         </p>
       )}
       {showBought && bought.length > 0 && (

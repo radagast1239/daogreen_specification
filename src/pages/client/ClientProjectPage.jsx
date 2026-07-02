@@ -17,6 +17,7 @@ import { applyClientSectionsFromSettings } from "../../lib/clientSectionsConfig.
 import ClientPurchaseGuide from "../../components/client/ClientPurchaseGuide.jsx";
 import ClientPurchaseViewToggles from "../../components/client/ClientPurchaseViewToggles.jsx";
 import ClientPdfExportModal from "../../components/client/ClientPdfExportModal.jsx";
+import ClientReplacementModal from "../../components/client/ClientReplacementModal.jsx";
 import {
   getClientCompactMode,
   getClientPurchaseLayout,
@@ -44,10 +45,11 @@ export default function ClientProjectPage() {
   const { token } = useParams();
   const { state, actions } = useStore();
   const [data, setData] = useState(null);
-  const [tab, setTab] = useState("purchase");
+  const [tab, setTab] = useState("overview");
   const [purchaseMode, setPurchaseMode] = useState("categories");
   const [purchaseFilter, setPurchaseFilter] = useState("todo");
   const [showBought, setShowBought] = useState(false);
+  const [targetSection, setTargetSection] = useState(null);
   const purchaseStatuses = data?.purchaseStatuses || PURCHASE_STATUSES;
   const [supplierFilter, setSupplierFilter] = useState("");
   const [purchaseQuery, setPurchaseQuery] = useState("");
@@ -162,7 +164,22 @@ export default function ClientProjectPage() {
   const openPurchase = (mode = "categories") => {
     const m = mode === "all" ? "categories" : mode === "ordered" ? "closed" : mode;
     setPurchaseMode(m);
+    if (m === "closed") setShowBought(true);
     setTab("purchase");
+  };
+
+  // Клик по разделу в «Обзоре» → «Купить сейчас», режим «По разделам», раскрыть и проскроллить раздел
+  const openPurchaseSection = (sectionId) => {
+    setPurchaseMode("categories");
+    setTargetSection(sectionId || null);
+    setTab("purchase");
+  };
+
+  // Смена режима закупки: для «Заказано/Куплено» автоматически показываем закрытые позиции
+  const handlePurchaseModeChange = (m) => {
+    setPurchaseMode(m);
+    if (m === "closed") setShowBought(true);
+    setTargetSection(null);
   };
 
   const mapLegacyTab = (nextTab) => {
@@ -425,7 +442,7 @@ export default function ClientProjectPage() {
               branding={branding}
               activity={activity}
               qrUrl={qrUrl}
-              onOpenPurchase={() => openPurchase("all")}
+              onOpenPurchase={(sectionId) => (sectionId ? openPurchaseSection(sectionId) : openPurchase("categories"))}
             />
           )}
           {activeTab === "purchase" && (
@@ -433,11 +450,13 @@ export default function ClientProjectPage() {
               project={project}
               items={purchaseItems}
               mode={purchaseMode}
-              onModeChange={setPurchaseMode}
+              onModeChange={handlePurchaseModeChange}
               filter={purchaseFilter}
               onFilterChange={setPurchaseFilter}
               showBought={showBought}
               onShowBoughtChange={setShowBought}
+              targetSection={targetSection}
+              onTargetConsumed={() => setTargetSection(null)}
               supplierFilter={supplierFilter}
               purchaseQuery={purchaseQuery}
               patch={patch}

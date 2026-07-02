@@ -1,7 +1,7 @@
 import React from "react";
 import { money } from "../../store/helpers.js";
 import { lineGross } from "../../lib/itemHelpers.js";
-import { groupByClientSection } from "../../../shared/clientSections.js";
+import { groupByClientSection, resolveClientSection } from "../../../shared/clientSections.js";
 import { isBoughtStatus } from "./ClientItemCard.jsx";
 import ActivityFeed from "../ActivityFeed.jsx";
 import { Progress } from "../ui.jsx";
@@ -62,17 +62,21 @@ export default function ClientOverviewPanel({
       </div>
 
       <h3 style={{ marginTop: 20 }}>По разделам закупки</h3>
+      <p className="muted" style={{ fontSize: 12, margin: "0 0 10px" }}>
+        Нажмите на раздел — откроется «Купить сейчас» с этим разделом.
+      </p>
       {sections.map(([title, list]) => {
         const sum = list.reduce((s, i) => s + lineGross(i), 0);
         const done = list.filter((i) => isBoughtStatus(i.status)).length;
         const pct = list.length ? Math.round((done / list.length) * 100) : 0;
+        const sectionId = resolveClientSection(list[0] || {}).section || null;
         return (
           <button
             key={title}
             type="button"
             className="client-section-card between panel"
             style={{ padding: 12, marginBottom: 8, width: "100%", textAlign: "left", cursor: "pointer" }}
-            onClick={() => onOpenPurchase?.()}
+            onClick={() => onOpenPurchase?.(sectionId)}
           >
             <span>
               <strong>{title}</strong>
