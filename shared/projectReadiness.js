@@ -7,6 +7,7 @@ import {
   lineVisibleToClient,
   resolveItemType,
   isPurchasableLineType,
+  isCoolingSpecItem,
 } from "./itemTypes.js";
 import { validateItemsForPublish, ISSUE_LABELS, parsePublishRulesSettings } from "./publishRules.js";
 
@@ -102,6 +103,8 @@ export function computeReadinessStats(items) {
   if (positionsInProject > 0) {
     const issueItems = new Set();
     for (const it of clientPool) {
+      // Строки-спецификации сплит-систем не считаем проблемными по цене/фото/подразделу.
+      if (isCoolingSpecItem(it)) continue;
       if (!(Number(it.price) > 0)) issueItems.add(it.id);
       if (!(Number(it.qty) > 0)) issueItems.add(it.id);
       if (!hasPhoto(it)) issueItems.add(it.id);
@@ -145,25 +148,30 @@ function clientSubsectionForCheck(it) {
 function extraChecksForItem(it, rules) {
   const problems = [];
   const t = resolveItemType(it);
+  const coolingSpec = isCoolingSpecItem(it);
 
   if (isPurchasableLineType(t) && it.includedInProject !== false && !lineVisibleToClient(it)) {
     problems.push("hidden_from_client");
   }
 
-  if (isMiscCategory(it)) {
-    problems.push("no_client_section");
-  }
-
-  const { section, subsection } = clientSubsectionForCheck(it);
-  const subs = subsectionsForSection(section);
-  if (section && subs.length > 0) {
-    if (!subsection || !isSubsectionValid(section, subsection)) {
-      problems.push("no_client_subsection");
+  // Строки сплит-систем — отдельная расчётная спецификация: клиентский раздел/подраздел
+  // и цена для них не обязательны и не блокируют публикацию.
+  if (!coolingSpec) {
+    if (isMiscCategory(it)) {
+      problems.push("no_client_section");
     }
-  }
 
-  if (Number(it.price) === 0 && rules.requirePrice) {
-    if (!problems.includes("no_price")) problems.push("zero_price");
+    const { section, subsection } = clientSubsectionForCheck(it);
+    const subs = subsectionsForSection(section);
+    if (section && subs.length > 0) {
+      if (!subsection || !isSubsectionValid(section, subsection)) {
+        problems.push("no_client_subsection");
+      }
+    }
+
+    if (Number(it.price) === 0 && rules.requirePrice) {
+      if (!problems.includes("no_price")) problems.push("zero_price");
+    }
   }
 
   if (isOnReviewItem(it)) problems.push("on_review");

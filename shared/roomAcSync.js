@@ -2,6 +2,9 @@ import { isSplitSystemName } from "./splitSpecs.js";
 import {
   AC_ITEM_NAME,
   AC_ITEM_SECTION,
+  AC_CLIENT_SECTION,
+  AC_CLIENT_SUBSECTION,
+  AC_ITEM_KIND,
   buildAcLineFromRoom,
   splitSpecsFromAcUnits,
 } from "./roomAcSpec.js";
@@ -29,8 +32,11 @@ export async function syncRoomAcSpecItems(project, rooms, actions) {
 
     const payload = {
       name: AC_ITEM_NAME,
+      kind: AC_ITEM_KIND,
       module: AC_ITEM_SECTION,
       section: AC_ITEM_SECTION,
+      clientSection: AC_CLIENT_SECTION,
+      clientSubsection: AC_CLIENT_SUBSECTION,
       roomId: room.id,
       splitSpecs: line.splitSpecs,
       coolingKw: line.coolingKw,

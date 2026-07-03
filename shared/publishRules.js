@@ -1,7 +1,7 @@
 /** Правила публикации / отправки клиенту — общая логика front + back */
 
 import { isMiscCategory } from "./clientSections.js";
-import { lineContributesToSum, lineVisibleToClient } from "./itemTypes.js";
+import { lineContributesToSum, lineVisibleToClient, isCoolingSpecItem } from "./itemTypes.js";
 
 export const PUBLISH_RULE_OPTIONS = [
   { id: "requirePrice", label: "Цена указана (> 0)" },
@@ -105,16 +105,19 @@ const WARNING_ONLY_ISSUES = new Set(["no_link"]);
 
 function checkItem(it, rules) {
   const problems = [];
-  if (rules.requirePrice && !(Number(it.price) > 0)) {
+  // Строки-спецификации сплит-систем — не обычный материал: не требуем цену/фото/
+  // ссылку/поставщика/клиентскую категорию. Цена/ссылка заполняются вручную опционально.
+  const coolingSpec = isCoolingSpecItem(it);
+  if (!coolingSpec && rules.requirePrice && !(Number(it.price) > 0)) {
     problems.push("no_price");
   }
-  if (rules.requirePhoto && !(it.photoUrl || it.imageUrl)) {
+  if (!coolingSpec && rules.requirePhoto && !(it.photoUrl || it.imageUrl)) {
     problems.push("no_photo");
   }
-  if (rules.requireLink && !(it.link || "").trim()) {
+  if (!coolingSpec && rules.requireLink && !(it.link || "").trim()) {
     problems.push("no_link");
   }
-  if (rules.requireSupplier && !(it.supplier || "").trim()) {
+  if (!coolingSpec && rules.requireSupplier && !(it.supplier || "").trim()) {
     problems.push("no_supplier");
   }
   if (rules.requireQtyPositive && !(Number(it.qty) > 0)) {
@@ -123,7 +126,7 @@ function checkItem(it, rules) {
   if (rules.requireApproved && !lineVisibleToClient(it)) {
     problems.push("not_approved");
   }
-  if (rules.blockMiscCategory !== false && isMiscCategory(it)) {
+  if (!coolingSpec && rules.blockMiscCategory !== false && isMiscCategory(it)) {
     problems.push("misc_category");
   }
   return problems;

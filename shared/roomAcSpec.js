@@ -11,6 +11,11 @@ function uid(prefix = "id") {
 
 export const AC_ITEM_NAME = "Сплит-система / кондиционер";
 export const AC_ITEM_SECTION = "Климат и вентиляция";
+/** Клиентский раздел/подраздел для строк сплит-систем (по умолчанию). */
+export const AC_CLIENT_SECTION = AC_ITEM_SECTION;
+export const AC_CLIENT_SUBSECTION = "Сплит-системы / кондиционирование";
+/** Признак строки-спецификации сплит-систем. */
+export const AC_ITEM_KIND = "cooling_spec";
 
 export function blankAcUnit(overrides = {}) {
   return {
@@ -143,8 +148,11 @@ export function buildAcLineFromRoom(room, sortOrder = 0) {
   return {
     id: room.acItemId || `ac__${room.id}`,
     materialId: null,
+    kind: AC_ITEM_KIND,
     module: AC_ITEM_SECTION,
     section: AC_ITEM_SECTION,
+    clientSection: AC_CLIENT_SECTION,
+    clientSubsection: AC_CLIENT_SUBSECTION,
     name: AC_ITEM_NAME,
     unit: "шт.",
     category: AC_ITEM_SECTION,

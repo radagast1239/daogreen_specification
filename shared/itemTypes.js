@@ -38,6 +38,22 @@ export function isPurchasableLineType(type) {
   return MATERIAL_CATALOG_TYPES.includes(type || "material");
 }
 
+/** Признак строки-спецификации сплит-систем (расчёт охлаждения по комнате). */
+export const COOLING_SPEC_KIND = "cooling_spec";
+
+/**
+ * Строка сплит-систем — это отдельная расчётная спецификация, а не обычный
+ * материал каталога. К ней нельзя применять требования «фото / материал из базы /
+ * цена > 0 / клиентский подраздел». Остаётся видимой клиенту и считается в сумме,
+ * если цена заполнена вручную.
+ */
+export function isCoolingSpecItem(it) {
+  if (!it) return false;
+  if (it.kind === COOLING_SPEC_KIND) return true;
+  if ((it.itemType || it.item_type) === COOLING_SPEC_KIND) return true;
+  return Array.isArray(it.splitSpecs) && it.splitSpecs.length > 0;
+}
+
 export function isDisplayOnlyLineType(type) {
   return ["note", "video"].includes(type);
 }
