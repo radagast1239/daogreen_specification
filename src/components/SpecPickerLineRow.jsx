@@ -3,7 +3,6 @@ import { patchLine } from "../../shared/specLineFilters.js";
 import { materialSpecSubtitle, hasStructuredSpecEditor } from "../lib/materialDisplay.js";
 import StructuredSpecEditor from "./StructuredSpecEditor.jsx";
 import PhotoUploadField from "./PhotoUploadField.jsx";
-import { photoSrc } from "../lib/api.js";
 import { linePhotoSrc } from "../lib/photoHelpers.js";
 import { roomLabel } from "../lib/roomHelpers.js";
 
@@ -44,7 +43,7 @@ export default function SpecPickerLineRow({
         {ln.materialId ? (
           linePhotoSrc(ln, materials) ? (
             <img
-              src={photoSrc(linePhotoSrc(ln, materials))}
+              src={linePhotoSrc(ln, materials)}
               alt=""
               className="spec-photo-thumb"
               style={{ maxWidth: 96, maxHeight: 64, objectFit: "contain" }}
