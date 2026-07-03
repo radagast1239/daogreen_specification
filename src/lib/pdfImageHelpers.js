@@ -16,7 +16,10 @@ function absImageUrl(url) {
   if (!url) return "";
   if (url.startsWith("http")) return url;
   const base = apiBase() || (typeof window !== "undefined" ? window.location.origin : "");
-  return `${base}${url.startsWith("/") ? url : `/${url}`}`;
+  const path = url.startsWith("/") ? url : `/${url}`;
+  // Идемпотентно: не префиксовать уже префиксованный путь (иначе /spec/spec/uploads/…).
+  if (base && (path === base || path.startsWith(`${base}/`))) return path;
+  return `${base}${path}`;
 }
 
 function isCrossOriginFetch(url) {
@@ -69,6 +72,19 @@ export function itemRowPhotoUrl(it) {
   return itemImageUrl(it) || absolutePhotoUrl(it?.imageUrl || it?.photoUrl || "");
 }
 
+/** Разрешаем только image/* и явно не html — чтобы не вставить в PDF HTML/страницу приложения. */
+export function isAllowedImageContentType(contentType) {
+  const ct = String(contentType || "").toLowerCase();
+  if (!ct.startsWith("image/")) return false;
+  if (ct.includes("html")) return false;
+  return true;
+}
+
+/** Валидный data-URL картинки для jsPDF. */
+export function isPdfImageDataUrl(value) {
+  return typeof value === "string" && value.startsWith("data:image/");
+}
+
 export async function loadImageDataUrl(url, opts = {}) {
   if (!url) return null;
   const fetchUrl = resolvePdfFetchUrl(url, opts);
@@ -79,15 +95,20 @@ export async function loadImageDataUrl(url, opts = {}) {
       const key = getAdminKey();
       if (key) headers["X-Admin-Key"] = key;
     }
-    const res = await fetch(fetchUrl, { headers, credentials: "same-origin" });
-    if (!res.ok) return null;
+    const res = await fetch(fetchUrl, { headers, credentials: "same-origin", cache: "no-store" });
+    if (!res || !res.ok) return null;
+    // Отбраковываем не-картинки: HTML/index.html, JSON, 404-страницы и т.п.
+    if (!isAllowedImageContentType(res.headers?.get?.("content-type"))) return null;
     const blob = await res.blob();
-    return await new Promise((resolve, reject) => {
+    if (!blob || blob.size <= 0) return null;
+    const dataUrl = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+    if (!isPdfImageDataUrl(dataUrl)) return null;
+    return dataUrl;
   } catch {
     return null;
   }
@@ -134,11 +155,31 @@ function rasterizeDataUrl(dataUrl, mime = "image/jpeg") {
   });
 }
 
+/** Реально ли картинка декодируется браузером (natural size > 0). Вне DOM — пропускаем проверку. */
+function probePdfImage(dataUrl) {
+  return new Promise((resolve) => {
+    if (typeof Image === "undefined") {
+      resolve(true);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => resolve(img.naturalWidth > 0 && img.naturalHeight > 0);
+    img.onerror = () => resolve(false);
+    img.src = dataUrl;
+  });
+}
+
 export async function loadPdfImage(url, opts = {}) {
   if (!url) return null;
   const cacheKey = `${opts.clientToken || ""}|${url}`;
   if (imageCache.has(cacheKey)) return imageCache.get(cacheKey);
-  const promise = loadImageDataUrl(url, opts).then((dataUrl) => (dataUrl ? normalizePdfImage(dataUrl) : null));
+  const promise = loadImageDataUrl(url, opts)
+    .then((dataUrl) => (dataUrl ? normalizePdfImage(dataUrl) : null))
+    .then(async (img) => {
+      if (!img || !isPdfImageDataUrl(img.dataUrl) || !img.format) return null;
+      const ok = await probePdfImage(img.dataUrl);
+      return ok ? img : null;
+    });
   imageCache.set(cacheKey, promise);
   return promise;
 }
@@ -165,15 +206,19 @@ export function pdfPhotoTableHooks(photoByRowIndex, photoColIndex) {
         return;
       }
       if (data.section === "body") {
-        data.cell.text = [];
-        data.cell.styles.minCellHeight = thumb + pad * 2;
-        data.cell.styles.valign = "middle";
+        // Чистим ячейку под картинку только если для строки есть валидное фото,
+        // иначе оставляем текстовый fallback "—".
+        if (photoByRowIndex.get(data.row.index)) {
+          data.cell.text = [];
+          data.cell.styles.minCellHeight = thumb + pad * 2;
+          data.cell.styles.valign = "middle";
+        }
       }
     },
     didDrawCell(data) {
       if (data.section !== "body" || data.column.index !== photoColIndex) return;
       const img = photoByRowIndex.get(data.row.index);
-      if (!img) return;
+      if (!img || !isPdfImageDataUrl(img.dataUrl) || !img.format) return;
       try {
         data.doc.addImage(
           img.dataUrl,

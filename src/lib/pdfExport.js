@@ -4,7 +4,7 @@ import QRCode from "qrcode";
 import { money, num } from "../store/helpers.js";
 import { lineGross } from "./itemHelpers.js";
 import { absolutePhotoUrl } from "./photoHelpers.js";
-import { loadPdfImage } from "./pdfImageHelpers.js";
+import { loadPdfImage, buildPdfPhotoMap, pdfPhotoTableHooks, itemRowPhotoUrl } from "./pdfImageHelpers.js";
 import { PDF_COLUMN_OPTIONS } from "./clientBrandConfig.js";
 import { PURCHASE_STATUSES } from "../data/modules.js";
 import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdfFontSetup.js";
@@ -61,7 +61,8 @@ export async function generateProjectPdf({ project, items, branding = {}, purcha
   const [r, g, b] = hexToRgb(brand);
   const cols = branding.pdfColumns?.length ? branding.pdfColumns : ["name", "qty", "unit", "price", "sum", "supplier"];
   const head = ["Фото", ...cols.map((c) => COLUMN_LABELS[c] || c)];
-  // Товарные фото отключены (битые картинки ломали Acrobat) — колонка «Фото» = тире.
+  // Фото вставляется только если это валидная картинка (см. loadPdfImage), иначе ячейка = «—».
+  const photoMap = await buildPdfPhotoMap(items, itemRowPhotoUrl, {});
   const body = items.map((it) => [safePdfPhotoCell(), ...cols.map((c) => cellValue(c, it, project, purchaseStatuses))]);
 
   let headerY = 28;
@@ -96,6 +97,7 @@ export async function generateProjectPdf({ project, items, branding = {}, purcha
     styles: { fontSize: 8, cellPadding: 2, ...pdfTableFontStyles() },
     headStyles: { fillColor: [r, g, b], ...pdfTableHeadFontStyles() },
     columnStyles: { 1: { cellWidth: 52 } },
+    ...pdfPhotoTableHooks(photoMap, 0),
   });
 
   const footer = branding.pdfFooter?.trim();

@@ -5,6 +5,9 @@ import {
   PDF_PHOTO_COL_WIDTH_MM,
   firstPhotoFromItems,
   resolvePdfFetchUrl,
+  isAllowedImageContentType,
+  isPdfImageDataUrl,
+  loadImageDataUrl,
 } from "../src/lib/pdfImageHelpers.js";
 
 describe("pdfImageHelpers", () => {
@@ -46,5 +49,39 @@ describe("pdfImageHelpers", () => {
   it("uses compact photo column width", () => {
     expect(PDF_PHOTO_COL_WIDTH_MM).toBeGreaterThan(10);
     expect(PDF_PHOTO_COL_WIDTH_MM).toBeLessThan(20);
+  });
+
+  it("принимает только image/* content-type, отклоняет html и мусор", () => {
+    expect(isAllowedImageContentType("image/png")).toBe(true);
+    expect(isAllowedImageContentType("image/jpeg; charset=binary")).toBe(true);
+    expect(isAllowedImageContentType("IMAGE/WEBP")).toBe(true);
+    expect(isAllowedImageContentType("text/html")).toBe(false);
+    expect(isAllowedImageContentType("text/html; charset=utf-8")).toBe(false);
+    expect(isAllowedImageContentType("application/json")).toBe(false);
+    expect(isAllowedImageContentType("")).toBe(false);
+    expect(isAllowedImageContentType(null)).toBe(false);
+    expect(isAllowedImageContentType(undefined)).toBe(false);
+  });
+
+  it("data-URL картинки должен начинаться с data:image/", () => {
+    expect(isPdfImageDataUrl("data:image/png;base64,iVBOR")).toBe(true);
+    expect(isPdfImageDataUrl("data:image/jpeg;base64,/9j/4AA")).toBe(true);
+    expect(isPdfImageDataUrl("data:text/html;base64,PGh0bWw+")).toBe(false);
+    expect(isPdfImageDataUrl("<!doctype html><html lang=\"ru\">")).toBe(false);
+    expect(isPdfImageDataUrl("")).toBe(false);
+    expect(isPdfImageDataUrl(null)).toBe(false);
+    expect(isPdfImageDataUrl(undefined)).toBe(false);
+  });
+
+  it("loadImageDataUrl возвращает null для пустых значений без исключений", async () => {
+    await expect(loadImageDataUrl(null)).resolves.toBeNull();
+    await expect(loadImageDataUrl(undefined)).resolves.toBeNull();
+    await expect(loadImageDataUrl("")).resolves.toBeNull();
+  });
+
+  it("resolvePdfFetchUrl не бросает исключение на мусорном вводе", () => {
+    expect(() => resolvePdfFetchUrl("!!!garbage")).not.toThrow();
+    expect(() => resolvePdfFetchUrl("")).not.toThrow();
+    expect(resolvePdfFetchUrl("")).toBe("");
   });
 });
