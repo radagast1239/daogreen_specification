@@ -5,6 +5,7 @@ import {
   safePdfNumber,
   safeCoolingKw,
   safeCoolingBtu,
+  safePdfPhotoCell,
 } from "../src/lib/pdfSafeValue.js";
 
 describe("pdfSafeValue", () => {
@@ -48,5 +49,9 @@ describe("pdfSafeValue", () => {
     expect(safeCoolingBtu(-12000)).toBeGreaterThanOrEqual(0);
     expect(safeCoolingBtu(NaN)).toBe(0);
     expect(safeCoolingBtu(12000)).toBe(12000);
+  });
+
+  it("safePdfPhotoCell всегда возвращает тире (фото товаров отключены)", () => {
+    expect(safePdfPhotoCell()).toBe("—");
   });
 });

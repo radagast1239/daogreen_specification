@@ -50,6 +50,15 @@ export function safePdfText(value, dash = PDF_DASH) {
 }
 
 /**
+ * Значение ячейки колонки «Фото» в PDF.
+ * Товарные фото временно отключены (битые картинки ломали Adobe Acrobat:
+ * в PDF попадали image XObject 0×0 с HTML вместо картинки). Всегда тире.
+ */
+export function safePdfPhotoCell() {
+  return PDF_DASH;
+}
+
+/**
  * Безопасное число для PDF. Возвращает строку.
  * NaN / Infinity / -Infinity / слишком большие → dash.
  */

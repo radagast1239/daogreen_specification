@@ -7,8 +7,8 @@ import { rowsForResponsibleRole } from "./responsibleResolve.js";
 import { getClientSectionLabelMap } from "../../shared/clientSections.js";
 import { generateProjectPdf } from "./pdfExport.js";
 import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdfFontSetup.js";
-import { buildPdfPhotoMap, pdfPhotoTableHooks, PDF_PHOTO_COL_WIDTH_MM } from "./pdfImageHelpers.js";
-import { safePdfText } from "./pdfSafeValue.js";
+import { PDF_PHOTO_COL_WIDTH_MM } from "./pdfImageHelpers.js";
+import { safePdfText, safePdfPhotoCell } from "./pdfSafeValue.js";
 
 function hexToRgb(hex) {
   const h = (hex || "#116355").replace("#", "");
@@ -70,14 +70,13 @@ function budgetLines(doc, items, project, y) {
 async function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStatuses, compact = false, pdfOpts = {}) {
   const photoCol = 1;
   const nameCol = 2;
-  const photoMap = await buildPdfPhotoMap(rows, undefined, pdfOpts);
   const head = compact
     ? [["№", "Фото", "Наименование", "Кол", "Ед", "Сумма", "Поставщик"]]
     : [["№", "Фото", "Наименование", "Кол", "Ед", "Сумма", "Поставщик", "Откуда"]];
   const body = rows.map((r, i) => {
     const base = [
       i + 1,
-      "",
+      safePdfPhotoCell(),
       safePdfText(r.name),
       formatQty(r.qty, r.unit),
       r.unit || "шт.",
@@ -97,7 +96,6 @@ async function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStat
       [photoCol]: { cellWidth: PDF_PHOTO_COL_WIDTH_MM },
       [nameCol]: { cellWidth: compact ? 64 : 50 },
     },
-    ...pdfPhotoTableHooks(photoMap, photoCol),
   });
   return doc.lastAutoTable.finalY + 8;
 }
