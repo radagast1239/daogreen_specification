@@ -37,7 +37,12 @@ import RoomsEditor from "../../components/RoomsEditor.jsx";
 import FloorPlanField from "../../components/FloorPlanField.jsx";
 import FloorPlanPin from "../../components/FloorPlanPin.jsx";
 import { COOLING_FARM_DEFAULTS, computeCoolingFarm } from "../../lib/coolingFarmCalc.js";
-import { defaultRooms } from "../../lib/roomHelpers.js";
+import { defaultRooms, newRoom } from "../../lib/roomHelpers.js";
+import {
+  applyAndSelectNextRoom,
+  applyCoolingCalcToRoom,
+  clearRoomCooling,
+} from "../../../shared/roomCoolingWorkflow.js";
 import { enrichRooms } from "../../../shared/roomCoolingCalc.js";
 
 const STEPS = [
@@ -85,6 +90,7 @@ export default function ProjectBuilderPage() {
   const [activeFarmSection, setActiveFarmSection] = useState(null);
   const [farmLoaded, setFarmLoaded] = useState(false);
   const [rooms, setRooms] = useState(defaultRooms);
+  const [activeCoolingRoomId, setActiveCoolingRoomId] = useState(null);
 
   const sections = useMemo(
     () => filterSectionsForFarmType(resolveFarmSections(farmSettings || {}), form.type),
@@ -329,6 +335,37 @@ export default function ProjectBuilderPage() {
         coolingBtu,
       },
     }));
+  };
+
+  // ---- Cooling calculator → room workflow (new project) ----
+  const activeCoolingRoom = rooms.find((r) => r.id === activeCoolingRoomId) || rooms[0] || null;
+  const effectiveCoolingRoomId = activeCoolingRoom?.id || null;
+
+  const applyCoolingToRoom = ({ roomId, snapshot }) => {
+    const id = roomId || effectiveCoolingRoomId;
+    if (!id) return;
+    setRooms(rooms.map((r) => (r.id === id ? applyCoolingCalcToRoom(r, snapshot) : r)));
+  };
+
+  const applyCoolingAndNext = ({ roomId, snapshot }) => {
+    const id = roomId || effectiveCoolingRoomId;
+    if (!id) return;
+    const { rooms: next, nextRoomId } = applyAndSelectNextRoom(rooms, id, snapshot);
+    setRooms(next);
+    if (nextRoomId) setActiveCoolingRoomId(nextRoomId);
+  };
+
+  const duplicateCoolingToNewRoom = ({ fromRoomId, snapshot }) => {
+    const from = rooms.find((r) => r.id === (fromRoomId || effectiveCoolingRoomId)) || null;
+    const created = applyCoolingCalcToRoom(newRoom(from?.name ? `Копия — ${from.name}` : "Новая комната"), snapshot);
+    setRooms([...rooms, created]);
+    setActiveCoolingRoomId(created.id);
+  };
+
+  const clearCoolingRoom = ({ roomId }) => {
+    const id = roomId || effectiveCoolingRoomId;
+    if (!id) return;
+    setRooms(rooms.map((r) => (r.id === id ? clearRoomCooling(r) : r)));
   };
 
   const canCreate =
@@ -714,6 +751,13 @@ export default function ProjectBuilderPage() {
             draftArea={form.area}
             draftHeight={form.height}
             onApplyToProject={applyCoolingToForm}
+            rooms={rooms}
+            activeRoomId={effectiveCoolingRoomId}
+            onActiveRoomChange={setActiveCoolingRoomId}
+            onApplyToRoom={applyCoolingToRoom}
+            onApplyAndNext={applyCoolingAndNext}
+            onDuplicateToNewRoom={duplicateCoolingToNewRoom}
+            onClearRoomCooling={clearCoolingRoom}
           />
           <div className="card" style={{ padding: 16, marginTop: 16 }}>
             <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>Кондиционеры по комнатам</h4>

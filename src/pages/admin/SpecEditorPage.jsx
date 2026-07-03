@@ -32,7 +32,12 @@ import StructuredSpecEditor from "../../components/StructuredSpecEditor.jsx";
 import { hasStructuredSpecEditor } from "../../lib/materialDisplay.js";
 import FloorPlanField from "../../components/FloorPlanField.jsx";
 import FloorPlanPin from "../../components/FloorPlanPin.jsx";
-import { defaultRooms, isFarmGeneralItem, roomLabel } from "../../lib/roomHelpers.js";
+import { defaultRooms, isFarmGeneralItem, newRoom, roomLabel } from "../../lib/roomHelpers.js";
+import {
+  applyAndSelectNextRoom,
+  applyCoolingCalcToRoom,
+  clearRoomCooling,
+} from "../../../shared/roomCoolingWorkflow.js";
 import RoomCoolingSummary from "../../components/RoomCoolingSummary.jsx";
 import RoomCoolingEditor from "../../components/RoomCoolingEditor.jsx";
 import { syncRoomAcSpecItems } from "../../../shared/roomAcSync.js";
@@ -86,6 +91,7 @@ export default function SpecEditorPage() {
   const [sectionTemplates, setSectionTemplates] = useState([]);
   const [applyTplId, setApplyTplId] = useState("");
   const [replacementReviewItem, setReplacementReviewItem] = useState(null);
+  const [activeCoolingRoomId, setActiveCoolingRoomId] = useState(null);
 
   const stalePrices = useMemo(
     () => findStaleProjectPrices(project?.items || [], state.materials),
@@ -195,6 +201,41 @@ export default function SpecEditorPage() {
   const saveRooms = async (rooms) => {
     await actions.projectUpdate(project.id, { rooms });
     await syncRoomAcSpecItems({ ...project, rooms }, rooms, actions);
+  };
+
+  // ---- Cooling calculator → room workflow (calc tab) ----
+  const coolingRooms = project.rooms?.length ? project.rooms : [];
+  const activeCoolingRoom =
+    coolingRooms.find((r) => r.id === activeCoolingRoomId) || coolingRooms[0] || null;
+  const effectiveCoolingRoomId = activeCoolingRoom?.id || null;
+
+  const applyCoolingToRoom = async ({ roomId, snapshot }) => {
+    const id = roomId || effectiveCoolingRoomId;
+    if (!id) return;
+    const next = coolingRooms.map((r) => (r.id === id ? applyCoolingCalcToRoom(r, snapshot) : r));
+    await saveRooms(next);
+  };
+
+  const applyCoolingAndNext = async ({ roomId, snapshot }) => {
+    const id = roomId || effectiveCoolingRoomId;
+    if (!id) return;
+    const { rooms: next, nextRoomId } = applyAndSelectNextRoom(coolingRooms, id, snapshot);
+    await saveRooms(next);
+    if (nextRoomId) setActiveCoolingRoomId(nextRoomId);
+  };
+
+  const duplicateCoolingToNewRoom = async ({ fromRoomId, snapshot }) => {
+    const from = coolingRooms.find((r) => r.id === (fromRoomId || effectiveCoolingRoomId)) || null;
+    const created = applyCoolingCalcToRoom(newRoom(from?.name ? `Копия — ${from.name}` : "Новая комната"), snapshot);
+    await saveRooms([...coolingRooms, created]);
+    setActiveCoolingRoomId(created.id);
+  };
+
+  const clearCoolingRoom = async ({ roomId }) => {
+    const id = roomId || effectiveCoolingRoomId;
+    if (!id) return;
+    const next = coolingRooms.map((r) => (r.id === id ? clearRoomCooling(r) : r));
+    await saveRooms(next);
   };
 
   const saveManualParam = (key, value) => {
@@ -638,6 +679,13 @@ export default function SpecEditorPage() {
                 },
               });
             }}
+            rooms={coolingRooms}
+            activeRoomId={effectiveCoolingRoomId}
+            onActiveRoomChange={setActiveCoolingRoomId}
+            onApplyToRoom={applyCoolingToRoom}
+            onApplyAndNext={applyCoolingAndNext}
+            onDuplicateToNewRoom={duplicateCoolingToNewRoom}
+            onClearRoomCooling={clearCoolingRoom}
           />
         )}
       </div>

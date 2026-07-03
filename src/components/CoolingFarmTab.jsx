@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   COOLING_FARM_DEFAULTS,
   COOLING_FARM_SECTIONS,
@@ -71,6 +71,10 @@ export default function CoolingFarmTab({
   });
   const inputs = externalInputs ?? internalInputs;
   const [saved, setSaved] = useState(false);
+  const moreRef = useRef(null);
+  const closeMore = () => {
+    if (moreRef.current) moreRef.current.open = false;
+  };
   const canPersist = !!(project?.id && actions?.projectUpdate);
   const isClient = variant === "client";
 
@@ -144,69 +148,71 @@ export default function CoolingFarmTab({
             </div>
             <div className="row wrap" style={{ gap: 8 }}>
               {canPersist && (
-                <button type="button" className="btn" onClick={save}>Сохранить</button>
+                <button type="button" className="btn btn-ghost" onClick={save}>Сохранить</button>
               )}
-              {hasRoomWorkflow ? (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={!activeRoom}
-                    onClick={applyToRoom}
-                  >
-                    Применить {fmt(calc.totalKwSafety)} кВт к выбранной комнате
-                  </button>
-                  {onApplyAndNext && (
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={!activeRoom}
-                      onClick={applyToRoomAndNext}
-                    >
-                      Применить и перейти к следующей комнате
-                    </button>
-                  )}
-                  {onDuplicateToNewRoom && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      onClick={duplicateToNewRoom}
-                    >
-                      Дублировать параметры в новую комнату
-                    </button>
-                  )}
-                  {onClearRoomCooling && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      disabled={!activeRoom}
-                      onClick={clearActiveRoomCooling}
-                    >
-                      Очистить расчёт комнаты
-                    </button>
-                  )}
-                </>
-              ) : (
+              {!hasRoomWorkflow && (
                 <button type="button" className="btn btn-primary" onClick={applyCooling}>
-                  {canPersist ? `Применить ${fmt(calc.totalKwSafety)} кВт к проекту` : `Использовать ${fmt(calc.totalKwSafety)} кВт`}
+                  {canPersist ? `Применить ${fmt(calc.totalKwSafety)} кВт к проекту` : `Использовать ${fmt(calc.totalKwSafety)} кВт в проекте`}
                 </button>
               )}
             </div>
           </div>
-          {hasRoomWorkflow && roomList.length > 0 && (
+          {hasRoomWorkflow && (
             <div className="row wrap" style={{ gap: 8, alignItems: "center", marginTop: 12 }}>
-              <span className="muted" style={{ fontSize: 13 }}>Активная комната:</span>
-              <select
-                className="spec-cell-input"
-                value={activeRoomId || ""}
-                onChange={(e) => onActiveRoomChange?.(e.target.value)}
-                style={{ minWidth: 200, fontSize: 13 }}
+              {roomList.length > 0 && (
+                <>
+                  <span className="muted" style={{ fontSize: 13 }}>Активная комната:</span>
+                  <select
+                    className="spec-cell-input"
+                    value={activeRoomId || ""}
+                    onChange={(e) => onActiveRoomChange?.(e.target.value)}
+                    style={{ minWidth: 200, fontSize: 13 }}
+                  >
+                    {!activeRoom && <option value="">— выберите комнату —</option>}
+                    {roomList.map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!activeRoom}
+                onClick={applyToRoom}
               >
-                {!activeRoom && <option value="">— выберите комнату —</option>}
-                {roomList.map((r) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
+                Применить {fmt(calc.totalKwSafety)} кВт к комнате
+              </button>
+              {onApplyAndNext && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={!activeRoom}
+                  onClick={applyToRoomAndNext}
+                >
+                  Применить и перейти дальше
+                </button>
+              )}
+              <details className="spec-bulk-menu" ref={moreRef}>
+                <summary className="btn">Ещё ▾</summary>
+                <div className="spec-bulk-menu__list">
+                  {(canPersist || onApplyToProject) && (
+                    <button type="button" className="btn" onClick={() => { applyCooling(); closeMore(); }}>
+                      {canPersist ? `Применить ${fmt(calc.totalKwSafety)} кВт к проекту` : `Использовать ${fmt(calc.totalKwSafety)} кВт в проекте`}
+                    </button>
+                  )}
+                  {onDuplicateToNewRoom && (
+                    <button type="button" className="btn" onClick={() => { duplicateToNewRoom(); closeMore(); }}>
+                      Дублировать параметры в новую комнату
+                    </button>
+                  )}
+                  {onClearRoomCooling && (
+                    <button type="button" className="btn" disabled={!activeRoom} onClick={() => { clearActiveRoomCooling(); closeMore(); }}>
+                      Очистить расчёт комнаты
+                    </button>
+                  )}
+                </div>
+              </details>
             </div>
           )}
           {saved && canPersist && <p className="muted" style={{ fontSize: 13, margin: "10px 0 0" }}>Сохранено в проекте</p>}
