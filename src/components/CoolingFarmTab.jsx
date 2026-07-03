@@ -7,6 +7,7 @@ import {
   seasonalCooling,
 } from "../lib/coolingFarmCalc.js";
 import { CLIENT_COOLING_SECTIONS, COOLING_ROW_HINTS } from "../lib/coolingHints.js";
+import { coolingSnapshotFromFarmCalc } from "../../shared/roomCoolingWorkflow.js";
 
 function fmt(val, row = {}) {
   if (val == null || val === "") return "—";
@@ -43,6 +44,13 @@ export default function CoolingFarmTab({
   draftHeight,
   variant = "admin",
   onSafetyFactorChange,
+  rooms,
+  activeRoomId,
+  onActiveRoomChange,
+  onApplyToRoom,
+  onApplyAndNext,
+  onDuplicateToNewRoom,
+  onClearRoomCooling,
 }) {
   const baseParams =
     project?.manualParams && typeof project.manualParams === "object" ? project.manualParams : {};
@@ -98,6 +106,31 @@ export default function CoolingFarmTab({
     }
   };
 
+  // Optional per-room workflow — active only when a parent wires onApplyToRoom.
+  const hasRoomWorkflow = typeof onApplyToRoom === "function";
+  const roomList = Array.isArray(rooms) ? rooms : [];
+  const activeRoom = roomList.find((r) => r.id === activeRoomId) || null;
+
+  const applyToRoom = async () => {
+    if (!onApplyToRoom || !activeRoom) return;
+    await onApplyToRoom({ roomId: activeRoomId, snapshot: coolingSnapshotFromFarmCalc(inputs, calc) });
+  };
+
+  const applyToRoomAndNext = async () => {
+    if (!onApplyAndNext || !activeRoom) return;
+    await onApplyAndNext({ roomId: activeRoomId, snapshot: coolingSnapshotFromFarmCalc(inputs, calc) });
+  };
+
+  const duplicateToNewRoom = async () => {
+    if (!onDuplicateToNewRoom) return;
+    await onDuplicateToNewRoom({ fromRoomId: activeRoomId, snapshot: coolingSnapshotFromFarmCalc(inputs, calc) });
+  };
+
+  const clearActiveRoomCooling = async () => {
+    if (!onClearRoomCooling || !activeRoom) return;
+    await onClearRoomCooling({ roomId: activeRoomId });
+  };
+
   return (
     <div className={`cooling-calc ${isClient ? "cooling-calc--client" : ""}`} style={{ marginTop: 16 }}>
       {!isClient && (
@@ -113,11 +146,69 @@ export default function CoolingFarmTab({
               {canPersist && (
                 <button type="button" className="btn" onClick={save}>Сохранить</button>
               )}
-              <button type="button" className="btn btn-primary" onClick={applyCooling}>
-                {canPersist ? `Применить ${fmt(calc.totalKwSafety)} кВт к проекту` : `Использовать ${fmt(calc.totalKwSafety)} кВт`}
-              </button>
+              {hasRoomWorkflow ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={!activeRoom}
+                    onClick={applyToRoom}
+                  >
+                    Применить {fmt(calc.totalKwSafety)} кВт к выбранной комнате
+                  </button>
+                  {onApplyAndNext && (
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={!activeRoom}
+                      onClick={applyToRoomAndNext}
+                    >
+                      Применить и перейти к следующей комнате
+                    </button>
+                  )}
+                  {onDuplicateToNewRoom && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={duplicateToNewRoom}
+                    >
+                      Дублировать параметры в новую комнату
+                    </button>
+                  )}
+                  {onClearRoomCooling && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={!activeRoom}
+                      onClick={clearActiveRoomCooling}
+                    >
+                      Очистить расчёт комнаты
+                    </button>
+                  )}
+                </>
+              ) : (
+                <button type="button" className="btn btn-primary" onClick={applyCooling}>
+                  {canPersist ? `Применить ${fmt(calc.totalKwSafety)} кВт к проекту` : `Использовать ${fmt(calc.totalKwSafety)} кВт`}
+                </button>
+              )}
             </div>
           </div>
+          {hasRoomWorkflow && roomList.length > 0 && (
+            <div className="row wrap" style={{ gap: 8, alignItems: "center", marginTop: 12 }}>
+              <span className="muted" style={{ fontSize: 13 }}>Активная комната:</span>
+              <select
+                className="spec-cell-input"
+                value={activeRoomId || ""}
+                onChange={(e) => onActiveRoomChange?.(e.target.value)}
+                style={{ minWidth: 200, fontSize: 13 }}
+              >
+                {!activeRoom && <option value="">— выберите комнату —</option>}
+                {roomList.map((r) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           {saved && canPersist && <p className="muted" style={{ fontSize: 13, margin: "10px 0 0" }}>Сохранено в проекте</p>}
         </div>
       )}
