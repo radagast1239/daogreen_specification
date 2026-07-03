@@ -2,9 +2,7 @@ import React, { useMemo, useRef, useState } from "react";
 import {
   COOLING_FARM_DEFAULTS,
   COOLING_FARM_SECTIONS,
-  COOLING_SEASONS_DEFAULT,
   computeCoolingFarm,
-  seasonalCooling,
 } from "../lib/coolingFarmCalc.js";
 import { CLIENT_COOLING_SECTIONS, COOLING_ROW_HINTS } from "../lib/coolingHints.js";
 import { coolingSnapshotFromFarmCalc } from "../../shared/roomCoolingWorkflow.js";
@@ -79,7 +77,6 @@ export default function CoolingFarmTab({
   const isClient = variant === "client";
 
   const calc = useMemo(() => computeCoolingFarm(inputs), [inputs]);
-  const seasons = useMemo(() => seasonalCooling(calc, COOLING_SEASONS_DEFAULT), [calc]);
   const sections = useMemo(() => filterSections(variant), [variant]);
 
   const set = (key, value) => {
@@ -291,54 +288,6 @@ export default function CoolingFarmTab({
           </table>
         </div>
       ))}
-
-      <div className="card cooling-calc__section" style={{ padding: 0, overflow: "hidden" }}>
-        <div className="cooling-calc__section-title">По сезонам</div>
-        <div style={{ overflowX: "auto", padding: "0 8px 12px 20px" }}>
-          <table className="spec cooling-calc__table">
-            <thead>
-              <tr>
-                <th className="cooling-calc__col-label">Параметр</th>
-                {seasons.map((s) => (
-                  <th key={s.id} className="right cooling-calc__col-value">{s.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="cooling-calc__label">T улица</td>
-                {seasons.map((s) => (
-                  <td key={s.id} className="right num cooling-calc__value">{s.tOut}°C</td>
-                ))}
-              </tr>
-              <tr>
-                <td className="cooling-calc__label">ΔT</td>
-                {seasons.map((s) => (
-                  <td key={s.id} className="right num cooling-calc__value cooling-calc__value--bold">{fmt(s.dT)}°C</td>
-                ))}
-              </tr>
-              <tr>
-                <td className="cooling-calc__label">Ограждения, BTU/ч</td>
-                {seasons.map((s) => (
-                  <td key={s.id} className="right num cooling-calc__value">{fmt(s.envelope)}</td>
-                ))}
-              </tr>
-              <tr>
-                <td><strong className="cooling-calc__label">ИТОГО BTU/ч</strong></td>
-                {seasons.map((s) => (
-                  <td key={s.id} className="right num cooling-calc__value cooling-calc__value--bold">{fmt(s.total)}</td>
-                ))}
-              </tr>
-              <tr>
-                <td><strong className="cooling-calc__label">ИТОГО кВт</strong></td>
-                {seasons.map((s) => (
-                  <td key={s.id} className="right num cooling-calc__value cooling-calc__value--bold">{fmt(s.totalKw)}</td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
 
       {isClient && (
         <p className="muted" style={{ fontSize: 12.5, marginTop: 8, paddingLeft: 20 }}>

@@ -302,27 +302,3 @@ export const COOLING_FARM_SECTIONS = [
     ],
   },
 ];
-
-export function seasonalCooling(calc, seasons) {
-  const envFactor =
-    (calc.wallArea * calc.uWall +
-      calc.roofArea * calc.uRoof +
-      calc.floorArea * calc.uFloor +
-      calc.glassArea * calc.uGlass) /
-    1000 /
-    BTU;
-  return seasons.map((s) => {
-    const dT = s.tOut - s.tIn;
-    const envelope = envFactor * dT * BTU;
-    const insol = calc.insolBtu * (s.insolMul ?? 1);
-    const total = envelope + insol + calc.lampBtu + calc.plantsBtu + calc.ventBtu * (dT / (calc.deltaT || 1));
-    return { ...s, dT, envelope, insol, total, totalKw: total / BTU };
-  });
-}
-
-export const COOLING_SEASONS_DEFAULT = [
-  { id: "summer", label: "Лето", tOut: 35, tIn: 22, insolMul: 1 },
-  { id: "autumn", label: "Осень", tOut: 10, tIn: 22, insolMul: 1 },
-  { id: "winter", label: "Зима", tOut: -20, tIn: 22, insolMul: 0.3 },
-  { id: "spring", label: "Весна", tOut: 5, tIn: 22, insolMul: 0.3 },
-];
