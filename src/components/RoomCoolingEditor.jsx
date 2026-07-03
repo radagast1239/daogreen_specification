@@ -7,13 +7,17 @@ import {
   patchRoomAcUnits,
   removeRoomAcUnit,
 } from "../../shared/roomAcSpec.js";
-import {
-  enrichRoom,
-  recommendedCoolingKw,
-  roomVolume,
-} from "../../shared/roomCoolingCalc.js";
+import { enrichRoom, roomVolume } from "../../shared/roomCoolingCalc.js";
+import { roomCoolingStatus, roomRecommendedKw } from "../../shared/roomCoolingWorkflow.js";
 import { num } from "../store/helpers.js";
 import { useDebouncedSync } from "../lib/useDebouncedSync.js";
+
+const ROOM_STATUS_COLORS = {
+  not_filled: "#8a8f98",
+  filled: "var(--brand)",
+  needs_ac: "var(--amber)",
+  ac_selected: "var(--ok)",
+};
 
 function parseNumInput(raw) {
   if (raw === "" || raw == null) return "";
@@ -80,14 +84,16 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
                 <th className="right">Запас, %</th>
                 <th className="right">Рек. кВт</th>
                 <th className="right">Факт. кВт</th>
+                <th>Статус</th>
               </tr>
             </thead>
             <tbody>
               {list.map((raw) => {
                 const r = enrichRoom(raw);
                 const vol = roomVolume(r);
-                const rec = recommendedCoolingKw(r);
+                const rec = roomRecommendedKw(r);
                 const actual = actualCoolingFromRoom(r);
+                const status = roomCoolingStatus(r);
                 return (
                   <tr key={r.id}>
                     <td>{r.name}</td>
@@ -163,6 +169,11 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
                     </td>
                     <td className="right num">{num(rec) || "—"}</td>
                     <td className="right num">{actual > 0 ? num(actual) : "—"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <span style={{ color: ROOM_STATUS_COLORS[status.id], fontWeight: 600, fontSize: 11 }}>
+                        {status.label}
+                      </span>
+                    </td>
                   </tr>
                 );
               })}
