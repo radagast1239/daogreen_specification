@@ -53,6 +53,52 @@ describe("applyCoolingCalcToRoom", () => {
     expect(applied.cooling.params.length).toBe(5);
     expect(applied.cooling.name).toBe("Манипуляционная");
   });
+
+  it("creates one blank AC unit row when applying cooling to a room without AC units", () => {
+    const room = { id: "r1", name: "Манипуляционная" };
+    const applied = applyCoolingCalcToRoom(
+      room,
+      coolingSnapshotFromFarmCalc(farmInputs, farmCalc)
+    );
+
+    expect(applied.acUnits).toHaveLength(1);
+    expect(applied.acUnits[0].qty).toBe(1);
+    expect(applied.acUnits[0].coolingKw).toBe("");
+    expect(applied.acUnits[0].link).toBe("");
+    expect(applied.acUnits[0].comment).toBe("");
+    expect(applied.cooling.recommendedKw).toBe(3.11);
+  });
+
+  it("does not overwrite existing manual AC unit fields when applying cooling", () => {
+    const room = {
+      id: "r1",
+      name: "Манипуляционная",
+      acUnits: [
+        {
+          id: "u1",
+          qty: 2,
+          coolingKw: 5,
+          link: "https://example.com/ac",
+          comment: "manual model",
+        },
+      ],
+    };
+
+    const applied = applyCoolingCalcToRoom(
+      room,
+      coolingSnapshotFromFarmCalc(farmInputs, farmCalc)
+    );
+
+    expect(applied.acUnits).toHaveLength(1);
+    expect(applied.acUnits[0]).toMatchObject({
+      id: "u1",
+      qty: 2,
+      coolingKw: 5,
+      link: "https://example.com/ac",
+      comment: "manual model",
+    });
+    expect(applied.cooling.recommendedKw).toBe(3.11);
+  });
 });
 
 describe("applyAndSelectNextRoom", () => {

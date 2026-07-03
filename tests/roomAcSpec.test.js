@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAcLineFromRoom,
+  flattenRoomAcSpecRows,
   roomAcUnits,
   splitSpecsFromAcUnits,
   actualCoolingFromRoom,
@@ -39,5 +40,26 @@ describe("roomAcSpec", () => {
       { qty: 1, coolingKw: 3 },
     ]);
     expect(specs).toHaveLength(2);
+  });
+
+  it("prefers applied room.cooling recommendation for AC rows", () => {
+    const rows = flattenRoomAcSpecRows([
+      {
+        id: "r1",
+        name: "Манипуляционная",
+        lightingW: 0,
+        cooling: {
+          recommendedKw: 3.11,
+          btu: 10614,
+          standardBtu: 12000,
+        },
+        acUnits: [{ id: "u1", qty: 1, coolingKw: "" }],
+      },
+    ]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].recommendedKw).toBe(3.11);
+    expect(rows[0].recommendedBtu).toBe(12000);
+    expect(rows[0].unit.coolingKw).toBe("");
   });
 });

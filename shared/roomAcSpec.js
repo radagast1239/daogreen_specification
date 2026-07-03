@@ -23,6 +23,30 @@ export function blankAcUnit(overrides = {}) {
   };
 }
 
+function toNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Рекомендованная мощность по комнате: применённый расчёт в приоритете, иначе — модель нагрузки. */
+export function roomAcRecommendedKw(room) {
+  const applied = toNum(room?.cooling?.recommendedKw);
+  if (applied > 0) return applied;
+  return recommendedCoolingKw(enrichRoom(room || {}));
+}
+
+/** Рекомендованный BTU/ч по комнате: стандарт из расчёта, иначе BTU расчёта, иначе из кВт. */
+export function roomAcRecommendedBtu(room) {
+  const standard = Math.round(toNum(room?.cooling?.standardBtu));
+  if (standard > 0) return standard;
+
+  const btu = Math.round(toNum(room?.cooling?.btu));
+  if (btu > 0) return btu;
+
+  const kw = roomAcRecommendedKw(room);
+  return kw > 0 ? Math.round(kw * 3412.142) : 0;
+}
+
 /** Строки сплита по комнате — минимум одна для редактора */
 export function roomAcUnits(room) {
   if (Array.isArray(room?.acUnits) && room.acUnits.length) {
@@ -32,8 +56,7 @@ export function roomAcUnits(room) {
       id: u.id || uid("acu"),
     }));
   }
-  const rec = recommendedCoolingKw(enrichRoom(room));
-  return [blankAcUnit(rec > 0 ? { coolingKw: rec } : {})];
+  return [blankAcUnit()];
 }
 
 export function splitSpecsFromAcUnits(units) {
@@ -59,7 +82,8 @@ export function flattenRoomAcSpecRows(rooms) {
       unit,
       roomId: room.id,
       roomName: room.name,
-      recommendedKw: recommendedCoolingKw(enrichRoom(room)),
+      recommendedKw: roomAcRecommendedKw(room),
+      recommendedBtu: roomAcRecommendedBtu(room),
       rowKey: `${room.id}__${unit.id}`,
     }))
   );

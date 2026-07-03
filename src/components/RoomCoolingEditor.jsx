@@ -208,15 +208,16 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
               <tr>
                 <th>Комната</th>
                 <th className="right">Рек. кВт</th>
+                <th className="right">BTU/ч</th>
                 <th className="right">шт</th>
-                <th className="right">кВт</th>
+                <th className="right">Факт. кВт</th>
                 <th>Ссылка</th>
                 <th>Комментарий</th>
                 <th style={{ width: 40 }} />
               </tr>
             </thead>
             <tbody>
-              {specRows.map(({ unit, roomId, roomName, recommendedKw, rowKey }) => (
+              {specRows.map(({ unit, roomId, roomName, recommendedKw, recommendedBtu, rowKey }) => (
                 <tr key={rowKey}>
                   <td>
                     <select
@@ -233,6 +234,9 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
                     </select>
                   </td>
                   <td className="right num muted">{num(recommendedKw) || "—"}</td>
+                  <td className="right num muted">
+                    {recommendedBtu ? Math.round(recommendedBtu).toLocaleString("ru-RU") : "—"}
+                  </td>
                   <td className="right">
                     <input
                       type="number"

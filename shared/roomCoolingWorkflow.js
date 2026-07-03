@@ -9,7 +9,7 @@
  */
 
 import { enrichRoom, recommendedCoolingKw, roomVolume } from "./roomCoolingCalc.js";
-import { actualCoolingFromRoom, roomAcUnits } from "./roomAcSpec.js";
+import { actualCoolingFromRoom, blankAcUnit, roomAcUnits } from "./roomAcSpec.js";
 
 function toNum(v) {
   const n = Number(v);
@@ -69,12 +69,15 @@ export function applyCoolingCalcToRoom(room, snapshot = {}) {
     toNum(snapshot.volume) || (area > 0 && height > 0 ? round2(area * height) : roomVolume(room));
   const reservePct =
     snapshot.reservePct != null && snapshot.reservePct !== "" ? snapshot.reservePct : room.reservePct;
+  const existingAcUnits = Array.isArray(room.acUnits) ? room.acUnits : [];
+  const acUnits = existingAcUnits.length ? existingAcUnits : [blankAcUnit()];
   return {
     ...room,
     area: area || room.area || "",
     height: height || room.height || "",
     volume: volume || room.volume || "",
     reservePct,
+    acUnits,
     cooling: {
       name: room.name,
       area,
