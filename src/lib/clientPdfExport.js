@@ -8,6 +8,7 @@ import { getClientSectionLabelMap } from "../../shared/clientSections.js";
 import { generateProjectPdf } from "./pdfExport.js";
 import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdfFontSetup.js";
 import { buildPdfPhotoMap, pdfPhotoTableHooks, PDF_PHOTO_COL_WIDTH_MM } from "./pdfImageHelpers.js";
+import { safePdfText } from "./pdfSafeValue.js";
 
 function hexToRgb(hex) {
   const h = (hex || "#116355").replace("#", "");
@@ -77,7 +78,7 @@ async function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStat
     const base = [
       i + 1,
       "",
-      r.name,
+      safePdfText(r.name),
       formatQty(r.qty, r.unit),
       r.unit || "шт.",
       money(r.sumVat ?? lineGross(r), project.currency),

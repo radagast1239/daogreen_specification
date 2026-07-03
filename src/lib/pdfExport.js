@@ -8,6 +8,7 @@ import { loadPdfImage, buildPdfPhotoMap, pdfPhotoTableHooks, itemRowPhotoUrl } f
 import { PDF_COLUMN_OPTIONS } from "./clientBrandConfig.js";
 import { PURCHASE_STATUSES } from "../data/modules.js";
 import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdfFontSetup.js";
+import { safePdfText } from "./pdfSafeValue.js";
 
 const COLUMN_LABELS = Object.fromEntries(PDF_COLUMN_OPTIONS.map((c) => [c.id, c.label]));
 
@@ -25,7 +26,7 @@ async function loadImageDataUrl(url) {
 function cellValue(col, it, project, purchaseStatuses) {
   switch (col) {
     case "name":
-      return it.name;
+      return safePdfText(it.name);
     case "qty":
       return num(it.qty);
     case "unit":

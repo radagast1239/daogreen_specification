@@ -43,14 +43,24 @@ function isRegistered(doc) {
 }
 
 export async function setupPdfFonts(doc) {
-  if (!isRegistered(doc)) {
-    const { regular, bold } = await getFonts();
-    doc.addFileToVFS(REGULAR_FILE, regular);
-    doc.addFont(REGULAR_FILE, PDF_FONT, "normal");
-    doc.addFileToVFS(BOLD_FILE, bold);
-    doc.addFont(BOLD_FILE, PDF_FONT, "bold");
+  try {
+    if (!isRegistered(doc)) {
+      const { regular, bold } = await getFonts();
+      doc.addFileToVFS(REGULAR_FILE, regular);
+      doc.addFont(REGULAR_FILE, PDF_FONT, "normal");
+      doc.addFileToVFS(BOLD_FILE, bold);
+      doc.addFont(BOLD_FILE, PDF_FONT, "bold");
+    }
+    doc.setFont(PDF_FONT, "normal");
+  } catch {
+    // Roboto недоступен — не роняем PDF, откатываемся на встроенный шрифт.
+    fontsPromise = null; // разрешить повторную попытку при следующем экспорте
+    try {
+      doc.setFont("helvetica", "normal");
+    } catch {
+      /* ignore — jsPDF сам подставит дефолтный шрифт */
+    }
   }
-  doc.setFont(PDF_FONT, "normal");
   return doc;
 }
 
