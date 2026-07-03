@@ -11,6 +11,7 @@ export const SPEC_LINE_FILTERS = [
   { id: "no_link", label: "Без ссылки" },
   { id: "no_photo", label: "Без фото" },
   { id: "no_supplier", label: "Без поставщика" },
+  { id: "no_responsible", label: "Без ответственного" },
 ];
 
 function builderIncluded(line) {
@@ -38,6 +39,15 @@ export function matchSpecLineFilter(line, filterId, mode = "builder") {
     mode === "project" ? lineVisibleToClient(line) : builderClientVisible(line);
 
   switch (filterId) {
+    case "problems":
+      return (
+        matchSpecLineFilter(line, "needs_review", mode) ||
+        matchSpecLineFilter(line, "no_price", mode) ||
+        matchSpecLineFilter(line, "no_link", mode) ||
+        matchSpecLineFilter(line, "no_photo", mode) ||
+        matchSpecLineFilter(line, "no_supplier", mode) ||
+        matchSpecLineFilter(line, "no_responsible", mode)
+      );
     case "included":
       return included;
     case "excluded":
@@ -60,6 +70,10 @@ export function matchSpecLineFilter(line, filterId, mode = "builder") {
       return !hasPhoto(line);
     case "no_supplier":
       return !(line.supplier || "").trim();
+    case "no_responsible": {
+      const r = (line.responsible || "").trim().toLowerCase();
+      return !r || r === "general" || r === "none";
+    }
     default:
       return true;
   }

@@ -1,9 +1,13 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { SPEC_LINE_FILTERS } from "../../shared/specLineFilters.js";
 import { PURCHASE_STATUSES } from "../data/modules.js";
 import { RESPONSIBLE_OPTIONS } from "../lib/itemHelpers.js";
 import { PURCHASE_PRIORITIES } from "../../shared/purchasePriority.js";
 import { Modal } from "./ui.jsx";
+
+const FILTER_LABELS = Object.fromEntries(SPEC_LINE_FILTERS.map((f) => [f.id, f.label]));
+const PROBLEM_FILTER_IDS = ["needs_review", "no_price", "no_link", "no_photo", "no_supplier", "no_responsible"];
+const STATUS_FILTER_IDS = ["included", "excluded"];
 
 /** Фильтры и массовые действия для раздела (проект или сборщик). */
 export default function SpecSectionToolbar({
@@ -32,8 +36,20 @@ export default function SpecSectionToolbar({
   const [statusVal, setStatusVal] = useState("not_bought");
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [priorityVal, setPriorityVal] = useState("urgent");
+  const menuRef = useRef(null);
+  const problemsRef = useRef(null);
+  const statusRef = useRef(null);
 
   const disabled = selectedCount === 0;
+
+  const closeMenu = () => {
+    if (menuRef.current) menuRef.current.open = false;
+  };
+
+  const pickFilter = (id, ref) => {
+    onFilterChange(id);
+    if (ref?.current) ref.current.open = false;
+  };
 
   const apply = (patch) => {
     onBulkPatch?.(patch);
@@ -43,22 +59,68 @@ export default function SpecSectionToolbar({
     setRespOpen(false);
     setStatusOpen(false);
     setPriorityOpen(false);
+    closeMenu();
   };
+
+  const openModal = (setter) => {
+    setter(true);
+    closeMenu();
+  };
+
+  const problemActive = filterId === "problems" || PROBLEM_FILTER_IDS.includes(filterId);
+  const statusValue = STATUS_FILTER_IDS.includes(filterId) ? filterId : "";
 
   return (
     <div className="spec-section-toolbar no-print">
       <div className="spec-quick-filters" style={{ marginBottom: 0 }}>
         <span className="muted" style={{ fontSize: 12 }}>Фильтр:</span>
-        {SPEC_LINE_FILTERS.map((f) => (
-          <button
-            key={f.id || "all"}
-            type="button"
-            className={`btn btn-sm${filterId === f.id ? " btn-primary" : ""}`}
-            onClick={() => onFilterChange(f.id)}
-          >
-            {f.label}
-          </button>
-        ))}
+        <button
+          type="button"
+          className={`btn btn-sm${filterId === "" ? " btn-primary" : ""}`}
+          onClick={() => onFilterChange("")}
+        >
+          Все
+        </button>
+        <details className="spec-filter-menu" ref={problemsRef}>
+          <summary className={`btn btn-sm${problemActive ? " btn-primary" : ""}`}>Проблемы ▾</summary>
+          <div className="spec-filter-menu__list">
+            <button type="button" className={`btn btn-sm${filterId === "problems" ? " btn-primary" : ""}`} onClick={() => pickFilter("problems", problemsRef)}>
+              Все проблемы
+            </button>
+            {PROBLEM_FILTER_IDS.map((id) => (
+              <button key={id} type="button" className={`btn btn-sm${filterId === id ? " btn-primary" : ""}`} onClick={() => pickFilter(id, problemsRef)}>
+                {FILTER_LABELS[id]}
+              </button>
+            ))}
+          </div>
+        </details>
+        <button
+          type="button"
+          className={`btn btn-sm${filterId === "client_visible" ? " btn-primary" : ""}`}
+          onClick={() => onFilterChange("client_visible")}
+        >
+          Клиенту
+        </button>
+        <button
+          type="button"
+          className={`btn btn-sm${filterId === "client_hidden" ? " btn-primary" : ""}`}
+          onClick={() => onFilterChange("client_hidden")}
+        >
+          Скрытые
+        </button>
+        <details className="spec-filter-menu" ref={statusRef}>
+          <summary className={`btn btn-sm${statusValue ? " btn-primary" : ""}`}>Статус ▾</summary>
+          <div className="spec-filter-menu__list">
+            <button type="button" className={`btn btn-sm${filterId === "" ? " btn-primary" : ""}`} onClick={() => pickFilter("", statusRef)}>
+              Все
+            </button>
+            {STATUS_FILTER_IDS.map((id) => (
+              <button key={id} type="button" className={`btn btn-sm${filterId === id ? " btn-primary" : ""}`} onClick={() => pickFilter(id, statusRef)}>
+                {FILTER_LABELS[id]}
+              </button>
+            ))}
+          </div>
+        </details>
       </div>
 
       {(onSelectAll || selectedCount > 0) && (
@@ -66,7 +128,7 @@ export default function SpecSectionToolbar({
           {onSelectAll && (
             <button
               type="button"
-              className="btn btn-sm"
+              className="btn btn-sm btn-ghost"
               disabled={!visibleCount}
               onClick={onSelectAll}
             >
@@ -78,49 +140,54 @@ export default function SpecSectionToolbar({
           <span className="muted" style={{ fontSize: 12 }}>
             Выбрано: <strong className="num">{selectedCount}</strong>
           </span>
-          <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => apply({ includedInProject: true, included: true, enabled: true })}>
-            Включить
-          </button>
-          <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => apply({ includedInProject: false, included: false, enabled: false })}>
-            Исключить
-          </button>
-          <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => apply({ visibleToClient: true, visible: true, approved: true })}>
-            Показать клиенту
-          </button>
-          <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => apply({ visibleToClient: false, visible: false, approved: false })}>
-            Скрыть от клиента
-          </button>
-          {onRefreshClientSections && (
-            <button type="button" className="btn btn-sm" disabled={disabled} onClick={onRefreshClientSections}>
-              Разделы из базы
-            </button>
-          )}
-          <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => setSupplierOpen(true)}>
-            Поставщик…
-          </button>
-          <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => setRespOpen(true)}>
-            Ответственный…
-          </button>
-          {mode === "project" && (
-            <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => setStatusOpen(true)}>
-              Статус…
-            </button>
-          )}
-          {mode === "project" && (
-            <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => setPriorityOpen(true)}>
-              Приоритет…
-            </button>
-          )}
-          {mode === "project" && sectionOptions.length > 1 && (
-            <>
-              <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => setMoveOpen(true)}>
-                Перенести…
+          <details className="spec-bulk-menu" ref={menuRef}>
+            <summary className="btn btn-sm btn-primary">Действия с выбранными ▾</summary>
+            <div className="spec-bulk-menu__list">
+              <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => apply({ includedInProject: true, included: true, enabled: true })}>
+                Включить в проект
               </button>
-              <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => setCopyOpen(true)}>
-                Копировать…
+              <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => apply({ includedInProject: false, included: false, enabled: false })}>
+                Исключить из проекта
               </button>
-            </>
-          )}
+              <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => apply({ visibleToClient: true, visible: true, approved: true })}>
+                Показать клиенту
+              </button>
+              <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => apply({ visibleToClient: false, visible: false, approved: false })}>
+                Скрыть от клиента
+              </button>
+              {onRefreshClientSections && (
+                <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => { onRefreshClientSections(); closeMenu(); }}>
+                  Разделы из базы
+                </button>
+              )}
+              <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => openModal(setSupplierOpen)}>
+                Назначить поставщика…
+              </button>
+              <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => openModal(setRespOpen)}>
+                Назначить ответственного…
+              </button>
+              {mode === "project" && (
+                <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => openModal(setStatusOpen)}>
+                  Статус…
+                </button>
+              )}
+              {mode === "project" && (
+                <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => openModal(setPriorityOpen)}>
+                  Приоритет…
+                </button>
+              )}
+              {mode === "project" && sectionOptions.length > 1 && (
+                <>
+                  <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => openModal(setMoveOpen)}>
+                    Перенести…
+                  </button>
+                  <button type="button" className="btn btn-sm" disabled={disabled} onClick={() => openModal(setCopyOpen)}>
+                    Копировать…
+                  </button>
+                </>
+              )}
+            </div>
+          </details>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClearSelection}>
             Снять выбор
           </button>

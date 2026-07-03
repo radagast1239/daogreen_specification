@@ -2305,6 +2305,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   gap: 8px;
   margin-bottom: 10px;
 }
+.spec-section-toolbar .spec-quick-filters { margin: 0; }
 
 .spec-bulk-bar {
   display: flex;
@@ -2316,6 +2317,36 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
 }
+
+.spec-bulk-menu,
+.spec-filter-menu {
+  position: relative;
+}
+.spec-bulk-menu > summary,
+.spec-filter-menu > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.spec-bulk-menu > summary::-webkit-details-marker,
+.spec-filter-menu > summary::-webkit-details-marker { display: none; }
+.spec-bulk-menu__list,
+.spec-filter-menu__list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 190px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+.spec-bulk-menu__list .btn,
+.spec-filter-menu__list .btn { justify-content: flex-start; text-align: left; }
 
 /* ---------- Admin layout helpers ---------- */
 .projects-grid {
