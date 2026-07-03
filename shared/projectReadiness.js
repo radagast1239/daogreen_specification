@@ -27,7 +27,6 @@ export const CRITICAL_ISSUES = new Set([
   "no_qty",
   "no_price",
   "zero_price",
-  "no_photo",
   "no_supplier",
   "not_approved",
   "misc_category",
@@ -36,9 +35,10 @@ export const CRITICAL_ISSUES = new Set([
   "min_client_items",
 ]);
 
-/** Предупреждения — публикация возможна */
+/** Предупреждения — публикация возможна (нет ссылки/фото не блокирует публикацию) */
 export const WARNING_ISSUES = new Set([
   "no_link",
+  "no_photo",
   "hidden_from_client",
   "purchase_duplicate",
   "on_review",

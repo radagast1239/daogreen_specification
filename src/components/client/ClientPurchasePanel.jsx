@@ -26,7 +26,6 @@ import {
   computeSectionStats,
   detectRowProblems,
   isRowReadyToBuy,
-  problemGroupCounts,
 } from "../../lib/clientPurchaseGroups.js";
 import Collapsible from "../Collapsible.jsx";
 import { Empty } from "../ui.jsx";
@@ -133,18 +132,6 @@ function MergedRowsList({ rows, layout, currency, patch, patchBulk, bought, purc
   ));
 }
 
-const PROBLEM_LABELS = {
-  no_link: "Без ссылки",
-  no_supplier: "Без поставщика",
-  need_help: "Нужна помощь",
-  on_review: "На проверке",
-  replacement_check: "Замена",
-  no_price: "Без цены",
-};
-
-// Порядок вывода групп проблем (по важности для клиента)
-const PROBLEM_ORDER = ["no_link", "no_supplier", "need_help", "on_review", "replacement_check", "no_price"];
-
 function BuyNowInstructions() {
   return (
     <div
@@ -160,34 +147,7 @@ function BuyNowInstructions() {
       }}
     >
       Откройте раздел, перейдите по ссылкам товаров и отметьте статус: <b>Заказано</b>, <b>Куплено</b> или{" "}
-      <b>Нужна помощь</b>. Позиции без ссылок и с вопросами собраны в блоке «Проблемы».
-    </div>
-  );
-}
-
-function ProblemsSummary({ sectionStats }) {
-  let total = 0;
-  for (const key of Object.keys(sectionStats || {})) {
-    total += (sectionStats[key].problemRows || []).length;
-  }
-  if (!total) return null;
-
-  const counts = problemGroupCounts(sectionStats);
-  const causes = [
-    ...PROBLEM_ORDER.filter((c) => counts[c]),
-    ...Object.keys(counts).filter((c) => !PROBLEM_ORDER.includes(c)),
-  ];
-
-  return (
-    <div className="client-purchase-problems no-print" style={{ background: "var(--bg-warn, #fff8e1)", border: "1px solid var(--border-warn, #ffe082)", borderRadius: 8, padding: "12px 16px", marginBottom: 12 }}>
-      <div style={{ fontWeight: 600, marginBottom: 6 }}>⚠ Проблемы · {total} поз.</div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {causes.map((cause) => (
-          <span key={cause} style={{ fontSize: 13, background: "var(--bg-surface, #fff)", borderRadius: 4, padding: "2px 8px", border: "1px solid var(--border-light, #e0e0e0)" }}>
-            {PROBLEM_LABELS[cause] || cause}: {counts[cause]}
-          </span>
-        ))}
-      </div>
+      <b>Нужна помощь</b>.
     </div>
   );
 }
@@ -201,9 +161,6 @@ function SectionCardActions({ section }) {
       ) : (
         <span className="muted">Куплено {section.boughtCount}/{section.totalCount}</span>
       )}
-      {section.problemCount > 0 && (
-        <span style={{ color: "var(--warn-text, #b26a00)" }}>⚠ {section.problemCount} проблем</span>
-      )}
     </span>
   );
 }
@@ -212,7 +169,6 @@ function SectionBodySummary({ section }) {
   const parts = [`Сумма: ${section.sumLabel}`];
   if (section.supplierCount) parts.push(`Поставщиков: ${section.supplierCount}`);
   parts.push(`Куплено: ${section.boughtCount}/${section.totalCount}`);
-  if (section.problemCount) parts.push(`Проблемных: ${section.problemCount}`);
   return (
     <div className="client-section-card__summary muted no-print" style={{ fontSize: 12, padding: "0 0 8px", borderBottom: "1px solid var(--border-light, #eee)", marginBottom: 8 }}>
       {parts.join(" · ")}
@@ -706,9 +662,6 @@ export default function ClientPurchasePanel({
         </p>
       )}
       {simple && effectiveMode === "categories" && <BuyNowInstructions />}
-      {simple && effectiveMode === "categories" && sectionStats && (
-        <ProblemsSummary sectionStats={sectionStats} />
-      )}
       {todo.length > 0 ? (
         <>
           <h3 className="purchase-section-title">

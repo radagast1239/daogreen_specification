@@ -101,7 +101,9 @@ function clientReadyItems(items) {
   return (items || []).filter((i) => lineVisibleToClient(i) && lineContributesToSum(i));
 }
 
-const WARNING_ONLY_ISSUES = new Set(["no_link"]);
+// Ссылка и фото не блокируют публикацию — это внутренние предупреждения для админа,
+// клиенту они не показываются. (Фото/ссылка у позиции могут отсутствовать — это нормально.)
+const WARNING_ONLY_ISSUES = new Set(["no_link", "no_photo"]);
 
 function checkItem(it, rules) {
   const problems = [];
