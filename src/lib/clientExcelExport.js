@@ -5,6 +5,8 @@ import { rowsForResponsibleRole } from "./responsibleResolve.js";
 import { groupByClientSection } from "../../shared/clientSections.js";
 import { isCoolingSpecItem } from "../../shared/itemTypes.js";
 
+const RUB_NUMFMT = '#,##0" ₽"';
+
 /** Включить автофильтр по всему диапазону листа */
 function withAutofilter(ws) {
   if (ws && ws["!ref"]) ws["!autofilter"] = { ref: ws["!ref"] };
@@ -24,6 +26,24 @@ function triggerDownload(blob, filename) {
 
 function statusLabel(id, purchaseStatuses) {
   return purchaseStatuses.find((s) => s.id === id)?.label || id || "";
+}
+
+function applyRubFormats(ws, headerNames, numericHeaders = ["Цена", "Сумма", "Бюджет", "Куплено", "Осталось"]) {
+  if (!ws?.["!ref"]) return ws;
+  const cols = numericHeaders
+    .map((h) => headerNames.indexOf(h))
+    .filter((i) => i >= 0);
+  if (!cols.length) return ws;
+  const range = XLSX.utils.decode_range(ws["!ref"]);
+  for (let r = range.s.r + 1; r <= range.e.r; r += 1) {
+    for (const c of cols) {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      const cell = ws[ref];
+      if (!cell || cell.t !== "n") continue;
+      cell.z = RUB_NUMFMT;
+    }
+  }
+  return ws;
 }
 
 const MERGED_HEADERS = [
@@ -88,11 +108,14 @@ function sheetFromMergedRows(rows, purchaseStatuses) {
   }
 
   ws["!cols"] = MERGED_HEADERS.map((h) => {
-    if (h === "Наименование" || h === "Откуда взялось") return { wch: 38 };
-    if (h === "Комментарий Daogreen" || h === "Комментарий клиента") return { wch: 28 };
-    if (h === "Открыть товар") return { wch: 14 };
-    return { wch: 13 };
+    if (h === "Наименование" || h === "Откуда взялось") return { wch: 40 };
+    if (h === "Комментарий Daogreen" || h === "Комментарий клиента") return { wch: 30 };
+    if (h === "Раздел" || h === "Подраздел") return { wch: 18 };
+    if (h === "Открыть товар") return { wch: 15 };
+    if (h === "№") return { wch: 5 };
+    return { wch: 14 };
   });
+  applyRubFormats(ws, MERGED_HEADERS, ["Сумма", "Факт. цена"]);
   return ws;
 }
 
@@ -102,10 +125,11 @@ function sheetFromRows(rows, colWidths = {}) {
   const data = [headers, ...rows.map((r) => headers.map((h) => r[h] ?? ""))];
   const ws = XLSX.utils.aoa_to_sheet(data);
   ws["!cols"] = headers.map((h) => ({ wch: colWidths[h] || (h === "Наименование" ? 42 : 14) }));
+  applyRubFormats(ws, headers);
   return ws;
 }
 
-function sheetFromRowsWithLinks(rows, linkHeader = "Ссылка", linkText = "Открыть товар") {
+function sheetFromRowsWithLinks(rows, linkHeader = "Ссылка", linkText = "Открыть товар", colWidths = {}) {
   if (!rows?.length) return null;
   const headers = Object.keys(rows[0]).filter((k) => !k.startsWith("_"));
   const linkCol = headers.indexOf(linkHeader);
@@ -119,19 +143,91 @@ function sheetFromRowsWithLinks(rows, linkHeader = "Ссылка", linkText = "�
       ws[ref] = { v: linkText, t: "s", l: { Target: link, Tooltip: link } };
     }
   }
-  ws["!cols"] = headers.map((h) => ({ wch: h === "Позиция" || h === "Наименование" ? 40 : 14 }));
+  ws["!cols"] = headers.map((h) => ({
+    wch: colWidths[h] || (h === "Позиция" || h === "Наименование" ? 42 : 14),
+  }));
+  applyRubFormats(ws, headers, ["Сумма"]);
   return ws;
 }
 
 function instructionSheet() {
   const rows = [
-    { Шаг: "1", Действие: "Покупайте по листу «03 К закупке по поставщикам» — магазин за магазином." },
-    { Шаг: "2", Действие: "Лист «04 К закупке по разделам» — тот же список, сгруппированный по блокам фермы." },
-    { Шаг: "3", Действие: "Лист «05 Без ссылок» — позиции, которым нужна ссылка или поставщик (требуют подбора)." },
-    { Шаг: "4", Действие: "В онлайн-версии отмечайте статусы «заказано» / «куплено» — они сохраняются автоматически." },
-    { Шаг: "5", Действие: "Листы 06–09 — срезы по ответственным (сантехник/электрик/монтажник/клиент). Лист «10 Детализация по модулям» — для проверки расчёта (не для закупки)." },
+    {
+      Блок: "О файле",
+      Текст:
+        "Это рабочий список закупки Daogreen. Его можно открыть в Excel или Google Таблицах и использовать параллельно с онлайн-версией по ссылке клиента.",
+    },
+    {
+      Блок: "О файле",
+      Текст:
+        "Одинаковые позиции из разных модулей проекта объединены в одну строку с общим количеством — не покупайте дубликаты.",
+    },
+    {
+      Блок: "Как пользоваться",
+      Текст: "Начните с листа «03 К закупке по поставщикам» — удобно идти магазин за магазином.",
+    },
+    {
+      Блок: "Как пользоваться",
+      Текст: "Лист «04 К закупке по разделам» — тот же список, сгруппированный по блокам фермы.",
+    },
+    {
+      Блок: "Как пользоваться",
+      Текст: "Лист «05 Без ссылок» — позиции без ссылки или поставщика, их нужно подобрать вместе с Daogreen.",
+    },
+    {
+      Блок: "Как пользоваться",
+      Текст:
+        "Листы 06–10 — срезы по ответственным: 06 Сантехник, 07 Электрик, 08 Монтажник, 09 Климат, 10 Клиент.",
+    },
+    {
+      Блок: "Как пользоваться",
+      Текст: "Лист «10б Монтаж» — монтажные работы (если есть в проекте).",
+    },
+    {
+      Блок: "Как пользоваться",
+      Текст: "Лист «11 Детализация по модулям» — для проверки расчёта, не для закупки.",
+    },
+    {
+      Блок: "Как пользоваться",
+      Текст: "В онлайн-версии отмечайте статусы — они сохраняются автоматически при следующем открытии ссылки.",
+    },
+    {
+      Блок: "Цена уточняется",
+      Текст:
+        "В колонках «Цена» и «Сумма» может стоять «цена уточняется» — это не ошибка. Так отмечены климатические позиции и другие строки, где модель или комплектация подбирается вручную.",
+    },
+    {
+      Блок: "Если товара нет",
+      Текст:
+        "Если позиции нет в наличии или не подходит — отметьте в онлайн-версии «Нужна помощь» или напишите Daogreen: подберём замену.",
+    },
+    {
+      Блок: "Статусы",
+      Текст: "Не заказано / Не куплено — позиция ещё не куплена.",
+    },
+    {
+      Блок: "Статусы",
+      Текст: "Заказано — оплачено или заказано, ожидается доставка.",
+    },
+    {
+      Блок: "Статусы",
+      Текст: "Куплено — получено на объект.",
+    },
+    {
+      Блок: "Статусы",
+      Текст: "Уже есть — позиция уже есть на объекте, покупать не нужно.",
+    },
+    {
+      Блок: "Статусы",
+      Текст: "Нужна помощь — нужна проверка или замена Daogreen.",
+    },
+    {
+      Блок: "Статусы",
+      Текст:
+        "Цена уточняется — позиция рассчитана автоматически или требует ручного подбора (часто на листе «09 Климат»).",
+    },
   ];
-  return sheetFromRows(rows, { Действие: 72 });
+  return sheetFromRows(rows, { Блок: 16, Текст: 88 });
 }
 
 function summarySheet(project, items, branding, purchaseStatuses) {
@@ -152,7 +248,7 @@ function summarySheet(project, items, branding, purchaseStatuses) {
     { Поле: "Готовность", Значение: `${progress}%` },
     { Поле: "Позиций (детально)", Значение: items.length },
   ];
-  return sheetFromRows(rows);
+  return sheetFromRows(rows, { Поле: 22, Значение: 18 });
 }
 
 function categorySummarySheet(items) {
@@ -168,7 +264,7 @@ function categorySummarySheet(items) {
       Готовность: list.length ? `${Math.round((bought / list.length) * 100)}%` : "0%",
     };
   });
-  return sheetFromRows(rows);
+  return sheetFromRows(rows, { Раздел: 28, Сумма: 16 });
 }
 
 function mergedByCategorySheet(merged, purchaseStatuses) {
@@ -191,7 +287,11 @@ function supplierMergedSheet(merged) {
     _link: r.link || "",
     Раздел: r.clientSectionLabel || "",
   }));
-  return sheetFromRowsWithLinks(rows, "Ссылка");
+  return sheetFromRowsWithLinks(rows, "Ссылка", "Открыть товар", {
+    Поставщик: 18,
+    Позиция: 42,
+    Раздел: 20,
+  });
 }
 
 /** Лист «Без ссылок / требует подбора»: строки без ссылки или без поставщика */
@@ -210,7 +310,7 @@ function noLinkSheet(merged, purchaseStatuses) {
       : "без поставщика",
     Статус: statusLabel(r.status, purchaseStatuses),
   }));
-  return sheetFromRows(out, { Наименование: 42, Проблема: 22, Поставщик: 20 });
+  return sheetFromRows(out, { Наименование: 42, Проблема: 24, Поставщик: 22, Раздел: 18 });
 }
 
 function mergedForRole(items, role) {
@@ -250,10 +350,13 @@ function moduleDetailSheet(items, project, purchaseStatuses) {
       });
     }
   }
-  return sheetFromRowsWithLinks(rows, "Ссылка");
+  return sheetFromRowsWithLinks(rows, "Ссылка", "Открыть товар", {
+    Модуль: 22,
+    Наименование: 40,
+  });
 }
 
-export function downloadClientWorkbook(project, items, { purchaseStatuses = [], branding = {}, versionInfo } = {}) {
+export function buildClientWorkbook(project, items, { purchaseStatuses = [], branding = {}, versionInfo } = {}) {
   const purchaseItems = (items || []).filter((i) => i.itemRole !== "installation");
   const installItems = (items || []).filter(
     (i) => i.itemRole === "installation" || i.category === "Работы и доставка"
@@ -301,8 +404,15 @@ export function downloadClientWorkbook(project, items, { purchaseStatuses = [], 
     );
   }
 
-  const safeName = (project.name || "проект").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
-  const ver = project.version > 1 ? `_v${project.version}` : "";
+  return wb;
+}
+
+export function downloadClientWorkbook(project, items, options = {}) {
+  const wb = buildClientWorkbook(project, items, options);
+  const { branding = {}, versionInfo } = options;
+  const projectRef = project || { name: "проект", version: 1 };
+  const safeName = (projectRef.name || "проект").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
+  const ver = projectRef.version > 1 ? `_v${projectRef.version}` : "";
   const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
   triggerDownload(
     new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
