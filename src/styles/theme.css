@@ -1868,6 +1868,41 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 .readiness-bar__chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .readiness-bar__chip { font-size: 11.5px; }
 
+.project-hq {
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.project-hq__title { font-size: 16px; }
+.project-hq__subtitle { font-size: 12px; margin: 4px 0 0; }
+.project-hq__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+.project-hq__kpi {
+  padding: 12px 14px;
+  margin: 0;
+  border: 1px solid var(--line);
+}
+.project-hq__kpi-value {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+  margin-bottom: 4px;
+}
+.project-hq__kpi-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.project-hq__kpi-sub { font-size: 11px; margin-top: 4px; }
+.project-hq__kpi--ok { border-color: rgba(17, 99, 85, 0.35); }
+.project-hq__kpi--warn { border-color: rgba(245, 158, 11, 0.45); }
+.project-hq__kpi--bad { border-color: rgba(220, 38, 38, 0.35); }
+.project-hq__actions { gap: 8px; margin-top: 4px; }
+
 .pre-publish-status {
   padding: 10px 12px;
   border-radius: var(--radius);

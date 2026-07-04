@@ -9,13 +9,12 @@ import {
   money,
   num,
 } from "../../store/helpers.js";
-import { SPECIALIST_MAP } from "../../data/modules.js";
+import { SPECIALIST_MAP, PURCHASE_STATUSES } from "../../data/modules.js";
 import { VAT_RATES, lineGross, lineContributesToSum, RESPONSIBLE_OPTIONS } from "../../lib/itemHelpers.js";
 import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS } from "../../../shared/itemTypes.js";
 import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
 import { FARM_LINE_GROUPS, farmLineGroupLabel } from "../../../shared/farmLineGroups.js";
 import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
-import { PURCHASE_STATUSES } from "../../data/modules.js";
 import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
 import { clientLink, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
@@ -46,6 +45,7 @@ import { findStaleProjectPrices } from "../../../shared/staleProjectPrices.js";
 import ActivityFeed from "../../components/ActivityFeed.jsx";
 import PublishChecklist, { PublishGateModal } from "../../components/PublishChecklist.jsx";
 import ProjectReadinessBar from "../../components/ProjectReadinessBar.jsx";
+import ProjectHqBar from "../../components/ProjectHqBar.jsx";
 import PrePublishCheckModal from "../../components/PrePublishCheckModal.jsx";
 import ImportFromProjectModal from "../../components/ImportFromProjectModal.jsx";
 import CompareProjectsModal from "../../components/CompareProjectsModal.jsx";
@@ -53,6 +53,7 @@ import DuplicateProjectModal from "../../components/DuplicateProjectModal.jsx";
 import ClientSchemesEditor from "../../components/ClientSchemesEditor.jsx";
 import { filterItemsForViewMode } from "../../../shared/projectReadiness.js";
 import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
+import { copyToClipboard } from "../../lib/copyText.js";
 import {
   compositionGroupLabel,
   groupItemsByComposition,
@@ -317,6 +318,57 @@ export default function SpecEditorPage() {
     setLinkOpen(true);
   };
 
+  const copyClientLink = async () => {
+    if (!url) return;
+    const ok = await copyToClipboard(url);
+    if (ok) success("Ссылка скопирована");
+    else error("Не удалось скопировать — выделите ссылку вручную");
+  };
+
+  const exportClientPdf = async () => {
+    try {
+      const visibleItems = filterItemsForViewMode(project.items, "client");
+      if (!visibleItems.length) {
+        error("Нет позиций для клиента");
+        return;
+      }
+      const { generateClientPurchasePdf } = await import("../../lib/clientPdfExport.js");
+      await generateClientPurchasePdf({
+        project,
+        items: visibleItems,
+        branding: { companyName },
+        purchaseStatuses: PURCHASE_STATUSES,
+        pageUrl: url || window.location.href,
+        mode: "client_full",
+        clientToken: project.clientToken,
+      });
+    } catch (e) {
+      error(e.message || "Ошибка PDF");
+    }
+  };
+
+  const exportClientExcel = async () => {
+    try {
+      const visibleItems = filterItemsForViewMode(project.items, "client");
+      if (!visibleItems.length) {
+        error("Нет позиций для клиента");
+        return;
+      }
+      const { downloadClientWorkbook } = await import("../../lib/clientExcelExport.js");
+      downloadClientWorkbook(project, visibleItems, {
+        purchaseStatuses: PURCHASE_STATUSES,
+        branding: { companyName },
+        versionInfo: project.version > 0 ? { versionNumber: project.version } : null,
+      });
+    } catch (e) {
+      error(e.message || "Ошибка Excel");
+    }
+  };
+
+  const prepareClientNotice = () => {
+    window.alert("Мастер подготовки клиентской выдачи будет добавлен следующим шагом.");
+  };
+
   const breadcrumbs = (
     <Breadcrumbs
       items={[
@@ -439,6 +491,22 @@ export default function SpecEditorPage() {
       />
 
       <div className="content">
+        <ProjectHqBar
+          project={project}
+          items={project.items || []}
+          publishCheck={publishCheck}
+          publishCheckLoading={publishCheckLoading}
+          clientUrl={url}
+          onRefreshPublishCheck={refreshPublishCheck}
+          onOpenPrePublish={() => setPrePublishOpen(true)}
+          onOpenClientLink={requestClientLink}
+          onOpenClientPreview={() => url && window.open(url, "_blank", "noopener,noreferrer")}
+          onCopyClientLink={copyClientLink}
+          onExportPdf={exportClientPdf}
+          onExportExcel={exportClientExcel}
+          onPrepareClient={prepareClientNotice}
+        />
+
         <div className="print-header">
           <h1>{project.name}</h1>
           <p>
