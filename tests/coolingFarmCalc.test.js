@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { computeCoolingFarm, COOLING_FARM_DEFAULTS } from "../src/lib/coolingFarmCalc.js";
+import {
+  computeCoolingFarm,
+  COOLING_FARM_DEFAULTS,
+  reserveCoefToPct,
+  pctToReserveCoef,
+} from "../src/lib/coolingFarmCalc.js";
 
 function closeTo(actual, expected, precision = 5) {
   expect(actual).toBeCloseTo(expected, precision);
@@ -137,5 +142,17 @@ describe("computeCoolingFarm", () => {
     const calc = computeCoolingFarm({ length: 5, width: 4, height: 3 });
     expect(calc.safetyFactor).toBe(1.3);
     expect(calc.totalKwSafety).toBeCloseTo(calc.totalKw * 1.3, 5);
+  });
+
+  it("reserve is editable as a percent (coefficient <-> percent)", () => {
+    expect(reserveCoefToPct(1.3)).toBe(30);
+    expect(reserveCoefToPct(1.1)).toBe(10);
+    expect(pctToReserveCoef(30)).toBe(1.3);
+    expect(pctToReserveCoef(0)).toBe(1);
+    // round-trip default
+    expect(pctToReserveCoef(reserveCoefToPct(COOLING_FARM_DEFAULTS.safetyFactor))).toBe(1.3);
+    // empty stays empty
+    expect(reserveCoefToPct("")).toBe("");
+    expect(pctToReserveCoef("")).toBe("");
   });
 });

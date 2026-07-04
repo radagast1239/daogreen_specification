@@ -53,6 +53,22 @@ export const COOLING_FARM_DEFAULTS = {
 
 const BTU = 3412.14;
 
+/** Запас: коэффициент (1.3) → проценты (30). */
+export function reserveCoefToPct(coef) {
+  if (coef === "" || coef == null) return "";
+  const n = Number(coef);
+  if (!Number.isFinite(n)) return "";
+  return Math.round((n - 1) * 100);
+}
+
+/** Запас: проценты (30) → коэффициент (1.3). */
+export function pctToReserveCoef(pct) {
+  if (pct === "" || pct == null) return "";
+  const n = Number(pct);
+  if (!Number.isFinite(n)) return "";
+  return Math.round((1 + n / 100) * 1000) / 1000;
+}
+
 function pickStandardBtu(btu) {
   const steps = [9000, 12000, 18000, 24000, 36000, 48000, 60000];
   for (const s of steps) if (btu <= s) return s;
@@ -291,7 +307,7 @@ export const COOLING_FARM_SECTIONS = [
       { key: "nightVentPct", label: "Ночная вентиляция", unit: "%", input: true },
       { key: "nightLoadBtu", label: "Ночная нагрузка", unit: "BTU/ч" },
       { key: "nightLoadKw", label: "Ночная нагрузка", unit: "кВт" },
-      { key: "safetyFactor", label: "Запасной коэфф.", unit: "—", input: true },
+      { key: "safetyFactor", label: "Запас", unit: "%", input: true, reservePct: true },
       { key: "cop", label: "COP кондиционера", unit: "—", input: true },
       { key: "totalBtu", label: "Нагрузка без запаса", unit: "BTU/ч" },
       { key: "totalKw", label: "Нагрузка без запаса", unit: "кВт" },

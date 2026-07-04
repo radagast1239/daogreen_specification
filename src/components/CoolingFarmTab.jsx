@@ -3,6 +3,8 @@ import {
   COOLING_FARM_DEFAULTS,
   COOLING_FARM_SECTIONS,
   computeCoolingFarm,
+  reserveCoefToPct,
+  pctToReserveCoef,
 } from "../lib/coolingFarmCalc.js";
 import { CLIENT_COOLING_SECTIONS, COOLING_ROW_HINTS } from "../lib/coolingHints.js";
 import { coolingSnapshotFromFarmCalc } from "../../shared/roomCoolingWorkflow.js";
@@ -272,8 +274,12 @@ export default function CoolingFarmTab({
                           className="spec-cell-input spec-cell-input--num cooling-calc__input"
                           type="number"
                           step="any"
-                          value={inputs[row.key] ?? ""}
-                          onChange={(e) => set(row.key, e.target.value === "" ? "" : Number(e.target.value))}
+                          value={row.reservePct ? reserveCoefToPct(inputs[row.key]) : (inputs[row.key] ?? "")}
+                          onChange={(e) =>
+                            row.reservePct
+                              ? set(row.key, pctToReserveCoef(e.target.value))
+                              : set(row.key, e.target.value === "" ? "" : Number(e.target.value))
+                          }
                         />
                       ) : (
                         <span className={`num cooling-calc__value ${row.result || readOnly ? "cooling-calc__value--bold" : ""}`}>
@@ -291,7 +297,7 @@ export default function CoolingFarmTab({
 
       {isClient && (
         <p className="muted" style={{ fontSize: 12.5, marginTop: 8, paddingLeft: 20 }}>
-          Можно изменить только «Запасной коэфф.» — остальные параметры задаёт Daogreen.
+          Можно изменить только «Запас, %» — остальные параметры задаёт Daogreen.
         </p>
       )}
     </div>
