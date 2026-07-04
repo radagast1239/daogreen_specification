@@ -49,9 +49,18 @@ export const COOLING_SPEC_KIND = "cooling_spec";
  */
 export function isCoolingSpecItem(it) {
   if (!it) return false;
+  // Явные маркеры (новые строки).
   if (it.kind === COOLING_SPEC_KIND) return true;
   if ((it.itemType || it.item_type) === COOLING_SPEC_KIND) return true;
-  return Array.isArray(it.splitSpecs) && it.splitSpecs.length > 0;
+  const src = it.source || it.origin || it.type;
+  if (src === "room-ac" || src === "room_ac" || src === "cooling-spec") return true;
+  // Структурный признак: наличие спецификации сплит-систем (переживает загрузку из БД).
+  if (Array.isArray(it.splitSpecs) && it.splitSpecs.length > 0) return true;
+  // Legacy-строки без маркера: имя сплит-системы + привязка к комнате/AC-строке
+  // (не матчим обычный каталожный «кондиционер» без признаков room/ac/split).
+  const isSplitName = /сплит/i.test(it.name || it.title || "");
+  if (isSplitName && (it.roomId || it.room_id || it.acUnitId || it.acItemId)) return true;
+  return false;
 }
 
 export function isDisplayOnlyLineType(type) {
