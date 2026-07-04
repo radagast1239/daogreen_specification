@@ -3,6 +3,7 @@ import { mergedPurchaseRows, formatQty, groupBy } from "../store/helpers.js";
 import { lineGross, isBoughtStatus } from "./itemHelpers.js";
 import { rowsForResponsibleRole } from "./responsibleResolve.js";
 import { groupByClientSection } from "../../shared/clientSections.js";
+import { isCoolingSpecItem } from "../../shared/itemTypes.js";
 
 /** Включить автофильтр по всему диапазону листа */
 function withAutofilter(ws) {
@@ -45,6 +46,8 @@ const MERGED_HEADERS = [
 
 function mergedDataRow(r, index, purchaseStatuses) {
   const rep = r.sourceItems?.[0];
+  // Сплит-системы: если цена не указана вручную — «цена уточняется», не 0.
+  const priceUnset = isCoolingSpecItem(rep || r) && !(Number(r.price) > 0) && !(Number(r.sumVat) > 0);
   return {
     "№": index + 1,
     Раздел: r.clientSectionLabel || "",
@@ -52,8 +55,8 @@ function mergedDataRow(r, index, purchaseStatuses) {
     Наименование: r.name,
     "Кол-во всего": formatQty(r.qty, r.unit),
     "Ед.": r.unit || "шт.",
-    Цена: r.price ?? "",
-    Сумма: Math.round(r.sumVat || 0),
+    Цена: priceUnset ? "цена уточняется" : (r.price ?? ""),
+    Сумма: priceUnset ? "цена уточняется" : Math.round(r.sumVat || 0),
     Поставщик: r.supplier || "",
     "Открыть товар": r.link ? "Открыть товар" : "без ссылки",
     _link: r.link || "",
