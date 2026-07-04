@@ -33,6 +33,7 @@ export default function ClientPdfExportModal({ open, items, onClose, onExport })
       (opt.id === "plumber" && !stats.plumberMerged) ||
       (opt.id === "electric" && !stats.electricMerged) ||
       (opt.id === "installer" && !stats.installerMerged) ||
+      (opt.id === "climate" && !stats.climateMerged) ||
       (opt.id === "client_role" && !stats.clientMerged);
     const active = selected === opt.id;
 

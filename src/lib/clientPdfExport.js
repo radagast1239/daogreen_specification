@@ -76,6 +76,62 @@ function budgetLines(doc, items, project, y) {
   return y + 16;
 }
 
+export function clientPdfNameCol(row) {
+  const rep = row.sourceItems?.[0];
+  const isCooling = isCoolingSpecItem(rep || row);
+  if (!isCooling) return safePdfText(row.name);
+
+  // Для климата: собираем характеристики из sourceItems, если они есть.
+  // Базовое название всегда "Сплит-система / кондиционер" (без суффиксов комнаты или количества)
+  const baseName = "Сплит-система / кондиционер";
+  const src = rep || row;
+
+  // Если уже есть готовая красивая заметка с характеристиками — используем её
+  const note = (row.clientNote || src.clientNote || "").trim();
+  if (note && note.includes("холод") && note.includes("BTU")) {
+    return safePdfText([baseName, note].join("\n"));
+  }
+
+  // Иначе собираем вручную по полям
+  const kw = Number(src.coolingKw) || 0;
+  const btu = Number(src.coolingBtu) || 0;
+  const ex = Number(src.exhaustM3) || 0;
+  const cop = 3.2; // default
+  const elec = kw > 0 ? Math.round((kw / cop) * 100) / 100 : 0;
+
+  const parts = [baseName];
+  
+  // Достаём имя комнаты (если есть), очищая от лишних префиксов и секций
+  // Ожидаемое значение "Комната: Манипуляционная", но не "Комната: Климат и вентиляция"
+  let roomName = "";
+  if (src.roomId && src.roomName) {
+    roomName = src.roomName;
+  } else if (row.sourceText) {
+    // sourceText может содержать "Помещение: Манипуляционная"
+    const fromText = row.sourceText.replace(/Помещение:|Из:/gi, "").trim();
+    // Исключаем случаи когда в sourceText попал раздел каталога
+    if (fromText && fromText.toLowerCase() !== "климат и вентиляция" && fromText.toLowerCase() !== "охлаждение") {
+      roomName = fromText;
+    }
+  }
+
+  if (roomName) {
+    parts.push(`Комната: ${roomName}`);
+  }
+
+  if (kw > 0) parts.push(`Холод: ${kw} кВт`);
+  if (btu > 0) parts.push(`BTU: ${btu}`);
+  if (elec > 0) parts.push(`Потребление: ~${elec} кВт`);
+  if (ex > 0) parts.push(`Вытяжка: ${ex} м³/ч`);
+
+  // Если вообще никаких характеристик не нашли (редкий кейс)
+  if (parts.length === 1) {
+    parts.push("Характеристики уточняются");
+  }
+
+  return safePdfText(parts.join("\n"));
+}
+
 async function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStatuses, compact = false, pdfOpts = {}) {
   const photoCol = 1;
   const nameCol = 2;
@@ -88,7 +144,7 @@ async function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStat
     const base = [
       i + 1,
       safePdfPhotoCell(),
-      safePdfText(r.name),
+      clientPdfNameCol(r),
       formatQty(r.qty, r.unit),
       r.unit || "шт.",
       clientPdfMoneyOrTbd(r, project.currency),
@@ -333,6 +389,7 @@ async function renderFullPdf(doc, project, items, branding, brandRgb, purchaseSt
     ["Сантехник", "plumber"],
     ["Электрик", "electrician"],
     ["Монтажник", "installer"],
+    ["Климат", "climate"],
     ["Клиент", "client"],
   ]) {
     const list = mergedForRole(items, role);
@@ -363,6 +420,7 @@ async function renderSpecialistPdf(doc, project, items, branding, brandRgb, purc
     plumber: "Список для сантехника",
     electric: "Список для электрика",
     installer: "Список для монтажника",
+    climate: "Список для специалиста по климату",
     consumables: "Расходники",
     client_role: "Список для клиента",
   };
@@ -370,11 +428,24 @@ async function renderSpecialistPdf(doc, project, items, branding, brandRgb, purc
     plumber: "plumber",
     electric: "electrician",
     installer: "installer",
+    climate: "climate",
     consumables: "consumables",
     client_role: "client",
   };
 
   let y = drawTitleBlock(doc, project, branding, brandRgb, titles[mode] || "Список");
+  
+  if (mode === "climate") {
+    y = ensureSpace(doc, y, 20);
+    doc.setFontSize(10);
+    doc.setTextColor(80, 80, 80);
+    const text = "В списке указаны сплит-системы, вентиляция и элементы климатической системы. Характеристики сплит-систем рассчитаны по комнатам.";
+    const wrapped = doc.splitTextToSize(text, 180);
+    doc.text(wrapped, 14, y);
+    doc.setTextColor(30, 30, 30);
+    y += wrapped.length * 4 + 4;
+  }
+  
   y = budgetLines(doc, items, project, y);
 
   // Та же фильтрация по роли, что в полном PDF и Excel (resolveResponsibleFull),
@@ -385,7 +456,7 @@ async function renderSpecialistPdf(doc, project, items, branding, brandRgb, purc
     y = ensureSpace(doc, y, 20);
     doc.setFontSize(11);
     doc.text("Нет позиций для этого специалиста", 14, y);
-    return;
+    return contactsBlock(doc, branding, y);
   }
 
   // Группировка по клиентскому разделу — только для читаемости вывода, не для фильтрации.

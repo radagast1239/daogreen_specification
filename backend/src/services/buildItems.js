@@ -15,7 +15,7 @@ const RESP = {
   "Полив и сантехника": "plumber",
   "Электрика и свет": "electrician",
   "Каркас и крепёж": "installer",
-  "Климат и вентиляция": "installer",
+  "Климат и вентиляция": "climate",
   Расходники: "consumables",
 };
 

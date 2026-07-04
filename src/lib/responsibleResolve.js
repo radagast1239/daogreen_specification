@@ -19,10 +19,11 @@ export const SECTION_RESPONSIBLE_FALLBACK = {
   // Монтажник
   stellage: "installer",
   trays_channels: "installer",
-  climate: "installer",
   manipulation: "installer",
   tools: "installer",
   works_delivery: "installer",
+  // Климат
+  climate: "climate",
 };
 
 /**

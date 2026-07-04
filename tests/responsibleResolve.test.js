@@ -63,21 +63,26 @@ describe("fallback по клиентскому разделу", () => {
     }
   });
 
-  it("монтажные разделы (каркас, лотки, климат, инструмент, работы) → монтажник", () => {
-    for (const s of ["stellage", "trays_channels", "climate", "manipulation", "tools", "works_delivery"]) {
+  it("монтажные разделы (каркас, лотки, инструмент, работы) → монтажник", () => {
+    for (const s of ["stellage", "trays_channels", "manipulation", "tools", "works_delivery"]) {
       expect(resolveResponsibleFull(item({ clientSection: s }))).toBe("installer");
     }
+  });
+
+  it("климатический раздел → климат", () => {
+    expect(resolveResponsibleFull(item({ clientSection: "climate" }))).toBe("climate");
   });
 
   it("fallbackResponsibleBySection возвращает null для неизвестного раздела", () => {
     expect(fallbackResponsibleBySection("__nope__")).toBe(null);
   });
 
-  it("карта fallback покрывает все три специализации", () => {
+  it("карта fallback покрывает все четыре специализации", () => {
     const roles = new Set(Object.values(SECTION_RESPONSIBLE_FALLBACK));
     expect(roles.has("plumber")).toBe(true);
     expect(roles.has("electrician")).toBe(true);
     expect(roles.has("installer")).toBe(true);
+    expect(roles.has("climate")).toBe(true);
   });
 });
 
@@ -139,6 +144,11 @@ describe("rowsForResponsibleRole — единая фильтрация для PD
     expect(rowsForResponsibleRole(mixed, "installer")).toHaveLength(1);
   });
 
+  it("климат: позиции с разделом климата", () => {
+    const cl = mergedRow("Кондей", [{ clientSection: "climate" }]);
+    expect(rowsForResponsibleRole([...rows, cl], "climate").map((r) => r.name)).toContain("Кондей");
+  });
+
   it("client-позиции идут к роли client и НЕ смешиваются со специалистами", () => {
     const clientRows = [
       mergedRow("Клиентская позиция", [{ responsible: "client" }]),
@@ -146,7 +156,7 @@ describe("rowsForResponsibleRole — единая фильтрация для PD
       mergedRow("Профильная труба", [{ clientSection: "stellage" }]),
     ];
     expect(rowsForResponsibleRole(clientRows, "client").map((r) => r.name)).toEqual(["Клиентская позиция"]);
-    for (const role of ["plumber", "electrician", "installer"]) {
+    for (const role of ["plumber", "electrician", "installer", "climate"]) {
       expect(rowsForResponsibleRole(clientRows, role).map((r) => r.name)).not.toContain("Клиентская позиция");
     }
   });
@@ -155,13 +165,13 @@ describe("rowsForResponsibleRole — единая фильтрация для PD
 describe("fillMissingResponsible", () => {
   it("копирует material default в пустые позиции, но не перетирает назначенные", () => {
     const items = [
-      item({ name: "A", responsible: "installer", materialId: "m1" }), // назначено вручную — не трогаем
+      item({ name: "A", responsible: "climate", materialId: "m1" }), // назначено вручную — не трогаем
       item({ name: "B", responsible: "", materialId: "m2" }), // возьмём material default
       item({ name: "C", responsible: "general", clientSection: "pumps", materialId: "m3" }), // fallback по разделу
     ];
     const materialsById = { m1: { responsible: "plumber" }, m2: { responsible: "electrician" }, m3: { responsible: "" } };
     const out = fillMissingResponsible(items, { materialsById });
-    expect(out[0].responsible).toBe("installer"); // не перетёрт
+    expect(out[0].responsible).toBe("climate"); // не перетёрт
     expect(out[1].responsible).toBe("electrician"); // из material default
     expect(out[2].responsible).toBe("plumber"); // fallback по разделу (pumps)
   });

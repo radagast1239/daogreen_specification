@@ -275,17 +275,18 @@ export function downloadClientWorkbook(project, items, { purchaseStatuses = [], 
     ["06 Сантехник", "plumber"],
     ["07 Электрик", "electrician"],
     ["08 Монтажник", "installer"],
-    ["09 Клиент", "client"],
+    ["09 Климат", "climate"],
+    ["10 Клиент", "client"],
   ]) {
     const roleMerged = mergedForRole(purchaseItems, role);
     if (roleMerged.length) append(sheetFromMergedRows(roleMerged, purchaseStatuses), sheetName, true);
   }
 
   if (installItems.length) {
-    append(sheetFromMergedRows(mergedPurchaseRows(installItems), purchaseStatuses), "09б Монтаж", true);
+    append(sheetFromMergedRows(mergedPurchaseRows(installItems), purchaseStatuses), "10б Монтаж", true);
   }
 
-  append(moduleDetailSheet(purchaseItems, project, purchaseStatuses), "10 Детализация по модулям");
+  append(moduleDetailSheet(purchaseItems, project, purchaseStatuses), "11 Детализация по модулям");
 
   if (versionInfo?.summary) {
     append(
@@ -296,7 +297,7 @@ export function downloadClientWorkbook(project, items, { purchaseStatuses = [], 
           Изменение: versionInfo.summary.delta ?? "",
         },
       ]),
-      "11 Изменения"
+      "12 Изменения"
     );
   }
 

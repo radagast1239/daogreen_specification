@@ -2,7 +2,7 @@ const CATEGORY_TO_RESPONSIBLE = {
   "Полив и сантехника": "plumber",
   "Электрика и свет": "electrician",
   "Каркас и крепёж": "installer",
-  "Климат и вентиляция": "installer",
+  "Климат и вентиляция": "climate",
   Расходники: "consumables",
   "Работы и доставка": "client",
   Прочее: "general",

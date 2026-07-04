@@ -624,16 +624,20 @@ export default function SpecEditorPage() {
             ["spec", "Спецификация"],
             ["merged", "Общий список"],
             ["spec_lists", "Специалисты"],
-            ["calc", "Расчёт охлаждения ферма"],
+            ["calc", "Расчёт охлаждения фермы"],
           ].map(([k, label]) => (
             <button
               key={k}
               onClick={() => setTab(k)}
               className="btn btn-ghost"
               style={{
-                borderRadius: 0,
-                borderBottom: tab === k ? "2px solid var(--brand)" : "2px solid transparent",
+                borderRadius: "6px 6px 0 0",
+                borderBottom: tab === k ? "3px solid var(--brand)" : "3px solid transparent",
                 color: tab === k ? "var(--brand)" : "var(--muted)",
+                background: tab === k ? "var(--bg-light)" : "transparent",
+                fontWeight: tab === k ? 700 : 500,
+                padding: "10px 16px",
+                marginRight: 4,
               }}
             >
               {label}

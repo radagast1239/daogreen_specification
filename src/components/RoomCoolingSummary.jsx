@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { num } from "../store/helpers.js";
 import { isFarmGeneralItem, roomLabel } from "../lib/roomHelpers.js";
-import { roomAcRecommendedKw, roomAcRecommendedBtu } from "../../shared/roomAcSpec.js";
+import { roomAcRecommendedKw, roomAcRecommendedBtu, roomAcRecommendedElecKw } from "../../shared/roomAcSpec.js";
 import Collapsible from "./Collapsible.jsx";
 
 function resolveItemRoomId(item, rooms, itemRoomBySelection) {
@@ -38,6 +38,7 @@ export default function RoomCoolingSummary({ project }) {
         ...r,
         kw: r.kw || roomAcRecommendedKw(room) || 0,
         btu: r.btu || roomAcRecommendedBtu(room) || 0,
+        consumption: roomAcRecommendedElecKw(room) || 0,
       };
     });
   }, [project]);
@@ -51,36 +52,32 @@ export default function RoomCoolingSummary({ project }) {
 
   return (
     <Collapsible title="Сводка по комнатам (охлаждение / вытяжка)" defaultOpen>
-      <div className="card" style={{ overflowX: "auto", padding: 0 }}>
-        <table className="spec">
-          <thead>
-            <tr>
-              <th>Комната</th>
-              <th className="right">кВт</th>
-              <th className="right">BTU</th>
-              <th className="right">м³/ч</th>
-              <th className="right">Позиций</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.roomId}>
-                <td>{roomLabel(project.rooms, r.roomId) || "—"}</td>
-                <td className="right num">{num(r.kw)}</td>
-                <td className="right num">{num(r.btu)}</td>
-                <td className="right num">{num(r.exhaust)}</td>
-                <td className="right num">{r.items}</td>
-              </tr>
-            ))}
-            <tr style={{ fontWeight: 700 }}>
-              <td>Итого</td>
-              <td className="right num">{num(total.kw)}</td>
-              <td className="right num">{num(total.btu)}</td>
-              <td className="right num">{num(total.exhaust)}</td>
-              <td />
-            </tr>
-          </tbody>
-        </table>
+      <div className="card" style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+        {rows.map((r) => (
+          <div
+            key={r.roomId}
+            style={{
+              padding: "8px 12px",
+              background: "var(--bg-info, #eef6ff)",
+              border: "1px solid var(--border-info, #cfe3fb)",
+              borderRadius: 6,
+              fontSize: 13,
+            }}
+          >
+            <b>Комната {roomLabel(project.rooms, r.roomId) || "—"}</b>
+            {" · "}
+            холод <span className="num">{num(r.kw)}</span> кВт
+            {" · "}
+            <span className="num">{num(r.btu)}</span> BTU
+            {" · "}
+            потребление ~<span className="num">{num(r.consumption)}</span> кВт
+            {r.exhaust > 0 && (
+              <>
+                {" · "}вытяжка <span className="num">{num(r.exhaust)}</span> м³/ч
+              </>
+            )}
+          </div>
+        ))}
       </div>
     </Collapsible>
   );

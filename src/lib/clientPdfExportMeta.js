@@ -59,9 +59,18 @@ export const CLIENT_PDF_EXPORT_OPTIONS = [
     label: "Монтажник",
     group: "specialist",
     recommended: false,
-    summary: "Каркас, стеллажи, климат, расходники монтажа.",
+    summary: "Каркас, стеллажи, расходники монтажа.",
     detail: "Склеенный список для монтажника и сборки стеллажей.",
     useWhen: "Отдельный лист для монтажной бригады.",
+  },
+  {
+    id: "climate",
+    label: "Климат",
+    group: "specialist",
+    recommended: false,
+    summary: "Сплит-системы, вентиляторы, трубы кондиционирования.",
+    detail: "Склеенный список позиций, которые относятся к климату и вентиляции.",
+    useWhen: "Отдельный лист для подрядчика по климату.",
   },
   {
     id: "client_role",
@@ -83,10 +92,11 @@ export function getClientPdfExportStats(items) {
   const plumberMerged = mergedPurchaseRows(itemsByResponsible(purchase, "plumber")).length;
   const electricMerged = mergedPurchaseRows(itemsByResponsible(purchase, "electrician")).length;
   const installerMerged = mergedPurchaseRows(itemsByResponsible(purchase, "installer")).length;
+  const climateMerged = mergedPurchaseRows(itemsByResponsible(purchase, "climate")).length;
   const clientMerged = mergedPurchaseRows(itemsByResponsible(purchase, "client")).length;
 
   const fullPdfTableRows =
-    mergedCount * 2 + plumberMerged + electricMerged + installerMerged;
+    mergedCount * 2 + plumberMerged + electricMerged + installerMerged + climateMerged;
 
   return {
     rawCount,
@@ -94,6 +104,7 @@ export function getClientPdfExportStats(items) {
     plumberMerged,
     electricMerged,
     installerMerged,
+    climateMerged,
     clientMerged,
     fullPdfTableRows,
     savedByMerge: Math.max(0, rawCount - mergedCount),
@@ -116,6 +127,8 @@ export function pdfExportOptionStats(optionId, stats) {
       return stats.electricMerged ? `${stats.electricMerged} строк` : "нет позиций";
     case "installer":
       return stats.installerMerged ? `${stats.installerMerged} строк` : "нет позиций";
+    case "climate":
+      return stats.climateMerged ? `${stats.climateMerged} строк` : "нет позиций";
     case "client_role":
       return stats.clientMerged ? `${stats.clientMerged} строк` : "нет позиций";
     default:

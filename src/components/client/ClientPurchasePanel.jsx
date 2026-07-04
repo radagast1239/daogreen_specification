@@ -79,8 +79,10 @@ function itemsForMode(items, mode) {
   if (mode === "without_link") return items.filter((i) => !hasProductLink(i));
   if (mode === "closed" || mode === "ordered") return items.filter((i) => isClosedPurchaseStatus(i.status));
   if (mode === "plumber") return itemsByResponsible(items, "plumber");
+  if (mode === "climate") return itemsByResponsible(items, "climate");
   if (mode === "electric") return itemsByResponsible(items, "electrician");
   if (mode === "installer") return itemsByResponsible(items, "installer");
+  if (mode === "client") return itemsByResponsible(items, "client");
   if (mode === "consumables") return itemsByResponsible(items, "consumables");
   if (mode === "install") return items.filter((i) => i.itemRole === "installation" || i.category === "Работы и доставка");
   return items.filter((i) => i.itemRole !== "installation");
@@ -533,7 +535,11 @@ export default function ClientPurchasePanel({
 
   // В режиме «Заказано/Куплено» не прячем панель фильтров при пустом списке —
   // показываем понятный текст ниже, а фильтры/режимы остаются доступны.
-  if (!todo.length && !bought.length && !isClosedMode) {
+  // Также не прячем кнопки для пустых специализированных разделов (как климат/сантехник),
+  // чтобы можно было вернуться к другим вкладкам.
+  const isSpecialistOrEmptySafeMode = isClosedMode || isSpecialistPurchaseMode(effectiveMode);
+
+  if (!todo.length && !bought.length && !isSpecialistOrEmptySafeMode) {
     return <Empty title="Нет позиций по фильтру" />;
   }
 
@@ -669,11 +675,40 @@ export default function ClientPurchasePanel({
           </h3>
           {renderList(todo, isClosedMode)}
         </>
+      ) : effectiveMode === "climate" ? (
+        <div className="client-purchase-empty" style={{ textAlign: "center", padding: "40px 20px" }}>
+          <h3 style={{ margin: "0 0 10px" }}>В разделе «Климат» пока нет позиций.</h3>
+          <p className="muted" style={{ margin: "0 0 20px", fontSize: 13 }}>
+            Возможно, климатические позиции ещё не назначены ответственному «Климат» или скрыты текущими фильтрами.
+          </p>
+          <div className="row" style={{ justifyContent: "center", gap: 8 }}>
+            <button type="button" className="btn btn-primary" onClick={() => onModeChange("categories")}>
+              Показать все позиции
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => {
+              if (onFilterChange) onFilterChange("todo");
+            }}>
+              Сбросить фильтры
+            </button>
+          </div>
+        </div>
+      ) : isSpecialistPurchaseMode(effectiveMode) ? (
+        <div className="client-purchase-empty" style={{ textAlign: "center", padding: "40px 20px" }}>
+          <h3 style={{ margin: "0 0 10px" }}>В этом разделе пока нет позиций.</h3>
+          <p className="muted" style={{ margin: "0 0 20px", fontSize: 13 }}>
+            Позиции ещё не добавлены или скрыты фильтрами.
+          </p>
+          <div className="row" style={{ justifyContent: "center", gap: 8 }}>
+            <button type="button" className="btn btn-primary" onClick={() => onModeChange("categories")}>
+              Показать все позиции
+            </button>
+          </div>
+        </div>
       ) : (
         <p className="muted" style={{ fontSize: 14, margin: "16px 0" }}>
           {isClosedMode
             ? "Пока нет заказанных или купленных позиций. Когда вы отметите товар как заказанный или купленный, он появится здесь."
-            : "Всё из фильтра уже куплено."}
+            : "Всё из фильтра уже куплено (или скрыто)."}
         </p>
       )}
       {showBought && bought.length > 0 && (

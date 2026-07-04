@@ -188,7 +188,7 @@ export default function ClientProjectPage() {
       setTab("purchase");
       return;
     }
-    const legacy = ["categories", "modules", "plumber", "electric", "installer", "consumables", "install", "cooling"];
+    const legacy = ["categories", "modules", "plumber", "electric", "installer", "climate", "consumables", "install", "cooling"];
     if (legacy.includes(nextTab)) {
       setPurchaseMode(legacyTabToPurchaseMode(nextTab));
       setTab("purchase");

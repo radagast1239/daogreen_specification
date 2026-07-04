@@ -55,7 +55,7 @@ describe("PDF export options", () => {
 
   it("специалисты сгруппированы отдельно", () => {
     const specialists = CLIENT_PDF_EXPORT_OPTIONS.filter((o) => o.group === "specialist").map((o) => o.id);
-    expect(specialists).toEqual(["plumber", "electric", "installer", "client_role"]);
+    expect(specialists).toEqual(["plumber", "electric", "installer", "climate", "client_role"]);
   });
 
   it("клиентский закупочный PDF не обещает списков специалистов (без дублей)", () => {
@@ -79,6 +79,47 @@ describe("clientPdfMoneyOrTbd", () => {
   it("обычная строка без цены остаётся денежным форматом 0 ₽", () => {
     const row = { price: 0, sumVat: 0, qty: 1, sourceItems: [{ kind: "material" }] };
     expect(clientPdfMoneyOrTbd(row, "₽")).toBe("0 ₽");
+  });
+});
+
+describe("clientPdfNameCol", () => {
+  it("возвращает только имя для обычной строки", async () => {
+    const { clientPdfNameCol } = await import("../src/lib/clientPdfExport.js");
+    const row = { name: "Труба", sourceItems: [{ kind: "material" }] };
+    expect(clientPdfNameCol(row)).toBe("Труба");
+  });
+
+  it("добавляет характеристики для cooling_spec", async () => {
+    const { clientPdfNameCol } = await import("../src/lib/clientPdfExport.js");
+    const row = {
+      name: "Сплит-система / кондиционер",
+      sourceText: "Лаборатория",
+      sourceItems: [{ kind: "cooling_spec", coolingKw: 3.5, coolingBtu: 12000 }],
+    };
+    const text = clientPdfNameCol(row);
+    expect(text).toContain("Сплит-система / кондиционер");
+    expect(text).toContain("Комната: Лаборатория");
+    expect(text).toContain("Холод: 3.5 кВт");
+    expect(text).toContain("BTU: 12000");
+    expect(text).toContain("Потребление: ~1.09 кВт");
+  });
+
+  it("использует clientNote как характеристики и не выводит странную комнату", async () => {
+    const { clientPdfNameCol } = await import("../src/lib/clientPdfExport.js");
+    const row = {
+      name: "Сплит-система / кондиционер",
+      clientSection: "Климат и вентиляция",
+      clientSubsection: "Охлаждение",
+      qty: 1,
+      clientNote: "Комната Манипуляционная · холод 75,32 кВт · 60 000 BTU · потребление ~23,54 кВт",
+      sourceText: "Климат и вентиляция",
+      sourceItems: [{ kind: "cooling_spec" }]
+    };
+    const text = clientPdfNameCol(row);
+    expect(text).toContain("Сплит-система / кондиционер");
+    expect(text).toContain("Комната Манипуляционная · холод 75,32 кВт · 60 000 BTU · потребление ~23,54 кВт");
+    expect(text).not.toContain("Комната: Климат и вентиляция");
+    expect(text).not.toContain("— 1 шт.");
   });
 });
 

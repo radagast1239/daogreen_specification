@@ -15,7 +15,9 @@ const ALLOWED_TABS = new Set([
   "plumber",
   "electric",
   "installer",
+  "climate",
   "consumables",
+  "client",
   "docs",
 ]);
 
@@ -57,6 +59,8 @@ export function buildClientBrandFromSettings(obj = {}) {
               id === "plumber" ||
               id === "electric" ||
               id === "installer" ||
+              id === "climate" ||
+              id === "client" ||
               id === "consumables" ||
               id === "install"
                 ? "purchase"
