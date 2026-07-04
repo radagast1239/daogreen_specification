@@ -107,9 +107,6 @@ export default function ClientMergedItemCard({
             </span>
           )}
         </div>
-        {!compact && coolingSpec && row.clientNote && (
-          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{row.clientNote}</div>
-        )}
         {!compact &&
           (coolingSpec && priceUnset ? (
             <div style={{ fontSize: 12.5, marginTop: 4 }}>
@@ -133,7 +130,7 @@ export default function ClientMergedItemCard({
         )}
         {!compact && row.clientNote && (
           <div className="client-admin-note" style={{ fontSize: 12.5, marginTop: 6 }}>
-            <b>Комментарий Daogreen:</b> {row.clientNote}
+            <b>{coolingSpec ? "Спецификация:" : "Комментарий Daogreen:"}</b> {row.clientNote}
           </div>
         )}
         {row.link && (

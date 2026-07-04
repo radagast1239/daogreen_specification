@@ -1,7 +1,6 @@
 import {
   aggregateSplitCoolingKw,
   normalizeSplitSpecs,
-  splitSpecsClientNote,
 } from "./splitSpecs.js";
 import { enrichRoom, recommendedCoolingKw } from "./roomCoolingCalc.js";
 
@@ -165,7 +164,17 @@ export function buildAcLineFromRoom(room, sortOrder = 0) {
   if (!specs.length) return null;
   const link = (room.acUnits || []).map((u) => u.link?.trim()).find(Boolean) || "";
   const comment = (room.acUnits || []).map((u) => u.comment?.trim()).filter(Boolean).join("; ");
-  const note = splitSpecsClientNote(specs);
+  // Клиентская спецификация по сплиту: комната · холод кВт · BTU · ориент. потребление кВт.
+  const fmtKw = (n) => Number(n).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+  const recKw = roomAcRecommendedKw(room);
+  const recBtu = roomAcRecommendedBtu(room);
+  const recElec = roomAcRecommendedElecKw(room);
+  const noteParts = [];
+  if (room.name) noteParts.push(`Комната ${room.name}`);
+  if (recKw > 0) noteParts.push(`холод ${fmtKw(recKw)} кВт`);
+  if (recBtu > 0) noteParts.push(`${Math.round(recBtu).toLocaleString("ru-RU")} BTU`);
+  if (recElec > 0) noteParts.push(`потребление ~${fmtKw(recElec)} кВт`);
+  const clientNote = noteParts.join(" · ") || room.name || "";
   return {
     id: room.acItemId || `ac__${room.id}`,
     materialId: null,
@@ -182,7 +191,7 @@ export function buildAcLineFromRoom(room, sortOrder = 0) {
     roomId: room.id,
     splitSpecs: specs,
     coolingKw: aggregateSplitCoolingKw(specs),
-    clientNote: note ? `${room.name}: ${note}` : room.name,
+    clientNote,
     link,
     techNote: comment,
     included: true,

@@ -30,6 +30,21 @@ describe("roomAcSpec", () => {
     expect(actualCoolingFromRoom(room)).toBe(2.5);
   });
 
+  it("client note carries room, cooling kW, BTU and estimated consumption", () => {
+    const line = buildAcLineFromRoom({
+      id: "r1",
+      name: "Манипуляционная",
+      cooling: { recommendedKw: 3.11, btu: 10614, standardBtu: 12000, params: { cop: 3.2 } },
+      acUnits: [{ id: "u1", qty: 1, coolingKw: "" }],
+    });
+    expect(line.clientNote).toContain("Манипуляционная");
+    expect(line.clientNote).toContain("холод");
+    expect(line.clientNote).toContain("BTU");
+    expect(line.clientNote).toContain("потребление");
+    // рекомендованный холод НЕ пишется в фактический coolingKw
+    expect(line.coolingKw).toBe(0);
+  });
+
   it("defaults one unit row per room", () => {
     expect(roomAcUnits({ id: "r", name: "Склад", lightingW: 100 }).length).toBe(1);
   });

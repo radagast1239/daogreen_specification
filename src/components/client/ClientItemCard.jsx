@@ -59,9 +59,6 @@ export default function ClientItemCard({
             </span>
           )}
         </div>
-        {!compact && coolingSpec && it.clientNote && (
-          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{it.clientNote}</div>
-        )}
         {!compact &&
           (coolingSpec && priceUnset ? (
             <div style={{ fontSize: 12.5, marginTop: 4 }}>
@@ -81,7 +78,7 @@ export default function ClientItemCard({
         )}
         {!compact && it.clientNote && (
           <div className="client-admin-note" style={{ fontSize: 12.5, marginTop: 6 }}>
-            <b>Комментарий Daogreen:</b> {it.clientNote}
+            <b>{coolingSpec ? "Спецификация:" : "Комментарий Daogreen:"}</b> {it.clientNote}
           </div>
         )}
         {it.link && (
