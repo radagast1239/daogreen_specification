@@ -21,10 +21,10 @@ function round2(n) {
 }
 
 export const ROOM_COOLING_STATUS = {
-  NOT_FILLED: { id: "not_filled", label: "Не заполнено" },
-  FILLED: { id: "filled", label: "Заполнено" },
-  NEEDS_AC: { id: "needs_ac", label: "Нужен кондиционер" },
-  AC_SELECTED: { id: "ac_selected", label: "Кондиционер выбран" },
+  NO_CALC: { id: "no_calc", label: "Нет расчёта" },
+  NO_MODEL: { id: "no_model", label: "Модель не выбрана" },
+  ENOUGH: { id: "enough", label: "Мощности хватает" },
+  NOT_ENOUGH: { id: "not_enough", label: "Недостаточно мощности" },
 };
 
 /**
@@ -125,10 +125,15 @@ export function isRoomCoolingFilled(room) {
 
 /** Compute the workflow status of a room. Returns one of ROOM_COOLING_STATUS entries. */
 export function roomCoolingStatus(room) {
-  if (actualCoolingFromRoom(room) > 0) return ROOM_COOLING_STATUS.AC_SELECTED;
-  if (roomRecommendedKw(room) > 0) return ROOM_COOLING_STATUS.NEEDS_AC;
-  if (isRoomCoolingFilled(room)) return ROOM_COOLING_STATUS.FILLED;
-  return ROOM_COOLING_STATUS.NOT_FILLED;
+  const rec = roomRecommendedKw(room);
+  const actual = actualCoolingFromRoom(room);
+  // Выбрана фактическая модель — сравниваем её холод с рекомендованным.
+  if (actual > 0) {
+    return actual + 1e-6 >= rec ? ROOM_COOLING_STATUS.ENOUGH : ROOM_COOLING_STATUS.NOT_ENOUGH;
+  }
+  // Есть расчёт, но модель ещё не выбрана.
+  if (rec > 0) return ROOM_COOLING_STATUS.NO_MODEL;
+  return ROOM_COOLING_STATUS.NO_CALC;
 }
 
 /**

@@ -52,6 +52,26 @@ export function roomAcRecommendedBtu(room) {
   return kw > 0 ? Math.round(kw * 3412.142) : 0;
 }
 
+/** Дефолтный COP кондиционера (энергоэффективность) — как в расчётной модели. */
+export const DEFAULT_AC_COP = 3.2;
+
+/** COP кондиционера комнаты: из применённого расчёта, иначе дефолт. */
+export function roomAcCop(room) {
+  const cop = toNum(room?.cooling?.params?.cop);
+  return cop > 0 ? cop : DEFAULT_AC_COP;
+}
+
+/**
+ * Ориентировочное электропотребление, кВт = холодопроизводительность / COP.
+ * Это НЕ холод: recommendedKw остаётся холодом, здесь только оценка потребления.
+ */
+export function roomAcRecommendedElecKw(room) {
+  const kw = roomAcRecommendedKw(room);
+  const cop = roomAcCop(room);
+  if (!(kw > 0) || !(cop > 0)) return 0;
+  return Math.round((kw / cop) * 100) / 100;
+}
+
 /** Строки сплита по комнате — минимум одна для редактора */
 export function roomAcUnits(room) {
   if (Array.isArray(room?.acUnits) && room.acUnits.length) {
@@ -89,6 +109,7 @@ export function flattenRoomAcSpecRows(rooms) {
       roomName: room.name,
       recommendedKw: roomAcRecommendedKw(room),
       recommendedBtu: roomAcRecommendedBtu(room),
+      recommendedElecKw: roomAcRecommendedElecKw(room),
       rowKey: `${room.id}__${unit.id}`,
     }))
   );

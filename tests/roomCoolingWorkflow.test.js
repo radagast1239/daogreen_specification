@@ -125,22 +125,30 @@ describe("applyAndSelectNextRoom", () => {
 });
 
 describe("roomCoolingStatus", () => {
-  it("changes from 'not filled' to 'needs AC' after applying a calculation", () => {
+  it("no calc -> 'Нет расчёта', after applying -> 'Модель не выбрана'", () => {
     const room = { id: "r1", name: "Манипуляционная" };
-    expect(roomCoolingStatus(room)).toBe(ROOM_COOLING_STATUS.NOT_FILLED);
+    expect(roomCoolingStatus(room)).toBe(ROOM_COOLING_STATUS.NO_CALC);
 
     const snap = coolingSnapshotFromFarmCalc(farmInputs, farmCalc);
     const applied = applyCoolingCalcToRoom(room, snap);
-    expect(roomCoolingStatus(applied)).toBe(ROOM_COOLING_STATUS.NEEDS_AC);
+    expect(roomCoolingStatus(applied)).toBe(ROOM_COOLING_STATUS.NO_MODEL);
   });
 
-  it("reports 'AC selected' once a unit has real cooling power", () => {
-    const room = {
-      id: "r1",
-      name: "Манипуляционная",
-      acUnits: [{ id: "u1", qty: 1, coolingKw: 3.5 }],
-    };
-    expect(roomCoolingStatus(room)).toBe(ROOM_COOLING_STATUS.AC_SELECTED);
+  it("actual >= recommended -> 'Мощности хватает'", () => {
+    const applied = applyCoolingCalcToRoom(
+      { id: "r1", name: "Манипуляционная", acUnits: [{ id: "u1", qty: 1, coolingKw: 3.5 }] },
+      coolingSnapshotFromFarmCalc(farmInputs, farmCalc)
+    );
+    expect(applied.cooling.recommendedKw).toBe(3.11);
+    expect(roomCoolingStatus(applied)).toBe(ROOM_COOLING_STATUS.ENOUGH);
+  });
+
+  it("actual < recommended -> 'Недостаточно мощности'", () => {
+    const applied = applyCoolingCalcToRoom(
+      { id: "r1", name: "Манипуляционная", acUnits: [{ id: "u1", qty: 1, coolingKw: 2 }] },
+      coolingSnapshotFromFarmCalc(farmInputs, farmCalc)
+    );
+    expect(roomCoolingStatus(applied)).toBe(ROOM_COOLING_STATUS.NOT_ENOUGH);
   });
 });
 
@@ -192,6 +200,6 @@ describe("params duplication and clearing", () => {
     );
     const cleared = clearRoomCooling(room);
     expect(cleared.cooling).toBeUndefined();
-    expect(roomCoolingStatus(cleared)).toBe(ROOM_COOLING_STATUS.NOT_FILLED);
+    expect(roomCoolingStatus(cleared)).toBe(ROOM_COOLING_STATUS.NO_CALC);
   });
 });

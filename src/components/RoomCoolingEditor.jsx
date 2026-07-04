@@ -13,10 +13,10 @@ import { num } from "../store/helpers.js";
 import { useDebouncedSync } from "../lib/useDebouncedSync.js";
 
 const ROOM_STATUS_COLORS = {
-  not_filled: "#8a8f98",
-  filled: "var(--brand)",
-  needs_ac: "var(--amber)",
-  ac_selected: "var(--ok)",
+  no_calc: "#8a8f98",
+  no_model: "var(--amber)",
+  enough: "var(--ok)",
+  not_enough: "var(--danger)",
 };
 
 function parseNumInput(raw) {
@@ -66,7 +66,7 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
         <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)" }}>
           <h4 style={{ margin: 0, fontSize: 14 }}>Расчёт нагрузки по комнатам</h4>
           <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
-            Площадь, освещение и теплопритоки — для ориентира «Рек. кВт».
+            Площадь, освещение и теплопритоки — для ориентира «Рек. холод, кВт».
           </p>
         </div>
         <div style={{ overflowX: "auto" }}>
@@ -82,8 +82,8 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
                 <th className="right">Люди/обор., Вт</th>
                 <th className="right">T°, °C</th>
                 <th className="right">Запас, %</th>
-                <th className="right">Рек. кВт</th>
-                <th className="right">Факт. кВт</th>
+                <th className="right">Рек. холод, кВт</th>
+                <th className="right">Факт. холод, кВт</th>
                 <th>Статус</th>
               </tr>
             </thead>
@@ -207,17 +207,18 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
             <thead>
               <tr>
                 <th>Комната</th>
-                <th className="right">Рек. кВт</th>
+                <th className="right">Рек. холод, кВт</th>
                 <th className="right">BTU/ч</th>
+                <th className="right">Потр., кВт</th>
                 <th className="right">шт</th>
-                <th className="right">Факт. кВт</th>
+                <th className="right">Факт. холод, кВт</th>
                 <th>Ссылка</th>
                 <th>Комментарий</th>
                 <th style={{ width: 40 }} />
               </tr>
             </thead>
             <tbody>
-              {specRows.map(({ unit, roomId, roomName, recommendedKw, recommendedBtu, rowKey }) => (
+              {specRows.map(({ unit, roomId, roomName, recommendedKw, recommendedBtu, recommendedElecKw, rowKey }) => (
                 <tr key={rowKey}>
                   <td>
                     <select
@@ -236,6 +237,9 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
                   <td className="right num muted">{num(recommendedKw) || "—"}</td>
                   <td className="right num muted">
                     {recommendedBtu ? Math.round(recommendedBtu).toLocaleString("ru-RU") : "—"}
+                  </td>
+                  <td className="right num muted" title="Ориентировочное электропотребление = холод / COP">
+                    {num(recommendedElecKw) || "—"}
                   </td>
                   <td className="right">
                     <input

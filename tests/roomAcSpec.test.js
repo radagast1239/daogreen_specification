@@ -62,4 +62,31 @@ describe("roomAcSpec", () => {
     expect(rows[0].recommendedBtu).toBe(12000);
     expect(rows[0].unit.coolingKw).toBe("");
   });
+
+  it("recommendedKw is cooling capacity; electric consumption = cooling / COP", () => {
+    const rows = flattenRoomAcSpecRows([
+      {
+        id: "r1",
+        name: "Манипуляционная",
+        lightingW: 0,
+        cooling: { recommendedKw: 3.2, btu: 10614, standardBtu: 12000, params: { cop: 3.2 } },
+        acUnits: [{ id: "u1", qty: 1, coolingKw: "" }],
+      },
+    ]);
+    expect(rows[0].recommendedKw).toBe(3.2); // холод, не потребление
+    expect(rows[0].recommendedElecKw).toBe(1); // 3.2 / 3.2
+  });
+
+  it("uses default COP 3.2 for electric consumption when params.cop is missing", () => {
+    const rows = flattenRoomAcSpecRows([
+      {
+        id: "r2",
+        name: "Водоподготовка",
+        lightingW: 0,
+        cooling: { recommendedKw: 6.4 },
+        acUnits: [{ id: "u1", qty: 1, coolingKw: "" }],
+      },
+    ]);
+    expect(rows[0].recommendedElecKw).toBe(2); // 6.4 / 3.2
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeCoolingFarm } from "../src/lib/coolingFarmCalc.js";
+import { computeCoolingFarm, COOLING_FARM_DEFAULTS } from "../src/lib/coolingFarmCalc.js";
 
 function closeTo(actual, expected, precision = 5) {
   expect(actual).toBeCloseTo(expected, precision);
@@ -130,5 +130,12 @@ describe("computeCoolingFarm", () => {
     expect(calc.modelBtu).toBeGreaterThan(3000);
     expect(calc.modelBtu).toBeLessThan(70000);
     expect(calc.standardBtu).toBeGreaterThanOrEqual(calc.modelBtu);
+  });
+
+  it("uses a 30% safety reserve by default", () => {
+    expect(COOLING_FARM_DEFAULTS.safetyFactor).toBe(1.3);
+    const calc = computeCoolingFarm({ length: 5, width: 4, height: 3 });
+    expect(calc.safetyFactor).toBe(1.3);
+    expect(calc.totalKwSafety).toBeCloseTo(calc.totalKw * 1.3, 5);
   });
 });

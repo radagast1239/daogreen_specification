@@ -40,7 +40,7 @@ export const COOLING_FARM_DEFAULTS = {
   nightVentPct: 30,
   dehumidPct: 40,
   dehumidCop: 2.5,
-  safetyFactor: 1.1,
+  safetyFactor: 1.3,
   cop: 3.2,
   tariff: 6,
   dayHours: 16,
