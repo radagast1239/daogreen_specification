@@ -4,7 +4,7 @@ import { STELLAGE_GROUPS } from "../../shared/stellageComposition.js";
 import { parseCategoriesJson } from "./categories.js";
 import { parseClientSectionsJson } from "../../shared/clientSections.js";
 import { resolveFarmSectionGroups } from "./farmSectionGroupsRef.js";
-import { DEFAULT_RESPONSIBLE_ROLES } from "./responsibleRoles.js";
+import { DEFAULT_RESPONSIBLE_ROLES, mergeResponsibleRoles } from "./responsibleRoles.js";
 
 export { DEFAULT_RESPONSIBLE_ROLES };
 
@@ -65,7 +65,7 @@ export function clientPurchaseStatuses(all) {
 export function resolveResponsibleRoles(settings = {}) {
   const list = parseJson(settings.refResponsibleRoles, null);
   if (Array.isArray(list) && list.length) {
-    return list.filter((r) => r?.id && r?.label).map((r) => ({ id: String(r.id), label: String(r.label) }));
+    return mergeResponsibleRoles(list);
   }
   return [...DEFAULT_RESPONSIBLE_ROLES];
 }

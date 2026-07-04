@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { DEFAULT_RESPONSIBLE_ROLES, mergeResponsibleRoles } from "../../../shared/responsibleRoles.js";
 
 const DEFAULT_UNITS = ["шт.", "м", "м²", "м³", "кг", "л", "компл.", "уп."];
 
@@ -63,17 +64,8 @@ export function loadReferenceData() {
         : DEFAULT_PURCHASE_STATUSES,
     responsibleRoles:
       Array.isArray(responsibleRoles) && responsibleRoles.length
-        ? responsibleRoles
-        : [
-            { id: "plumber", label: "Сантехник" },
-            { id: "electrician", label: "Электрик" },
-            { id: "installer", label: "Монтажник" },
-            { id: "climate", label: "Климат" },
-            { id: "client", label: "Клиент" },
-            { id: "purchaser", label: "Закупщик" },
-            { id: "consumables", label: "Расходники" },
-            { id: "general", label: "Общий" },
-          ],
+        ? mergeResponsibleRoles(responsibleRoles)
+        : [...DEFAULT_RESPONSIBLE_ROLES],
     farmTypes: Array.isArray(farmTypes) && farmTypes.length ? farmTypes : DEFAULT_FARM_TYPES,
     stellageGroups:
       Array.isArray(stellageGroups) && stellageGroups.length

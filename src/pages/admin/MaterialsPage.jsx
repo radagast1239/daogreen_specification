@@ -38,6 +38,7 @@ import {
 import { MaterialsQualityPanel } from "./MaterialsQualityPage.jsx";
 import MaterialsSubnav from "../../components/MaterialsSubnav.jsx";
 import { resolveFarmSections } from "../../lib/farmSectionsConfig.js";
+import { DEFAULT_RESPONSIBLE_ROLES } from "../../lib/responsibleRoles.js";
 const blank = {
   name: "",
   unit: "шт.",
@@ -461,12 +462,11 @@ export default function MaterialsPage() {
               onChange={(e) => setEditing({ ...editing, responsible: e.target.value })}
             >
               <option value="general">Не назначено / Общее</option>
-              <option value="plumber">Сантехник</option>
-              <option value="electrician">Электрик</option>
-              <option value="installer">Монтажник</option>
-              <option value="client">Клиент</option>
-              <option value="purchaser">Закупщик</option>
-              <option value="consumables">Расходники</option>
+              {DEFAULT_RESPONSIBLE_ROLES.filter((r) => r.id !== "general").map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
             </select>
             <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
               Копируется в позицию при добавлении материала в проект. Старые проекты не меняются.
