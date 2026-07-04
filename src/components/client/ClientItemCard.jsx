@@ -6,6 +6,7 @@ import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { itemImageUrl, lineGross, lineVat } from "../../lib/itemHelpers.js";
 import { money, num } from "../../store/helpers.js";
 import { isBoughtStatus } from "../../lib/itemHelpers.js";
+import { isCoolingSpecItem } from "../../../shared/itemTypes.js";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { DebouncedInput } from "./ClientDebouncedField.jsx";
 
@@ -22,6 +23,8 @@ export default function ClientItemCard({
   const img = !compact ? itemImageUrl(it) : "";
   const gross = lineGross(it);
   const vat = lineVat(it);
+  const coolingSpec = isCoolingSpecItem(it);
+  const priceUnset = !(Number(it.price) > 0);
 
   return (
     <div className={"card card-item" + (bought ? " card-item--bought" : "") + (compact ? " card-item--compact" : "")}>
@@ -56,13 +59,21 @@ export default function ClientItemCard({
             </span>
           )}
         </div>
-        {!compact && (
-          <div style={{ fontSize: 12.5, marginTop: 4 }}>
-            Цена: <span className="num">{money(it.price, currency)}</span>/ед · Сумма:{" "}
-            <b className="num">{money(gross, currency)}</b>
-            {vat > 0 && <span className="muted"> (в т.ч. НДС {money(vat, currency)})</span>}
-          </div>
+        {!compact && coolingSpec && it.clientNote && (
+          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{it.clientNote}</div>
         )}
+        {!compact &&
+          (coolingSpec && priceUnset ? (
+            <div style={{ fontSize: 12.5, marginTop: 4 }}>
+              Цена: <span className="num">цена уточняется</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12.5, marginTop: 4 }}>
+              Цена: <span className="num">{money(it.price, currency)}</span>/ед · Сумма:{" "}
+              <b className="num">{money(gross, currency)}</b>
+              {vat > 0 && <span className="muted"> (в т.ч. НДС {money(vat, currency)})</span>}
+            </div>
+          ))}
         {!compact && it.supplier && (
           <div style={{ fontSize: 12.5, marginTop: 4 }}>
             <b>Поставщик:</b> {it.supplier}

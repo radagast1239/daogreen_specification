@@ -5,6 +5,7 @@ import { PURCHASE_STATUSES } from "../../data/modules.js";
 import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { itemImageUrl, isPurchaseClosed } from "../../lib/itemHelpers.js";
 import { money, num } from "../../store/helpers.js";
+import { isCoolingSpecItem } from "../../../shared/itemTypes.js";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { patchMergedRow } from "../../lib/clientMergedPatch.js";
 import { DebouncedInput } from "./ClientDebouncedField.jsx";
@@ -50,6 +51,8 @@ export default function ClientMergedItemCard({
   const patchRowField = (payload) => patchMerged(patch, patchBulk, row, payload);
 
   const onReplacement = rep && onProposeReplacement ? () => onProposeReplacement(rep) : undefined;
+  const coolingSpec = isCoolingSpecItem(rep || row);
+  const priceUnset = !(Number(row.price) > 0);
 
   return (
     <div className={"card card-item" + (bought ? " card-item--bought" : "") + (compact ? " card-item--compact" : "")}>
@@ -104,12 +107,20 @@ export default function ClientMergedItemCard({
             </span>
           )}
         </div>
-        {!compact && (
-          <div style={{ fontSize: 12.5, marginTop: 4 }}>
-            Цена: <span className="num">{money(row.price, currency)}</span>/ед · Сумма:{" "}
-            <b className="num">{money(row.sumVat, currency)}</b>
-          </div>
+        {!compact && coolingSpec && row.clientNote && (
+          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{row.clientNote}</div>
         )}
+        {!compact &&
+          (coolingSpec && priceUnset ? (
+            <div style={{ fontSize: 12.5, marginTop: 4 }}>
+              Цена: <span className="num">цена уточняется</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12.5, marginTop: 4 }}>
+              Цена: <span className="num">{money(row.price, currency)}</span>/ед · Сумма:{" "}
+              <b className="num">{money(row.sumVat, currency)}</b>
+            </div>
+          ))}
         {!compact && row.supplier && (
           <div style={{ fontSize: 12.5, marginTop: 4 }}>
             <b>Поставщик:</b> {row.supplier}

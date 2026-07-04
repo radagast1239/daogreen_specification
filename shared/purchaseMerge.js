@@ -1,9 +1,17 @@
 /** Ключи склейки строк закупки — общая логика front + back */
 
+import { isCoolingSpecItem } from "./itemTypes.js";
+
 export function purchaseMergeKey(it) {
-  const normName = (it?.name || "").trim().toLowerCase().replace(/\s+/g, " ");
   const purchaseKey = (it?.purchaseKey || it?.purchase_key || "").trim();
   if (purchaseKey) return purchaseKey;
+  const normName = (it?.name || "").trim().toLowerCase().replace(/\s+/g, " ");
+  // Спецификации сплит-систем не склеиваем между разными комнатами/типоразмерами.
+  if (isCoolingSpecItem(it)) {
+    const room = String(it?.roomId ?? it?.room_id ?? "").trim();
+    const kw = Math.round((Number(it?.coolingKw) || 0) * 100);
+    return ["cooling-spec", normName, room, kw].join("|");
+  }
   return [normName, (it?.unit || "").toLowerCase(), (it?.supplier || "").trim(), (it?.link || "").trim()].join("|");
 }
 
