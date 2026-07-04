@@ -6,6 +6,7 @@ import { lineGross, isBoughtStatus } from "./itemHelpers.js";
 import { rowsForResponsibleRole } from "./responsibleResolve.js";
 import { getClientSectionLabelMap } from "../../shared/clientSections.js";
 import { isCoolingSpecItem } from "../../shared/itemTypes.js";
+import { purchasePriorityLabel } from "../../shared/purchasePriority.js";
 import { generateProjectPdf } from "./pdfExport.js";
 import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdfFontSetup.js";
 import { buildPdfPhotoMap, pdfPhotoTableHooks, PDF_PHOTO_COL_WIDTH_MM } from "./pdfImageHelpers.js";
@@ -33,6 +34,195 @@ function ensureSpace(doc, y, need = 40) {
     return 20;
   }
   return y;
+}
+
+export function getShortPdfTableHead() {
+  return ["№", "Наименование", "Кол", "Ед", "Сумма", "Поставщик"];
+}
+
+const COVER_USAGE_LINES = [
+  "Этот PDF содержит список материалов для закупки и передачи специалистам.",
+  "Позиции сгруппированы по разделам, поставщикам или ответственным.",
+  'Если в строке указано "цена уточняется", позиция рассчитана автоматически или требует ручного подбора.',
+  "Актуальные статусы закупки лучше проверять по клиентской ссылке.",
+];
+
+const PRIORITY_SPECIALIST_ROLES = new Set(["climate", "electrician", "plumber"]);
+
+function rowPurchaseMeta(row) {
+  const src = row.sourceItems?.[0] || row;
+  return {
+    name: row.name || src.name || "—",
+    supplier: (row.supplier || src.supplier || "").trim(),
+    purchasePriority: (
+      src.purchasePriority ||
+      src.purchase_priority ||
+      row.purchasePriority ||
+      row.purchase_priority ||
+      ""
+    ).trim(),
+    deliveryDays: Number(
+      src.deliveryDays ?? src.delivery_days ?? row.deliveryDays ?? row.delivery_days ?? 0
+    ),
+    responsible: src.responsible || row.responsible || "",
+  };
+}
+
+/** Позиции «что купить в первую очередь» — pure helper для обложки и тестов. */
+export function pickPriorityPurchaseItems(items, maxLines = 7) {
+  const purchaseItems = (items || []).filter((i) => i.itemRole !== "installation");
+  const merged = mergedPurchaseRows(purchaseItems);
+  const picked = [];
+  const seen = new Set();
+
+  const addRow = (row, tier) => {
+    const key = row.mergeKey || `${row.name}|${row.supplier}|${row.qty}`;
+    if (seen.has(key) || picked.length >= maxLines) return;
+    seen.add(key);
+    const meta = rowPurchaseMeta(row);
+    let suffix = "";
+    if (tier === 1 && meta.purchasePriority) {
+      suffix = ` (${purchasePriorityLabel(meta.purchasePriority)})`;
+    } else if (tier === 2 && meta.deliveryDays > 7) {
+      suffix = ` (поставка ${meta.deliveryDays} дн.)`;
+    }
+    const line = meta.supplier ? `${meta.name} — ${meta.supplier}${suffix}` : `${meta.name}${suffix}`;
+    picked.push(line);
+  };
+
+  for (const row of merged) {
+    if (rowPurchaseMeta(row).purchasePriority) addRow(row, 1);
+  }
+  if (picked.length < maxLines) {
+    for (const row of merged) {
+      if (rowPurchaseMeta(row).deliveryDays > 7) addRow(row, 2);
+    }
+  }
+  if (picked.length < maxLines) {
+    for (const row of merged) {
+      if (PRIORITY_SPECIALIST_ROLES.has(rowPurchaseMeta(row).responsible)) addRow(row, 3);
+    }
+  }
+  return picked;
+}
+
+/** Данные для титульной страницы PDF — pure helper для тестов. */
+export function buildPdfCoverData(project = {}, items = [], branding = {}, options = {}) {
+  const purchaseItems = (items || []).filter((i) => i.itemRole !== "installation");
+  const merged = options.merged || mergedPurchaseRows(purchaseItems);
+  const budget = purchaseItems.reduce((s, i) => s + lineGross(i), 0);
+  const priorityLines = pickPriorityPurchaseItems(purchaseItems);
+  const parts = [branding.contactPhone, branding.contactEmail, branding.contactTelegram].filter(Boolean);
+
+  return {
+    title: "Спецификация закупки",
+    projectName: project?.name || "—",
+    client: project?.client || "—",
+    city: project?.city || "—",
+    version: project?.version ?? 1,
+    generatedDate: new Date().toLocaleDateString("ru-RU"),
+    totalAmount: money(budget, project?.currency || "₽"),
+    itemCount: merged.length,
+    contacts: parts.length ? parts.join(" · ") : branding.companyName || "Daogreen",
+    priorityLines,
+    priorityFallback:
+      priorityLines.length > 0 ? null : "Приоритет закупки уточняется в клиентской ссылке.",
+    usageLines: COVER_USAGE_LINES,
+  };
+}
+
+/** Титульная страница PDF перед основным содержимым. */
+export function drawCoverPage(doc, project, items, branding, options = {}) {
+  const cover = buildPdfCoverData(project, items, branding, options);
+  const brandRgb = hexToRgb(branding.brandColor);
+  let y = 24;
+
+  doc.setFillColor(...brandRgb);
+  doc.rect(0, 0, 210, 36, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(20);
+  doc.text(cover.title, 14, 18);
+  doc.setFontSize(10);
+  doc.text(branding.companyName || "Daogreen", 14, 28);
+  doc.setTextColor(30, 30, 30);
+
+  y = 48;
+  doc.setFontSize(14);
+  doc.text(safePdfText(cover.projectName), 14, y);
+  y += 8;
+  doc.setFontSize(10);
+  doc.text(`Клиент: ${safePdfText(cover.client)}`, 14, y);
+  y += 6;
+  doc.text(`Город: ${safePdfText(cover.city)}`, 14, y);
+  y += 6;
+  doc.text(`Версия проекта: v${cover.version}`, 14, y);
+  y += 6;
+  doc.text(`Дата формирования: ${cover.generatedDate}`, 14, y);
+  y += 10;
+
+  doc.setFontSize(11);
+  doc.text(`Итоговая сумма: ${cover.totalAmount}`, 14, y);
+  y += 6;
+  doc.text(`Количество позиций: ${cover.itemCount}`, 14, y);
+  y += 12;
+
+  doc.setFontSize(11);
+  doc.text("Что купить в первую очередь", 14, y);
+  y += 6;
+  doc.setFontSize(9);
+  if (cover.priorityLines.length) {
+    for (const line of cover.priorityLines) {
+      const wrapped = doc.splitTextToSize(`• ${line}`, 182);
+      doc.text(wrapped, 16, y);
+      y += wrapped.length * 4.5 + 1;
+    }
+  } else {
+    const fb = doc.splitTextToSize(cover.priorityFallback, 182);
+    doc.text(fb, 14, y);
+    y += fb.length * 4.5 + 2;
+  }
+  y += 6;
+
+  doc.setFontSize(11);
+  doc.text("Как пользоваться документом", 14, y);
+  y += 6;
+  doc.setFontSize(9);
+  for (const line of cover.usageLines) {
+    const wrapped = doc.splitTextToSize(line, 182);
+    doc.text(wrapped, 14, y);
+    y += wrapped.length * 4.5 + 1;
+  }
+  y += 8;
+
+  doc.setFontSize(11);
+  doc.text("Контакты Daogreen", 14, y);
+  y += 6;
+  doc.setFontSize(9);
+  doc.text(safePdfText(cover.contacts), 14, y);
+}
+
+async function tableForShort(doc, rows, project, startY, brandRgb) {
+  const nameCol = 1;
+  const head = [getShortPdfTableHead()];
+  const body = rows.map((r, i) => [
+    i + 1,
+    clientPdfNameCol(r),
+    formatQty(r.qty, r.unit),
+    r.unit || "шт.",
+    clientPdfMoneyOrTbd(r, project.currency),
+    (r.supplier || "—").slice(0, 28),
+  ]);
+  autoTable(doc, {
+    startY,
+    head,
+    body,
+    styles: { fontSize: 8, cellPadding: 2, ...pdfTableFontStyles() },
+    headStyles: { fillColor: brandRgb, ...pdfTableHeadFontStyles() },
+    columnStyles: {
+      [nameCol]: { cellWidth: 72 },
+    },
+  });
+  return doc.lastAutoTable.finalY + 8;
 }
 
 export function clientPdfMoneyOrTbd(row, currency) {
@@ -404,6 +594,19 @@ async function renderFullPdf(doc, project, items, branding, brandRgb, purchaseSt
   return contactsBlock(doc, branding, y);
 }
 
+/** «Короткий список закупки»: компактная таблица без фото и без специалистов. */
+async function renderShortPdf(doc, project, items, branding, brandRgb, purchaseStatuses, pdfOpts) {
+  let y = drawTitleBlock(doc, project, branding, brandRgb, "Короткий список закупки");
+  y = budgetLines(doc, items, project, y);
+  const merged = mergedPurchaseRows(items);
+  y = ensureSpace(doc, y, 20);
+  doc.setFontSize(11);
+  doc.text(`Компактный список · ${merged.length} позиций`, 14, y);
+  y += 4;
+  y = await tableForShort(doc, merged, project, y, brandRgb);
+  return contactsBlock(doc, branding, y);
+}
+
 async function renderMergedPdf(doc, project, items, branding, brandRgb, purchaseStatuses, pdfOpts) {
   let y = drawTitleBlock(doc, project, branding, brandRgb, "Всё к покупке");
   y = budgetLines(doc, items, project, y);
@@ -498,7 +701,12 @@ export async function generateClientPurchasePdf({
 
   const resolvedMode = mode === "client" ? "client_full" : mode;
 
-  if (resolvedMode === "client_purchase") {
+  drawCoverPage(doc, project, purchaseItems, branding, pdfOpts);
+  doc.addPage();
+
+  if (resolvedMode === "client_short") {
+    await renderShortPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
+  } else if (resolvedMode === "client_purchase") {
     await renderClientPurchasePdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
   } else if (resolvedMode === "supplier") {
     await renderSupplierPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
@@ -506,7 +714,7 @@ export async function generateClientPurchasePdf({
     await renderFullPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
   } else if (resolvedMode === "merged") {
     await renderMergedPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
-  } else if (["plumber", "electric", "installer", "consumables", "client_role"].includes(resolvedMode)) {
+  } else if (["plumber", "electric", "installer", "climate", "consumables", "client_role"].includes(resolvedMode)) {
     await renderSpecialistPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, resolvedMode, pdfOpts);
   } else {
     await renderMergedPdf(doc, project, purchaseItems, branding, brandRgb, purchaseStatuses, pdfOpts);
@@ -521,6 +729,7 @@ export async function generateClientPurchasePdf({
   }
 
   const modeSuffix = {
+    client_short: "_короткий",
     client_purchase: "_закупка",
     supplier: "_по_поставщикам",
     client_full: "_полный",
@@ -528,6 +737,7 @@ export async function generateClientPurchasePdf({
     plumber: "_сантехник",
     electric: "_электрик",
     installer: "_монтажник",
+    climate: "_климат",
     consumables: "_расходники",
     client_role: "_клиент",
   };

@@ -5,7 +5,7 @@ import {
   DEFAULT_CLIENT_PDF_OPTION,
   pdfExportOptionStats,
 } from "../src/lib/clientPdfExportMeta.js";
-import { groupRowsBySupplier, rowsWithoutLink, clientPdfMoneyOrTbd } from "../src/lib/clientPdfExport.js";
+import { groupRowsBySupplier, rowsWithoutLink, clientPdfMoneyOrTbd, getShortPdfTableHead } from "../src/lib/clientPdfExport.js";
 
 describe("formatQty — клиентское количество", () => {
   it("не выводит 10.10 шт (округляет вверх для штук)", () => {
@@ -68,6 +68,14 @@ describe("PDF export options", () => {
     expect(line).toContain("повторяются");
     expect(line).toContain("105");
   });
+
+  it("client_short — первый основной режим без колонки «Фото»", () => {
+    const primary = CLIENT_PDF_EXPORT_OPTIONS.filter((o) => o.group === "primary");
+    expect(primary[0].id).toBe("client_short");
+    const head = getShortPdfTableHead();
+    expect(head).not.toContain("Фото");
+    expect(head).toEqual(["№", "Наименование", "Кол", "Ед", "Сумма", "Поставщик"]);
+  });
 });
 
 describe("clientPdfMoneyOrTbd", () => {
@@ -79,6 +87,12 @@ describe("clientPdfMoneyOrTbd", () => {
   it("обычная строка без цены остаётся денежным форматом 0 ₽", () => {
     const row = { price: 0, sumVat: 0, qty: 1, sourceItems: [{ kind: "material" }] };
     expect(clientPdfMoneyOrTbd(row, "₽")).toBe("0 ₽");
+  });
+
+  it("cooling_spec без цены в client_short (та же колонка суммы) — «цена уточняется»", () => {
+    const row = { price: 0, sumVat: 0, sourceItems: [{ kind: "cooling_spec" }] };
+    expect(getShortPdfTableHead()).not.toContain("Фото");
+    expect(clientPdfMoneyOrTbd(row, "₽")).toBe("цена уточняется");
   });
 });
 
@@ -120,6 +134,19 @@ describe("clientPdfNameCol", () => {
     expect(text).toContain("Комната Манипуляционная · холод 75,32 кВт · 60 000 BTU · потребление ~23,54 кВт");
     expect(text).not.toContain("Комната: Климат и вентиляция");
     expect(text).not.toContain("— 1 шт.");
+  });
+
+  it("PDF climate по-прежнему содержит характеристики сплитов (clientPdfNameCol)", async () => {
+    const { clientPdfNameCol } = await import("../src/lib/clientPdfExport.js");
+    const row = {
+      name: "Сплит-система / кондиционер",
+      sourceItems: [{ kind: "cooling_spec", coolingKw: 5, coolingBtu: 18000 }],
+      sourceText: "Теплица",
+    };
+    const text = clientPdfNameCol(row);
+    expect(text).toContain("Сплит-система / кондиционер");
+    expect(text).toContain("Холод: 5 кВт");
+    expect(text).toContain("BTU: 18000");
   });
 });
 

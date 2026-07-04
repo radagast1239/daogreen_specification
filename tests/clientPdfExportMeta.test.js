@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getClientPdfExportStats, pdfExportOptionStats } from "../src/lib/clientPdfExportMeta.js";
+import {
+  CLIENT_PDF_EXPORT_OPTIONS,
+  getClientPdfExportStats,
+  pdfExportOptionStats,
+} from "../src/lib/clientPdfExportMeta.js";
 
 describe("clientPdfExportMeta", () => {
   it("считает склейку и оценку полного PDF", () => {
@@ -14,5 +18,17 @@ describe("clientPdfExportMeta", () => {
     expect(stats.savedByMerge).toBe(1);
     expect(stats.plumberMerged).toBe(1);
     expect(pdfExportOptionStats("merged", stats)).toContain("2 строк");
+  });
+
+  it("CLIENT_PDF_EXPORT_OPTIONS содержит client_short в primary", () => {
+    const opt = CLIENT_PDF_EXPORT_OPTIONS.find((o) => o.id === "client_short");
+    expect(opt).toBeTruthy();
+    expect(opt.group).toBe("primary");
+    expect(opt.label).toBe("Короткий список закупки");
+  });
+
+  it("client_short stats — компактный список без фото", () => {
+    const stats = getClientPdfExportStats([{ name: "A", unit: "шт.", itemType: "material", enabled: true }]);
+    expect(pdfExportOptionStats("client_short", stats)).toContain("без фото");
   });
 });

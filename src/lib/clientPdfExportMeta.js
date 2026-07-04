@@ -7,14 +7,14 @@ export const DEFAULT_CLIENT_PDF_OPTION = "client_purchase";
 /** Варианты PDF для клиента — подписи и пояснения. group: "primary" | "specialist" */
 export const CLIENT_PDF_EXPORT_OPTIONS = [
   {
-    id: "client_purchase",
-    label: "Закупочный PDF для клиента",
+    id: "client_short",
+    label: "Короткий список закупки",
     group: "primary",
-    recommended: true,
-    summary: "Без дублей. Для закупки и контроля.",
-    detail:
-      "Итоги, закупка по поставщикам, отдельный блок «без ссылок / требует подбора», закупка по разделам и QR на онлайн-версию. Без списков специалистов, чтобы не было ощущения повторов.",
-    useWhen: "Обычный вариант для клиента — покупка по одному списку без дублей.",
+    recommended: false,
+    summary: "Компактный список без фото.",
+    description: "Компактный список без фото для быстрой печати или отправки.",
+    detail: "Один общий список: №, наименование, количество, сумма и поставщик. Без фото и без блоков специалистов.",
+    useWhen: "Быстро распечатать или отправить закупщику короткий перечень.",
   },
   {
     id: "supplier",
@@ -35,6 +35,16 @@ export const CLIENT_PDF_EXPORT_OPTIONS = [
       "Те же позиции показываются несколько раз: общий список, затем по разделам, затем срезы для специалистов. Это не дубли закупки — один товар не нужно покупать повторно.",
     useWhen: "Передать бригаде по блокам или раздать специалистам одним файлом.",
     largeFile: true,
+  },
+  {
+    id: "client_purchase",
+    label: "Закупочный PDF для клиента",
+    group: "primary",
+    recommended: true,
+    summary: "Без дублей. Для закупки и контроля.",
+    detail:
+      "Итоги, закупка по поставщикам, отдельный блок «без ссылок / требует подбора», закупка по разделам и QR на онлайн-версию. Без списков специалистов, чтобы не было ощущения повторов.",
+    useWhen: "Обычный вариант для клиента — покупка по одному списку без дублей.",
   },
   {
     id: "plumber",
@@ -113,6 +123,8 @@ export function getClientPdfExportStats(items) {
 
 export function pdfExportOptionStats(optionId, stats) {
   switch (optionId) {
+    case "client_short":
+      return `${stats.mergedCount} позиций · без фото`;
     case "client_purchase":
       return `${stats.mergedCount} уникальных позиций. Без дублей.`;
     case "supplier":
