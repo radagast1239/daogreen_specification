@@ -42,6 +42,16 @@ export function coolingSnapshotFromFarmCalc(inputs = {}, calc = {}) {
     inputs.safetyFactor != null && inputs.safetyFactor !== ""
       ? Math.round((toNum(inputs.safetyFactor) - 1) * 100)
       : toNum(inputs.reservePct);
+
+  // Разбивка тепловой нагрузки для таблицы «Расчёт нагрузки» (только для реального расчёта):
+  // свет + люди/оборудование + прочие теплопритоки = нагрузка без запаса.
+  const BTU_PER_KW = 3412.14;
+  const totalKw = toNum(calc.totalKw);
+  const hasBreakdown = totalKw > 0;
+  const lightW = Math.round(toNum(calc.lampHeatW));
+  const peopleW = Math.round((toNum(calc.peopleBtu) / BTU_PER_KW) * 1000);
+  const otherW = Math.max(0, Math.round(totalKw * 1000 - lightW - peopleW));
+
   return {
     params: { ...inputs },
     area,
@@ -52,6 +62,10 @@ export function coolingSnapshotFromFarmCalc(inputs = {}, calc = {}) {
     btu: Math.round(toNum(calc.modelBtu)),
     standardBtu: Math.round(toNum(calc.standardBtu)),
     model: inputs.model || "",
+    lightingW: hasBreakdown ? lightW : "",
+    peopleEquipW: hasBreakdown ? peopleW : "",
+    heatGainW: hasBreakdown ? otherW : "",
+    deltaT: hasBreakdown ? round2(toNum(calc.deltaT)) : "",
   };
 }
 
@@ -71,8 +85,15 @@ export function applyCoolingCalcToRoom(room, snapshot = {}) {
     snapshot.reservePct != null && snapshot.reservePct !== "" ? snapshot.reservePct : room.reservePct;
   const existingAcUnits = Array.isArray(room.acUnits) ? room.acUnits : [];
   const acUnits = existingAcUnits.length ? existingAcUnits : [blankAcUnit()];
+  // Заполнить поля тепловой нагрузки комнаты из расчёта (если разбивка есть).
+  const load = {};
+  if (snapshot.lightingW !== "" && snapshot.lightingW != null) load.lightingW = snapshot.lightingW;
+  if (snapshot.heatGainW !== "" && snapshot.heatGainW != null) load.heatGainW = snapshot.heatGainW;
+  if (snapshot.peopleEquipW !== "" && snapshot.peopleEquipW != null) load.peopleEquipW = snapshot.peopleEquipW;
+  const deltaT = snapshot.deltaT != null && snapshot.deltaT !== "" ? round2(toNum(snapshot.deltaT)) : "";
   return {
     ...room,
+    ...load,
     area: area || room.area || "",
     height: height || room.height || "",
     volume: volume || room.volume || "",
@@ -88,6 +109,7 @@ export function applyCoolingCalcToRoom(room, snapshot = {}) {
       btu: Math.round(toNum(snapshot.btu)),
       standardBtu: Math.round(toNum(snapshot.standardBtu)),
       reservePct: snapshot.reservePct != null ? snapshot.reservePct : "",
+      deltaT,
       model: snapshot.model || "",
       actualKw: actualCoolingFromRoom(room) || 0,
     },

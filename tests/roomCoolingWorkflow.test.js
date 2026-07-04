@@ -11,6 +11,7 @@ import {
   roomRecommendedKw,
 } from "../shared/roomCoolingWorkflow.js";
 import { buildAcLineFromRoom } from "../shared/roomAcSpec.js";
+import { computeCoolingFarm } from "../src/lib/coolingFarmCalc.js";
 
 const farmInputs = { length: 5, width: 4, height: 3, safetyFactor: 1.1 };
 const farmCalc = { totalKwSafety: 3.11, modelBtu: 10614, standardBtu: 12000 };
@@ -201,5 +202,32 @@ describe("params duplication and clearing", () => {
     const cleared = clearRoomCooling(room);
     expect(cleared.cooling).toBeUndefined();
     expect(roomCoolingStatus(cleared)).toBe(ROOM_COOLING_STATUS.NO_CALC);
+  });
+});
+
+describe("cooling load breakdown fills the room table", () => {
+  it("stores light/other/people watts and ΔT from a real farm calc", () => {
+    const inputs = { length: 5, width: 4, height: 3, tOut: 32, tIn: 22 };
+    const calc = computeCoolingFarm(inputs);
+    const snap = coolingSnapshotFromFarmCalc(inputs, calc);
+
+    expect(snap.deltaT).toBe(10);
+    expect(snap.lightingW).toBeGreaterThan(0);
+    // свет + люди + прочее = нагрузка без запаса (Вт)
+    const sum = snap.lightingW + snap.peopleEquipW + snap.heatGainW;
+    expect(Math.abs(sum - calc.totalKw * 1000)).toBeLessThanOrEqual(1);
+
+    const applied = applyCoolingCalcToRoom({ id: "r1", name: "X" }, snap);
+    expect(applied.lightingW).toBe(snap.lightingW);
+    expect(applied.heatGainW).toBe(snap.heatGainW);
+    expect(applied.peopleEquipW).toBe(snap.peopleEquipW);
+    expect(applied.cooling.deltaT).toBe(10);
+  });
+
+  it("does not fill load fields for a stub calc without a breakdown", () => {
+    const snap = coolingSnapshotFromFarmCalc(farmInputs, farmCalc);
+    const applied = applyCoolingCalcToRoom({ id: "r1", name: "X" }, snap);
+    expect(applied.lightingW).toBeUndefined();
+    expect(applied.cooling.deltaT).toBe("");
   });
 });

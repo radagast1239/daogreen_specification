@@ -80,7 +80,7 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
                 <th className="right">Теплопритоки, Вт</th>
                 <th className="right">Свет, Вт</th>
                 <th className="right">Люди/обор., Вт</th>
-                <th className="right">T°, °C</th>
+                <th className="right">ΔT, °C</th>
                 <th className="right">Запас, %</th>
                 <th className="right">Рек. холод, кВт</th>
                 <th className="right">Факт. холод, кВт</th>
@@ -145,16 +145,8 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
                         }
                       />
                     </td>
-                    <td className="right">
-                      <input
-                        type="number"
-                        className="spec-cell-input spec-cell-input--num"
-                        style={{ width: 52 }}
-                        value={raw.targetTempC ?? ""}
-                        onChange={(e) =>
-                          patch(r.id, { targetTempC: parseNumInput(e.target.value) })
-                        }
-                      />
+                    <td className="right num" title="ΔT = t снаружи − t внутри (из расчёта)">
+                      {r.cooling?.deltaT ? num(r.cooling.deltaT) : "—"}
                     </td>
                     <td className="right">
                       <input
