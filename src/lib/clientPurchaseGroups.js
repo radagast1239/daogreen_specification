@@ -1,6 +1,7 @@
 import { money } from "../store/helpers.js";
 import { getClientSections, resolveClientSection } from "../../shared/clientSections.js";
 import { groupMergedByListCategories as buildListCategoryGroups } from "../../shared/clientListCategoryGroups.js";
+import { isCoolingSpecItem } from "../../shared/itemTypes.js";
 import { isClosedPurchaseStatus } from "./itemHelpers.js";
 
 const PROBLEM_STATUSES = new Set(["need_help", "replacement_check", "on_review"]);
@@ -8,7 +9,9 @@ const PROBLEM_STATUSES = new Set(["need_help", "replacement_check", "on_review"]
 export function detectRowProblems(row) {
   const problems = [];
   if (!(row.link || "").trim()) problems.push("no_link");
-  if (!Number(row.price)) problems.push("no_price");
+  const rep = row.sourceItems?.[0];
+  const coolingSpec = isCoolingSpecItem(rep || row);
+  if (!coolingSpec && !Number(row.price)) problems.push("no_price");
   if (!(row.supplier || "").trim()) problems.push("no_supplier");
   const statuses = (row.sourceItems || []).map((i) => i.status);
   for (const st of PROBLEM_STATUSES) {

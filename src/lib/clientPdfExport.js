@@ -5,6 +5,7 @@ import { money, formatQty, mergedPurchaseRows } from "../store/helpers.js";
 import { lineGross, isBoughtStatus } from "./itemHelpers.js";
 import { rowsForResponsibleRole } from "./responsibleResolve.js";
 import { getClientSectionLabelMap } from "../../shared/clientSections.js";
+import { isCoolingSpecItem } from "../../shared/itemTypes.js";
 import { generateProjectPdf } from "./pdfExport.js";
 import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdfFontSetup.js";
 import { buildPdfPhotoMap, pdfPhotoTableHooks, PDF_PHOTO_COL_WIDTH_MM } from "./pdfImageHelpers.js";
@@ -32,6 +33,14 @@ function ensureSpace(doc, y, need = 40) {
     return 20;
   }
   return y;
+}
+
+export function clientPdfMoneyOrTbd(row, currency) {
+  const rep = row.sourceItems?.[0];
+  const coolingSpec = isCoolingSpecItem(rep || row);
+  const priceUnset = coolingSpec && !(Number(row.price) > 0) && !(Number(row.sumVat) > 0);
+  if (priceUnset) return "цена уточняется";
+  return money(row.sumVat ?? lineGross(row), currency);
 }
 
 function drawTitleBlock(doc, project, branding, brandRgb, subtitle) {
@@ -82,7 +91,7 @@ async function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStat
       safePdfText(r.name),
       formatQty(r.qty, r.unit),
       r.unit || "шт.",
-      money(r.sumVat ?? lineGross(r), project.currency),
+      clientPdfMoneyOrTbd(r, project.currency),
       (r.supplier || "—").slice(0, 28),
     ];
     if (!compact) base.push((r.sourceText || "").slice(0, 48));

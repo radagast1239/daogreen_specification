@@ -5,7 +5,7 @@ import {
   DEFAULT_CLIENT_PDF_OPTION,
   pdfExportOptionStats,
 } from "../src/lib/clientPdfExportMeta.js";
-import { groupRowsBySupplier, rowsWithoutLink } from "../src/lib/clientPdfExport.js";
+import { groupRowsBySupplier, rowsWithoutLink, clientPdfMoneyOrTbd } from "../src/lib/clientPdfExport.js";
 
 describe("formatQty — клиентское количество", () => {
   it("не выводит 10.10 шт (округляет вверх для штук)", () => {
@@ -67,6 +67,18 @@ describe("PDF export options", () => {
     const line = pdfExportOptionStats("client_full", { mergedCount: 105 });
     expect(line).toContain("повторяются");
     expect(line).toContain("105");
+  });
+});
+
+describe("clientPdfMoneyOrTbd", () => {
+  it('cooling_spec без цены возвращает "цена уточняется"', () => {
+    const row = { price: 0, sumVat: 0, sourceItems: [{ kind: "cooling_spec" }] };
+    expect(clientPdfMoneyOrTbd(row, "₽")).toBe("цена уточняется");
+  });
+
+  it("обычная строка без цены остаётся денежным форматом 0 ₽", () => {
+    const row = { price: 0, sumVat: 0, qty: 1, sourceItems: [{ kind: "material" }] };
+    expect(clientPdfMoneyOrTbd(row, "₽")).toBe("0 ₽");
   });
 });
 

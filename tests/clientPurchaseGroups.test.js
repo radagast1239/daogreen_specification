@@ -63,6 +63,19 @@ describe("detectRowProblems", () => {
     const row = mkRow({ status: "on_review" });
     expect(detectRowProblems(row)).toContain("on_review");
   });
+
+  it("обычная строка без цены всё ещё получает no_price", () => {
+    const row = mkRow({ price: 0, sumVat: 0 });
+    expect(detectRowProblems(row)).toContain("no_price");
+  });
+
+  it("cooling_spec без цены НЕ получает no_price", () => {
+    const row = {
+      ...mkRow({ price: 0, sumVat: 0 }),
+      sourceItems: [{ id: "ac-1", kind: "cooling_spec", status: "", clientSection: "stellage", category: "" }],
+    };
+    expect(detectRowProblems(row)).not.toContain("no_price");
+  });
 });
 
 describe("computeSectionStats", () => {
@@ -105,6 +118,17 @@ describe("computeSectionStats", () => {
     const stats = computeSectionStats(rows);
     expect(stats.stellage.problemCount).toBe(1);
   });
+
+  it("не считает cooling_spec без цены проблемой раздела", () => {
+    const rows = [
+      {
+        ...mkRow({ name: "AC", clientSection: "stellage", price: 0, sumVat: 0 }),
+        sourceItems: [{ id: "ac-1", kind: "cooling_spec", status: "", clientSection: "stellage", category: "" }],
+      },
+    ];
+    const stats = computeSectionStats(rows);
+    expect(stats.stellage.problemCount).toBe(0);
+  });
 });
 
 describe("isRowReadyToBuy", () => {
@@ -135,6 +159,14 @@ describe("isRowReadyToBuy", () => {
 
   it("ready even without price (price is not a blocker for buying)", () => {
     expect(isRowReadyToBuy(mkRow({ price: 0 }))).toBe(true);
+  });
+
+  it("cooling_spec без цены готов к покупке при ссылке и поставщике", () => {
+    const row = {
+      ...mkRow({ price: 0, sumVat: 0 }),
+      sourceItems: [{ id: "ac-1", kind: "cooling_spec", status: "", clientSection: "stellage", category: "" }],
+    };
+    expect(isRowReadyToBuy(row)).toBe(true);
   });
 
   it("ready-only filter hides no-link items", () => {
