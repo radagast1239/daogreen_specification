@@ -23,8 +23,20 @@ import {
   resolveSplitSpecs,
 } from "./splitSpecs.js";
 
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj || {}, key);
+}
+
+function isExplicitEmptyNote(value) {
+  return value === "" || (typeof value === "string" && value.trim() === "");
+}
+
 /** Пояснение клиенту из структурированных полей или текст */
 export function structuredClientNote(obj) {
+  if (hasOwn(obj, "clientNote") && isExplicitEmptyNote(obj.clientNote)) {
+    return "";
+  }
+
   const name = obj?.name || "";
   const cuts = normalizePipeCuts(obj?.pipeCuts ?? resolvePipeCuts(obj));
   if (isProfilePipeName(name) && cuts.length) return pipeCutsClientNote(cuts);
@@ -36,8 +48,14 @@ export function structuredClientNote(obj) {
   if (isSplitSystemName(name) && split.length) {
     // Для сплит-систем сохраняем присланную спецификацию (комната · холод кВт · BTU ·
     // потребление), если она задана; иначе — авто-заметка по типоразмерам.
-    const provided = (obj?.clientNote || "").trim();
-    return provided || splitSpecsClientNote(split);
+    if (hasOwn(obj, "clientNote")) {
+      const provided = String(obj.clientNote ?? "").trim();
+      return provided || splitSpecsClientNote(split);
+    }
+    return splitSpecsClientNote(split);
   }
-  return obj?.clientNote || obj?.comment || "";
+  if (hasOwn(obj, "clientNote")) {
+    return obj.clientNote ?? "";
+  }
+  return obj?.comment || "";
 }

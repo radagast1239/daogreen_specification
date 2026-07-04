@@ -17,6 +17,7 @@ import {
   isSplitSystemName,
 } from "../../../shared/splitSpecs.js";
 import { structuredClientNote } from "../../../shared/structuredClientNote.js";
+import { resolveMaterialNoteField } from "../../../shared/materialNoteFields.js";
 import {
   normalizeMaterialModules,
   primaryMaterialModule,
@@ -112,8 +113,8 @@ function matToParams(m, id) {
     vat_rate: Number(m.vatRate) || 0,
     vat_included: m.vatIncluded ? 1 : 0,
     client_note: clientNote,
-    tech_note: m.techNote || "",
-    internal_note: m.internalNote || "",
+    tech_note: resolveMaterialNoteField(m, "techNote") ?? "",
+    internal_note: resolveMaterialNoteField(m, "internalNote") ?? "",
     status: m.status || "active",
     needs_approval: m.needsApproval ? 1 : 0,
     is_consumable: m.isConsumable ? 1 : 0,

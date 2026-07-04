@@ -23,4 +23,22 @@ describe("structuredClientNote — split systems", () => {
       "просто комментарий"
     );
   });
+
+  it("clears clientNote when explicitly set to empty string", () => {
+    expect(
+      structuredClientNote({
+        name: "Насос",
+        clientNote: "",
+        comment: "старый комментарий",
+      })
+    ).toBe("");
+  });
+
+  it("clears split clientNote instead of falling back to auto note", () => {
+    expect(structuredClientNote({ ...split, clientNote: "" })).toBe("");
+  });
+
+  it("does not change note when clientNote is absent", () => {
+    expect(structuredClientNote({ name: "Насос", comment: "из comment" })).toBe("из comment");
+  });
 });
