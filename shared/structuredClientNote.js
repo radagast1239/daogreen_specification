@@ -33,6 +33,11 @@ export function structuredClientNote(obj) {
   const flow = normalizeFlowSpecs(obj?.flowSpecs ?? resolveFlowSpecs(obj));
   if (isFlowSpecName(name) && flow.length) return flowSpecsClientNote(flow, name);
   const split = normalizeSplitSpecs(obj?.splitSpecs ?? resolveSplitSpecs(obj));
-  if (isSplitSystemName(name) && split.length) return splitSpecsClientNote(split);
+  if (isSplitSystemName(name) && split.length) {
+    // Для сплит-систем сохраняем присланную спецификацию (комната · холод кВт · BTU ·
+    // потребление), если она задана; иначе — авто-заметка по типоразмерам.
+    const provided = (obj?.clientNote || "").trim();
+    return provided || splitSpecsClientNote(split);
+  }
   return obj?.clientNote || obj?.comment || "";
 }
