@@ -19,10 +19,6 @@ export default function ClientOverviewPanel({
   const boughtCount = items.filter((i) => isBoughtStatus(i.status)).length;
 
   const nextSteps = [];
-  if (sections.some(([t]) => /стеллаж/i.test(t))) nextSteps.push("Закупить позиции из раздела «Стеллажи и каркас»");
-  if (items.some((i) => i.responsible === "plumber")) nextSteps.push("Передать список сантехнику");
-  if (items.some((i) => i.responsible === "electrician")) nextSteps.push("Передать список электрику");
-  nextSteps.push("Отметить купленные позиции в разделе «Закупка»");
 
   return (
     <div className="client-overview" style={{ marginTop: 16 }}>
@@ -53,12 +49,37 @@ export default function ClientOverviewPanel({
       </div>
 
       <div className="card" style={{ padding: 16, marginTop: 16 }}>
-        <strong>Что делать дальше</strong>
-        <ol style={{ margin: "10px 0 0", paddingLeft: 20, fontSize: 14 }}>
-          {nextSteps.map((s) => (
-            <li key={s} style={{ marginBottom: 6 }}>{s}</li>
-          ))}
-        </ol>
+        <strong style={{ fontSize: 16, color: "var(--brand)" }}>Что делать дальше</strong>
+        <div style={{ margin: "14px 0 0", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="client-next-step">
+            <b>1. Начните с приоритетных позиций</b>
+            <p className="muted" style={{ margin: "2px 0 0", fontSize: 13 }}>Откройте закупку и сначала проверьте позиции, которые нужны в первую очередь или требуют долгой доставки.</p>
+          </div>
+          <div className="client-next-step">
+            <b>2. Закупайте по разделам или поставщикам</b>
+            <p className="muted" style={{ margin: "2px 0 0", fontSize: 13 }}>Можно идти по блокам фермы или открыть список по магазинам.</p>
+          </div>
+          <div className="client-next-step">
+            <b>3. После оплаты отметьте <span style={{ color: "var(--accent)" }}>“Заказано”</span></b>
+            <p className="muted" style={{ margin: "2px 0 0", fontSize: 13 }}>Так будет видно, что позиция уже в работе.</p>
+          </div>
+          <div className="client-next-step">
+            <b>4. После получения отметьте <span style={{ color: "var(--ok, #2e7d32)" }}>“Куплено”</span></b>
+            <p className="muted" style={{ margin: "2px 0 0", fontSize: 13 }}>Прогресс закупки сохранится автоматически.</p>
+          </div>
+          <div className="client-next-step">
+            <b>5. Если товар уже есть — отметьте <span style={{ color: "var(--ok, #2e7d32)" }}>“Уже есть”</span></b>
+            <p className="muted" style={{ margin: "2px 0 0", fontSize: 13 }}>Позиция уйдёт из активной закупки.</p>
+          </div>
+          <div className="client-next-step">
+            <b>6. Если товара нет или нужна замена — нажмите <span style={{ color: "var(--bad, #d32f2f)" }}>“Нужна помощь”</span></b>
+            <p className="muted" style={{ margin: "2px 0 0", fontSize: 13 }}>Daogreen проверит замену или подберёт аналог.</p>
+          </div>
+          <div className="client-next-step">
+            <b>7. Документы для специалистов находятся во вкладке <span>“Документы”</span></b>
+            <p className="muted" style={{ margin: "2px 0 0", fontSize: 13 }}>PDF и Excel можно передать сантехнику, электрику или монтажнику.</p>
+          </div>
+        </div>
       </div>
 
       <h3 style={{ marginTop: 20 }}>По разделам закупки</h3>
