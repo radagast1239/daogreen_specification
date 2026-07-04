@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { num } from "../store/helpers.js";
 import { isFarmGeneralItem, roomLabel } from "../lib/roomHelpers.js";
+import { roomAcRecommendedKw, roomAcRecommendedBtu } from "../../shared/roomAcSpec.js";
 import Collapsible from "./Collapsible.jsx";
 
 function resolveItemRoomId(item, rooms, itemRoomBySelection) {
@@ -30,7 +31,15 @@ export default function RoomCoolingSummary({ project }) {
       r.exhaust += Number(it.exhaustM3) || 0;
       r.items += 1;
     }
-    return [...map.values()];
+    return [...map.values()].map((r) => {
+      const room = rooms.find((rm) => rm.id === r.roomId);
+      if (!room) return r;
+      return {
+        ...r,
+        kw: r.kw || roomAcRecommendedKw(room) || 0,
+        btu: r.btu || roomAcRecommendedBtu(room) || 0,
+      };
+    });
   }, [project]);
 
   const total = rows.reduce(
