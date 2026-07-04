@@ -80,7 +80,7 @@ export function cleanStellageCatalogs(rawCatalogs, materials, options = {}) {
       }
 
       const qty = lineQty(ln);
-      const sub = String(ln.subcategory || ln.farmGroup || "").trim();
+      const sub = String(ln.subcategory || ln.farmGroup || "").trim(); // subcategory — явный выбор в UI
       const prev = byMaterialId.get(mid);
       if (prev) {
         const prevQty = lineQty(prev);

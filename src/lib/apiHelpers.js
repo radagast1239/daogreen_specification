@@ -28,6 +28,7 @@ function itemFromMaterial(mat, mod, qty, order) {
     qty,
     price: Number(mat.basePrice) || 0,
     vatRate: [0, 5, 20].includes(Number(mat.vatRate)) ? Number(mat.vatRate) : 0,
+    subcategory: mat.subcategory || "",
     responsible: mat.responsible || defaultResponsible(mat.category, mat),
     includedInProject: !isZero,
     visibleToClient: !isZero && mat.clientVisibleDefault !== false,

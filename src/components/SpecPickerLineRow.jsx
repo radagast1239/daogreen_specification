@@ -158,7 +158,14 @@ export default function SpecPickerLineRow({
           <select
             className="spec-cell-input"
             value={ln.subcategory || ""}
-            onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, { subcategory: e.target.value }))}
+            onChange={(e) =>
+              emitLines(
+                patchLine(normalizedLines, ln.id, {
+                  subcategory: e.target.value,
+                  farmGroup: e.target.value,
+                })
+              )
+            }
           >
             <option value="">—</option>
             {stellageGroups.map((g) => (

@@ -10,7 +10,7 @@ import { attachLineSpecOverrides, pickLineSpecOverrides } from "./lineSpecOverri
 export function slimCatalogLine(ln) {
   if (!ln || ln.included === false) return null;
   const defaultQty = Number(ln.qty ?? ln.defaultQty) || 0;
-  const subcategory = String(ln.farmGroup || ln.subcategory || "").trim();
+  const subcategory = String(ln.subcategory || ln.farmGroup || "").trim();
 
   if (ln.materialId) {
     const out = { materialId: ln.materialId, defaultQty, included: true };
@@ -44,7 +44,7 @@ export function normalizeStoredCatalogLine(ln) {
       defaultQty: Number(ln.defaultQty ?? ln.qty) || 0,
       included: ln.included !== false,
     };
-    const sub = String(ln.farmGroup || ln.subcategory || "").trim();
+    const sub = String(ln.subcategory || ln.farmGroup || "").trim();
     if (sub) out.subcategory = sub;
     return attachLineSpecOverrides(out, ln);
   }
