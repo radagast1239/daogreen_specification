@@ -172,7 +172,18 @@ export function createMaterial(data) {
 export function updateMaterial(id, patch, { changedBy = "admin" } = {}) {
   const cur = getMaterial(id);
   if (!cur) return null;
+  
   const merged = { ...cur, ...patch, id };
+
+  // Явное сохранение responsible при частичном PATCH
+  if (!("responsible" in patch)) {
+    merged.responsible = cur.responsible;
+  } else if (!patch.responsible || String(patch.responsible).trim() === "") {
+    merged.responsible = "general";
+  } else {
+    merged.responsible = String(patch.responsible).trim();
+  }
+
   if (patch.basePrice != null && patch.basePrice !== cur.basePrice) {
     logPriceChange(
       id,
