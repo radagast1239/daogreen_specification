@@ -214,6 +214,40 @@ export const api = {
     return data;
   },
   deleteDocument: (id) => request(`/api/admin/documents/${id}`, { method: "DELETE" }),
+  getFrameDrawings: (params = {}) => {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v) qs.set(k, v); });
+    const q = qs.toString();
+    return request(`/api/frame-drawings${q ? `?${q}` : ""}`);
+  },
+  getFrameDrawing: (id) => request(`/api/frame-drawings/${id}`),
+  deleteFrameDrawing: (id) => request(`/api/frame-drawings/${id}`, { method: "DELETE" }),
+  uploadFrameDrawing: async (payload, pdfBlob, filename, replace = false) => {
+    const fd = new FormData();
+    fd.append("file", pdfBlob, filename || "frame-drawing.pdf");
+    Object.entries(payload).forEach(([k, v]) => {
+      if (v === undefined || v === null) return;
+      if (k === "frameConfigJson" && typeof v === "object") {
+        fd.append("frame_config_json", JSON.stringify(v));
+      } else {
+        fd.append(k, typeof v === "boolean" ? String(v) : String(v));
+      }
+    });
+    if (replace) fd.append("replace", "true");
+    const res = await fetch(`${API}/api/frame-drawings`, {
+      method: "POST",
+      headers: { "X-Admin-Key": getAdminKey() },
+      body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const err = new Error(data.message || data.error || "Upload failed");
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  },
   archiveProject: (id) => request(`/api/projects/${id}/archive`, { method: "POST" }),
   restoreProject: (id) => request(`/api/projects/${id}/restore`, { method: "POST" }),
 };

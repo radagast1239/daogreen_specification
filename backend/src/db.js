@@ -326,6 +326,31 @@ function migrateDb() {
 
   addCol("spec_presets", "params_json", "TEXT NOT NULL DEFAULT '{}'");
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS frame_drawings (
+      id TEXT PRIMARY KEY,
+      project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      module_id TEXT,
+      stellage_id TEXT,
+      preset_id TEXT,
+      source_type TEXT NOT NULL DEFAULT 'standalone',
+      title TEXT NOT NULL DEFAULT '',
+      rack_type TEXT DEFAULT '',
+      frame_config_json TEXT NOT NULL DEFAULT '{}',
+      pdf_url TEXT NOT NULL,
+      pdf_filename TEXT NOT NULL DEFAULT '',
+      file_id TEXT,
+      is_client_visible INTEGER NOT NULL DEFAULT 1,
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_frame_drawings_project ON frame_drawings(project_id);
+    CREATE INDEX IF NOT EXISTS idx_frame_drawings_stellage ON frame_drawings(project_id, stellage_id);
+    CREATE INDEX IF NOT EXISTS idx_frame_drawings_module ON frame_drawings(module_id);
+    CREATE INDEX IF NOT EXISTS idx_frame_drawings_preset ON frame_drawings(preset_id);
+  `);
+
   const visibleDefaultMigrated = db
     .prepare("SELECT 1 FROM settings WHERE key = 'migration_client_visible_default_v2'")
     .get();

@@ -7,6 +7,7 @@ import { clientVisibleItems, clientPurchaseItems } from "../../lib/itemHelpers.j
 import { Progress, Empty } from "../../components/ui.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
 import { setClientScope } from "../../components/ClientGuard.jsx";
+import { photoSrc } from "../../lib/api.js";
 import { clientTabDefs, heroEyebrow, legacyTabToPurchaseMode } from "../../lib/clientBrandConfig.js";
 import { printPDF } from "../../lib/exportDownload.js";
 import { ClientSchemesViewer } from "../../components/ClientSchemesEditor.jsx";
@@ -510,6 +511,8 @@ function ClientBrandFooter({ branding }) {
 }
 
 function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
+  const frameDrawings = (documents || []).filter((d) => d.type === 'frame_drawing');
+  const otherDocs = (documents || []).filter((d) => d.type !== 'frame_drawing');
   return (
     <div className="card" style={{ padding: 22, marginTop: 16 }}>
       <h3>Документы</h3>
@@ -536,11 +539,26 @@ function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
           </button>
         </div>
       </div>
-      {documents?.length > 0 && (
+      {frameDrawings.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>Чертежи и схемы</div>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {frameDrawings.map((d) => (
+              <li key={d.id} style={{ marginBottom: 8 }}>
+                <a href={photoSrc(d.url)} target="_blank" rel="noreferrer">
+                  {d.filename}
+                </a>
+                <span className="muted" style={{ fontSize: 12 }}> · Чертёж каркаса</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {otherDocs.length > 0 && (
         <ul style={{ marginTop: 16, paddingLeft: 18 }}>
-          {documents.map((d) => (
+          {otherDocs.map((d) => (
             <li key={d.id} style={{ marginBottom: 8 }}>
-              <a href={d.url} target="_blank" rel="noreferrer">
+              <a href={photoSrc(d.url)} target="_blank" rel="noreferrer">
                 {d.filename}
               </a>
               <span className="muted" style={{ fontSize: 12 }}> · {d.type}</span>

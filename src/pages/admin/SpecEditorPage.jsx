@@ -22,7 +22,7 @@ import { Progress, Stat, Empty, ClientLinkModal } from "../../components/ui.jsx"
 import Breadcrumbs from "../../components/Breadcrumbs.jsx";
 import Collapsible from "../../components/Collapsible.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
-import { useToast } from "../../components/Toast.jsx";
+import StellageFrameDrawingsPanel from "../../components/StellageFrameDrawingsPanel.jsx";
 import SaveSectionTemplateModal from "../../components/SaveSectionTemplateModal.jsx";
 import { api } from "../../lib/api.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
@@ -646,6 +646,7 @@ export default function SpecEditorPage() {
           </div>
         )}
 
+        <StellageFrameDrawingsPanel project={project} returnPath={`/project/${project.id}`} />
         <ProjectDocuments projectId={project.id} />
 
         <Collapsible title="История: клиент и Daogreen" subtitle={`${activity.length} записей`} defaultOpen={activity.length > 0}>
@@ -759,6 +760,7 @@ const DOC_TYPES = [
   ["invoice", "Счёт"],
   ["quote", "КП"],
   ["manual", "Инструкция"],
+  ["frame_drawing", "Чертёж каркаса"],
   ["other", "Прочее"],
 ];
 

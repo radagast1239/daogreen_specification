@@ -32,6 +32,7 @@ import ClientBrandTab from "./ClientBrandTab.jsx";
 import PublishRulesTab from "./PublishRulesTab.jsx";
 import StellageGroupsEditor from "../../components/StellageGroupsEditor.jsx";
 import StellagePhotoField, { StellagePhotoThumb } from "../../components/StellagePhotoField.jsx";
+import FrameDrawingLinkButton from "../../components/FrameDrawingLinkButton.jsx";
 import { referenceToSettings, buildReferenceData } from "../../lib/referenceData.js";
 import {
   parseStellageModuleCatalogs,
@@ -836,6 +837,17 @@ export default function ModulesPage() {
                       <button type="button" className="btn btn-sm" onClick={() => openStellagePreset(p)}>
                         Редактировать
                       </button>
+                      <FrameDrawingLinkButton
+                        context={{
+                          presetId: p.id,
+                          moduleId: p.moduleId,
+                          sourceType: "preset",
+                          rackLabel: p.name,
+                          returnTo: "/modules?tab=stellage",
+                        }}
+                        label="Создать чертёж пресета"
+                        className="btn btn-sm btn-outline"
+                      />
                       <button type="button" className="btn btn-sm" onClick={() => duplicateStellagePreset(p)}>
                         Копия
                       </button>

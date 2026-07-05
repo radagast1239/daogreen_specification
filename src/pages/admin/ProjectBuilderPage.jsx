@@ -6,7 +6,7 @@ import { useToast } from "../../components/Toast.jsx";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
 import { resolveCategories } from "../../lib/categories.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
-import { api } from "../../lib/api.js";
+import FrameDrawingLinkButton from "../../components/FrameDrawingLinkButton.jsx";
 import {
   filterSectionsForFarmType,
   GROUP_LABEL,
@@ -586,6 +586,22 @@ export default function ProjectBuilderPage() {
                 Параметры пресета: {formatStellageParamsSummary(draft.params)}
               </p>
             )}
+            <div style={{ marginTop: 12 }}>
+              <FrameDrawingLinkButton
+                context={{
+                  moduleId: draft.moduleId,
+                  rackId: draft.id,
+                  sourceType: "module_rack",
+                  rackLabel: draft.name,
+                  returnTo: "/new",
+                }}
+                label="Создать чертёж каркаса"
+                className="btn btn-sm btn-outline"
+              />
+              <p className="muted" style={{ fontSize: 11, margin: "6px 0 0" }}>
+                Сохранение PDF в проект — после создания проекта, в карточке стеллажа.
+              </p>
+            </div>
             <div className="toolbar" style={{ marginTop: 10 }}>
               <button type="button" className="btn btn-sm" onClick={saveDraftAsPreset}>
                 💾 Сохранить как пресет

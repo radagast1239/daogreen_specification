@@ -954,6 +954,21 @@ function loadBrandingSettings() {
   return loadClientBrand(db);
 }
 
+/** Client-visible project files: excludes hidden frame_drawings (is_client_visible=0). */
+export function getClientProjectDocuments(projectId) {
+  return db.prepare(`
+    SELECT f.id, f.type, f.filename, f.url, f.uploaded_at as uploadedAt
+    FROM files f
+    LEFT JOIN frame_drawings fd ON fd.file_id = f.id
+    WHERE f.project_id = ?
+      AND (
+        f.type != 'frame_drawing'
+        OR (fd.id IS NOT NULL AND fd.is_client_visible = 1)
+      )
+    ORDER BY f.uploaded_at DESC
+  `).all(projectId);
+}
+
 function serveClientProject(req, res) {
   const p = loadProjectByToken(req.clientToken);
   if (!p) return res.status(404).json({ error: "Not found" });
@@ -961,9 +976,7 @@ function serveClientProject(req, res) {
     return res.status(410).json({ error: "Link expired" });
   }
   const versions = listVersions(p.id);
-  const documents = db
-    .prepare("SELECT id, type, filename, url, uploaded_at as uploadedAt FROM files WHERE project_id = ? ORDER BY uploaded_at DESC")
-    .all(p.id);
+  const documents = getClientProjectDocuments(p.id);
   const activity = listActivity(p.id, { clientOnly: true });
   res.json({
     project: sanitizeProjectForClient(p),

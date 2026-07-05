@@ -1,0 +1,348 @@
+import { Router } from "express";
+import path from "path";
+import fs from "fs";
+import multer from "multer";
+import { nanoid } from "nanoid";
+import { fileURLToPath } from "url";
+import { db } from "../db.js";
+import { multerFileFilter } from "../services/uploadFilter.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const uploadRoot = path.join(__dirname, "../../uploads");
+
+const pdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024 },
+  fileFilter: multerFileFilter({ allowDocs: true }),
+});
+
+const router = Router();
+
+function rowToDrawing(row) {
+  if (!row) return null;
+  let frameConfig = {};
+  try {
+    frameConfig = JSON.parse(row.frame_config_json || "{}");
+  } catch {
+    frameConfig = {};
+  }
+  return {
+    id: row.id,
+    projectId: row.project_id || null,
+    moduleId: row.module_id || null,
+    stellageId: row.stellage_id || null,
+    presetId: row.preset_id || null,
+    sourceType: row.source_type,
+    title: row.title,
+    rackType: row.rack_type,
+    frameConfig,
+    pdfUrl: row.pdf_url,
+    pdfFilename: row.pdf_filename,
+    fileId: row.file_id || null,
+    isClientVisible: !!row.is_client_visible,
+    version: row.version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function resolvePdfSubdir(body) {
+  const projectId = body.project_id || body.projectId || null;
+  const presetId = body.preset_id || body.presetId || null;
+  if (projectId) return path.join("frame-drawings", String(projectId));
+  if (presetId) return path.join("frame-drawings", "presets", String(presetId));
+  return path.join("frame-drawings", "standalone");
+}
+
+function writePdfBuffer(buffer, body, drawingId) {
+  const subdir = resolvePdfSubdir(body);
+  const absDir = path.join(uploadRoot, subdir);
+  fs.mkdirSync(absDir, { recursive: true });
+  const filename = `${drawingId}.pdf`;
+  const absPath = path.join(absDir, filename);
+  fs.writeFileSync(absPath, buffer);
+  const urlPath = `/uploads/${subdir.replace(/\\/g, "/")}/${filename}`;
+  return { urlPath, absPath, filename };
+}
+
+function parseBool(val, def = true) {
+  if (val === undefined || val === null || val === "") return def;
+  if (val === true || val === "true" || val === "1" || val === 1) return true;
+  if (val === false || val === "false" || val === "0" || val === 0) return false;
+  return def;
+}
+
+function parseFrameConfig(raw) {
+  if (!raw) return {};
+  if (typeof raw === "object") return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function filesFilename(title, pdfFilename) {
+  if (pdfFilename) return pdfFilename;
+  return title.endsWith(".pdf") ? title : `${title}.pdf`;
+}
+
+function isFrameDrawingUploadPath(pdfUrl) {
+  if (!pdfUrl) return false;
+  const rel = pdfUrl.replace(/^\/uploads\/?/, "").replace(/\\/g, "/");
+  return rel.startsWith("frame-drawings/");
+}
+
+function removeDrawingFilesRow(fileId) {
+  if (!fileId) return;
+  db.prepare("DELETE FROM files WHERE id = ?").run(fileId);
+}
+
+function ensureDrawingFilesRow({ projectId, fileId, pdfFilename, pdfUrl, title }) {
+  if (!projectId) return null;
+  const filename = filesFilename(title, pdfFilename);
+  const id = fileId || nanoid(12);
+  const existing = db.prepare("SELECT id FROM files WHERE id = ?").get(id);
+  if (existing) {
+    db.prepare(
+      "UPDATE files SET project_id = ?, type = ?, filename = ?, url = ? WHERE id = ?",
+    ).run(projectId, "frame_drawing", filename, pdfUrl, id);
+  } else {
+    db.prepare(
+      "INSERT INTO files (id, project_id, type, filename, url) VALUES (?, ?, ?, ?, ?)",
+    ).run(id, projectId, "frame_drawing", filename, pdfUrl);
+  }
+  return id;
+}
+
+/** Sync files row for a frame drawing based on visibility. Returns file_id or null. */
+function syncDrawingFilesVisibility({
+  projectId,
+  isClientVisible,
+  fileId = null,
+  pdfFilename,
+  pdfUrl,
+  title,
+}) {
+  if (!projectId || !isClientVisible) {
+    removeDrawingFilesRow(fileId);
+    return null;
+  }
+  return ensureDrawingFilesRow({ projectId, fileId, pdfFilename, pdfUrl, title });
+}
+
+function safeDeleteFrameDrawingPdf(pdfUrl) {
+  if (!isFrameDrawingUploadPath(pdfUrl)) return;
+  const rel = pdfUrl.replace(/^\/uploads\/?/, "");
+  const abs = path.join(uploadRoot, rel);
+  if (!fs.existsSync(abs)) return;
+  try {
+    fs.unlinkSync(abs);
+  } catch (err) {
+    console.warn(`[frame-drawings] failed to delete PDF: ${abs}`, err?.message || err);
+  }
+}
+
+router.get("/", (req, res) => {
+  const { project_id, module_id, stellage_id, preset_id, source_type } = req.query;
+  let sql = "SELECT * FROM frame_drawings WHERE 1=1";
+  const params = [];
+  if (project_id) {
+    sql += " AND project_id = ?";
+    params.push(project_id);
+  }
+  if (module_id) {
+    sql += " AND module_id = ?";
+    params.push(module_id);
+  }
+  if (stellage_id) {
+    sql += " AND stellage_id = ?";
+    params.push(stellage_id);
+  }
+  if (preset_id) {
+    sql += " AND preset_id = ?";
+    params.push(preset_id);
+  }
+  if (source_type) {
+    sql += " AND source_type = ?";
+    params.push(source_type);
+  }
+  sql += " ORDER BY updated_at DESC, created_at DESC";
+  const rows = db.prepare(sql).all(...params);
+  res.json(rows.map(rowToDrawing));
+});
+
+router.get("/:id", (req, res) => {
+  const row = db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: "Not found" });
+  res.json(rowToDrawing(row));
+});
+
+router.get("/:id/download", (req, res) => {
+  const row = db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: "Not found" });
+  const rel = row.pdf_url.replace(/^\/uploads\/?/, "");
+  const abs = path.join(uploadRoot, rel);
+  if (!fs.existsSync(abs)) return res.status(404).json({ error: "File not found" });
+  res.download(abs, row.pdf_filename || `${row.id}.pdf`);
+});
+
+router.post("/", pdfUpload.single("file"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "PDF file required" });
+
+  const body = req.body || {};
+  const projectId = body.project_id || body.projectId || null;
+  const moduleId = body.module_id || body.moduleId || null;
+  const stellageId = body.stellage_id || body.stellageId || body.rack_id || body.rackId || null;
+  const presetId = body.preset_id || body.presetId || null;
+  const sourceType = body.source_type || body.sourceType || "standalone";
+  const title = (body.title || req.file.originalname || "Чертёж каркаса").trim();
+  const rackType = body.rack_type || body.rackType || "";
+  const frameConfig = parseFrameConfig(body.frame_config_json || body.frameConfigJson);
+  const isClientVisible = parseBool(body.is_client_visible ?? body.isClientVisible, true);
+  const replace = parseBool(body.replace, false);
+  const updateId = body.drawing_id || body.drawingId || null;
+
+  if (projectId && stellageId && !replace && !updateId) {
+    const existing = db
+      .prepare("SELECT id FROM frame_drawings WHERE project_id = ? AND stellage_id = ? ORDER BY updated_at DESC LIMIT 1")
+      .get(projectId, stellageId);
+    if (existing) {
+      if (!replace) {
+        return res.status(409).json({
+          error: "drawing_exists",
+          message: "Для этого стеллажа уже есть чертёж",
+          existing: rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(existing.id)),
+        });
+      }
+      return saveDrawing(req, res, { ...body, drawing_id: existing.id, replace: true });
+    }
+  }
+
+  return saveDrawing(req, res, body);
+});
+
+function saveDrawing(req, res, body) {
+  const projectId = body.project_id || body.projectId || null;
+  const moduleId = body.module_id || body.moduleId || null;
+  const stellageId = body.stellage_id || body.stellageId || body.rack_id || body.rackId || null;
+  const presetId = body.preset_id || body.presetId || null;
+  const sourceType = body.source_type || body.sourceType || "standalone";
+  const title = (body.title || req.file.originalname || "Чертёж каркаса").trim();
+  const rackType = body.rack_type || body.rackType || "";
+  const frameConfig = parseFrameConfig(body.frame_config_json || body.frameConfigJson);
+  const isClientVisible = parseBool(body.is_client_visible ?? body.isClientVisible, true);
+  const updateId = body.drawing_id || body.drawingId || null;
+
+  const id = updateId || nanoid(12);
+  const { urlPath } = writePdfBuffer(req.file.buffer, { projectId, presetId }, id);
+  const pdfFilename = body.pdf_filename || body.pdfFilename || req.file.originalname || `${id}.pdf`;
+  const frameConfigJson = JSON.stringify(frameConfig);
+  const now = new Date().toISOString();
+
+  const prevRow = updateId
+    ? db.prepare("SELECT file_id FROM frame_drawings WHERE id = ?").get(updateId)
+    : null;
+  const fileId = projectId
+    ? syncDrawingFilesVisibility({
+        projectId,
+        isClientVisible,
+        fileId: prevRow?.file_id || null,
+        pdfFilename,
+        pdfUrl: urlPath,
+        title,
+      })
+    : null;
+
+  const prev = updateId
+    ? db.prepare("SELECT version, file_id FROM frame_drawings WHERE id = ?").get(updateId)
+    : null;
+
+  if (updateId && prev) {
+    db.prepare(`
+      UPDATE frame_drawings SET
+        project_id = ?, module_id = ?, stellage_id = ?, preset_id = ?,
+        source_type = ?, title = ?, rack_type = ?, frame_config_json = ?,
+        pdf_url = ?, pdf_filename = ?, file_id = ?,
+        is_client_visible = ?, version = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      projectId, moduleId, stellageId, presetId,
+      sourceType, title, rackType, frameConfigJson,
+      urlPath, pdfFilename, fileId,
+      isClientVisible ? 1 : 0, (prev.version || 1) + 1, now,
+      updateId,
+    );
+    return res.json(rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(updateId)));
+  }
+
+  db.prepare(`
+    INSERT INTO frame_drawings (
+      id, project_id, module_id, stellage_id, preset_id, source_type,
+      title, rack_type, frame_config_json, pdf_url, pdf_filename, file_id,
+      is_client_visible, version, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+  `).run(
+    id, projectId, moduleId, stellageId, presetId, sourceType,
+    title, rackType, frameConfigJson, urlPath, pdfFilename, fileId,
+    isClientVisible ? 1 : 0, now, now,
+  );
+
+  return res.json(rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(id)));
+}
+
+router.patch("/:id", (req, res) => {
+  const row = db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: "Not found" });
+
+  const title = req.body.title ?? row.title;
+  const pdfFilename = req.body.pdf_filename ?? req.body.pdfFilename ?? row.pdf_filename;
+  const pdfUrl = req.body.pdf_url ?? req.body.pdfUrl ?? row.pdf_url;
+  const isClientVisibleRaw = req.body.is_client_visible ?? req.body.isClientVisible;
+  const visible = isClientVisibleRaw === undefined
+    ? !!row.is_client_visible
+    : parseBool(isClientVisibleRaw, true);
+
+  const fileId = row.project_id
+    ? syncDrawingFilesVisibility({
+        projectId: row.project_id,
+        isClientVisible: visible,
+        fileId: row.file_id || null,
+        pdfFilename,
+        pdfUrl,
+        title,
+      })
+    : null;
+
+  db.prepare(`
+    UPDATE frame_drawings SET
+      title = ?, pdf_filename = ?, pdf_url = ?, file_id = ?,
+      is_client_visible = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(title, pdfFilename, pdfUrl, fileId, visible ? 1 : 0, req.params.id);
+
+  res.json(rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(req.params.id)));
+});
+
+router.delete("/:id", (req, res) => {
+  const row = db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: "Not found" });
+
+  removeDrawingFilesRow(row.file_id);
+  safeDeleteFrameDrawingPdf(row.pdf_url);
+
+  db.prepare("DELETE FROM frame_drawings WHERE id = ?").run(req.params.id);
+  res.status(204).end();
+});
+
+export default router;
+export {
+  rowToDrawing,
+  parseFrameConfig,
+  parseBool,
+  syncDrawingFilesVisibility,
+  removeDrawingFilesRow,
+  ensureDrawingFilesRow,
+  isFrameDrawingUploadPath,
+  safeDeleteFrameDrawingPdf,
+};

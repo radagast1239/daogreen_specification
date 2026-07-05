@@ -84,6 +84,7 @@ function SidebarNav({ compact, collapsed, onToggleCompact, onToggleCollapse, onN
         <span className="sidebar__sep-text">Планировщик</span>
       </div>
       <NavItem to="/planner" label="Планировщик" icon="planner" onNavigate={onNavigate} collapsed={collapsed} />
+      <NavItem to="/planner/frame" label="Конструктор каркасов" icon="modules" onNavigate={onNavigate} collapsed={collapsed} />
 
       <div className="sidebar__sep" title={collapsed ? "Калькуляторы" : undefined}>
         <span className="sidebar__sep-text">Калькуляторы</span>
