@@ -171,7 +171,7 @@ describe("analyzeMaterialsQuality", () => {
     const report = analyzeMaterialsQuality(
       [
         baseMaterial({
-          supplier: "",
+          basePrice: 0,
           clientVisibleDefault: true,
         }),
       ],
@@ -179,5 +179,34 @@ describe("analyzeMaterialsQuality", () => {
     );
     const entry = report.entries[0];
     expect(entry.issues.some((i) => i.id === "not_client_ready")).toBe(true);
+  });
+
+  it("услуга без поставщика не получает not_client_ready", () => {
+    const report = analyzeMaterialsQuality(
+      [
+        baseMaterial({
+          supplier: "",
+          category: "Услуги",
+          clientVisibleDefault: true,
+        }),
+      ],
+      { activeModuleNames: [] }
+    );
+    const entry = report.entries[0];
+    expect(entry.issues.some((i) => i.id === "no_supplier")).toBe(true);
+    expect(entry.issues.some((i) => i.id === "not_client_ready")).toBe(false);
+  });
+
+  it("no_supplier у обычного товара = critical, у услуги = warning", () => {
+    const normal = collectBaseMaterialIssues(baseMaterial({ supplier: "" }), new Set());
+    expect(normal.find((i) => i.id === "no_supplier")?.severity).toBe("critical");
+
+    const service = collectBaseMaterialIssues(baseMaterial({ supplier: "", category: "Работы и доставка" }), new Set());
+    expect(service.find((i) => i.id === "no_supplier")?.severity).toBe("warning");
+  });
+
+  it("Мусорные пакеты не получают junk_in_name", () => {
+    const issues = collectBaseMaterialIssues(baseMaterial({ name: "Мусорные пакеты 120л" }), new Set());
+    expect(issues.some((i) => i.id === "junk_in_name")).toBe(false);
   });
 });

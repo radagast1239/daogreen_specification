@@ -190,6 +190,8 @@ function hasJunkInName(name) {
   const s = String(name || "").trim();
   if (!s) return false;
   if (hasUrlInName(s)) return false;
+  const lower = s.toLowerCase();
+  if (lower.includes("мусорн") && (lower.includes("пакет") || lower.includes("меш"))) return false;
   return JUNK_NAME_RE.test(s);
 }
 
@@ -258,6 +260,10 @@ export function materialRow(m, activeModuleNames) {
   };
 }
 
+export function isServiceMaterial(m) {
+  return m?.itemType === "service" || m?.category === "Работы и доставка" || m?.category === "Услуги";
+}
+
 /** Базовые проверки одного материала (без дублей между материалами) */
 export function collectBaseMaterialIssues(m, activeSet) {
   const issues = [];
@@ -292,7 +298,9 @@ export function collectBaseMaterialIssues(m, activeSet) {
   }
 
   if (!(m.unit || "").trim()) issues.push(makeIssue("no_unit"));
-  if (!(m.supplier || "").trim()) issues.push(makeIssue("no_supplier"));
+  if (!(m.supplier || "").trim()) {
+    issues.push(makeIssue("no_supplier", { severity: isServiceMaterial(m) ? "warning" : "critical" }));
+  }
   if (!hasPhoto(m)) issues.push(makeIssue("no_photo"));
   if (!(m.link || "").trim()) issues.push(makeIssue("no_link"));
 

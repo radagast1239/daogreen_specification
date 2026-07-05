@@ -11,6 +11,9 @@ import {
   qualityReportRows,
   qualitySummaryRows,
 } from "../../../shared/materialQualityCheck.js";
+import { buildBulkPatchPayload, formatBulkActionConfirmation } from "../../../shared/materialBulkActions.js";
+import { DEFAULT_RESPONSIBLE_ROLES } from "../../lib/responsibleRoles.js";
+import { getClientSections, subsectionsForSection } from "../../../shared/clientSections.js";
 
 const SEV_STYLE = {
   critical: { color: "var(--danger)", chip: "chip chip--danger", label: "Критично" },
@@ -20,6 +23,12 @@ const SEV_STYLE = {
 
 export function MaterialsQualityPanel({ materials, modules, onEditMaterial, onPatchMaterial }) {
   const [qualityFilter, setQualityFilter] = useState("all");
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkAction, setBulkAction] = useState("");
+  const [bulkValue, setBulkValue] = useState("");
+  const [bulkSubValue, setBulkSubValue] = useState("");
+  const [isApplying, setIsApplying] = useState(false);
+  const { confirm, success, error } = useToast();
 
   const activeModuleNames = useMemo(
     () => (modules || []).filter((m) => m.active !== false).map((m) => m.name),
@@ -54,6 +63,66 @@ export function MaterialsQualityPanel({ materials, modules, onEditMaterial, onPa
     if (summary.length) downloadXlsx(`materials-quality-${stamp}`, summary, "Сводка");
     if (detail.length) downloadXlsx(`materials-quality-${stamp}-detail`, detail, "Проблемы");
   };
+
+  const toggleSelection = (id) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const selectVisible = () => {
+    const next = new Set();
+    for (const entry of filteredEntries) {
+      const visibleIssues =
+        qualityFilter === "all"
+          ? entry.issues
+          : entry.issues.filter((issue) => {
+              if (qualityFilter === "critical") return issue.severity === "critical";
+              if (qualityFilter === "duplicates") {
+                return issue.id === "duplicate_name_unit" || issue.id === "duplicate_purchase_key";
+              }
+              return issue.id === qualityFilter;
+            });
+      if (visibleIssues.length > 0) next.add(entry.row.id);
+    }
+    setSelectedIds(next);
+  };
+
+  const applyBulkAction = async () => {
+    if (!bulkAction || selectedIds.size === 0) return;
+    const msg = formatBulkActionConfirmation(bulkAction, bulkValue, bulkSubValue, selectedIds.size);
+    if (!(await confirm({ title: "Применить массовое действие?", message: msg }))) return;
+
+    setIsApplying(true);
+    let successCount = 0;
+    let errorCount = 0;
+    const payload = buildBulkPatchPayload(bulkAction, bulkValue, bulkSubValue);
+
+    for (const id of selectedIds) {
+      try {
+        await onPatchMaterial(id, payload, true); // true to skip individual success toasts if supported
+        successCount++;
+      } catch (e) {
+        errorCount++;
+      }
+    }
+
+    setIsApplying(false);
+    if (successCount > 0) {
+      success(`Успешно обновлено: ${successCount}`);
+      setSelectedIds(new Set());
+      setBulkAction("");
+      setBulkValue("");
+      setBulkSubValue("");
+    }
+    if (errorCount > 0) {
+      error(`Ошибок при обновлении: ${errorCount}`);
+    }
+  };
+
+  const clientSections = getClientSections();
+  const currentSubsections = bulkAction === "clientSection" && bulkValue ? subsectionsForSection(bulkValue) : [];
 
   return (
     <>
@@ -109,11 +178,125 @@ export function MaterialsQualityPanel({ materials, modules, onEditMaterial, onPa
             key={f.id}
             type="button"
             className={`btn btn-sm ${qualityFilter === f.id ? "btn-primary" : "btn-ghost"}`}
-            onClick={() => setQualityFilter(f.id)}
+            onClick={() => {
+              setQualityFilter(f.id);
+              setSelectedIds(new Set());
+            }}
           >
             {f.label}
           </button>
         ))}
+      </div>
+
+      <div className="card" style={{ marginBottom: 16, padding: "12px 16px", background: "var(--surface-alt)" }}>
+        <div className="row wrap" style={{ gap: 12, alignItems: "center" }}>
+          <strong>Выбрано: {selectedIds.size}</strong>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={selectVisible}>
+            Выбрать видимые
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            disabled={selectedIds.size === 0}
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Снять выбор
+          </button>
+
+          <div style={{ flex: 1 }} />
+
+          <select
+            className="input-sm"
+            value={bulkAction}
+            onChange={(e) => {
+              setBulkAction(e.target.value);
+              setBulkValue("");
+              setBulkSubValue("");
+            }}
+            disabled={selectedIds.size === 0 || isApplying}
+            style={{ width: 200 }}
+          >
+            <option value="">— Выберите действие —</option>
+            <option value="responsible">Назначить ответственного</option>
+            <option value="supplier">Назначить поставщика</option>
+            <option value="clientSection">Назначить клиентский раздел</option>
+            <option value="showClient">Показать клиенту</option>
+            <option value="hideClient">Скрыть от клиента</option>
+            <option value="setReview">Отправить на проверку</option>
+            <option value="clearReview">Снять «на проверке»</option>
+          </select>
+
+          {bulkAction === "responsible" && (
+            <select
+              className="input-sm"
+              value={bulkValue}
+              onChange={(e) => setBulkValue(e.target.value)}
+              disabled={isApplying}
+            >
+              <option value="">Общий (сброс)</option>
+              {DEFAULT_RESPONSIBLE_ROLES.filter((r) => r.id !== "general").map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {bulkAction === "supplier" && (
+            <input
+              className="input-sm"
+              placeholder="Название поставщика"
+              value={bulkValue}
+              onChange={(e) => setBulkValue(e.target.value)}
+              disabled={isApplying}
+            />
+          )}
+
+          {bulkAction === "clientSection" && (
+            <>
+              <select
+                className="input-sm"
+                value={bulkValue}
+                onChange={(e) => {
+                  setBulkValue(e.target.value);
+                  setBulkSubValue("");
+                }}
+                disabled={isApplying}
+              >
+                <option value="">— Раздел —</option>
+                {clientSections.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+              {currentSubsections.length > 0 && (
+                <select
+                  className="input-sm"
+                  value={bulkSubValue}
+                  onChange={(e) => setBulkSubValue(e.target.value)}
+                  disabled={isApplying}
+                >
+                  <option value="">— Подраздел —</option>
+                  {currentSubsections.map((sub) => (
+                    <option key={sub} value={sub}>
+                      {sub}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </>
+          )}
+
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            disabled={!bulkAction || selectedIds.size === 0 || isApplying}
+            onClick={applyBulkAction}
+          >
+            {isApplying ? "Применение..." : "Применить к выбранным"}
+          </button>
+        </div>
       </div>
 
       {filteredEntries.length === 0 ? (
@@ -150,6 +333,13 @@ export function MaterialsQualityPanel({ materials, modules, onEditMaterial, onPa
                   flexWrap: "wrap",
                 }}
               >
+                <div style={{ paddingTop: 2 }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(entry.row.id)}
+                    onChange={() => toggleSelection(entry.row.id)}
+                  />
+                </div>
                 <div style={{ flex: 1, minWidth: 200 }}>
                   <div style={{ fontWeight: 600, fontSize: 15 }}>{entry.row.name || "—"}</div>
                   <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
