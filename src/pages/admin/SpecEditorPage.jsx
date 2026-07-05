@@ -44,7 +44,6 @@ import ReplacementReviewModal from "../../components/ReplacementReviewModal.jsx"
 import { findStaleProjectPrices } from "../../../shared/staleProjectPrices.js";
 import ActivityFeed from "../../components/ActivityFeed.jsx";
 import PublishChecklist, { PublishGateModal } from "../../components/PublishChecklist.jsx";
-import ProjectReadinessBar from "../../components/ProjectReadinessBar.jsx";
 import ProjectHqBar from "../../components/ProjectHqBar.jsx";
 import PrePublishCheckModal from "../../components/PrePublishCheckModal.jsx";
 import ImportFromProjectModal from "../../components/ImportFromProjectModal.jsx";
@@ -478,14 +477,32 @@ export default function SpecEditorPage() {
         actions={
           <>
             <Link className="btn" to={`/project/${project.id}/plan`}>▦ План</Link>
-            <button className="btn" onClick={exportSpec}>Excel ↓</button>
+            <button className="btn" onClick={exportSpec} title="Внутренний Excel (все поля)">Excel ↓</button>
             <button className="btn" onClick={() => setImportOpen(true)}>Из прошлого</button>
             <button className="btn" onClick={() => setCompareOpen(true)}>Сравнить</button>
-            <button className="btn" onClick={() => setDupOpen(true)}>На основе прошлого</button>
-            <button className="btn" onClick={publishVersion}>Утвердить версию</button>
-            <button className="btn" onClick={approveAll}>Показать всё клиенту</button>
-            <button className="btn" disabled={!url} onClick={requestClientLink}>Ссылка клиенту</button>
-            <button className="btn btn-ghost" onClick={regenerateLink}>↻ Новая ссылка</button>
+            <details style={{ position: "relative" }}>
+              <summary className="btn btn-ghost" style={{ cursor: "pointer" }}>Ещё ▾</summary>
+              <div
+                className="card"
+                style={{
+                  position: "absolute",
+                  right: 0,
+                  top: "100%",
+                  marginTop: 4,
+                  padding: 8,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4,
+                  zIndex: 100,
+                  minWidth: 200,
+                }}
+              >
+                <button className="btn btn-sm" onClick={() => setDupOpen(true)}>На основе прошлого</button>
+                <button className="btn btn-sm" onClick={approveAll}>Показать всё клиенту</button>
+                <button className="btn btn-sm" disabled={!url} onClick={requestClientLink}>QR / Шаблон ссылки</button>
+                <button className="btn btn-sm btn-ghost" onClick={regenerateLink}>↻ Сбросить ссылку</button>
+              </div>
+            </details>
           </>
         }
       />
@@ -514,14 +531,6 @@ export default function SpecEditorPage() {
             {project.city ? ` · ${project.city}` : ""} · спецификация · {new Date().toLocaleDateString("ru-RU")}
           </p>
         </div>
-
-        <ProjectReadinessBar
-          stats={publishCheck?.readiness}
-          loading={publishCheckLoading}
-          onPrePublishCheck={() => {
-            refreshPublishCheck().then(() => setPrePublishOpen(true));
-          }}
-        />
 
         {clientSectionIssueCount > 0 && (
           <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--danger)" }}>
@@ -663,27 +672,6 @@ export default function SpecEditorPage() {
           {stats.noPrice > 0 && <span className="chip chip--amber chip-dot">без цены: {stats.noPrice}</span>}
           {stats.noLink > 0 && <span className="chip chip--neutral chip-dot">без ссылки: {stats.noLink}</span>}
         </div>
-        </Collapsible>
-
-        <Collapsible
-          title="Готовность к отправке клиенту"
-          subtitle={
-            publishCheck?.status === "ok"
-              ? "Всё в порядке"
-              : publishCheck?.status === "warnings"
-                ? `${publishCheck.counts?.warningCount || 0} предупреждений`
-                : publishCheck
-                  ? `${publishCheck.counts?.criticalCount || publishCheck.counts?.issueCount || 0} критичных`
-                  : "Проверка…"
-          }
-          defaultOpen={publishCheck?.status === "blocked"}
-        >
-          <PublishChecklist
-            check={publishCheck}
-            loading={publishCheckLoading}
-            onRefresh={refreshPublishCheck}
-            projectId={project.id}
-          />
         </Collapsible>
 
         {/* Tabs */}
