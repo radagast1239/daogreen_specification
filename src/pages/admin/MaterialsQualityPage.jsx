@@ -6,13 +6,20 @@ import { useToast } from "../../components/Toast.jsx";
 import { downloadCSV } from "../../lib/exportDownload.js";
 import {
   analyzeMaterialsQuality,
-  QUALITY_CHECK_SECTIONS,
+  matchQualityFilter,
+  QUALITY_QUICK_FILTERS,
   qualityReportRows,
   qualitySummaryRows,
 } from "../../../shared/materialQualityCheck.js";
 
+const SEV_STYLE = {
+  critical: { color: "var(--danger)", chip: "chip chip--danger", label: "Критично" },
+  warning: { color: "var(--warn)", chip: "chip chip--amber", label: "Предупреждение" },
+  info: { color: "var(--muted)", chip: "chip chip--neutral", label: "Рекомендация" },
+};
+
 export function MaterialsQualityPanel({ materials, modules, onEditMaterial, onPatchMaterial }) {
-  const [openSection, setOpenSection] = useState(null);
+  const [qualityFilter, setQualityFilter] = useState("all");
 
   const activeModuleNames = useMemo(
     () => (modules || []).filter((m) => m.active !== false).map((m) => m.name),
@@ -24,7 +31,14 @@ export function MaterialsQualityPanel({ materials, modules, onEditMaterial, onPa
     [materials, activeModuleNames]
   );
 
-  const issueTotal = report.summary.reduce((s, x) => s + x.count, 0);
+  const filteredEntries = useMemo(() => {
+    const list = report.problematicEntries || [];
+    if (qualityFilter === "all") return list;
+    return list.filter((entry) => matchQualityFilter(entry, qualityFilter));
+  }, [report, qualityFilter]);
+
+  const issueTotal =
+    report.criticalIssueCount + report.warningIssueCount + report.infoIssueCount;
 
   const exportCsv = () => {
     const rows = qualityReportRows(report);
@@ -43,9 +57,41 @@ export function MaterialsQualityPanel({ materials, modules, onEditMaterial, onPa
 
   return (
     <>
-      <div className="toolbar" style={{ marginBottom: 16 }}>
+      <section className="card" style={{ marginBottom: 16, padding: 16 }}>
+        <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>Проверка базы материалов</h3>
+        <div className="stat-grid">
+          <div className="stat">
+            <div className="k">Всего материалов</div>
+            <div className="v num">{report.totalMaterials}</div>
+          </div>
+          <div className="stat">
+            <div className="k">Критичных проблем</div>
+            <div className="v num" style={{ color: "var(--danger)" }}>
+              {report.criticalIssueCount}
+            </div>
+          </div>
+          <div className="stat">
+            <div className="k">Предупреждений</div>
+            <div className="v num" style={{ color: "var(--warn)" }}>
+              {report.warningIssueCount}
+            </div>
+          </div>
+          <div className="stat">
+            <div className="k">Рекомендаций</div>
+            <div className="v num">{report.infoIssueCount}</div>
+          </div>
+          <div className="stat">
+            <div className="k">Готовы к клиентской выдаче</div>
+            <div className="v num" style={{ color: "var(--ok)" }}>
+              {report.readyCount}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="toolbar" style={{ marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
         <span className="muted">
-          {report.totalMaterials} активных позиций · {issueTotal} замечаний
+          {report.problematicEntries?.length || 0} материалов с замечаниями · {issueTotal} замечаний
         </span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <button type="button" className="btn" onClick={exportCsv} disabled={!issueTotal}>
@@ -57,140 +103,134 @@ export function MaterialsQualityPanel({ materials, modules, onEditMaterial, onPa
         </span>
       </div>
 
-      <div className="stat-grid" style={{ marginBottom: 24 }}>
-        {report.summary.map((s) => (
+      <div className="toolbar" style={{ marginBottom: 16, flexWrap: "wrap", gap: 6 }}>
+        {QUALITY_QUICK_FILTERS.map((f) => (
           <button
-            key={s.id}
+            key={f.id}
             type="button"
-            className="card stat"
-            style={{
-              textAlign: "left",
-              cursor: "pointer",
-              border: openSection === s.id ? "2px solid var(--brand)" : undefined,
-            }}
-            onClick={() => setOpenSection(openSection === s.id ? null : s.id)}
+            className={`btn btn-sm ${qualityFilter === f.id ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => setQualityFilter(f.id)}
           >
-            <div className="k">{s.label}</div>
-            <div
-              className="v num"
-              style={{
-                color: s.count
-                  ? QUALITY_CHECK_SECTIONS.find((x) => x.id === s.id)?.warning
-                    ? "var(--warn)"
-                    : "var(--danger)"
-                  : "var(--ok)",
-              }}
-            >
-              {s.count}
-            </div>
+            {f.label}
           </button>
         ))}
       </div>
 
-      {issueTotal === 0 ? (
+      {filteredEntries.length === 0 ? (
         <div className="card" style={{ padding: 24, textAlign: "center" }}>
-          <p style={{ margin: 0, fontSize: 18 }}>Замечаний нет — база выглядит аккуратно.</p>
+          <p style={{ margin: 0, fontSize: 18 }}>
+            {issueTotal === 0
+              ? "Замечаний нет — база выглядит аккуратно."
+              : "По выбранному фильтру проблемных материалов нет."}
+          </p>
         </div>
       ) : (
-        QUALITY_CHECK_SECTIONS.map(({ id, label }) => {
-          const items = report.sections[id];
-          if (!items.length) return null;
-          if (openSection && openSection !== id) return null;
+        filteredEntries.map((entry) => {
+          const visibleIssues =
+            qualityFilter === "all"
+              ? entry.issues
+              : entry.issues.filter((issue) => {
+                  if (qualityFilter === "critical") return issue.severity === "critical";
+                  if (qualityFilter === "duplicates") {
+                    return issue.id === "duplicate_name_unit" || issue.id === "duplicate_purchase_key";
+                  }
+                  return issue.id === qualityFilter;
+                });
+
+          if (!visibleIssues.length) return null;
+
           return (
-            <section key={id} className="card" style={{ marginBottom: 16, padding: 0, overflow: "hidden" }}>
+            <article key={entry.row.id} className="card" style={{ marginBottom: 12, padding: 16 }}>
               <header
                 style={{
-                  padding: "12px 16px",
-                  borderBottom: "1px solid var(--line)",
                   display: "flex",
-                  alignItems: "center",
+                  alignItems: "flex-start",
                   gap: 12,
+                  marginBottom: 12,
+                  flexWrap: "wrap",
                 }}
               >
-                <h3 style={{ margin: 0, fontSize: 15 }}>{label}</h3>
-                <span className="chip chip-danger">{items.length}</span>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ fontWeight: 600, fontSize: 15 }}>{entry.row.name || "—"}</div>
+                  <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                    {entry.row.unit || "—"} · {entry.row.clientSectionLabel || entry.row.clientSection || "—"} ·{" "}
+                    {entry.row.supplier || "без поставщика"}
+                  </div>
+                </div>
                 <button
                   type="button"
-                  className="btn btn-ghost btn-sm"
-                  style={{ marginLeft: "auto" }}
-                  onClick={() => setOpenSection(openSection === id ? null : id)}
+                  className="btn btn-sm btn-primary"
+                  onClick={() => onEditMaterial?.(entry.row.id)}
                 >
-                  {openSection === id ? "Свернуть" : "Развернуть"}
+                  Открыть материал
                 </button>
               </header>
-              {(openSection === null || openSection === id) && (
-                <div style={{ overflowX: "auto" }}>
-                  <table className="spec" style={{ margin: 0 }}>
-                    <thead>
-                      <tr>
-                        <th>Наименование</th>
-                        <th>Ед.</th>
-                        <th>Категория</th>
-                        <th>Раздел клиента</th>
-                        <th>Подраздел</th>
-                        <th>Модули</th>
-                        {id === "duplicateCandidates" && <th>Дублей</th>}
-                        {id === "archivedModules" && <th>Архивные</th>}
-                        <th style={{ width: 200 }}>Действия</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map((m) => (
-                        <tr key={`${id}-${m.id}`}>
-                          <td>{m.name}</td>
-                          <td>{m.unit}</td>
-                          <td>{m.category}</td>
-                          <td>{m.clientSectionLabel || m.clientSection || "—"}</td>
-                          <td>{m.clientSubsection || "—"}</td>
-                          <td className="muted" style={{ fontSize: 12, maxWidth: 200 }}>
-                            {m.modules}
-                          </td>
-                          {id === "duplicateCandidates" && <td>{m.duplicateCount}</td>}
-                          {id === "archivedModules" && (
-                            <td className="muted" style={{ fontSize: 12 }}>
-                              {m.archivedModules}
-                            </td>
-                          )}
-                          <td>
-                            <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
-                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => onEditMaterial?.(m.id)}>
-                                Исправить
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                onClick={() => onPatchMaterial?.(m.id, { active: false, status: "archived" })}
-                              >
-                                Скрыть
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                onClick={() =>
-                                  onPatchMaterial?.(m.id, {
-                                    category: "Требует разбора",
-                                    clientSection: "requires_review",
-                                  })
-                                }
-                              >
-                                На проверку
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+
+              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 10 }}>
+                {visibleIssues.map((issue) => {
+                  const sev = SEV_STYLE[issue.severity] || SEV_STYLE.warning;
+                  return (
+                    <li
+                      key={`${entry.row.id}-${issue.id}`}
+                      style={{
+                        border: "1px solid var(--line)",
+                        borderRadius: 8,
+                        padding: "10px 12px",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span className={sev.chip} style={{ fontSize: 11 }}>
+                          {sev.label}
+                        </span>
+                        <strong style={{ fontSize: 13 }}>{issue.label}</strong>
+                        {(issue.duplicateCount || 0) > 1 && (
+                          <span className="muted" style={{ fontSize: 12 }}>
+                            ({issue.duplicateCount} шт.)
+                          </span>
+                        )}
+                      </div>
+                      {issue.hint && (
+                        <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+                          {issue.hint}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {onPatchMaterial && (
+                <div className="row" style={{ gap: 4, flexWrap: "wrap", marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => onPatchMaterial(entry.row.id, { active: false, status: "archived" })}
+                  >
+                    Скрыть
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() =>
+                      onPatchMaterial(entry.row.id, {
+                        category: "Требует разбора",
+                        clientSection: "requires_review",
+                      })
+                    }
+                  >
+                    На проверку
+                  </button>
                 </div>
               )}
-            </section>
+            </article>
           );
         })
       )}
 
       <p className="muted" style={{ fontSize: 12, marginTop: 16 }}>
-        Проверка не изменяет базу. Дубли с разными поставщиками или ссылками могут быть отдельными закупочными
-        позициями — объединяйте вручную через «Дубликаты», только если это одна и та же позиция.
+        Проверка не изменяет базу автоматически. Дубли с разными поставщиками или ссылками могут быть
+        отдельными закупочными позициями — объединяйте вручную через «Дубликаты», только если это одна и
+        та же позиция.
       </p>
     </>
   );
