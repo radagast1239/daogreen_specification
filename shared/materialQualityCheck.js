@@ -20,9 +20,9 @@ export const MATERIAL_ISSUE_DEFS = {
     filter: "no_photo",
   },
   no_link: {
-    severity: "critical",
+    severity: "warning",
     label: "Нет ссылки",
-    hint: "Клиент не сможет открыть товар.",
+    hint: "Ссылка не указана. Это нормально, если товар закупается офлайн или ссылка не передаётся клиенту.",
     filter: "no_link",
   },
   no_supplier: {
@@ -137,7 +137,7 @@ export const QUALITY_QUICK_FILTERS = [
 /** Legacy-список секций для экспорта и совместимости */
 export const QUALITY_CHECK_SECTIONS = [
   { id: "noPhoto", label: "Без фото", warning: true, issueId: "no_photo" },
-  { id: "noLink", label: "Без ссылки", issueId: "no_link" },
+  { id: "noLink", label: "Без ссылки", warning: true, issueId: "no_link" },
   { id: "noClientSection", label: "Без клиентского раздела", issueId: "no_client_section" },
   { id: "noClientSubsection", label: "Без подраздела клиента", issueId: "no_client_subsection" },
   { id: "needsReviewCategory", label: "Категория «Требует разбора»", warning: true, issueId: "needs_review_category" },
@@ -303,6 +303,13 @@ function hasCriticalSeverity(issues) {
   return issues.some((i) => i.severity === "critical");
 }
 
+/** Критичные проблемы, блокирующие клиентскую выдачу (no_link — только рекомендация) */
+function issuesBlockingClientReady(issues) {
+  return issues.filter(
+    (i) => i.id !== "not_client_ready" && i.id !== "no_link" && i.severity === "critical"
+  );
+}
+
 function pushSectionRow(sections, sectionId, row) {
   if (!sections[sectionId]) sections[sectionId] = [];
   sections[sectionId].push(row);
@@ -376,9 +383,7 @@ export function analyzeMaterialsQuality(materials, { activeModuleNames = [] } = 
   let infoIssueCount = 0;
 
   for (const entry of entries) {
-    const baseCritical = hasCriticalSeverity(
-      entry.issues.filter((i) => i.id !== "not_client_ready")
-    );
+    const baseCritical = issuesBlockingClientReady(entry.issues).length > 0;
 
     if (materialShownToClientByDefault(entry.material) && baseCritical) {
       entry.issues.push(makeIssue("not_client_ready"));

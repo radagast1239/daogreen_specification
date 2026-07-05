@@ -32,10 +32,10 @@ const baseMaterial = (over = {}) => ({
 });
 
 describe("collectBaseMaterialIssues", () => {
-  it("материал без ссылки получает no_link", () => {
+  it("материал без ссылки получает no_link warning", () => {
     const issues = collectBaseMaterialIssues(baseMaterial({ link: "" }), new Set());
     expect(issues.some((i) => i.id === "no_link")).toBe(true);
-    expect(issues.find((i) => i.id === "no_link")?.severity).toBe("critical");
+    expect(issues.find((i) => i.id === "no_link")?.severity).toBe("warning");
   });
 
   it("материал без фото получает warning no_photo", () => {
@@ -128,9 +128,24 @@ describe("analyzeMaterialsQuality", () => {
     expect(materialShownToClientByDefault(baseMaterial())).toBe(true);
   });
 
-  it("материал с критичными проблемами и clientVisibleDefault получает not_client_ready", () => {
+  it("материал без ссылки НЕ получает not_client_ready только из-за ссылки", () => {
     const report = analyzeMaterialsQuality(
       [baseMaterial({ link: "", clientVisibleDefault: true })],
+      { activeModuleNames: [] }
+    );
+    const entry = report.entries[0];
+    expect(entry.issues.some((i) => i.id === "no_link")).toBe(true);
+    expect(entry.issues.some((i) => i.id === "not_client_ready")).toBe(false);
+  });
+
+  it("материал с критичными проблемами и clientVisibleDefault получает not_client_ready", () => {
+    const report = analyzeMaterialsQuality(
+      [
+        baseMaterial({
+          supplier: "",
+          clientVisibleDefault: true,
+        }),
+      ],
       { activeModuleNames: [] }
     );
     const entry = report.entries[0];
