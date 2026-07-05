@@ -57,9 +57,15 @@ export const MATERIAL_ISSUE_DEFS = {
   },
   no_responsible: {
     severity: "info",
-    label: "Нет ответственного",
-    hint: "Назначьте роль — так проще распределить закупку.",
+    label: "Не указан ответственный",
+    hint: "Выберите роль — так проще распределить закупку.",
     filter: "no_responsible",
+  },
+  general_responsible: {
+    severity: "info",
+    label: "Общее / не назначено явно",
+    hint: "Роль «Общий» — нормальный сброс. При необходимости назначьте сантехника, электрика и т.д.",
+    filter: "general_responsible",
   },
   no_client_note: {
     severity: "warning",
@@ -130,7 +136,7 @@ export const QUALITY_QUICK_FILTERS = [
   { id: "no_supplier", label: "Без поставщика" },
   { id: "no_price", label: "Без цены" },
   { id: "no_client_section", label: "Без раздела клиента" },
-  { id: "no_responsible", label: "Без ответственного" },
+  { id: "general_responsible", label: "Общее / не назначено явно" },
   { id: "duplicates", label: "Возможные дубли" },
 ];
 
@@ -148,7 +154,8 @@ export const QUALITY_CHECK_SECTIONS = [
   { id: "priceZero", label: "Цена 0", issueId: "no_price" },
   { id: "noUnit", label: "Без единицы", issueId: "no_unit" },
   { id: "noSupplier", label: "Без поставщика", issueId: "no_supplier" },
-  { id: "noResponsible", label: "Без ответственного", info: true, issueId: "no_responsible" },
+  { id: "noResponsible", label: "Не указан ответственный", info: true, issueId: "no_responsible" },
+  { id: "generalResponsible", label: "Общее / не назначено явно", info: true, issueId: "general_responsible" },
   { id: "noClientNote", label: "Без пояснения для клиента", warning: true, issueId: "no_client_note" },
   { id: "noAltLink", label: "Без альтернативной ссылки", info: true, issueId: "no_alt_link" },
   { id: "duplicateCandidates", label: "Потенциальные дубли (название + ед.)", warning: true, issueId: "duplicate_name_unit" },
@@ -190,9 +197,14 @@ function hasPhoto(m) {
   return !!(m.photoUrl || m.imageUrl);
 }
 
-function hasConcreteResponsible(m) {
-  const r = (m.responsible || "").trim().toLowerCase();
-  return !!r && r !== "general" && r !== "none";
+/** empty | general | assigned */
+export function resolveMaterialResponsibleState(m) {
+  const raw = m?.responsible;
+  if (raw == null || String(raw).trim() === "") return "empty";
+  const r = String(raw).trim().toLowerCase();
+  if (r === "none") return "empty";
+  if (r === "general") return "general";
+  return "assigned";
 }
 
 /** Сплит-системы и авто-спеки: цена может уточняться */
@@ -283,7 +295,10 @@ export function collectBaseMaterialIssues(m, activeSet) {
   if (!(m.supplier || "").trim()) issues.push(makeIssue("no_supplier"));
   if (!hasPhoto(m)) issues.push(makeIssue("no_photo"));
   if (!(m.link || "").trim()) issues.push(makeIssue("no_link"));
-  if (!hasConcreteResponsible(m)) issues.push(makeIssue("no_responsible"));
+
+  const responsibleState = resolveMaterialResponsibleState(m);
+  if (responsibleState === "empty") issues.push(makeIssue("no_responsible"));
+  else if (responsibleState === "general") issues.push(makeIssue("general_responsible"));
 
   const note = structuredClientNote(m);
   if (!(note || "").trim()) issues.push(makeIssue("no_client_note"));
@@ -390,7 +405,7 @@ export function analyzeMaterialsQuality(materials, { activeModuleNames = [] } = 
     }
 
     const sevSet = new Set(entry.issues.map((i) => i.severity));
-    if (entry.issues.length === 0) readyCount += 1;
+    if (issuesBlockingClientReady(entry.issues).length === 0) readyCount += 1;
     if (sevSet.has("critical")) criticalMaterials += 1;
     if (sevSet.has("warning")) warningMaterials += 1;
     if (sevSet.has("info")) infoMaterials += 1;
@@ -449,6 +464,12 @@ export function matchQualityFilter(entry, filterId) {
     return entry.issues.some(
       (i) => i.id === "duplicate_name_unit" || i.id === "duplicate_purchase_key"
     );
+  }
+  if (filterId === "general_responsible") {
+    return entry.issues.some((i) => i.id === "general_responsible");
+  }
+  if (filterId === "no_responsible") {
+    return entry.issues.some((i) => i.id === "no_responsible");
   }
   const def = MATERIAL_ISSUE_DEFS[filterId];
   if (def?.filter === filterId) {

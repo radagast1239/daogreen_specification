@@ -5,6 +5,7 @@ import {
   collectBaseMaterialIssues,
   isPriceOptionalMaterial,
   materialShownToClientByDefault,
+  resolveMaterialResponsibleState,
 } from "../shared/materialQualityCheck.js";
 import { COOLING_SPEC_KIND } from "../shared/itemTypes.js";
 
@@ -66,6 +67,24 @@ describe("collectBaseMaterialIssues", () => {
     const issues = collectBaseMaterialIssues(baseMaterial({ basePrice: 0 }), new Set());
     expect(issues.some((i) => i.id === "no_price")).toBe(true);
   });
+
+  it("responsible = general не считается no_responsible", () => {
+    const issues = collectBaseMaterialIssues(baseMaterial({ responsible: "general" }), new Set());
+    expect(issues.some((i) => i.id === "no_responsible")).toBe(false);
+    expect(issues.some((i) => i.id === "general_responsible")).toBe(true);
+    expect(issues.find((i) => i.id === "general_responsible")?.severity).toBe("info");
+  });
+
+  it("responsible empty/null считается no_responsible", () => {
+    for (const responsible of ["", null, "none"]) {
+      const issues = collectBaseMaterialIssues(baseMaterial({ responsible }), new Set());
+      expect(issues.some((i) => i.id === "no_responsible")).toBe(true);
+      expect(issues.some((i) => i.id === "general_responsible")).toBe(false);
+    }
+    expect(resolveMaterialResponsibleState({ responsible: "" })).toBe("empty");
+    expect(resolveMaterialResponsibleState({ responsible: "general" })).toBe("general");
+    expect(resolveMaterialResponsibleState({ responsible: "plumber" })).toBe("assigned");
+  });
 });
 
 describe("isPriceOptionalMaterial", () => {
@@ -126,6 +145,16 @@ describe("analyzeMaterialsQuality", () => {
     expect(report.readyCount).toBe(1);
     expect(report.problematicEntries.length).toBe(0);
     expect(materialShownToClientByDefault(baseMaterial())).toBe(true);
+  });
+
+  it("материал с general остаётся готовым к клиентской выдаче", () => {
+    const report = analyzeMaterialsQuality(
+      [baseMaterial({ responsible: "general" })],
+      { activeModuleNames: [] }
+    );
+    expect(report.readyCount).toBe(1);
+    expect(report.entries[0].issues.some((i) => i.id === "general_responsible")).toBe(true);
+    expect(report.entries[0].issues.some((i) => i.id === "not_client_ready")).toBe(false);
   });
 
   it("материал без ссылки НЕ получает not_client_ready только из-за ссылки", () => {
