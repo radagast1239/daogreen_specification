@@ -14,6 +14,7 @@ import {
   parseFrameDrawingSearchParams,
   hasFrameDrawingSaveTarget,
   frameDrawingBindingLabel,
+  frameDrawingSaveHint,
 } from '../../shared/frameDrawingContext.js';
 import { api } from '../lib/api.js';
 import './frameConstructor.css';
@@ -68,6 +69,7 @@ export default function FrameConstructorPage() {
   const dims = geomOk ? geom.dimensions : null;
   const showSaveTarget = hasFrameDrawingSaveTarget(drawingContext);
   const bindingLabel = frameDrawingBindingLabel(drawingContext);
+  const saveHint = frameDrawingSaveHint(drawingContext);
 
   return (
     <div className="page frame-constructor-page">
@@ -92,9 +94,16 @@ export default function FrameConstructorPage() {
             <div><strong>Проект:</strong> {drawingContext.projectName}</div>
           )}
           {bindingLabel && <div><strong>Привязка:</strong> {bindingLabel}</div>}
+          {saveHint && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{saveHint}</div>}
+          {drawingContext.mode === 'new_version' && (
+            <div style={{ fontSize: 12, marginTop: 4 }}>Будет создана новая версия схемы.</div>
+          )}
+          {drawingContext.mode === 'replace' && (
+            <div style={{ fontSize: 12, marginTop: 4 }}>Текущий PDF будет заменён.</div>
+          )}
           {drawingContext.returnTo && (
             <div style={{ marginTop: 6 }}>
-              <Link to={drawingContext.returnTo}>← Вернуться в проект</Link>
+              <Link to={drawingContext.returnTo}>← Вернуться</Link>
             </div>
           )}
         </div>

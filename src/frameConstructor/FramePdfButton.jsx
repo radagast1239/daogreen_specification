@@ -4,8 +4,22 @@ import { generateCutList } from './frameCutList.js';
 import { canExportFramePdf, exportFrameToPdf } from './framePdfExport.js';
 import { exportFrameToPdfBlob } from './framePdfExport.js';
 import { buildFramePdfFilename } from './framePdfData.js';
-import { buildFrameDrawingSavePayload, hasFrameDrawingSaveTarget } from '../../shared/frameDrawingContext.js';
+import {
+  buildFrameDrawingSavePayload,
+  hasFrameDrawingSaveTarget,
+  normalizeFrameSourceType,
+  FRAME_SOURCE_MODULE_RACK,
+  FRAME_SOURCE_PRESET,
+} from '../../shared/frameDrawingContext.js';
 import { api, photoSrc } from '../lib/api.js';
+
+function saveButtonLabel(ctx) {
+  const src = normalizeFrameSourceType(ctx?.sourceType);
+  if (src === FRAME_SOURCE_PRESET) return 'Сохранить PDF к пресету';
+  if (src === FRAME_SOURCE_MODULE_RACK && !ctx?.projectId) return 'Сохранить PDF к модулю';
+  if (ctx?.projectId) return 'Сохранить PDF в проект';
+  return 'Сохранить PDF';
+}
 
 export default function FramePdfButton({
   params,
@@ -20,7 +34,9 @@ export default function FramePdfButton({
   const [savedDrawing, setSavedDrawing] = useState(null);
 
   const disabled = !canExportFramePdf(geom) || busy || saveBusy;
-  const canSaveToProject = hasFrameDrawingSaveTarget(drawingContext);
+  const canSave = hasFrameDrawingSaveTarget(drawingContext);
+  const isReplaceMode = drawingContext?.mode === 'replace' && drawingContext?.drawingId;
+  const isNewVersionMode = drawingContext?.mode === 'new_version';
 
   const buildPdfPayload = useCallback(async () => {
     const cutList = generateCutList(params);
@@ -52,7 +68,7 @@ export default function FramePdfButton({
     }
   }, [geom, buildPdfPayload]);
 
-  const handleSaveToProject = useCallback(async (replace = false) => {
+  const handleSave = useCallback(async (replace = false) => {
     if (!canExportFramePdf(geom) || !drawingContext) return;
     setSaveBusy(true);
     setError('');
@@ -60,8 +76,8 @@ export default function FramePdfButton({
       const payload = await buildPdfPayload();
       const { blob, filename } = await exportFrameToPdfBlob(payload);
       const savePayload = buildFrameDrawingSavePayload(params, drawingContext, {
-        replace,
-        drawingId: drawingContext.drawingId,
+        replace: replace && !isNewVersionMode,
+        drawingId: isNewVersionMode ? null : (replace ? drawingContext.drawingId : drawingContext.drawingId || null),
       });
       savePayload.pdfFilename = filename || buildFramePdfFilename(params);
       const result = await api.uploadFrameDrawing(
@@ -69,55 +85,54 @@ export default function FramePdfButton({
           projectId: savePayload.projectId,
           moduleId: savePayload.moduleId,
           stellageId: savePayload.stellageId,
+          moduleRackKey: savePayload.moduleRackKey,
           presetId: savePayload.presetId,
           sourceType: savePayload.sourceType,
           title: savePayload.title,
           rackType: savePayload.rackType,
           frameConfigJson: savePayload.frameConfigJson,
           isClientVisible: savePayload.isClientVisible,
-          drawingId: savePayload.drawingId,
+          drawingId: replace ? drawingContext.drawingId : null,
           pdfFilename: savePayload.pdfFilename,
         },
         blob,
         savePayload.pdfFilename,
-        replace,
+        replace && !isNewVersionMode,
       );
       setSavedDrawing(result);
       onSaved?.(result);
-    } catch (err) {
-      if (err.status === 409 && err.data?.existing) {
-        const ok = window.confirm(
-          'Для этого стеллажа уже есть чертёж. Заменить существующий PDF?',
-        );
-        if (ok) {
-          setSaveBusy(false);
-          return handleSaveToProject(true);
-        }
-        setError('Сохранение отменено — чертёж уже существует.');
-      } else {
-        setError(err?.message || 'Не удалось сохранить PDF в проект.');
+      if (result.isNewVersion) {
+        setError('');
       }
+    } catch (err) {
+      setError(err?.message || 'Не удалось сохранить PDF.');
     } finally {
       setSaveBusy(false);
     }
-  }, [geom, drawingContext, params, buildPdfPayload, onSaved]);
+  }, [geom, drawingContext, params, buildPdfPayload, onSaved, isNewVersionMode]);
 
   return (
     <div className="fc-export">
-      {canSaveToProject && (
+      {canSave && (
         <button
           type="button"
           className="btn btn-primary"
-          onClick={() => handleSaveToProject(false)}
+          onClick={() => handleSave(isReplaceMode)}
           disabled={disabled}
-          title="Сохранить PDF в документы проекта"
+          title={isReplaceMode ? 'Заменить существующий PDF' : 'Сохранить PDF'}
         >
-          {saveBusy ? 'Сохранение…' : 'Сохранить PDF в проект'}
+          {saveBusy
+            ? 'Сохранение…'
+            : isReplaceMode
+              ? 'Заменить PDF'
+              : isNewVersionMode
+                ? 'Сохранить новую версию'
+                : saveButtonLabel(drawingContext)}
         </button>
       )}
       <button
         type="button"
-        className={`btn ${canSaveToProject ? 'btn-outline' : 'btn-primary'}`}
+        className={`btn ${canSave ? 'btn-outline' : 'btn-primary'}`}
         onClick={handleExport}
         disabled={disabled}
         title={disabled && !busy ? 'Экспорт недоступен при ошибках геометрии' : 'Скачать PDF сборочного чертежа'}
@@ -126,10 +141,10 @@ export default function FramePdfButton({
       </button>
       {savedDrawing && (
         <span className="fc-export__ok">
-          Чертёж сохранён.{' '}
+          {savedDrawing.isNewVersion ? 'Новая версия сохранена. ' : 'Чертёж сохранён. '}
           <a href={photoSrc(savedDrawing.pdfUrl)} target="_blank" rel="noreferrer">Открыть PDF</a>
           {drawingContext?.returnTo && (
-            <> · <Link to={drawingContext.returnTo}>Вернуться в проект</Link></>
+            <> · <Link to={drawingContext.returnTo}>Вернуться</Link></>
           )}
         </span>
       )}

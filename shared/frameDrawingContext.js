@@ -1,10 +1,21 @@
 /** Контекст привязки чертежа каркаса (query params / API metadata) */
 
+import {
+  normalizeFrameSourceType,
+  FRAME_SOURCE_MODULE_RACK,
+  FRAME_SOURCE_PRESET,
+  FRAME_SOURCE_PROJECT,
+  FRAME_SOURCE_PROJECT_STELLAGE,
+  FRAME_SOURCE_STANDALONE,
+} from './frameDrawingTargets.js';
+import { buildModuleRackKey } from './moduleRackIds.js';
+
 export const FRAME_DRAWING_SOURCE_TYPES = [
-  'project_rack',
-  'module_rack',
-  'preset',
-  'standalone',
+  FRAME_SOURCE_PROJECT,
+  FRAME_SOURCE_PROJECT_STELLAGE,
+  FRAME_SOURCE_MODULE_RACK,
+  FRAME_SOURCE_PRESET,
+  FRAME_SOURCE_STANDALONE,
 ];
 
 export function parseFrameDrawingSearchParams(searchParams) {
@@ -15,31 +26,44 @@ export function parseFrameDrawingSearchParams(searchParams) {
   const drawingId = sp.get('drawingId') || sp.get('drawing_id') || '';
   const projectId = sp.get('projectId') || sp.get('project_id') || '';
   const moduleId = sp.get('moduleId') || sp.get('module_id') || '';
-  const rackId = sp.get('rackId') || sp.get('rack_id') || sp.get('stellageId') || '';
+  const rackId = sp.get('rackId') || sp.get('rack_id')
+    || sp.get('stellageId') || sp.get('stellage_id') || '';
+  const moduleRackKey = sp.get('moduleRackKey') || sp.get('module_rack_key') || '';
   const presetId = sp.get('presetId') || sp.get('preset_id') || '';
   const source = sp.get('source') || sp.get('sourceType') || '';
   const returnTo = sp.get('returnTo') || sp.get('return_to') || '';
   const rackLabel = sp.get('rackLabel') || sp.get('rack_label') || '';
   const projectName = sp.get('projectName') || sp.get('project_name') || '';
+  const mode = sp.get('mode') || '';
 
-  let sourceType = source;
-  if (!sourceType) {
-    if (projectId && rackId) sourceType = 'project_rack';
-    else if (projectId && moduleId) sourceType = 'module_rack';
-    else if (presetId) sourceType = 'preset';
-    else sourceType = 'standalone';
+  let sourceType = normalizeFrameSourceType(source);
+  if (!source) {
+    if (projectId && rackId) sourceType = FRAME_SOURCE_PROJECT_STELLAGE;
+    else if (projectId && moduleId && (moduleRackKey || rackId)) sourceType = FRAME_SOURCE_MODULE_RACK;
+    else if (projectId && !rackId && !moduleId) sourceType = FRAME_SOURCE_PROJECT;
+    else if (presetId) sourceType = FRAME_SOURCE_PRESET;
+    else if (moduleId) sourceType = FRAME_SOURCE_MODULE_RACK;
+    else sourceType = FRAME_SOURCE_STANDALONE;
   }
+
+  const resolvedModuleRackKey = moduleRackKey
+    || (moduleId && rackId
+      ? buildModuleRackKey({ moduleId, rackId })
+      : '');
 
   return {
     drawingId,
     projectId,
     moduleId,
     rackId,
+    stellageId: rackId,
+    moduleRackKey: resolvedModuleRackKey,
     presetId,
     sourceType,
     returnTo,
     rackLabel,
     projectName,
+    mode,
   };
 }
 
@@ -48,7 +72,7 @@ export function hasFrameDrawingSaveTarget(ctx) {
   return Boolean(
     ctx.projectId
     || ctx.presetId
-    || (ctx.moduleId && ctx.sourceType === 'module_rack')
+    || (ctx.moduleId && (ctx.sourceType === FRAME_SOURCE_MODULE_RACK || ctx.moduleRackKey))
     || ctx.drawingId,
   );
 }
@@ -58,12 +82,15 @@ export function buildFrameDrawingLink(ctx) {
   if (ctx.projectId) params.set('projectId', ctx.projectId);
   if (ctx.moduleId) params.set('moduleId', ctx.moduleId);
   if (ctx.rackId) params.set('rackId', ctx.rackId);
+  if (ctx.rackId || ctx.stellageId) params.set('stellageId', ctx.rackId || ctx.stellageId);
+  if (ctx.moduleRackKey) params.set('moduleRackKey', ctx.moduleRackKey);
   if (ctx.presetId) params.set('presetId', ctx.presetId);
-  if (ctx.sourceType) params.set('source', ctx.sourceType);
+  if (ctx.sourceType) params.set('source', normalizeFrameSourceType(ctx.sourceType));
   if (ctx.returnTo) params.set('returnTo', ctx.returnTo);
   if (ctx.rackLabel) params.set('rackLabel', ctx.rackLabel);
   if (ctx.projectName) params.set('projectName', ctx.projectName);
   if (ctx.drawingId) params.set('drawingId', ctx.drawingId);
+  if (ctx.mode) params.set('mode', ctx.mode);
   const qs = params.toString();
   return `/planner/frame${qs ? `?${qs}` : ''}`;
 }
@@ -81,16 +108,23 @@ export function buildFrameDrawingTitle(config, ctx = {}) {
 
 export function frameDrawingBindingLabel(ctx) {
   if (!ctx) return '';
-  switch (ctx.sourceType) {
-    case 'project_rack':
+  switch (normalizeFrameSourceType(ctx.sourceType)) {
+    case FRAME_SOURCE_PROJECT:
+      return ctx.projectName ? `Проект: ${ctx.projectName}` : 'Проект';
+    case FRAME_SOURCE_PROJECT_STELLAGE:
       return ctx.rackLabel
         ? `Стеллаж проекта: ${ctx.rackLabel}`
         : 'Стеллаж проекта';
-    case 'module_rack':
+    case FRAME_SOURCE_MODULE_RACK:
+      if (!ctx.projectId) {
+        return ctx.rackLabel
+          ? `Модуль / стеллаж (без проекта): ${ctx.rackLabel}`
+          : 'Модуль / стеллаж (без проекта)';
+      }
       return ctx.rackLabel
         ? `Модуль / стеллаж: ${ctx.rackLabel}`
         : 'Стеллаж модуля';
-    case 'preset':
+    case FRAME_SOURCE_PRESET:
       return ctx.rackLabel
         ? `Пресет: ${ctx.rackLabel}`
         : 'Пресет стеллажа';
@@ -99,13 +133,33 @@ export function frameDrawingBindingLabel(ctx) {
   }
 }
 
+export function frameDrawingSaveHint(ctx) {
+  if (!ctx) return '';
+  const src = normalizeFrameSourceType(ctx.sourceType);
+  if (src === FRAME_SOURCE_PRESET) return 'Схема сохранится к пресету.';
+  if (src === FRAME_SOURCE_MODULE_RACK && !ctx.projectId) {
+    return 'Схема сохранится к модулю, но не попадёт в документы клиента без проекта.';
+  }
+  if (ctx.projectId) return 'Схема будет сохранена в документы проекта.';
+  return '';
+}
+
 export function buildFrameDrawingSavePayload(config, ctx, overrides = {}) {
+  const moduleRackKey = ctx.moduleRackKey
+    || (ctx.moduleId && normalizeFrameSourceType(ctx.sourceType) === FRAME_SOURCE_MODULE_RACK
+      ? buildModuleRackKey({
+        moduleId: ctx.moduleId,
+        rackId: ctx.rackId || ctx.stellageId,
+      })
+      : null);
+
   return {
     projectId: ctx.projectId || null,
     moduleId: ctx.moduleId || null,
-    stellageId: ctx.rackId || null,
+    stellageId: ctx.rackId || ctx.stellageId || null,
+    moduleRackKey: moduleRackKey || null,
     presetId: ctx.presetId || null,
-    sourceType: ctx.sourceType || 'standalone',
+    sourceType: normalizeFrameSourceType(ctx.sourceType || FRAME_SOURCE_STANDALONE),
     title: overrides.title || buildFrameDrawingTitle(config, ctx),
     rackType: config?.rackType || '',
     frameConfigJson: config,
@@ -114,3 +168,20 @@ export function buildFrameDrawingSavePayload(config, ctx, overrides = {}) {
     drawingId: ctx.drawingId || overrides.drawingId || null,
   };
 }
+
+export {
+  buildModuleRackKey,
+  moduleCatalogRackId,
+  moduleMetaFrameRackId,
+  ensureModuleMetaFrameRackIds,
+  MODULE_CATALOG_RACK_SLOT,
+  moduleRackKeyUsesIndexFallback,
+} from './moduleRackIds.js';
+export {
+  normalizeFrameSourceType,
+  FRAME_SOURCE_PROJECT,
+  FRAME_SOURCE_PROJECT_STELLAGE,
+  FRAME_SOURCE_MODULE_RACK,
+  FRAME_SOURCE_PRESET,
+  FRAME_SOURCE_STANDALONE,
+} from './frameDrawingTargets.js';

@@ -33,18 +33,23 @@ function insertDrawingWithFile({
   fileId,
   visible = true,
   projectId = 'proj1',
+  stellageId = 'st_1',
+  title = 'Rack',
+  sourceType = 'project_stellage',
 }) {
   const now = new Date().toISOString();
   db.prepare(`
     INSERT INTO frame_drawings (
-      id, project_id, stellage_id, source_type, title, rack_type,
+      id, project_id, stellage_id, module_rack_key, source_type, title, rack_type,
       frame_config_json, pdf_url, pdf_filename, file_id,
       is_client_visible, version, created_at, updated_at
-    ) VALUES (?, ?, ?, 'project_rack', 'Rack', 'nft', '{}', ?, ?, ?, ?, 1, ?, ?)
+    ) VALUES (?, ?, ?, NULL, ?, ?, 'nft', '{}', ?, ?, ?, ?, 1, ?, ?)
   `).run(
     drawingId,
     projectId,
-    'st_1',
+    stellageId,
+    sourceType,
+    title,
     `/uploads/frame-drawings/${projectId}/${drawingId}.pdf`,
     `${drawingId}.pdf`,
     fileId,
@@ -71,13 +76,16 @@ describe('getClientProjectDocuments', () => {
       pdfUrl: '/uploads/frame-drawings/proj1/d1.pdf',
       title: 'NFT rack',
     });
-    insertDrawingWithFile({ drawingId: 'd1', fileId, visible: true });
+    insertDrawingWithFile({ drawingId: 'd1', fileId, visible: true, title: 'NFT rack' });
 
     const docs = getClientProjectDocuments('proj1');
     expect(docs).toHaveLength(1);
     expect(docs[0].type).toBe('frame_drawing');
     expect(docs[0].url).toMatch(/^\/uploads\//);
     expect(docs[0].url).not.toContain('/api/frame-drawings');
+    expect(docs[0].drawingTitle).toBe('NFT rack');
+    expect(docs[0].stellageId).toBe('st_1');
+    expect(docs[0].drawingSourceType).toBe('project_stellage');
   });
 
   it('excludes hidden frame_drawing even if stale files row exists', () => {

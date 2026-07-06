@@ -27,17 +27,18 @@ function insertDrawing(overrides = {}) {
   const now = new Date().toISOString();
   db.prepare(`
     INSERT INTO frame_drawings (
-      id, project_id, module_id, stellage_id, preset_id, source_type,
+      id, project_id, module_id, stellage_id, module_rack_key, preset_id, source_type,
       title, rack_type, frame_config_json, pdf_url, pdf_filename, file_id,
       is_client_visible, version, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     projectId,
     overrides.module_id ?? null,
     overrides.stellage_id ?? null,
+    overrides.module_rack_key ?? null,
     overrides.preset_id ?? null,
-    overrides.source_type ?? 'project_rack',
+    overrides.source_type ?? 'project_stellage',
     overrides.title ?? 'Test drawing',
     overrides.rack_type ?? 'nft',
     overrides.frame_config_json ?? '{"lengthMm":3000}',
@@ -85,12 +86,36 @@ describe('frame_drawings db', () => {
     expect(rows.map((r) => r.id)).toEqual(['a', 'b']);
   });
 
-  it('finds duplicate project_id + stellage_id', () => {
-    insertDrawing({ id: 'first', stellage_id: 'st_dup' });
-    const dup = db
+  it('allows multiple versions for same project_id + stellage_id', () => {
+    insertDrawing({ id: 'first', stellage_id: 'st_dup', version: 1 });
+    insertDrawing({ id: 'second', stellage_id: 'st_dup', version: 2 });
+    const rows = db
       .prepare('SELECT id FROM frame_drawings WHERE project_id = ? AND stellage_id = ?')
-      .get('proj1', 'st_dup');
-    expect(dup.id).toBe('first');
+      .all('proj1', 'st_dup');
+    expect(rows).toHaveLength(2);
+  });
+
+  it('filters by module_id + module_rack_key after stable catalog slot', () => {
+    insertDrawing({
+      id: 'mr1',
+      project_id: null,
+      module_id: 'mod_nft',
+      module_rack_key: 'mod_nft:catalog',
+      source_type: 'module_rack',
+    });
+    insertDrawing({
+      id: 'mr2',
+      project_id: null,
+      module_id: 'mod_nft',
+      module_rack_key: 'mod_nft:other',
+      source_type: 'module_rack',
+    });
+
+    const rows = db.prepare(
+      'SELECT * FROM frame_drawings WHERE module_id = ? AND module_rack_key = ?',
+    ).all('mod_nft', 'mod_nft:catalog');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe('mr1');
   });
 
   it('creates files row for client-visible project drawing', () => {

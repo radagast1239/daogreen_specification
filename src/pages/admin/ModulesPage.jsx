@@ -32,7 +32,8 @@ import ClientBrandTab from "./ClientBrandTab.jsx";
 import PublishRulesTab from "./PublishRulesTab.jsx";
 import StellageGroupsEditor from "../../components/StellageGroupsEditor.jsx";
 import StellagePhotoField, { StellagePhotoThumb } from "../../components/StellagePhotoField.jsx";
-import FrameDrawingLinkButton from "../../components/FrameDrawingLinkButton.jsx";
+import FrameDrawingTargetRow from "../../components/FrameDrawingTargetRow.jsx";
+import { buildModuleRackKey, moduleMetaFrameRackId } from "../../../shared/frameDrawingContext.js";
 import { referenceToSettings, buildReferenceData } from "../../lib/referenceData.js";
 import {
   parseStellageModuleCatalogs,
@@ -833,11 +834,8 @@ export default function ModulesPage() {
                       {p.items.filter((i) => i.included).length} поз.
                       {formatStellageParamsSummary(p.params) ? ` · ${formatStellageParamsSummary(p.params)}` : ""}
                     </span>
-                    <div className="row" style={{ marginTop: 10, gap: 6 }}>
-                      <button type="button" className="btn btn-sm" onClick={() => openStellagePreset(p)}>
-                        Редактировать
-                      </button>
-                      <FrameDrawingLinkButton
+                    <div style={{ marginTop: 10 }}>
+                      <FrameDrawingTargetRow
                         context={{
                           presetId: p.id,
                           moduleId: p.moduleId,
@@ -845,9 +843,13 @@ export default function ModulesPage() {
                           rackLabel: p.name,
                           returnTo: "/modules?tab=stellage",
                         }}
-                        label="Создать чертёж пресета"
-                        className="btn btn-sm btn-outline"
+                        fetchParams={{ preset_id: p.id }}
                       />
+                    </div>
+                    <div className="row" style={{ marginTop: 10, gap: 6 }}>
+                      <button type="button" className="btn btn-sm" onClick={() => openStellagePreset(p)}>
+                        Редактировать
+                      </button>
                       <button type="button" className="btn btn-sm" onClick={() => duplicateStellagePreset(p)}>
                         Копия
                       </button>
@@ -915,6 +917,29 @@ export default function ModulesPage() {
                         >
                           Копия
                         </button>
+                        <div style={{ marginTop: 8, textAlign: "left" }}>
+                          <FrameDrawingTargetRow
+                            compact
+                            context={{
+                              moduleId: mod.id,
+                              rackId: moduleMetaFrameRackId(stellageModuleMeta, mod.id),
+                              sourceType: "module_rack",
+                              moduleRackKey: buildModuleRackKey({
+                                moduleId: mod.id,
+                                rackId: moduleMetaFrameRackId(stellageModuleMeta, mod.id),
+                              }),
+                              rackLabel: mod.name,
+                              returnTo: "/modules?tab=stellage_composition",
+                            }}
+                            fetchParams={{
+                              module_id: mod.id,
+                              module_rack_key: buildModuleRackKey({
+                                moduleId: mod.id,
+                                rackId: moduleMetaFrameRackId(stellageModuleMeta, mod.id),
+                              }),
+                            }}
+                          />
+                        </div>
                       </td>
                     </tr>
                   ))}

@@ -957,7 +957,20 @@ function loadBrandingSettings() {
 /** Client-visible project files: excludes hidden frame_drawings (is_client_visible=0). */
 export function getClientProjectDocuments(projectId) {
   return db.prepare(`
-    SELECT f.id, f.type, f.filename, f.url, f.uploaded_at as uploadedAt
+    SELECT
+      f.id,
+      f.type,
+      f.filename,
+      f.url,
+      f.uploaded_at as uploadedAt,
+      fd.title as drawingTitle,
+      fd.source_type as drawingSourceType,
+      fd.stellage_id as stellageId,
+      fd.module_id as moduleId,
+      fd.module_rack_key as moduleRackKey,
+      fd.preset_id as presetId,
+      fd.version as drawingVersion,
+      fd.rack_type as rackType
     FROM files f
     LEFT JOIN frame_drawings fd ON fd.file_id = f.id
     WHERE f.project_id = ?

@@ -28,6 +28,7 @@ import {
 import { mergedPurchaseRows } from "../../store/helpers.js";
 import { STELLAGE_GROUPS } from "../../../shared/stellageComposition.js";
 import { clientPurchaseDashboard } from "../../../shared/clientPurchaseStats.js";
+import { groupClientFrameDocuments } from "../../../shared/frameDrawingTargets.js";
 import { api } from "../../lib/api.js";
 
 function clientPageStyle(branding) {
@@ -511,8 +512,8 @@ function ClientBrandFooter({ branding }) {
 }
 
 function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
-  const frameDrawings = (documents || []).filter((d) => d.type === 'frame_drawing');
-  const otherDocs = (documents || []).filter((d) => d.type !== 'frame_drawing');
+  const frameGroups = groupClientFrameDocuments(documents || []);
+  const otherDocs = (documents || []).filter((d) => d.type !== "frame_drawing");
   return (
     <div className="card" style={{ padding: 22, marginTop: 16 }}>
       <h3>Документы</h3>
@@ -539,19 +540,31 @@ function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
           </button>
         </div>
       </div>
-      {frameDrawings.length > 0 && (
+      {frameGroups.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>Чертежи и схемы</div>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {frameDrawings.map((d) => (
-              <li key={d.id} style={{ marginBottom: 8 }}>
-                <a href={photoSrc(d.url)} target="_blank" rel="noreferrer">
-                  {d.filename}
-                </a>
-                <span className="muted" style={{ fontSize: 12 }}> · Чертёж каркаса</span>
-              </li>
-            ))}
-          </ul>
+          {frameGroups.map((group) => (
+            <div key={group.label} style={{ marginBottom: 12 }}>
+              <div className="muted" style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{group.label}</div>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {group.items.map((d) => (
+                  <li key={d.id} style={{ marginBottom: 8 }}>
+                    <a href={photoSrc(d.url)} target="_blank" rel="noreferrer">
+                      {d.drawingTitle || d.filename}
+                    </a>
+                    {d.drawingVersion ? (
+                      <span className="muted" style={{ fontSize: 12 }}> · v{d.drawingVersion}</span>
+                    ) : null}
+                    {d.uploadedAt ? (
+                      <span className="muted" style={{ fontSize: 12 }}>
+                        {" "}· {new Date(d.uploadedAt).toLocaleDateString("ru-RU")}
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
       )}
       {otherDocs.length > 0 && (

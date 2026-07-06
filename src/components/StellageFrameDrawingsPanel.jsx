@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { api, photoSrc } from '../lib/api.js';
-import FrameDrawingLinkButton from './FrameDrawingLinkButton.jsx';
+import { api } from '../lib/api.js';
+import FrameDrawingActions from './FrameDrawingActions.jsx';
+import { drawingsForProjectStellage } from '../../shared/frameDrawingTargets.js';
+import { FRAME_SOURCE_PROJECT_STELLAGE } from '../../shared/frameDrawingContext.js';
 
 export default function StellageFrameDrawingsPanel({ project, returnPath }) {
   const stellages = project?.stellageConfigs || [];
@@ -44,63 +46,43 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
 
   if (!stellages.length) return null;
 
-  const drawingForRack = (rackId) =>
-    drawings.find((d) => d.stellageId === rackId);
-
   return (
     <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-      <h3 style={{ marginTop: 0, fontSize: 15 }}>Чертежи каркасов</h3>
+      <h3 style={{ marginTop: 0, fontSize: 15 }}>Схемы каркасов</h3>
       <p className="muted" style={{ fontSize: 12, margin: '0 0 10px' }}>
-        PDF-чертежи из конструктора каркасов. Не влияют на спецификацию материалов.
+        PDF-схемы из конструктора каркасов. Привязаны к конкретным стеллажам проекта. Не влияют на спецификацию материалов.
       </p>
       {loading ? (
         <p className="muted" style={{ fontSize: 13 }}>Загрузка…</p>
       ) : (
         <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
           {stellages.map((st) => {
-            const drawing = drawingForRack(st.id);
+            const rackDrawings = drawingsForProjectStellage(drawings, st.id);
             const presetDrawing = st.presetId ? presetDrawings[st.presetId] : null;
             const ctx = {
               projectId: project.id,
               moduleId: st.moduleId,
               rackId: st.id,
               presetId: st.presetId || '',
-              sourceType: 'project_rack',
+              sourceType: FRAME_SOURCE_PROJECT_STELLAGE,
               rackLabel: st.name,
               projectName: project.name,
               returnTo: returnPath || `/project/${project.id}`,
-              drawingId: drawing?.id || '',
             };
             return (
-              <li key={st.id} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid var(--border)' }}>
-                <div className="row between wrap" style={{ gap: 8 }}>
-                  <div>
-                    <strong>{st.name}</strong>
-                    <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>{st.moduleName}</span>
-                  </div>
-                  <span className="row wrap" style={{ gap: 6 }}>
-                    {drawing ? (
-                      <>
-                        <span className="chip chip--ok" style={{ fontSize: 11 }}>PDF прикреплён</span>
-                        <a className="btn btn-sm" href={photoSrc(drawing.pdfUrl)} target="_blank" rel="noreferrer">Открыть</a>
-                        <FrameDrawingLinkButton context={ctx} label="Заменить" />
-                      </>
-                    ) : presetDrawing ? (
-                      <>
-                        <span className="chip" style={{ fontSize: 11 }}>Есть чертёж пресета</span>
-                        <a className="btn btn-sm" href={photoSrc(presetDrawing.pdfUrl)} target="_blank" rel="noreferrer">Открыть чертёж пресета</a>
-                        <FrameDrawingLinkButton context={ctx} label="Создать чертёж каркаса" />
-                      </>
-                    ) : (
-                      <FrameDrawingLinkButton context={ctx} label="Создать чертёж каркаса" />
-                    )}
-                  </span>
+              <li key={st.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
+                <div style={{ marginBottom: 6 }}>
+                  <strong>{st.name}</strong>
+                  <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>{st.moduleName}</span>
+                  {st.count > 1 && (
+                    <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>×{st.count}</span>
+                  )}
                 </div>
-                {drawing && (
-                  <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                    {drawing.title} · v{drawing.version} · {new Date(drawing.updatedAt || drawing.createdAt).toLocaleDateString('ru-RU')}
-                  </div>
-                )}
+                <FrameDrawingActions
+                  context={ctx}
+                  drawings={rackDrawings}
+                  presetDrawing={presetDrawing}
+                />
               </li>
             );
           })}

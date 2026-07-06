@@ -31,6 +31,7 @@ function rowToDrawing(row) {
     projectId: row.project_id || null,
     moduleId: row.module_id || null,
     stellageId: row.stellage_id || null,
+    moduleRackKey: row.module_rack_key || null,
     presetId: row.preset_id || null,
     sourceType: row.source_type,
     title: row.title,
@@ -44,6 +45,55 @@ function rowToDrawing(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function computeNextVersion({
+  projectId,
+  stellageId,
+  moduleId,
+  moduleRackKey,
+  presetId,
+  sourceType,
+}) {
+  let sql = "SELECT MAX(version) as v FROM frame_drawings WHERE ";
+  const params = [];
+  if (projectId && stellageId) {
+    sql += "project_id = ? AND stellage_id = ?";
+    params.push(projectId, stellageId);
+  } else if (moduleId && moduleRackKey) {
+    sql += "module_id = ? AND module_rack_key = ?";
+    params.push(moduleId, moduleRackKey);
+  } else if (presetId) {
+    sql += "preset_id = ?";
+    params.push(presetId);
+  } else if (projectId) {
+    sql += "project_id = ? AND COALESCE(stellage_id, '') = '' AND COALESCE(module_rack_key, '') = ''";
+    params.push(projectId);
+  } else {
+    return 1;
+  }
+  const row = db.prepare(sql).get(...params);
+  return (row?.v || 0) + 1;
+}
+
+function countExistingDrawings(filters) {
+  const { projectId, stellageId, moduleId, moduleRackKey, presetId } = filters;
+  if (projectId && stellageId) {
+    return db.prepare(
+      "SELECT COUNT(*) as c FROM frame_drawings WHERE project_id = ? AND stellage_id = ?",
+    ).get(projectId, stellageId).c;
+  }
+  if (moduleId && moduleRackKey) {
+    return db.prepare(
+      "SELECT COUNT(*) as c FROM frame_drawings WHERE module_id = ? AND module_rack_key = ?",
+    ).get(moduleId, moduleRackKey).c;
+  }
+  if (presetId) {
+    return db.prepare(
+      "SELECT COUNT(*) as c FROM frame_drawings WHERE preset_id = ?",
+    ).get(presetId).c;
+  }
+  return 0;
 }
 
 function resolvePdfSubdir(body) {
@@ -144,7 +194,14 @@ function safeDeleteFrameDrawingPdf(pdfUrl) {
 }
 
 router.get("/", (req, res) => {
-  const { project_id, module_id, stellage_id, preset_id, source_type } = req.query;
+  const {
+    project_id,
+    module_id,
+    stellage_id,
+    module_rack_key,
+    preset_id,
+    source_type,
+  } = req.query;
   let sql = "SELECT * FROM frame_drawings WHERE 1=1";
   const params = [];
   if (project_id) {
@@ -158,6 +215,10 @@ router.get("/", (req, res) => {
   if (stellage_id) {
     sql += " AND stellage_id = ?";
     params.push(stellage_id);
+  }
+  if (module_rack_key) {
+    sql += " AND module_rack_key = ?";
+    params.push(module_rack_key);
   }
   if (preset_id) {
     sql += " AND preset_id = ?";
@@ -189,43 +250,14 @@ router.get("/:id/download", (req, res) => {
 
 router.post("/", pdfUpload.single("file"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "PDF file required" });
-
-  const body = req.body || {};
-  const projectId = body.project_id || body.projectId || null;
-  const moduleId = body.module_id || body.moduleId || null;
-  const stellageId = body.stellage_id || body.stellageId || body.rack_id || body.rackId || null;
-  const presetId = body.preset_id || body.presetId || null;
-  const sourceType = body.source_type || body.sourceType || "standalone";
-  const title = (body.title || req.file.originalname || "Чертёж каркаса").trim();
-  const rackType = body.rack_type || body.rackType || "";
-  const frameConfig = parseFrameConfig(body.frame_config_json || body.frameConfigJson);
-  const isClientVisible = parseBool(body.is_client_visible ?? body.isClientVisible, true);
-  const replace = parseBool(body.replace, false);
-  const updateId = body.drawing_id || body.drawingId || null;
-
-  if (projectId && stellageId && !replace && !updateId) {
-    const existing = db
-      .prepare("SELECT id FROM frame_drawings WHERE project_id = ? AND stellage_id = ? ORDER BY updated_at DESC LIMIT 1")
-      .get(projectId, stellageId);
-    if (existing) {
-      if (!replace) {
-        return res.status(409).json({
-          error: "drawing_exists",
-          message: "Для этого стеллажа уже есть чертёж",
-          existing: rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(existing.id)),
-        });
-      }
-      return saveDrawing(req, res, { ...body, drawing_id: existing.id, replace: true });
-    }
-  }
-
-  return saveDrawing(req, res, body);
+  return saveDrawing(req, res, req.body || {});
 });
 
 function saveDrawing(req, res, body) {
   const projectId = body.project_id || body.projectId || null;
   const moduleId = body.module_id || body.moduleId || null;
   const stellageId = body.stellage_id || body.stellageId || body.rack_id || body.rackId || null;
+  const moduleRackKey = body.module_rack_key || body.moduleRackKey || null;
   const presetId = body.preset_id || body.presetId || null;
   const sourceType = body.source_type || body.sourceType || "standalone";
   const title = (body.title || req.file.originalname || "Чертёж каркаса").trim();
@@ -233,62 +265,92 @@ function saveDrawing(req, res, body) {
   const frameConfig = parseFrameConfig(body.frame_config_json || body.frameConfigJson);
   const isClientVisible = parseBool(body.is_client_visible ?? body.isClientVisible, true);
   const updateId = body.drawing_id || body.drawingId || null;
+  const replace = parseBool(body.replace, false) && updateId;
 
-  const id = updateId || nanoid(12);
-  const { urlPath } = writePdfBuffer(req.file.buffer, { projectId, presetId }, id);
-  const pdfFilename = body.pdf_filename || body.pdfFilename || req.file.originalname || `${id}.pdf`;
+  const existingCount = countExistingDrawings({
+    projectId,
+    stellageId,
+    moduleId,
+    moduleRackKey,
+    presetId,
+  });
+
+  const pdfFilename = body.pdf_filename || body.pdfFilename || req.file.originalname || "frame-drawing.pdf";
   const frameConfigJson = JSON.stringify(frameConfig);
   const now = new Date().toISOString();
 
-  const prevRow = updateId
-    ? db.prepare("SELECT file_id FROM frame_drawings WHERE id = ?").get(updateId)
-    : null;
+  if (replace) {
+    const { urlPath } = writePdfBuffer(req.file.buffer, { projectId, presetId }, updateId);
+    const prev = db.prepare("SELECT version, file_id FROM frame_drawings WHERE id = ?").get(updateId);
+    const fileId = projectId
+      ? syncDrawingFilesVisibility({
+          projectId,
+          isClientVisible,
+          fileId: prev?.file_id || null,
+          pdfFilename,
+          pdfUrl: urlPath,
+          title,
+        })
+      : null;
+
+    db.prepare(`
+      UPDATE frame_drawings SET
+        project_id = ?, module_id = ?, stellage_id = ?, module_rack_key = ?, preset_id = ?,
+        source_type = ?, title = ?, rack_type = ?, frame_config_json = ?,
+        pdf_url = ?, pdf_filename = ?, file_id = ?,
+        is_client_visible = ?, version = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      projectId, moduleId, stellageId, moduleRackKey, presetId,
+      sourceType, title, rackType, frameConfigJson,
+      urlPath, pdfFilename, fileId,
+      isClientVisible ? 1 : 0, (prev?.version || 1) + 1, now,
+      updateId,
+    );
+    const drawing = rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(updateId));
+    return res.json({ ...drawing, existingVersions: existingCount, replaced: true });
+  }
+
+  const id = nanoid(12);
+  const { urlPath } = writePdfBuffer(req.file.buffer, { projectId, presetId }, id);
   const fileId = projectId
     ? syncDrawingFilesVisibility({
         projectId,
         isClientVisible,
-        fileId: prevRow?.file_id || null,
+        fileId: null,
         pdfFilename,
         pdfUrl: urlPath,
         title,
       })
     : null;
 
-  const prev = updateId
-    ? db.prepare("SELECT version, file_id FROM frame_drawings WHERE id = ?").get(updateId)
-    : null;
-
-  if (updateId && prev) {
-    db.prepare(`
-      UPDATE frame_drawings SET
-        project_id = ?, module_id = ?, stellage_id = ?, preset_id = ?,
-        source_type = ?, title = ?, rack_type = ?, frame_config_json = ?,
-        pdf_url = ?, pdf_filename = ?, file_id = ?,
-        is_client_visible = ?, version = ?, updated_at = ?
-      WHERE id = ?
-    `).run(
-      projectId, moduleId, stellageId, presetId,
-      sourceType, title, rackType, frameConfigJson,
-      urlPath, pdfFilename, fileId,
-      isClientVisible ? 1 : 0, (prev.version || 1) + 1, now,
-      updateId,
-    );
-    return res.json(rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(updateId)));
-  }
+  const version = computeNextVersion({
+    projectId,
+    stellageId,
+    moduleId,
+    moduleRackKey,
+    presetId,
+    sourceType,
+  });
 
   db.prepare(`
     INSERT INTO frame_drawings (
-      id, project_id, module_id, stellage_id, preset_id, source_type,
+      id, project_id, module_id, stellage_id, module_rack_key, preset_id, source_type,
       title, rack_type, frame_config_json, pdf_url, pdf_filename, file_id,
       is_client_visible, version, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    id, projectId, moduleId, stellageId, presetId, sourceType,
+    id, projectId, moduleId, stellageId, moduleRackKey, presetId, sourceType,
     title, rackType, frameConfigJson, urlPath, pdfFilename, fileId,
-    isClientVisible ? 1 : 0, now, now,
+    isClientVisible ? 1 : 0, version, now, now,
   );
 
-  return res.json(rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(id)));
+  const drawing = rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(id));
+  return res.json({
+    ...drawing,
+    existingVersions: existingCount,
+    isNewVersion: existingCount > 0,
+  });
 }
 
 router.patch("/:id", (req, res) => {

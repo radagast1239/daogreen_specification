@@ -1,6 +1,7 @@
 import { cloneBuilderLines } from "./builderLines.js";
 import { hydrateCatalogEditorLine } from "./specLineCore.js";
 import { parseJson } from "./jsonUtils.js";
+import { ensureModuleMetaFrameRackIds, moduleCatalogRackId } from "../../shared/moduleRackIds.js";
 import { stripLineIds } from "./builderLines.js";
 import { normalizeStoredCatalog } from "../../shared/catalogLine.js";
 import { materialCompositionGroup } from "../../shared/stellageComposition.js";
@@ -17,7 +18,7 @@ export function parseStellageModuleCatalogs(raw) {
 }
 
 export function parseStellageModuleMeta(raw) {
-  return parseJson(raw, {});
+  return ensureModuleMetaFrameRackIds(parseJson(raw, {}));
 }
 
 export function stellageModulePhoto(meta, moduleId) {
@@ -34,7 +35,11 @@ export function resolveStellagePhoto(meta, moduleId, override = "") {
 export function patchStellageModulePhoto(meta, moduleId, photoUrl) {
   return {
     ...(meta || {}),
-    [moduleId]: { ...(meta?.[moduleId] || {}), photoUrl: photoUrl || "" },
+    [moduleId]: {
+      ...(meta?.[moduleId] || {}),
+      photoUrl: photoUrl || "",
+      frameRackId: meta?.[moduleId]?.frameRackId || moduleCatalogRackId(moduleId),
+    },
   };
 }
 

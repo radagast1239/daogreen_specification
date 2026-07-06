@@ -351,6 +351,12 @@ function migrateDb() {
     CREATE INDEX IF NOT EXISTS idx_frame_drawings_preset ON frame_drawings(preset_id);
   `);
 
+  addCol("frame_drawings", "module_rack_key", "TEXT DEFAULT ''");
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_frame_drawings_module_rack
+    ON frame_drawings(module_id, module_rack_key);
+  `);
+
   const visibleDefaultMigrated = db
     .prepare("SELECT 1 FROM settings WHERE key = 'migration_client_visible_default_v2'")
     .get();

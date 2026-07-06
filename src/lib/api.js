@@ -225,13 +225,27 @@ export const api = {
   uploadFrameDrawing: async (payload, pdfBlob, filename, replace = false) => {
     const fd = new FormData();
     fd.append("file", pdfBlob, filename || "frame-drawing.pdf");
+    const fieldMap = {
+      projectId: "project_id",
+      moduleId: "module_id",
+      stellageId: "stellage_id",
+      moduleRackKey: "module_rack_key",
+      presetId: "preset_id",
+      sourceType: "source_type",
+      title: "title",
+      rackType: "rack_type",
+      drawingId: "drawing_id",
+      pdfFilename: "pdf_filename",
+      isClientVisible: "is_client_visible",
+    };
     Object.entries(payload).forEach(([k, v]) => {
-      if (v === undefined || v === null) return;
+      if (v === undefined || v === null || v === "") return;
       if (k === "frameConfigJson" && typeof v === "object") {
         fd.append("frame_config_json", JSON.stringify(v));
-      } else {
-        fd.append(k, typeof v === "boolean" ? String(v) : String(v));
+        return;
       }
+      const key = fieldMap[k] || k;
+      fd.append(key, typeof v === "boolean" ? String(v) : String(v));
     });
     if (replace) fd.append("replace", "true");
     const res = await fetch(`${API}/api/frame-drawings`, {

@@ -6,7 +6,8 @@ import { useToast } from "../../components/Toast.jsx";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
 import { resolveCategories } from "../../lib/categories.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
-import FrameDrawingLinkButton from "../../components/FrameDrawingLinkButton.jsx";
+import FrameDrawingTargetRow from "../../components/FrameDrawingTargetRow.jsx";
+import { buildModuleRackKey, FRAME_SOURCE_MODULE_RACK } from "../../../shared/frameDrawingContext.js";
 import {
   filterSectionsForFarmType,
   GROUP_LABEL,
@@ -587,19 +588,28 @@ export default function ProjectBuilderPage() {
               </p>
             )}
             <div style={{ marginTop: 12 }}>
-              <FrameDrawingLinkButton
+              <FrameDrawingTargetRow
                 context={{
                   moduleId: draft.moduleId,
                   rackId: draft.id,
-                  sourceType: "module_rack",
+                  sourceType: FRAME_SOURCE_MODULE_RACK,
+                  moduleRackKey: buildModuleRackKey({
+                    moduleId: draft.moduleId,
+                    rackId: draft.id,
+                  }),
                   rackLabel: draft.name,
                   returnTo: "/new",
                 }}
-                label="Создать чертёж каркаса"
-                className="btn btn-sm btn-outline"
+                fetchParams={{
+                  module_id: draft.moduleId,
+                  module_rack_key: buildModuleRackKey({
+                    moduleId: draft.moduleId,
+                    rackId: draft.id,
+                  }),
+                }}
               />
               <p className="muted" style={{ fontSize: 11, margin: "6px 0 0" }}>
-                Сохранение PDF в проект — после создания проекта, в карточке стеллажа.
+                Сохранение PDF в документы клиента — после создания проекта, в карточке стеллажа.
               </p>
             </div>
             <div className="toolbar" style={{ marginTop: 10 }}>
