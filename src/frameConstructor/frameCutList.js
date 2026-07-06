@@ -1,5 +1,5 @@
 import { calculateFrameGeometry } from './frameGeometry.js';
-import { crabHalvesFromSets, countConnectorsByType } from './frameCrabRules.js';
+import { countConnectorsByTypeForBom, crabCutListQty, crabSpecNote, resolveManualCrabSets } from './frameCrabRules.js';
 import { calculateNftChannelBill, NFT_CHANNEL_STOCK_MM, supportsNftChannels, formatNftQtyWithMargin } from './frameNftChannels.js';
 
 export function generateCutList(params) {
@@ -51,17 +51,16 @@ export function generateCutList(params) {
   }
 
   if (connectionType === 'crab' && geom.connectors.length > 0) {
-    const { G: gCount, T: tCount, X: xCount } = countConnectorsByType(geom.connectors);
+    const { G: gCount, T: tCount, X: xCount, A4: a4Count, A6: a6Count } = countConnectorsByTypeForBom(
+      geom.connectors,
+      geom.zLevels ?? geom.levels,
+      params.postCountY,
+    );
 
-    const finalG = params.crabGQtyManual !== '' && params.crabGQtyManual !== undefined
-      ? params.crabGQtyManual
-      : gCount;
-    const finalT = params.crabTQtyManual !== '' && params.crabTQtyManual !== undefined
-      ? params.crabTQtyManual
-      : tCount;
-    const finalX = params.crabXQtyManual !== '' && params.crabXQtyManual !== undefined
-      ? params.crabXQtyManual
-      : xCount;
+    const finalG = resolveManualCrabSets(params.crabGQtyManual, 'G', gCount);
+    const finalT = resolveManualCrabSets(params.crabTQtyManual, 'T', tCount);
+    const finalX = resolveManualCrabSets(params.crabXQtyManual, 'X', xCount);
+    const finalA4 = resolveManualCrabSets(params.crabA4QtyManual, 'A4', a4Count);
 
     if (finalG > 0) {
       list.push({
@@ -69,9 +68,9 @@ export function generateCutList(params) {
         name: 'Краб-система Г-образная',
         profile: '-',
         length: '-',
-        qty: crabHalvesFromSets(finalG),
+        qty: crabCutListQty(finalG, 'G'),
         cut: '-',
-        note: `${finalG} комплектов (половинки)`,
+        note: crabSpecNote(finalG, 'G'),
       });
     }
 
@@ -81,9 +80,9 @@ export function generateCutList(params) {
         name: 'Краб-система T-образная',
         profile: '-',
         length: '-',
-        qty: crabHalvesFromSets(finalT),
+        qty: crabCutListQty(finalT, 'T'),
         cut: '-',
-        note: `${finalT} комплектов (половинки)`,
+        note: crabSpecNote(finalT, 'T'),
       });
     }
 
@@ -93,9 +92,35 @@ export function generateCutList(params) {
         name: 'Краб-система X-образная',
         profile: '-',
         length: '-',
-        qty: crabHalvesFromSets(finalX),
+        qty: crabCutListQty(finalX, 'X'),
         cut: '-',
-        note: `${finalX} комплектов (половинки)`,
+        note: crabSpecNote(finalX, 'X'),
+      });
+    }
+
+    if (finalA4 > 0) {
+      list.push({
+        id: 'connector-a4',
+        name: 'Краб система угол на 4 стороны',
+        profile: '-',
+        length: '-',
+        qty: crabCutListQty(finalA4, 'A4'),
+        cut: '-',
+        note: crabSpecNote(finalA4, 'A4'),
+      });
+    }
+
+    const finalA6 = resolveManualCrabSets(params.crabA6QtyManual, 'A6', a6Count);
+
+    if (finalA6 > 0) {
+      list.push({
+        id: 'connector-a6',
+        name: 'Краб система угол на 6 сторон',
+        profile: '-',
+        length: '-',
+        qty: crabCutListQty(finalA6, 'A6'),
+        cut: '-',
+        note: crabSpecNote(finalA6, 'A6'),
       });
     }
   }

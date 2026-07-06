@@ -1,4 +1,5 @@
 import { normalizeFrameConfig } from './frameConfig.js';
+import { crabCatalogByConnectorId } from './frameCrabCatalog.js';
 import { supportsTrays, totalFrameDepthMm } from './frameCrabRules.js';
 import { countNftChannelsAcrossDepth, calculateNftChannelBill, shouldShowNftChannels, formatNftQtyWithMargin } from './frameNftChannels.js';
 
@@ -95,11 +96,16 @@ export function prepareFramePdfData(config, geometry, cutList) {
     note: item.note || '',
   }));
 
-  const hardwareRows = hardware.map((item) => ({
-    name: item.name,
-    qty: item.qty,
-    note: item.note || '',
-  }));
+  const hardwareRows = hardware.map((item) => {
+    const crab = crabCatalogByConnectorId(item.id);
+    return {
+      name: item.name,
+      qty: item.qty,
+      note: item.note || '',
+      crabKey: crab?.key ?? null,
+      crabFile: crab?.file ?? null,
+    };
+  });
 
   const channelTableRows = channels.map((item, idx) => ({
     no: idx + 1,

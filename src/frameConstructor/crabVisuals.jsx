@@ -6,6 +6,30 @@ export function Crab2D({ x, y, type, rotation = 0, scale = 1 }) {
   const stroke = '#8a7020';
   const sw = 1.2 / scale;
 
+  if (type === 'A6') {
+    const arm = 11 / scale;
+    const thick = 3.5 / scale;
+    return (
+      <g transform={`translate(${x}, ${y}) rotate(${rotation})`}>
+        <rect x={-arm} y={-thick / 2} width={arm * 2} height={thick} fill={fill} stroke={stroke} strokeWidth={sw} rx={1 / scale} />
+        <rect x={-thick / 2} y={-arm} width={thick} height={arm * 2} fill={fill} stroke={stroke} strokeWidth={sw} rx={1 / scale} />
+        <rect x={-arm * 0.5} y={-arm * 0.5} width={arm} height={arm} fill="none" stroke={stroke} strokeWidth={sw * 0.7} transform="rotate(45)" />
+      </g>
+    );
+  }
+
+  if (type === 'A4') {
+    const arm = 12 / scale;
+    const thick = 4 / scale;
+    return (
+      <g transform={`translate(${x}, ${y}) rotate(${rotation})`}>
+        <rect x={-arm} y={-thick / 2} width={arm * 2} height={thick} fill={fill} stroke={stroke} strokeWidth={sw} rx={1 / scale} />
+        <rect x={-thick / 2} y={-arm} width={thick} height={arm * 2} fill={fill} stroke={stroke} strokeWidth={sw} rx={1 / scale} />
+        <rect x={-arm * 0.55} y={-arm * 0.55} width={arm * 1.1} height={arm * 1.1} fill="none" stroke={stroke} strokeWidth={sw * 0.8} />
+      </g>
+    );
+  }
+
   if (type === 'X') {
     const arm = 14 / scale;
     const thick = 5 / scale;
@@ -65,6 +89,42 @@ export function Crab3D({ c, w, h }) {
   const t = Math.max(2, w * 0.12);
   const arm = w * 2.8;
   const gap = w * 0.55;
+
+  if (c.type === 'A6') {
+    return (
+      <group position={[c.x, c.z, c.y]}>
+        {[0, Math.PI / 3, (2 * Math.PI) / 3].map((rot, i) => (
+          <mesh key={i} position={[0, 0, 0]} rotation={[0, rot, 0]}>
+            <boxGeometry args={[arm, t, arm * 0.3]} />
+            {mat}
+          </mesh>
+        ))}
+      </group>
+    );
+  }
+
+  if (c.type === 'A4') {
+    return (
+      <group position={[c.x, c.z, c.y]}>
+        <mesh position={[0, 0, gap]}>
+          <boxGeometry args={[arm, t, arm * 0.35]} />
+          {mat}
+        </mesh>
+        <mesh position={[0, 0, -gap]}>
+          <boxGeometry args={[arm, t, arm * 0.35]} />
+          {mat}
+        </mesh>
+        <mesh position={[0, gap, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <boxGeometry args={[arm, t, arm * 0.35]} />
+          {mat}
+        </mesh>
+        <mesh position={[0, -gap, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <boxGeometry args={[arm, t, arm * 0.35]} />
+          {mat}
+        </mesh>
+      </group>
+    );
+  }
 
   if (c.type === 'X') {
     return (

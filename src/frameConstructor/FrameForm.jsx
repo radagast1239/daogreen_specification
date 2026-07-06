@@ -532,17 +532,25 @@ export default function FrameForm({ params, onChange }) {
             <summary className="fc-section__title">Краб-система</summary>
             <div className="fc-section__body">
               <div className="fc-grid fc-grid--3">
-                <Field label="G (компл.)">
+                <Field label="G (шт.)">
                   <input type="number" name="crabGQtyManual" value={params.crabGQtyManual ?? ''} onChange={handleChange} onBlur={handleBlur} placeholder="Авто" />
                 </Field>
-                <Field label="T (компл.)">
+                <Field label="T (шт.)">
                   <input type="number" name="crabTQtyManual" value={params.crabTQtyManual ?? ''} onChange={handleChange} onBlur={handleBlur} placeholder="Авто" />
                 </Field>
-                <Field label="X (компл.)">
+                <Field label="X (шт.)">
                   <input type="number" name="crabXQtyManual" value={params.crabXQtyManual ?? ''} onChange={handleChange} onBlur={handleBlur} placeholder="Авто" />
                 </Field>
+                <Field label="4× (компл.)">
+                  <input type="number" name="crabA4QtyManual" value={params.crabA4QtyManual ?? ''} onChange={handleChange} onBlur={handleBlur} placeholder="Авто" />
+                </Field>
+                <Field label="6× (шт.)">
+                  <input type="number" name="crabA6QtyManual" value={params.crabA6QtyManual ?? ''} onChange={handleChange} onBlur={handleBlur} placeholder="Авто" />
+                </Field>
               </div>
-              <p className="fc-field__hint">1 комплект = 2 половинки (шт.)</p>
+              <p className="fc-field__hint">
+                Ручной ввод: G, T, X — в штуках (1 комплект = 2 шт.). 6× — в штуках (1 комплект = 4 шт.). 4× — в комплектах.
+              </p>
             </div>
           </details>
         )}

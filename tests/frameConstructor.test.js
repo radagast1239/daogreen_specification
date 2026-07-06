@@ -18,6 +18,10 @@ import {
   PDF_LAYOUT,
   collectFrontViewStrokes,
   edgeBasedCrossBeamSegments,
+  summarizeCrossBeamSegmentDims,
+  planTopViewCrossBeamDims,
+  assignCrossBeamDimRows,
+  estimateCrossBeamDimRowCount,
   pickDimLabelCoord,
   collectCrabLegendTypes,
   collectTopViewPlanConnectors,
@@ -30,6 +34,7 @@ import {
   levelCenterMm,
   tierTopMm,
   beamElevationCenterZ,
+  normalizeFramePdfBranding,
 } from '../src/frameConstructor/framePdfExport.js';
 import { computeFrameOrthoZoom } from '../src/frameConstructor/frameViewFit.js';
 import {
@@ -64,6 +69,11 @@ import {
   postYPosition,
   totalFrameDepthMm,
   isInternalPost,
+  isMiddleYPost,
+  postCrabCountsForLevel,
+  fourWayCrabSetsForPost,
+  countConnectorsByType,
+  countConnectorsByTypeForBom,
   endCapBeamXPositions,
   normalizeEndCapBeamLevelMask,
   normalizeEndCapBeamDropByLevel,
@@ -76,6 +86,7 @@ import {
   listSavedFramePresets,
   saveFramePreset,
 } from '../src/frameConstructor/frameSavedPresets.js';
+import { buildCrabAudit, describePostRole } from '../src/frameConstructor/frameCrabAudit.js';
 
 describe('Frame Constructor Geometry', () => {
   it('normalizeFrameConfig replaces invalid values with defaults', () => {
@@ -349,17 +360,18 @@ describe('Frame Constructor Geometry', () => {
     expect(geom.connectors.filter(c => c.type === 'G' && Math.abs(c.z - topZ) < 0.01).length).toBe(4);
   });
 
-  it('cut list counts crab halves (2 pieces per set)', () => {
+  it('cut list counts crab pieces (2 per set for G/T/X/A6)', () => {
     const params = { ...defaultFrameParams, connectionType: 'crab' };
     const geom = calculateFrameGeometry(params);
     const cutList = generateCutList(params);
-    const tSets = geom.connectors.filter(c => c.type === 'T').length;
-    const gSets = geom.connectors.filter(c => c.type === 'G').length;
+    const bomCounts = countConnectorsByTypeForBom(geom.connectors, geom.levels);
+    const tSets = bomCounts.T;
+    const gSets = bomCounts.G;
     const tRow = cutList.find(c => c.id === 'connector-t');
     const gRow = cutList.find(c => c.id === 'connector-g');
     expect(gRow.qty).toBe(gSets * 2);
     expect(tRow.qty).toBe(tSets * 2);
-    expect(tRow.note).toMatch(/комплектов \(половинки\)/);
+    expect(tRow.note).toMatch(/компл\. × 2 шт = \d+ шт/);
   });
 
   it('internal posts use X crabs below top level, T on top level', () => {
@@ -391,6 +403,198 @@ describe('Frame Constructor Geometry', () => {
     const x3 = geom3.connectors.filter((c) => c.type === 'X').length;
     const x4 = geom4.connectors.filter((c) => c.type === 'X').length;
     expect(x4).toBeGreaterThan(x3);
+  });
+
+  it('X crab BOM includes bottom-level internal junctions for single-bay racks', () => {
+    const params = {
+      ...defaultFrameParams,
+      postCountX: 4,
+      postCountY: 2,
+      tierCount: 7,
+      connectionType: 'crab',
+    };
+    const geom = calculateFrameGeometry(params);
+    const allX = countConnectorsByType(geom.connectors).X;
+    const bomX = countConnectorsByTypeForBom(geom.connectors, geom.levels).X;
+    const internalPosts = 2 * 2;
+    const xLevels = geom.levelCount - 1;
+    expect(allX).toBe(internalPosts * xLevels);
+    expect(bomX).toBe(allX);
+    const xRow = generateCutList(params).find((c) => c.id === 'connector-x');
+    expect(xRow.qty).toBe(56);
+    expect(xRow.note).toBe('28 компл. × 2 шт = 56 шт');
+  });
+
+  it('T crab BOM: two kits per cross beam at rail junctions (5 posts, 8 beams)', () => {
+    const params = {
+      ...defaultFrameParams,
+      postCountX: 5,
+      postCountY: 2,
+      crossBeamsPerLevel: 8,
+      tierCount: 7,
+      connectionType: 'crab',
+    };
+    const geom = calculateFrameGeometry(params);
+    const topZ = geom.levels[geom.levels.length - 1];
+    const regZ = geom.levels[1];
+    const topCross = geom.connectors.filter(
+      (c) => c.type === 'T' && c.axis === 'cross' && Math.abs(c.z - topZ) < 0.01,
+    );
+    const regT = geom.connectors.filter((c) => c.type === 'T' && Math.abs(c.z - regZ) < 0.01);
+    expect(topCross.length).toBe(16);
+    expect(regT.length).toBe(20);
+    const bomT = countConnectorsByTypeForBom(geom.connectors, geom.levels, params.postCountY).T;
+    expect(bomT).toBe(162);
+    const tRow = generateCutList(params).find((c) => c.id === 'connector-t');
+    expect(tRow.qty).toBe(324);
+    expect(tRow.note).toBe('162 компл. × 2 шт = 324 шт');
+  });
+
+  it('postCountY=2 has no four-way angle crabs', () => {
+    const geom = calculateFrameGeometry({ ...defaultFrameParams, postCountX: 3, postCountY: 2, connectionType: 'crab' });
+    const counts = countConnectorsByType(geom.connectors);
+    expect(counts.A4).toBe(0);
+    const cutList = generateCutList({ ...defaultFrameParams, postCountX: 3, postCountY: 2, connectionType: 'crab' });
+    expect(cutList.find((c) => c.id === 'connector-a4')).toBeUndefined();
+  });
+
+  it('extra Y rows: 6-way internal middle, 4-way external, X on front/back internals', () => {
+    const regular = postCrabCountsForLevel({ px: 1, py: 1, postCountX: 4, postCountY: 3, isTopLevel: false });
+    expect(regular).toEqual({ g: 0, t: 0, x: 0, a4: 0, a6: 4 });
+    expect(postCrabCountsForLevel({ px: 0, py: 1, postCountX: 4, postCountY: 3, isTopLevel: false })).toEqual({
+      g: 0, t: 0, x: 0, a4: 2, a6: 0,
+    });
+    expect(postCrabCountsForLevel({ px: 1, py: 0, postCountX: 4, postCountY: 3, isTopLevel: false })).toEqual({
+      g: 0, t: 0, x: 1, a4: 0, a6: 0,
+    });
+    const topCorner = postCrabCountsForLevel({ px: 0, py: 0, postCountX: 4, postCountY: 3, isTopLevel: true });
+    expect(topCorner).toEqual({ g: 1, t: 0, x: 0, a4: 2, a6: 0 });
+    expect(postCrabCountsForLevel({ px: 1, py: 1, postCountX: 4, postCountY: 3, isTopLevel: true })).toEqual({
+      g: 0, t: 0, x: 1, a4: 2, a6: 0,
+    });
+    expect(postCrabCountsForLevel({ px: 1, py: 0, postCountX: 4, postCountY: 3, isTopLevel: true })).toEqual({
+      g: 0, t: 1, x: 0, a4: 0, a6: 0,
+    });
+  });
+
+  it('4x3 Y-bays scale crab counts across levels (user grid)', () => {
+    const params = {
+      ...defaultFrameParams,
+      postCountX: 4,
+      postCountY: 3,
+      tierCount: 7,
+      connectionType: 'crab',
+    };
+    const geom = calculateFrameGeometry(params);
+    const counts = countConnectorsByType(geom.connectors);
+    const bomCounts = countConnectorsByTypeForBom(geom.connectors, geom.levels);
+    const levelCount = geom.levelCount;
+    const nonTopLevels = levelCount - 1;
+    const topZ = geom.levels[levelCount - 1];
+
+    const expectedA6 = nonTopLevels * 2 * 4;
+    const expectedA4Regular = nonTopLevels * 2 * 2;
+    const expectedXRegular = nonTopLevels * 4;
+    const expectedA4Top = 6 * 2 + 2 * 2;
+    const expectedXTop = 4;
+    const expectedTTop = 4;
+
+    expect(counts.A6).toBe(expectedA6);
+    expect(counts.A4).toBe(expectedA4Regular + expectedA4Top);
+    expect(counts.X).toBe(expectedXRegular + expectedXTop);
+    expect(geom.connectors.filter((c) => c.type === 'T' && Math.abs(c.z - topZ) < 0.01 && c.axis === 'post').length)
+      .toBeGreaterThanOrEqual(expectedTTop);
+
+    const cutList = generateCutList(params);
+    expect(cutList.find((c) => c.id === 'connector-a6')?.name).toBe('Краб система угол на 6 сторон');
+    expect(cutList.find((c) => c.id === 'connector-a4')?.name).toBe('Краб система угол на 4 стороны');
+    const a4Row = cutList.find((c) => c.id === 'connector-a4');
+    expect(a4Row.qty).toBe(bomCounts.A4);
+    expect(a4Row.note).toMatch(/компл\./);
+    const a6Row = cutList.find((c) => c.id === 'connector-a6');
+    expect(a6Row.qty).toBe(bomCounts.A6 * 4);
+  });
+
+  it('T crab BOM: 1 connection = 1 kit = 2 pcs (4x2, 12 beams, 7 tiers)', () => {
+    const params = {
+      ...defaultFrameParams,
+      postCountX: 4,
+      postCountY: 2,
+      crossBeamsPerLevel: 12,
+      tierCount: 7,
+      lengthMm: 6000,
+      connectionType: 'crab',
+    };
+    const cutList = generateCutList(params);
+    const tRow = cutList.find((c) => c.id === 'connector-t');
+    expect(tRow.qty).toBe(448);
+    expect(tRow.note).toBe('224 компл. × 2 шт = 448 шт');
+  });
+
+  it('single-bay crab BOM counts all horizontal levels (3 tiers, 6x2, 8 beams)', () => {
+    const params = {
+      ...defaultFrameParams,
+      postCountX: 6,
+      postCountY: 2,
+      crossBeamsPerLevel: 8,
+      tierCount: 3,
+      connectionType: 'crab',
+    };
+    const geom = calculateFrameGeometry(params);
+    const cutList = generateCutList(params);
+    const bom = countConnectorsByTypeForBom(geom.connectors, geom.levels, params.postCountY);
+    const all = countConnectorsByType(geom.connectors);
+
+    expect(bom.G).toBe(4);
+    expect(bom.T).toBe(84);
+    expect(bom.X).toBe(24);
+    expect(bom).toEqual({
+      G: all.G,
+      T: all.T,
+      X: all.X,
+      A4: all.A4,
+      A6: all.A6,
+    });
+
+    expect(cutList.find((c) => c.id === 'connector-g')?.qty).toBe(8);
+    expect(cutList.find((c) => c.id === 'connector-t')?.qty).toBe(168);
+    expect(cutList.find((c) => c.id === 'connector-x')?.qty).toBe(48);
+
+    const audit = buildCrabAudit(params, geom, cutList);
+    expect(audit.regularLevelCount).toBe(3);
+    expect(audit.impliedTotals.T).toBe(84);
+    expect(audit.allMatch).toBe(true);
+  });
+
+  it('PDF hardware reflects manual crab post overrides', () => {
+    const base = {
+      ...defaultFrameParams,
+      postCountX: 4,
+      postCountY: 3,
+      tierCount: 7,
+      connectionType: 'crab',
+    };
+    const geomAuto = calculateFrameGeometry(base);
+    const cutAuto = generateCutList(base);
+    const xAuto = cutAuto.find((c) => c.id === 'connector-x')?.qty ?? 0;
+
+    const overridden = {
+      ...base,
+      crabPostOverrides: {
+        regular_p0_p0: { g: 0, t: 0, x: 3, a4: 0, a6: 0 },
+      },
+    };
+    const geom = calculateFrameGeometry(overridden);
+    const cutManual = generateCutList(overridden);
+    const xManual = cutManual.find((c) => c.id === 'connector-x')?.qty ?? 0;
+    const xManualSets = countConnectorsByTypeForBom(geom.connectors, geom.levels).X;
+    expect(xManualSets).toBeGreaterThan(countConnectorsByTypeForBom(geomAuto.connectors, geomAuto.levels).X);
+    expect(xManual).toBe(xManualSets * 2);
+    expect(xManual).toBeGreaterThan(xAuto);
+
+    const data = prepareFramePdfData(overridden, geom, cutManual);
+    const xPdf = data.hardwareRows.find((r) => r.crabKey === 'X');
+    expect(xPdf?.qty).toBe(xManual);
   });
 
   it('includes connectors in cut list when connectionType is crab', () => {
@@ -521,7 +725,42 @@ describe('Frame Constructor PDF export', () => {
     expect(data.hardwareRows.some((r) => r.name.includes('X-образная'))).toBe(true);
     const tRow = data.hardwareRows.find((r) => r.name.includes('T-образная'));
     expect(tRow.qty % 2).toBe(0);
+    expect(tRow.crabKey).toBe('T');
+    expect(tRow.crabFile).toBe('t');
     expect(data.weldedNote).toBeNull();
+  });
+
+  it('normalizeFramePdfBranding uses admin settings defaults', () => {
+    const brand = normalizeFramePdfBranding({
+      companyName: 'Ферма Про',
+      brandColor: '#224466',
+      logoUrl: '/uploads/logo.png',
+      contactPhone: '+7 900',
+      clientPdfFooter: 'футер PDF',
+    });
+    expect(brand.companyName).toBe('Ферма Про');
+    expect(brand.brandColor).toBe('#224466');
+    expect(brand.logoUrl).toBe('/uploads/logo.png');
+    expect(brand.pdfFooter).toBe('футер PDF');
+  });
+
+  it('fitLogoRect preserves aspect ratio inside header box', async () => {
+    const { fitLogoRect, buildFramePdfHeaderContactLine, FRAME_PDF_BRAND_HEADER_H } = await import('../src/frameConstructor/framePdfBranding.js');
+    const wide = fitLogoRect(400, 100, 18, 14);
+    expect(wide.w).toBe(18);
+    expect(wide.h).toBeCloseTo(4.5, 1);
+    const tall = fitLogoRect(100, 400, 18, 14);
+    expect(tall.h).toBeCloseTo(14, 1);
+    expect(tall.w).toBeCloseTo(3.5, 1);
+    expect(FRAME_PDF_BRAND_HEADER_H).toBeGreaterThanOrEqual(20);
+    const line = buildFramePdfHeaderContactLine({
+      contactPhone: '+7 900',
+      contactEmail: 'info@test.ru',
+      contactTelegram: '@daogreen',
+    });
+    expect(line).toContain('+7 900');
+    expect(line).toContain('info@test.ru');
+    expect(line).toContain('@daogreen');
   });
 
   it('canExportFramePdf is false when geometry has validation errors', async () => {
@@ -850,6 +1089,43 @@ describe('Frame Constructor PDF export', () => {
     expect(segments[0].x2 - segments[0].x1).toBe(90);
   });
 
+  it('summarizeCrossBeamSegmentDims collapses equal interior spacing', () => {
+    const positions = Array.from({ length: 6 }, (_, i) => 100 + i * 527);
+    const segments = edgeBasedCrossBeamSegments(positions, 6000, 20);
+    const summarized = summarizeCrossBeamSegmentDims(segments);
+    expect(summarized).toHaveLength(3);
+    expect(summarized[1].label).toMatch(/× 4|× 5/);
+  });
+
+  it('planTopViewCrossBeamDims shows summary chain and legend note for many beams', () => {
+    const positions = Array.from({ length: 12 }, (_, i) => 100 + i * 527);
+    const plan = planTopViewCrossBeamDims(positions, 6000, 20);
+    expect(plan.mode).toBe('summary');
+    expect(plan.chainItems.length).toBeGreaterThan(0);
+    expect(plan.chainItems[1].label).toMatch(/×/);
+    expect(plan.note).toMatch(/Поперечины: 12 шт\./);
+    expect(plan.note).toMatch(/шаг 507 мм/);
+    expect(plan.note).toMatch(/торец 90 мм/);
+  });
+
+  it('planTopViewCrossBeamDims keeps chain dims for few cross beams', () => {
+    const positions = [100, 660, 1220, 1780, 2340, 2900];
+    const plan = planTopViewCrossBeamDims(positions, 3000, 20);
+    expect(plan.mode).toBe('chain');
+    expect(plan.chainItems.length).toBeGreaterThan(0);
+    expect(plan.note).toBeNull();
+  });
+
+  it('assignCrossBeamDimRows staggers labels when pdf segments are narrow', () => {
+    const items = Array.from({ length: 6 }, (_, i) => ({
+      seg: { x1: i * 8, x2: i * 8 + 6 },
+      label: '540',
+    }));
+    const transform = { toX: (x) => x };
+    const placed = assignCrossBeamDimRows(items, transform, 10);
+    expect(placed.some((p) => p.row > 0)).toBe(true);
+  });
+
   it('pickDimLabelCoord avoids post centers for inner length and depth labels', () => {
     const tubeWidthMm = 20;
     const params = { ...defaultFrameParams, lengthMm: 3000, depthMm: 500, postCountX: 3, postCountY: 3 };
@@ -911,7 +1187,7 @@ describe('Frame Constructor PDF export', () => {
     expect(collectCrabLegendTypes([{ type: 'G' }, { type: 'T' }, { type: 'X' }])).toEqual(['G', 'T', 'X']);
   });
 
-  it('collectTopViewPlanConnectors uses top level only and keeps T crabs', () => {
+  it('collectTopViewPlanConnectors places T crabs at cross-longitudinal junctions', () => {
     const geom = calculateFrameGeometry({ ...defaultFrameParams, postCountX: 3, connectionType: 'crab' });
     const topLevel = geom.levels[geom.levels.length - 1];
     const plan = collectTopViewPlanConnectors(geom, topLevel);
@@ -919,20 +1195,56 @@ describe('Frame Constructor PDF export', () => {
     expect(middlePost?.type).toBe('T');
     expect(plan.some((c) => c.type === 'T')).toBe(true);
     expect(plan.every((c) => Math.abs(c.z - topLevel) < 0.01)).toBe(true);
-    expect(plan.some((c) => c.axis === 'cross' && c.type === 'T')).toBe(true);
+    const crossJunction = plan.find((c) => c.axis === 'cross' && c.type === 'T');
+    expect(crossJunction).toBeDefined();
+    const topCross = geom.crossBeams.find((b) => Math.abs(b.z - topLevel) < 0.01);
+    expect(topCross).toBeDefined();
+    const onRail = plan.some(
+      (c) => c.axis === 'cross'
+        && Math.abs(c.x - topCross.x) < 0.01
+        && (Math.abs(c.y - (topCross.y - topCross.length / 2)) < 0.01
+          || Math.abs(c.y - (topCross.y + topCross.length / 2)) < 0.01),
+    );
+    expect(onRail).toBe(true);
+    const centerOnly = plan.filter(
+      (c) => c.axis === 'cross' && Math.abs(c.y - topCross.y) < 0.01,
+    );
+    expect(centerOnly).toHaveLength(0);
   });
 
-  it('measureTopViewDimMargins grows bottom inset for many beam segments', () => {
-    const geom = calculateFrameGeometry({ ...defaultFrameParams, crossBeamsPerLevel: 8 });
-    const small = measureTopViewDimMargins({ ...defaultFrameParams, crossBeamsPerLevel: 6 }, geom);
-    const large = measureTopViewDimMargins({ ...defaultFrameParams, crossBeamsPerLevel: 8 }, geom);
-    expect(large.bottom).toBeGreaterThanOrEqual(small.bottom);
+  it('measureTopViewDimMargins keeps room for summary chain on many beams', () => {
+    const geomFew = calculateFrameGeometry({ ...defaultFrameParams, crossBeamsPerLevel: 6 });
+    const geomMany = calculateFrameGeometry({ ...defaultFrameParams, crossBeamsPerLevel: 12 });
+    const few = measureTopViewDimMargins({ ...defaultFrameParams, crossBeamsPerLevel: 6 }, geomFew, 1);
+    const many = measureTopViewDimMargins({ ...defaultFrameParams, crossBeamsPerLevel: 12 }, geomMany, 1);
+    expect(few.bottom).toBeGreaterThanOrEqual(12);
+    expect(many.bottom).toBeGreaterThanOrEqual(15);
     const areas = topViewLayoutAreas(PDF_LAYOUT.topBox, {
       hasLegend: true,
       legendTypes: ['G', 'T', 'X'],
-      dimMargins: large,
+      dimMargins: many,
+      beamNote: 'Поперечины: 12 шт.',
     });
-    expect(areas.drawing.h).toBeLessThan(PDF_LAYOUT.topBox.h - 20);
+    expect(areas.drawing.h).toBeGreaterThan(30);
+    expect(PDF_LAYOUT.topBox.w).toBeGreaterThan(250);
+  });
+
+  it('stamp box fits footer row inside frame', () => {
+    const { stampBox } = PDF_LAYOUT;
+    const contentBottom = stampBox.y + 4 + 4 + 4 + 5 * 3.5;
+    expect(contentBottom).toBeLessThanOrEqual(stampBox.y + stampBox.h - 1);
+  });
+
+  it('topViewVisualTubeWidth and crab markers scale with drawing size', async () => {
+    const { topViewVisualTubeWidth, resolveTopViewCrabMarkerOptions } = await import('../src/frameConstructor/framePdfExport.js');
+    const thin = topViewVisualTubeWidth(20, 0.1);
+    const thick = visualTubeWidth(20, 0.1);
+    expect(thin).toBeLessThan(thick);
+    expect(thin).toBeLessThanOrEqual(1.05);
+    const sparse = resolveTopViewCrabMarkerOptions(0.08, 8, 4);
+    const dense = resolveTopViewCrabMarkerOptions(0.08, 30, 12);
+    expect(sparse.radius).toBeGreaterThan(0.9);
+    expect(dense.radius).toBeLessThan(sparse.radius);
   });
 
   it('computeFrameOrthoZoom fits tall front view into wide viewport', () => {
@@ -1014,5 +1326,148 @@ describe('Frame saved presets', () => {
     deleteSavedFramePreset(created.id);
     expect(listSavedFramePresets()).toHaveLength(0);
     expect(storage[FRAME_PRESETS_STORAGE_KEY]).toBe('[]');
+  });
+});
+
+describe('frame crab overrides', () => {
+  it('manual post override changes connectors at specific post', () => {
+    const base = {
+      ...defaultFrameParams,
+      postCountX: 4,
+      postCountY: 3,
+      connectionType: 'crab',
+    };
+    const autoGeom = calculateFrameGeometry(base);
+    const topZ = autoGeom.levels[autoGeom.levelCount - 1];
+    const cornerAuto = autoGeom.connectors.filter(
+      (c) => c.px === 0 && c.py === 0 && Math.abs(c.z - topZ) < 0.01 && c.axis === 'post',
+    );
+    expect(cornerAuto.some((c) => c.type === 'G')).toBe(true);
+
+    const withOverride = calculateFrameGeometry({
+      ...base,
+      crabPostOverrides: {
+        top_p0_p0: { g: 0, t: 0, x: 1, a4: 0, a6: 0 },
+      },
+    });
+    const cornerManual = withOverride.connectors.filter(
+      (c) => c.px === 0 && c.py === 0 && Math.abs(c.z - topZ) < 0.01 && c.axis === 'post',
+    );
+    expect(cornerManual.some((c) => c.type === 'G')).toBe(false);
+    expect(cornerManual.some((c) => c.type === 'X')).toBe(true);
+
+    const midZ = autoGeom.levels[0];
+    const midRegular = withOverride.connectors.filter(
+      (c) => c.px === 1 && c.py === 1 && Math.abs(c.z - midZ) < 0.01 && c.axis === 'post',
+    );
+    expect(midRegular.some((c) => c.type === 'A6')).toBe(true);
+  });
+
+  it('regular tier override applies to all non-top levels', () => {
+    const base = {
+      ...defaultFrameParams,
+      postCountX: 4,
+      postCountY: 3,
+      tierCount: 7,
+      connectionType: 'crab',
+    };
+    const geom = calculateFrameGeometry({
+      ...base,
+      crabPostOverrides: {
+        regular_p1_p1: { g: 0, t: 1, x: 0, a4: 0, a6: 0 },
+      },
+    });
+    const topIdx = geom.levelCount - 1;
+    const level0 = geom.connectors.filter(
+      (c) => c.px === 1 && c.py === 1 && Math.abs(c.z - geom.levels[0]) < 0.01 && c.axis === 'post',
+    );
+    const levelMid = geom.connectors.filter(
+      (c) => c.px === 1 && c.py === 1 && Math.abs(c.z - geom.levels[3]) < 0.01 && c.axis === 'post',
+    );
+    const levelTop = geom.connectors.filter(
+      (c) => c.px === 1 && c.py === 1 && Math.abs(c.z - geom.levels[topIdx]) < 0.01 && c.axis === 'post',
+    );
+    expect(level0.some((c) => c.type === 'T')).toBe(true);
+    expect(level0.some((c) => c.type === 'A6')).toBe(false);
+    expect(levelMid.some((c) => c.type === 'T')).toBe(true);
+    expect(levelTop.some((c) => c.type === 'A4')).toBe(true);
+  });
+
+  it('setCrabPostOverride adds and removes override keys', async () => {
+    const { setCrabPostOverride, hasCrabPostOverride } = await import('../src/frameConstructor/frameCrabOverrides.js');
+    let params = { ...defaultFrameParams, crabPostOverrides: {} };
+    params = setCrabPostOverride(params, false, 1, 1, { g: 1, t: 0, x: 0, a4: 0, a6: 0 });
+    expect(hasCrabPostOverride(params.crabPostOverrides, 1, 1, false)).toBe(true);
+    params = setCrabPostOverride(params, false, 1, 1, null);
+    expect(hasCrabPostOverride(params.crabPostOverrides, 1, 1, false)).toBe(false);
+  });
+});
+
+describe('frame crab audit', () => {
+  it('buildCrabAudit matches geometry totals with cut list for default crab frame', () => {
+    const params = { ...defaultFrameParams, connectionType: 'crab' };
+    const geom = calculateFrameGeometry(params);
+    const cutList = generateCutList(params);
+    const audit = buildCrabAudit(params, geom, cutList);
+
+    expect(audit.levelCount).toBe(geom.levelCount);
+    expect(audit.tiers).toHaveLength(2);
+    expect(audit.allMatch).toBe(true);
+
+    const top = audit.tiers.find((t) => t.isTop);
+    expect(top.isTop).toBe(true);
+    expect(top.grid.length).toBe(params.postCountY);
+    expect(top.grid[0].length).toBe(params.postCountX);
+
+    const corners = top.grid.flat().filter((c) => c.isCorner);
+    expect(corners.length).toBe(4);
+    expect(corners.every((c) => c.badges.some((b) => b.type === 'G'))).toBe(true);
+  });
+
+  it('describePostRole labels corner and internal posts', () => {
+    expect(describePostRole(0, 0, 4, 3)).toBe('Угол стеллажа');
+    expect(describePostRole(1, 1, 4, 3)).toBe('Внутренняя стойка (средний ряд по глубине)');
+    expect(describePostRole(0, 1, 4, 3)).toBe('Торцевая стойка (средний ряд по глубине)');
+  });
+});
+
+describe('frame crab photos', () => {
+  const storage = {};
+
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', {
+      getItem: (k) => storage[k] ?? null,
+      setItem: (k, v) => { storage[k] = v; },
+      removeItem: (k) => { delete storage[k]; },
+    });
+    vi.stubGlobal('window', { dispatchEvent: vi.fn() });
+  });
+
+  afterEach(() => {
+    Object.keys(storage).forEach((k) => delete storage[k]);
+    vi.unstubAllGlobals();
+  });
+
+  it('stores and resolves custom crab photo override', async () => {
+    const {
+      CRAB_PHOTOS_STORAGE_KEY,
+      setCrabPhotoOverride,
+      getCrabPhotoOverride,
+      clearCrabPhotoOverride,
+      resolveCrabImageSrc,
+    } = await import('../src/frameConstructor/frameCrabPhotos.js');
+
+    const entry = { file: 'g', key: 'G' };
+    const dataUrl = 'data:image/jpeg;base64,abc';
+
+    expect(getCrabPhotoOverride('g')).toBeNull();
+    setCrabPhotoOverride('g', dataUrl);
+    expect(storage[CRAB_PHOTOS_STORAGE_KEY]).toContain('abc');
+    expect(getCrabPhotoOverride('g')).toBe(dataUrl);
+    expect(resolveCrabImageSrc(entry)).toBe(dataUrl);
+
+    clearCrabPhotoOverride('g');
+    expect(getCrabPhotoOverride('g')).toBeNull();
+    expect(resolveCrabImageSrc(entry)).toMatch(/frame-crabs\/g\.svg/);
   });
 });

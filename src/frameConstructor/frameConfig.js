@@ -1,4 +1,5 @@
 import { crossBayLengthMm, normalizeEndCapBeamLevelMask, normalizeEndCapBeamDropByLevel } from './frameCrabRules.js';
+import { migrateCrabPostOverrides } from './frameCrabOverrides.js';
 
 export function normalizeFrameConfig(config) {
   const safeNum = (val, min, def, max = Infinity) => {
@@ -50,6 +51,9 @@ export function normalizeFrameConfig(config) {
     crabGQtyManual: safeOptNum(config.crabGQtyManual),
     crabTQtyManual: safeOptNum(config.crabTQtyManual),
     crabXQtyManual: safeOptNum(config.crabXQtyManual),
+    crabA4QtyManual: safeOptNum(config.crabA4QtyManual),
+    crabA6QtyManual: safeOptNum(config.crabA6QtyManual),
+    crabPostOverrides: migrateCrabPostOverrides(config.crabPostOverrides, levelCount),
     endCapBeamsEnabled: config.endCapBeamsEnabled === true,
     endCapBeamLevelMask: normalizeEndCapBeamLevelMask(config.endCapBeamLevelMask, levelCount),
     endCapBeamDropByLevel: normalizeEndCapBeamDropByLevel(config.endCapBeamDropByLevel, levelCount),

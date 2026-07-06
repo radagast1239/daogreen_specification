@@ -5,6 +5,8 @@ import FrameForm from './FrameForm.jsx';
 import Frame3DView from './Frame3DView.jsx';
 import FrameDrawings2D from './FrameDrawings2D.jsx';
 import FrameCutList from './FrameCutList.jsx';
+import FrameCrabGallery from './FrameCrabGallery.jsx';
+import FrameCrabAudit from './FrameCrabAudit.jsx';
 import FramePdfButton from './FramePdfButton.jsx';
 import { framePresets } from './framePresets.js';
 import { calculateFrameGeometry } from './frameGeometry.js';
@@ -151,6 +153,8 @@ export default function FrameConstructorPage() {
               <span className="fc-stat__label">Крабы</span>
               <span className="fc-stat__value">
                 Г {crabs.G} · T {crabs.T} · X {crabs.X}
+                {crabs.A4 > 0 ? ` · 4× ${crabs.A4}` : ''}
+                {crabs.A6 > 0 ? ` · 6× ${crabs.A6}` : ''}
               </span>
             </div>
           )}
@@ -173,6 +177,10 @@ export default function FrameConstructorPage() {
         </div>
       </div>
 
+      {geomOk && params.connectionType === 'crab' && (
+        <FrameCrabGallery counts={crabs} />
+      )}
+
       {geomOk && (
         <section className="fc-panel" aria-label="Чертежи и спецификация">
           <div className="fc-tabs" role="tablist">
@@ -185,6 +193,17 @@ export default function FrameConstructorPage() {
             >
               Чертежи 2D
             </button>
+            {params.connectionType === 'crab' && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'crabs'}
+                className={`fc-tabs__btn${activeTab === 'crabs' ? ' is-active' : ''}`}
+                onClick={() => setActiveTab('crabs')}
+              >
+                Схема крабов
+              </button>
+            )}
             <button
               type="button"
               role="tab"
@@ -196,9 +215,19 @@ export default function FrameConstructorPage() {
             </button>
           </div>
           <div className="fc-panel__body">
-            {activeTab === 'drawings' ? (
+            {activeTab === 'drawings' && (
               <FrameDrawings2D params={params} geom={geom} />
-            ) : (
+            )}
+            {activeTab === 'crabs' && params.connectionType === 'crab' && (
+              <FrameCrabAudit
+                key={`crab-${params.postCountX}x${params.postCountY}-${params.tierCount}`}
+                params={params}
+                geom={geom}
+                cutList={cutList}
+                onParamsChange={setParams}
+              />
+            )}
+            {activeTab === 'cutlist' && (
               <FrameCutList params={params} />
             )}
           </div>

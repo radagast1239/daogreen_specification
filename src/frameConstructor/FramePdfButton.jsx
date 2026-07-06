@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { generateCutList } from './frameCutList.js';
 import { canExportFramePdf, exportFrameToPdf } from './framePdfExport.js';
@@ -11,6 +11,7 @@ import {
   FRAME_SOURCE_MODULE_RACK,
   FRAME_SOURCE_PRESET,
 } from '../../shared/frameDrawingContext.js';
+import { buildClientBrand } from '../lib/clientBrandConfig.js';
 import { api, photoSrc } from '../lib/api.js';
 
 function saveButtonLabel(ctx) {
@@ -32,6 +33,19 @@ export default function FramePdfButton({
   const [saveBusy, setSaveBusy] = useState(false);
   const [error, setError] = useState('');
   const [savedDrawing, setSavedDrawing] = useState(null);
+  const [branding, setBranding] = useState(() => buildClientBrand({}));
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getSettings()
+      .then((settings) => {
+        if (!cancelled) setBranding(buildClientBrand(settings));
+      })
+      .catch(() => {
+        if (!cancelled) setBranding(buildClientBrand({}));
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const disabled = !canExportFramePdf(geom) || busy || saveBusy;
   const canSave = hasFrameDrawingSaveTarget(drawingContext);
@@ -48,8 +62,8 @@ export default function FramePdfButton({
         isoImageDataUrl = null;
       }
     }
-    return { config: params, geometry: geom, cutList, isoImageDataUrl };
-  }, [params, geom, captureRef]);
+    return { config: params, geometry: geom, cutList, isoImageDataUrl, branding };
+  }, [params, geom, captureRef, branding]);
 
   const handleExport = useCallback(async () => {
     if (!canExportFramePdf(geom)) {

@@ -46,6 +46,7 @@ export function calculateFrameGeometry(rawParams) {
     connectionType = 'crab',
     rackType = 'nft',
     channelsEnabled = false,
+    crabPostOverrides = {},
   } = params;
 
   const validationErrors = [];
@@ -233,6 +234,8 @@ export function calculateFrameGeometry(rawParams) {
     beamLayouts,
     posts,
     endCapBeamLayouts,
+    frameParams: params,
+    crabPostOverrides,
   });
 
   const dimensions = {

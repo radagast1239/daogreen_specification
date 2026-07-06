@@ -1,4 +1,6 @@
 /** Проточная гидропония: 6 стоек, 6–8 балок */
+import { getCrabPostOverride } from './frameCrabOverrides.js';
+
 export function isFlowRack(rackType) {
   return rackType === 'nft' || rackType === 'strawberry' || rackType === 'custom';
 }
@@ -87,8 +89,68 @@ function postXY(px, py, spanX, tubeWidthMm, moduleDepthMm) {
   return { x, y };
 }
 
-function connectorKey(c) {
+function connectorPositionKey(c) {
   return `${Math.round(c.x)}|${Math.round(c.y)}|${Math.round(c.z)}`;
+}
+
+function connectorKey(c) {
+  return `${connectorPositionKey(c)}|${c.type ?? ''}|${c.slot ?? 0}`;
+}
+
+/** Промежуточный ряд стоек по глубине (при postCountY > 2). */
+export function isMiddleYPost(py, postCountY) {
+  return postCountY > 2 && py > 0 && py < postCountY - 1;
+}
+
+/** Длинная сторона каркаса (периметр по X). */
+export function isLongSidePost(px, postCountX) {
+  return px === 0 || px === postCountX - 1;
+}
+
+/**
+ * Расстановка крабов при postCountY > 2 (доп. ряды по глубине).
+ * null — использовать стандартную логику Г/T/X.
+ */
+export function postCrabCountsForLevel({ px, py, postCountX, postCountY, isTopLevel }) {
+  if (postCountY <= 2) return null;
+
+  const middleY = isMiddleYPost(py, postCountY);
+  const longSide = isLongSidePost(px, postCountX);
+  const internalX = px > 0 && px < postCountX - 1;
+  const frontBack = py === 0 || py === postCountY - 1;
+  const corner = isCornerPost(px, py, postCountX, postCountY);
+
+  if (isTopLevel) {
+    if (longSide) {
+      // Углы стеллажа на верхнем ярусе — только Г-краб (без X)
+      return { g: corner ? 1 : 0, t: 0, x: corner ? 0 : 1, a4: 2, a6: 0 };
+    }
+    if (middleY && internalX) {
+      return { g: 0, t: 0, x: 1, a4: 2, a6: 0 };
+    }
+    if (frontBack && internalX) {
+      return { g: 0, t: 1, x: 0, a4: 0, a6: 0 };
+    }
+    return null;
+  }
+
+  if (middleY && internalX) {
+    return { g: 0, t: 0, x: 0, a4: 0, a6: 4 };
+  }
+  if (middleY && longSide) {
+    return { g: 0, t: 0, x: 0, a4: 2, a6: 0 };
+  }
+  if (frontBack && internalX) {
+    return { g: 0, t: 0, x: 1, a4: 0, a6: 0 };
+  }
+  return null;
+}
+
+/** @deprecated используйте postCrabCountsForLevel */
+export function fourWayCrabSetsForPost({ px, py, postCountX, postCountY, isTopLevel }) {
+  const plan = postCrabCountsForLevel({ px, py, postCountX, postCountY, isTopLevel });
+  if (!plan) return { a4: 0, x: 0 };
+  return { a4: plan.a4, x: plan.x };
 }
 
 export function isCornerPost(px, py, postCountX, postCountY) {
@@ -102,9 +164,114 @@ export function isInternalPost(px, py, postCountX, postCountY) {
   return internalX || internalY;
 }
 
-/** Один комплект краба = 2 половинки (шт.) */
-export function crabHalvesFromSets(sets) {
-  return Math.max(0, sets) * 2;
+/** Автоматическая расстановка крабов на стойке (без ручных override). */
+export function defaultPostCrabCounts({ px, py, postCountX, postCountY, isTopLevel }) {
+  const yExpansionPlan = postCrabCountsForLevel({
+    px,
+    py,
+    postCountX,
+    postCountY,
+    isTopLevel,
+  });
+  if (yExpansionPlan) return yExpansionPlan;
+
+  if (isTopLevel && isCornerPost(px, py, postCountX, postCountY)) {
+    return { g: 1, t: 0, x: 0, a4: 0, a6: 0 };
+  }
+  if (isInternalPost(px, py, postCountX, postCountY) && !isTopLevel) {
+    return { g: 0, t: 0, x: 1, a4: 0, a6: 0 };
+  }
+  return { g: 0, t: 1, x: 0, a4: 0, a6: 0 };
+}
+
+/**
+ * @param {object} frameParams
+ * @param {number} levelIndex
+ * @param {number} px
+ * @param {number} py
+ * @param {boolean} isTopLevel
+ * @param {object|null|undefined} crabPostOverrides
+ */
+export function resolvePostCrabCounts(frameParams, levelIndex, px, py, isTopLevel, crabPostOverrides) {
+  const manual = getCrabPostOverride(crabPostOverrides, px, py, isTopLevel);
+  if (manual) return manual;
+  return defaultPostCrabCounts({
+    px,
+    py,
+    postCountX: frameParams.postCountX,
+    postCountY: frameParams.postCountY,
+    isTopLevel,
+  });
+}
+
+/** G, T, X: одинаковые детали, 1 комплект = 2 шт. */
+export const CRAB_PIECES_PER_SET = 2;
+
+/** A6: 1 комплект = 4 шт. */
+export const CRAB_A6_PIECES_PER_SET = 4;
+
+/** @param {'G'|'T'|'X'|'A4'|'A6'} type */
+export function crabPiecesPerSet(type = 'G') {
+  if (type === 'A6') return CRAB_A6_PIECES_PER_SET;
+  return CRAB_PIECES_PER_SET;
+}
+
+/** @param {number} sets @param {'G'|'T'|'X'|'A4'|'A6'} [type] */
+export function crabPiecesFromSets(sets, type = 'G') {
+  const n = Math.max(0, Number(sets) || 0);
+  if (type === 'A4') return n;
+  return n * crabPiecesPerSet(type);
+}
+
+/** @param {number} pieces @param {'G'|'T'|'X'|'A4'|'A6'} type */
+export function crabSetsFromPieces(pieces, type) {
+  const n = Math.max(0, Number(pieces) || 0);
+  if (type === 'A4') return n;
+  const perSet = crabPiecesPerSet(type);
+  return perSet > 0 ? n / perSet : 0;
+}
+
+/** @param {number} sets @param {'G'|'T'|'X'|'A4'|'A6'} type */
+export function crabSpecNote(sets, type) {
+  const s = Math.max(0, Number(sets) || 0);
+  if (type === 'A4') return `${s} компл.`;
+  const pieces = crabPiecesFromSets(s, type);
+  const perSet = crabPiecesPerSet(type);
+  return `${s} компл. × ${perSet} шт = ${pieces} шт`;
+}
+
+/** Кол-во в спецификации: G/T/X/A6 — шт., A4 — компл. */
+export function crabCutListQty(sets, type) {
+  const s = Math.max(0, Number(sets) || 0);
+  if (type === 'A4') return s;
+  return crabPiecesFromSets(s, type);
+}
+
+/** Перевод qty из спецификации в комплекты (для сверки). */
+export function crabCutListQtyToPieces(qty, type) {
+  const n = Math.max(0, Number(qty) || 0);
+  if (type === 'A4') return n;
+  return n;
+}
+
+/**
+ * Ручной ввод: G/T/X/A6 — шт., A4 — компл.
+ * @param {number|string} manual
+ * @param {'G'|'T'|'X'|'A4'|'A6'} type
+ * @param {number} autoSets
+ */
+export function resolveManualCrabSets(manual, type, autoSets) {
+  if (manual === '' || manual === undefined || manual === null) return autoSets;
+  const n = Math.max(0, Number(manual) || 0);
+  if (type === 'A4') return n;
+  return crabSetsFromPieces(n, type);
+}
+
+/** Подпись количества для UI: G/T/X/A6 — шт., A4 — компл. */
+export function crabDisplayQty(sets, type) {
+  const s = Math.max(0, Number(sets) || 0);
+  if (type === 'A4') return { qty: s, unit: 'компл.' };
+  return { qty: crabPiecesFromSets(s, type), unit: 'шт.' };
 }
 
 export function countConnectorsByType(connectors) {
@@ -112,7 +279,90 @@ export function countConnectorsByType(connectors) {
     G: connectors.filter((c) => c.type === 'G').length,
     T: connectors.filter((c) => c.type === 'T').length,
     X: connectors.filter((c) => c.type === 'X').length,
+    A4: connectors.filter((c) => c.type === 'A4').length,
+    A6: connectors.filter((c) => c.type === 'A6').length,
   };
+}
+
+/** Каркас с двумя рядами стоек по Y: каждый горизонтальный уровень — полноценный ярус. */
+export function isSingleBayRack(postCountY) {
+  return Math.max(2, Math.round(postCountY) || 2) === 2;
+}
+
+function inferPostCountYFromConnectors(connectors) {
+  let maxPy = -1;
+  for (const c of connectors || []) {
+    if (c.axis === 'post' && c.py != null) maxPy = Math.max(maxPy, c.py);
+  }
+  return maxPy >= 0 ? maxPy + 1 : 2;
+}
+
+/**
+ * Для спецификации.
+ * postCountY=2: все уровни (1-й рабочий … верх) входят в закупку.
+ * postCountY>2: уровень 0 — нижнее кольцо; в закупку только X на внутренних стойках.
+ */
+export function countConnectorsByTypeForBom(connectors, zLevels, postCountY) {
+  const yCount = postCountY ?? inferPostCountYFromConnectors(connectors);
+  if (isSingleBayRack(yCount)) {
+    return countConnectorsByType(connectors);
+  }
+
+  const bottomZ = zLevels?.[0];
+  if (bottomZ == null) return countConnectorsByType(connectors);
+  const filtered = (connectors || []).filter((c) => {
+    if (Math.abs(c.z - bottomZ) <= 0.01 && c.type === 'X') return true;
+    return Math.abs(c.z - bottomZ) > 0.01;
+  });
+  return countConnectorsByType(filtered);
+}
+
+function postConnectorOrientation(px, py, postCountX, postCountY, type) {
+  if (type === 'G') return px === 0 ? 'right' : 'left';
+  if (type === 'X') return 'center';
+  if (px === 0) return 'right';
+  if (px === postCountX - 1) return 'left';
+  if (py === 0) return 'down';
+  if (py === postCountY - 1) return 'up';
+  return 'center';
+}
+
+function addPostCrabCounts(add, { x, y, z, px, py, postCountX, postCountY, counts }) {
+  if (counts.g > 0) {
+    add({
+      x,
+      y,
+      z,
+      type: 'G',
+      axis: 'post',
+      orientation: postConnectorOrientation(px, py, postCountX, postCountY, 'G'),
+      px,
+      py,
+      slot: 'g',
+    });
+  }
+  if (counts.t > 0) {
+    add({
+      x,
+      y,
+      z,
+      type: 'T',
+      axis: 'post',
+      orientation: postConnectorOrientation(px, py, postCountX, postCountY, 'T'),
+      px,
+      py,
+      slot: 't',
+    });
+  }
+  for (let slot = 0; slot < counts.a4; slot++) {
+    add({ x, y, z, type: 'A4', axis: 'post', orientation: 'center', px, py, slot: `a4-${slot}` });
+  }
+  for (let slot = 0; slot < counts.a6; slot++) {
+    add({ x, y, z, type: 'A6', axis: 'post', orientation: 'center', px, py, slot: `a6-${slot}` });
+  }
+  if (counts.x > 0) {
+    add({ x, y, z, type: 'X', axis: 'post', orientation: 'center', px, py, slot: 'x' });
+  }
 }
 
 /** X-позиции торцевых поперечных балок — строго на оси крайних стоек по длине */
@@ -171,6 +421,8 @@ export function generateConnectors({
   beamLayouts,
   posts,
   endCapBeamLayouts = [],
+  frameParams = null,
+  crabPostOverrides = {},
 }) {
   const connectors = [];
   if (connectionType !== 'crab') return connectors;
@@ -184,17 +436,26 @@ export function generateConnectors({
   };
 
   const upsertEndCapConnector = (c) => {
-    const key = connectorKey(c);
+    const posKey = connectorPositionKey(c);
     const next = { ...c, type: 'T', endCap: true };
-    const idx = connectors.findIndex((item) => connectorKey(item) === key);
+    const idx = connectors.findIndex(
+      (item) => item.axis === 'post' && connectorPositionKey(item) === posKey,
+    );
     if (idx >= 0) {
+      const oldKey = connectorKey(connectors[idx]);
+      seen.delete(oldKey);
       connectors[idx] = { ...connectors[idx], ...next };
+      seen.add(connectorKey(connectors[idx]));
       return;
     }
-    seen.add(key);
-    connectors.push(next);
+    add(next);
   };
 
+
+  const paramsForCrabs = frameParams || {
+    postCountX,
+    postCountY,
+  };
 
   for (let l = 0; l < levelCount; l++) {
     const layout = beamLayouts[l];
@@ -205,43 +466,56 @@ export function generateConnectors({
     for (let px = 0; px < postCountX; px++) {
       for (let py = 0; py < postCountY; py++) {
         const { x, y } = postXY(px, py, spanX, tubeWidthMm, depthMm);
+        const counts = resolvePostCrabCounts(
+          paramsForCrabs,
+          l,
+          px,
+          py,
+          isTopLevel,
+          crabPostOverrides,
+        );
 
-        let type = 'T';
-        let orientation = 'center';
-
-        if (isTopLevel && isCornerPost(px, py, postCountX, postCountY)) {
-          type = 'G';
-          if (px === 0) orientation = 'right';
-          else orientation = 'left';
-        } else if (isInternalPost(px, py, postCountX, postCountY) && !isTopLevel) {
-          type = 'X';
-          orientation = 'center';
-        } else {
-          type = 'T';
-          if (px === 0) orientation = 'right';
-          else if (px === postCountX - 1) orientation = 'left';
-          else if (py === 0) orientation = 'down';
-          else if (py === postCountY - 1) orientation = 'up';
-        }
-
-        add({ x, y, z, type, axis: 'post', orientation, px, py });
-      }
-    }
-
-    // Узлы поперечной балки на продольной (не на стойке) — всегда T
-    for (let py = 0; py < postCountY; py++) {
-      const y = postXY(0, py, spanX, tubeWidthMm, depthMm).y;
-      for (const x of layout.xPositions) {
-        const atPost = posts.some((p) => Math.abs(p.x - x) < tubeWidthMm && Math.abs(p.y - y) < tubeWidthMm);
-        if (atPost) continue;
-
-        add({
+        addPostCrabCounts(add, {
           x,
           y,
           z,
+          px,
+          py,
+          postCountX,
+          postCountY,
+          counts,
+        });
+      }
+    }
+
+    // T на поперечной: 2 комплекта на балку (стык с продольной спереди и сзади), 1 комплект = 2 шт.
+    const yBayCount = Math.max(1, postCountY - 1);
+    for (let bay = 0; bay < yBayCount; bay++) {
+      const y1 = postYPosition(bay, depthMm, tubeWidthMm);
+      const y2 = postYPosition(bay + 1, depthMm, tubeWidthMm);
+      const yFrontRail = y1 + tubeWidthMm / 2;
+      const yBackRail = y2 - tubeWidthMm / 2;
+      for (const x of layout.xPositions) {
+        const onPostColumn = posts.some((p) => Math.abs(p.x - x) < tubeWidthMm);
+        if (onPostColumn) continue;
+
+        add({
+          x,
+          y: yFrontRail,
+          z,
           type: 'T',
           axis: 'cross',
-          orientation: py === 0 ? 'down' : 'up',
+          orientation: 'down',
+          slot: `cross-rail-f-${bay}`,
+        });
+        add({
+          x,
+          y: yBackRail,
+          z,
+          type: 'T',
+          axis: 'cross',
+          orientation: 'up',
+          slot: `cross-rail-b-${bay}`,
         });
       }
     }

@@ -2,6 +2,14 @@ import {
   canExportFramePdf,
   prepareFramePdfData,
 } from './framePdfData.js';
+import { loadHardwareRowImages } from './frameCrabImages.js';
+import {
+  drawFramePdfBrandFooter,
+  drawFramePdfBrandHeader,
+  FRAME_PDF_BRAND_HEADER_H,
+  loadFramePdfLogoDataUrl,
+  normalizeFramePdfBranding,
+} from './framePdfBranding.js';
 import { supportsTrays } from './frameCrabRules.js';
 import {
   countNftChannelsAcrossDepth,
@@ -16,6 +24,7 @@ import {
 } from './frameNftChannels.js';
 
 export { buildFramePdfFilename, canExportFramePdf, prepareFramePdfData } from './framePdfData.js';
+export { normalizeFramePdfBranding } from './framePdfBranding.js';
 
 const PAGE_W = 420;
 const PAGE_H = 297;
@@ -24,7 +33,7 @@ const PAGE_H = 297;
 const SHEET_INSET = 10;
 const SHEET_PAD = 5;
 const STAMP_W = 110;
-const STAMP_H = 34;
+const STAMP_H = 36;
 const STAMP_X = PAGE_W - SHEET_INSET - STAMP_W - SHEET_PAD;
 const STAMP_Y = PAGE_H - SHEET_INSET - STAMP_H - SHEET_PAD;
 const CONTENT_BOTTOM = STAMP_Y - 6;
@@ -50,12 +59,16 @@ export const CRAB_COLORS = {
   G: [210, 140, 30],
   T: [255, 200, 0],
   X: [50, 130, 210],
+  A4: [160, 80, 190],
+  A6: [120, 60, 150],
 };
 
 export const CRAB_LABELS = {
   G: 'Г',
   T: 'T',
   X: 'X',
+  A4: '4',
+  A6: '6',
 };
 
 /** Ось горизонтальной трубы яруса (от пола) */
@@ -81,20 +94,22 @@ export function beamElevationCenterZ(beamZ, geom, tubeHeightMm) {
   return beamZ;
 }
 
+const BRAND_Y = FRAME_PDF_BRAND_HEADER_H;
+
 export const PDF_LAYOUT = {
-  frontBox: { x: 15, y: 20, w: 185, h: 136 },
-  sideBox: { x: 208, y: 20, w: 85, h: 136 },
-  topBox: { x: 15, y: 162, w: 185, h: CONTENT_BOTTOM - 162 },
-  isoBox: { x: 290, y: 20, w: 110, h: 136 },
+  frontBox: { x: 15, y: 20 + BRAND_Y, w: 185, h: 136 - BRAND_Y },
+  sideBox: { x: 208, y: 20 + BRAND_Y, w: 85, h: 136 - BRAND_Y },
+  topBox: { x: 15, y: 154 + BRAND_Y, w: STAMP_X - 20, h: CONTENT_BOTTOM - (154 + BRAND_Y) },
+  isoBox: { x: 290, y: 20 + BRAND_Y, w: 110, h: 136 - BRAND_Y },
   stampBox: { x: STAMP_X, y: STAMP_Y, w: STAMP_W, h: STAMP_H },
 };
 
 /** Рамки отдельной страницы NFT-каналов */
 export const PDF_CHANNELS_LAYOUT = {
-  frontBox: { x: 15, y: 22, w: 195, h: 124 },
-  sideBox: { x: RIGHT_COL_X, y: 22, w: RIGHT_COL_W, h: 124 },
-  topBox: { x: 15, y: 152, w: 195, h: CONTENT_BOTTOM - 152 },
-  infoBox: { x: RIGHT_COL_X, y: 152, w: RIGHT_COL_W, h: CONTENT_BOTTOM - 152 },
+  frontBox: { x: 15, y: 22 + BRAND_Y, w: 195, h: 124 - BRAND_Y },
+  sideBox: { x: RIGHT_COL_X, y: 22 + BRAND_Y, w: RIGHT_COL_W, h: 124 - BRAND_Y },
+  topBox: { x: 15, y: 152 + BRAND_Y, w: 195, h: CONTENT_BOTTOM - (152 + BRAND_Y) },
+  infoBox: { x: RIGHT_COL_X, y: 152 + BRAND_Y, w: RIGHT_COL_W, h: CONTENT_BOTTOM - (152 + BRAND_Y) },
   stampBox: { x: STAMP_X, y: STAMP_Y, w: STAMP_W, h: STAMP_H },
 };
 
@@ -112,6 +127,20 @@ export function fitToBox(realW, realH, box, padding = 8) {
 
 export function visualTubeWidth(tubeWidthMm, scale, min = 0.8, max = 2.2) {
   return Math.min(max, Math.max(min, tubeWidthMm * scale));
+}
+
+/** Тонкие линии труб на виде сверху — не перекрывают крабы и пролёты */
+export function topViewVisualTubeWidth(tubeWidthMm, scale) {
+  return Math.min(1.05, Math.max(0.35, tubeWidthMm * scale * 0.58));
+}
+
+/** Маркеры крабов на плане — масштаб от размера чертежа и плотности сетки */
+export function resolveTopViewCrabMarkerOptions(scale, connectorCount = 0, beamCount = 0) {
+  let r = Math.min(2.4, Math.max(0.95, scale * 22));
+  if (beamCount > 10) r *= 0.82;
+  else if (beamCount > 6) r *= 0.9;
+  if (connectorCount > 28) r *= 0.88;
+  return { radius: r, fitLabel: true, lineWidth: 0.22 };
 }
 
 export function shouldDrawPdfTrays(params) {
@@ -177,6 +206,102 @@ export function edgeBasedCrossBeamSegments(xPositions, lengthMm, tubeWidthMm) {
   });
 
   return segments;
+}
+
+/** Цепочка подписей для небольшого числа поперечин (≤6) */
+function chainItemsForCrossBeamSegments(segments) {
+  if (!segments?.length) return [];
+  if (segments.length <= 5) {
+    return segments.map((seg) => ({ seg, label: String(seg.value) }));
+  }
+
+  const interior = segments.slice(1, -1);
+  const allInteriorEqual = interior.length > 0 && interior.every((s) => s.value === interior[0].value);
+
+  if (allInteriorEqual && interior.length >= 2) {
+    const mid = interior[Math.floor(interior.length / 2)];
+    return [
+      { seg: segments[0], label: String(segments[0].value) },
+      { seg: mid, label: `${interior[0].value} × ${interior.length}` },
+      { seg: segments[segments.length - 1], label: String(segments[segments.length - 1].value) },
+    ];
+  }
+
+  return segments.map((seg) => ({ seg, label: String(seg.value) }));
+}
+
+/**
+ * План размеров поперечин на виде сверху.
+ * ≤6 — на плане; >6 — сжатая цепочка снизу + подпись в легенде.
+ */
+export function planTopViewCrossBeamDims(xPositions, lengthMm, tubeWidthMm) {
+  if (!xPositions?.length) {
+    return { mode: 'none', chainItems: [], note: null };
+  }
+
+  const beamCount = xPositions.length;
+  const segments = edgeBasedCrossBeamSegments(xPositions, lengthMm, tubeWidthMm);
+
+  if (beamCount > 6) {
+    const leading = segments[0];
+    const interior = segments.slice(1, -1);
+    const allEqual = interior.length > 0 && interior.every((s) => s.value === interior[0].value);
+    let note;
+    if (allEqual) {
+      note = `Поперечины: ${beamCount} шт., шаг ${interior[0].value} мм, торец ${leading.value} мм`;
+    } else {
+      const unique = [...new Set(interior.map((s) => s.value))].sort((a, b) => a - b);
+      note = `Поперечины: ${beamCount} шт., шаги ${unique.join(', ')} мм, торец ${leading.value} мм`;
+    }
+    return {
+      mode: 'summary',
+      chainItems: chainItemsForCrossBeamSegments(segments),
+      note,
+    };
+  }
+
+  return { mode: 'chain', chainItems: chainItemsForCrossBeamSegments(segments), note: null };
+}
+
+/** @deprecated используйте planTopViewCrossBeamDims */
+export function summarizeCrossBeamSegmentDims(segments) {
+  return chainItemsForCrossBeamSegments(segments);
+}
+
+/**
+ * Раскладывает подписи по «ярусам», если в PDF они наезжают друг на друга.
+ * @param {{ seg: object, label: string }[]} items
+ */
+export function assignCrossBeamDimRows(items, transform, minLabelMm = 8) {
+  const placed = [];
+
+  for (const item of items) {
+    const x1 = transform.toX(item.seg.x1);
+    const x2 = transform.toX(item.seg.x2);
+    const center = (x1 + x2) / 2;
+    const labelW = Math.max(minLabelMm, String(item.label).length * 2.1);
+
+    let row = 0;
+    while (placed.some((p) => p.row === row && Math.abs(center - p.center) < (labelW + p.labelW) / 2)) {
+      row += 1;
+    }
+    placed.push({ ...item, row, labelW, center });
+  }
+  return placed;
+}
+
+/** Оценка числа ярусов размеров снизу (для отступа рамки вида) */
+export function estimateCrossBeamDimRowCount(params, geom) {
+  const layout = geom.beamLayouts?.[geom.beamLayouts.length - 1];
+  if (!layout?.xPositions?.length) return 1;
+  const plan = planTopViewCrossBeamDims(
+    layout.xPositions,
+    params.lengthMm,
+    params.tubeWidthMm,
+  );
+  if (plan.mode !== 'chain' && plan.mode !== 'summary') return 1;
+  if (plan.chainItems.length <= 4) return 1;
+  return Math.min(plan.mode === 'summary' ? 3 : 4, Math.ceil(plan.chainItems.length / 3));
 }
 
 function createViewTransform(box, contentW, contentH, padding = 10) {
@@ -306,11 +431,25 @@ export function pickDimLabelCoord(from, to, posts, tubeWidthMm, axis = 'x') {
   return from + span * 0.25;
 }
 
-function drawDimH(doc, x1, y1, x2, y2, label, offset = 4, box = null, labelOffset = -1.8, labelPdfX = null) {
+function drawDimHInline(doc, x1, y, x2, label, box, fontSize = 4.2) {
+  if (box && (y < box.y - 2 || y > box.y + box.h + 2)) return;
+  doc.setDrawColor(...COLORS.dim);
+  doc.setLineWidth(0.2);
+  doc.line(x1, y, x2, y);
+  doc.line(x1, y, x1 + 0.9, y - 0.55);
+  doc.line(x1, y, x1 + 0.9, y + 0.55);
+  doc.line(x2, y, x2 - 0.9, y - 0.55);
+  doc.line(x2, y, x2 - 0.9, y + 0.55);
+  doc.setFontSize(fontSize);
+  doc.setTextColor(...COLORS.dim);
+  doc.text(String(label), (x1 + x2) / 2, y + 1.3, { align: 'center' });
+}
+
+function drawDimH(doc, x1, y1, x2, y2, label, offset = 4, box = null, labelOffset = -1.8, labelPdfX = null, fontSize = 5.5) {
   const y = y1 + offset;
   if (box && (y < box.y - PDF_DIM_OUTSIDE || y > box.y + box.h + PDF_DIM_OUTSIDE)) return;
   doc.setDrawColor(...COLORS.dim);
-  doc.setLineWidth(0.3);
+  doc.setLineWidth(fontSize <= 4.6 ? 0.25 : 0.3);
   doc.line(x1, y1, x1, y);
   doc.line(x2, y2, x2, y);
   doc.line(x1, y, x2, y);
@@ -318,10 +457,11 @@ function drawDimH(doc, x1, y1, x2, y2, label, offset = 4, box = null, labelOffse
   doc.line(x1, y, x1 + 1.2, y + 0.7);
   doc.line(x2, y, x2 - 1.2, y - 0.7);
   doc.line(x2, y, x2 - 1.2, y + 0.7);
-  doc.setFontSize(5.5);
+  doc.setFontSize(fontSize);
   doc.setTextColor(...COLORS.dim);
   const lx = labelPdfX ?? (x1 + x2) / 2;
-  doc.text(String(Math.round(label)), lx, y + labelOffset, { align: 'center' });
+  const labelText = typeof label === 'number' ? String(Math.round(label)) : String(label);
+  doc.text(labelText, lx, y + labelOffset, { align: 'center' });
 }
 
 function drawDimV(doc, x1, y1, x2, y2, label, offset = 4, box = null, side = 'left', labelGap = 1.2, labelPdfY = null) {
@@ -398,7 +538,7 @@ export function collectCrabLegendTypes(connectors) {
   return ['G', 'T', 'X'].filter((t) => types.has(t));
 }
 
-/** Крабы на плане: только верхний уровень (как в FrameDrawings2D) */
+/** Крабы на плане: стойки + T в точках пересечения поперечин с продольными балками */
 export function collectTopViewPlanConnectors(geom, topLevel) {
   const topConnectors = (geom.connectors || []).filter(
     (c) => Math.abs(c.z - topLevel) < 0.01,
@@ -420,26 +560,46 @@ export function collectTopViewPlanConnectors(geom, topLevel) {
     return list[0];
   });
 
-  const crossPlan = topConnectors.filter((c) => c.axis === 'cross');
-  return [...postPlan, ...crossPlan];
+  const crossBeams = (geom.crossBeams || []).filter((b) => Math.abs(b.z - topLevel) < 0.01);
+  const junctionPlan = [];
+  for (const b of crossBeams) {
+    junctionPlan.push({ x: b.x, y: b.y - b.length / 2, z: topLevel, type: 'T', axis: 'cross' });
+    if (b.length > 0.01) {
+      junctionPlan.push({ x: b.x, y: b.y + b.length / 2, z: topLevel, type: 'T', axis: 'cross' });
+    }
+  }
+
+  const merged = new Map();
+  for (const c of [...postPlan, ...junctionPlan]) {
+    const key = `${Math.round(c.x)}|${Math.round(c.y)}`;
+    const prev = merged.get(key);
+    if (!prev || c.type === 'G') merged.set(key, c);
+  }
+  return [...merged.values()];
 }
 
 /** Отступы под размерные линии вида сверху (мм PDF) */
-export function measureTopViewDimMargins(params, geom) {
+export function measureTopViewDimMargins(params, geom, dimRowCount = 1) {
   const layout = geom.beamLayouts?.[geom.beamLayouts.length - 1];
-  const segCount = layout?.xPositions?.length || 0;
+  const beamCount = layout?.xPositions?.length || 0;
+  const summaryMode = beamCount > 6;
   const depthMm = geom.dimensions?.depthMm ?? params.depthMm;
   const aspect = params.lengthMm / Math.max(1, depthMm);
-  const bottom = segCount > 6 ? 28 : segCount > 4 ? 24 : segCount > 2 ? 21 : 18;
-  const right = aspect > 4 ? 16 : 14;
-  return { top: 12, bottom, left: 12, right };
+  let bottom = summaryMode ? 15 : 12;
+  if (!summaryMode) {
+    bottom += Math.max(0, dimRowCount - 1) * 2;
+  } else {
+    bottom += Math.max(0, dimRowCount - 1) * 4;
+  }
+  const right = aspect > 4 ? 12 : 10;
+  return { top: 7, bottom, left: 9, right };
 }
 
-export function topViewLayoutAreas(box, { hasLegend = true, legendTypes = ['G', 'T'], dimMargins = null } = {}) {
-  const dm = dimMargins || { top: 11, bottom: 18, left: 10, right: 10 };
-  const legendCount = Math.max(1, legendTypes?.length || 2);
-  const legendH = hasLegend ? Math.max(13, legendCount * 3.5 + 4) : 0;
-  const titleH = 7;
+export function topViewLayoutAreas(box, { hasLegend = true, legendTypes = ['G', 'T'], dimMargins = null, beamNote = null } = {}) {
+  const dm = dimMargins || { top: 7, bottom: 10, left: 9, right: 10 };
+  const hasFooter = hasLegend || beamNote;
+  const legendH = hasFooter ? 6 : 0;
+  const titleH = 5;
   return {
     frame: box,
     drawing: {
@@ -464,6 +624,8 @@ function drawCrabLegend(doc, legendBox, legendTypes) {
     G: 'Г — Г образный краб',
     T: 'T — Т образный краб',
     X: 'X — Икс образный краб',
+    A4: '4 — угол на 4 стороны',
+    A6: '6 — угол на 6 сторон',
   };
   let ly = legendBox.y + legendBox.h - 2;
   doc.setFontSize(4.5);
@@ -481,23 +643,74 @@ function drawCrabLegend(doc, legendBox, legendTypes) {
   });
 }
 
+function drawTopViewFooterStrip(doc, legendBox, legendTypes, beamNote) {
+  if (!legendBox || legendBox.h <= 0) return;
+  const y = legendBox.y + legendBox.h - 1.5;
+  let x = legendBox.x + 2;
+  doc.setFontSize(4.2);
+  const labels = {
+    G: 'Г-краб',
+    T: 'T-краб',
+    X: 'X-краб',
+  };
+  (legendTypes || []).forEach((type) => {
+    const color = CRAB_COLORS[type];
+    doc.setFillColor(...color);
+    if (type === 'G') {
+      doc.rect(x, y - 1.1, 1.6, 1.6, 'F');
+    } else {
+      doc.circle(x + 0.8, y - 0.3, 0.8, 'F');
+    }
+    doc.setTextColor(50);
+    doc.text(labels[type] || type, x + 2.4, y + 0.2);
+    x += 18;
+  });
+  if (beamNote) {
+    doc.setTextColor(70);
+    doc.text(beamNote, legendBox.x + legendBox.w - 2, y + 0.2, { align: 'right', maxWidth: legendBox.w - x - 4 });
+  }
+}
+
 function renderDepthMm(params, geom) {
   return geom?.dimensions?.depthMm ?? params.depthMm;
 }
 
-function drawTopViewDimensions(doc, box, params, geom, transform) {
+function drawTopViewDimensions(doc, box, params, geom, transform, beamDimPlan, drawingBox) {
   const { lengthMm, tubeWidthMm } = params;
   const depthMm = renderDepthMm(params, geom);
   const innerLength = frameInnerLengthMm(lengthMm, tubeWidthMm);
   const innerDepth = depthMm - 2 * tubeWidthMm;
-  const layout = geom.beamLayouts?.[geom.beamLayouts.length - 1];
   const baseY = transform.toY(0);
+  const topY = transform.toY(depthMm);
   const posts = geom.posts ?? [];
+  const inlineClip = drawingBox || box;
+  let outerDimOffset = 10;
 
-  // Снизу: цепочка между поперечными балками (ближе к чертежу)
-  if (layout?.xPositions?.length) {
-    const segments = edgeBasedCrossBeamSegments(layout.xPositions, lengthMm, tubeWidthMm);
-    segments.forEach((seg) => {
+  // На плане: шаг поперечин при ≤6
+  if (beamDimPlan?.mode === 'chain' && beamDimPlan.chainItems.length) {
+    const planned = assignCrossBeamDimRows(beamDimPlan.chainItems, transform);
+    const inlineBaseY = transform.toY(depthMm * 0.38);
+    const rowStep = 3.2;
+    planned.forEach(({ seg, label, row }) => {
+      drawDimHInline(
+        doc,
+        transform.toX(seg.x1),
+        inlineBaseY - row * rowStep,
+        transform.toX(seg.x2),
+        label,
+        inlineClip,
+      );
+    });
+  }
+
+  // Снизу снаружи: сжатая цепочка при >6 поперечинах
+  if (beamDimPlan?.mode === 'summary' && beamDimPlan.chainItems.length) {
+    const planned = assignCrossBeamDimRows(beamDimPlan.chainItems, transform);
+    const chainOffset = 5;
+    const rowStep = 4.5;
+    let maxRow = 0;
+    planned.forEach(({ seg, label, row }) => {
+      maxRow = Math.max(maxRow, row);
       const labelMm = pickDimLabelCoord(seg.x1, seg.x2, posts, tubeWidthMm, 'x');
       drawDimH(
         doc,
@@ -505,13 +718,15 @@ function drawTopViewDimensions(doc, box, params, geom, transform) {
         baseY,
         transform.toX(seg.x2),
         baseY,
-        seg.value,
-        8,
+        label,
+        chainOffset + row * rowStep,
         box,
-        -1.8,
+        1.7,
         transform.toX(labelMm),
+        4.5,
       );
     });
+    outerDimOffset = chainOffset + (maxRow + 1) * rowStep + 4;
   }
 
   // Снаружи снизу: общая длина
@@ -522,25 +737,25 @@ function drawTopViewDimensions(doc, box, params, geom, transform) {
     transform.toX(lengthMm),
     baseY,
     frameOuterLengthMm(lengthMm),
-    15,
+    outerDimOffset,
     box,
-    -1.8,
+    -1.6,
     transform.toX(pickDimLabelCoord(0, lengthMm, posts, tubeWidthMm, 'x')),
   );
 
-  // Сверху: внутренняя длина (подпись в пролёте без стоек)
+  // Сверху: внутренняя длина
   const innerX1 = tubeWidthMm;
   const innerX2 = lengthMm - tubeWidthMm;
   drawDimH(
     doc,
     transform.toX(innerX1),
-    transform.toY(depthMm),
+    topY,
     transform.toX(innerX2),
-    transform.toY(depthMm),
+    topY,
     innerLength,
-    -10,
+    -8,
     box,
-    -2.2,
+    -1.8,
     transform.toX(pickDimLabelCoord(innerX1, innerX2, posts, tubeWidthMm, 'x')),
   );
 
@@ -553,14 +768,14 @@ function drawTopViewDimensions(doc, box, params, geom, transform) {
     transform.toX(0),
     transform.toY(depthMm),
     depthMm,
-    9,
+    7,
     box,
     'left',
     1.2,
     transform.toY(depthLabelY),
   );
 
-  // Справа: внутренняя глубина — подпись в пролёте без стоек
+  // Справа: внутренняя глубина
   const innerY1 = tubeWidthMm;
   const innerY2 = depthMm - tubeWidthMm;
   drawDimV(
@@ -570,10 +785,10 @@ function drawTopViewDimensions(doc, box, params, geom, transform) {
     transform.toX(lengthMm),
     transform.toY(innerY2),
     innerDepth,
-    13,
+    9,
     box,
     'right',
-    3.5,
+    3,
     transform.toY(pickDimLabelCoord(innerY1, innerY2, posts, tubeWidthMm, 'y')),
   );
 }
@@ -831,14 +1046,27 @@ function drawTopView(doc, box, params, geom) {
   const legendTypes = showCrabs
     ? collectCrabLegendTypes([...planConnectors, ...topGConnectors])
     : [];
-  const dimMargins = measureTopViewDimMargins(params, geom);
+  const layout = geom.beamLayouts?.[geom.beamLayouts.length - 1];
+  const beamDimPlan = layout?.xPositions?.length
+    ? planTopViewCrossBeamDims(layout.xPositions, lengthMm, tubeWidthMm)
+    : { mode: 'none', chainItems: [], note: null };
+  const dimRowCount = estimateCrossBeamDimRowCount(params, geom);
+  const dimMargins = measureTopViewDimMargins(params, geom, dimRowCount);
   const areas = topViewLayoutAreas(box, {
     hasLegend: legendTypes.length > 0,
     legendTypes,
     dimMargins,
+    beamNote: beamDimPlan.note,
   });
-  const transform = createViewTransform(areas.drawing, lengthMm, depthMm, 3);
-  const vw = visualTubeWidth(tubeWidthMm, transform.scale);
+  const beamCount = layout?.xPositions?.length || 0;
+  const transform = createViewTransform(areas.drawing, lengthMm, depthMm, 2);
+  const vw = topViewVisualTubeWidth(tubeWidthMm, transform.scale);
+  const crabMarkerOpts = resolveTopViewCrabMarkerOptions(
+    transform.scale,
+    planConnectors.length,
+    beamCount,
+  );
+  const drawBox = areas.drawing;
 
   // 1. Поддон — только контур, под балками
   if (shouldDrawPdfTrays(params) && geom.trays?.length) {
@@ -860,7 +1088,7 @@ function drawTopView(doc, box, params, geom) {
   geom.longitudinalBeams
     .filter((b) => Math.abs(b.z - topLevel) < 0.01)
     .forEach((b) => {
-      drawPdfTubeH(doc, transform, b.y, b.x - b.length / 2, b.x + b.length / 2, tubeWidthMm, COLORS.longitudinal, box);
+      drawPdfTubeH(doc, transform, b.y, b.x - b.length / 2, b.x + b.length / 2, tubeWidthMm, COLORS.longitudinal, drawBox);
     });
 
   geom.crossBeams
@@ -870,7 +1098,7 @@ function drawTopView(doc, box, params, geom) {
       drawPdfTube(doc, x, transform.toY(b.y - b.length / 2), x, transform.toY(b.y + b.length / 2), {
         color: COLORS.cross,
         strokeWidth: vw,
-        box,
+        box: drawBox,
       });
     });
 
@@ -883,16 +1111,17 @@ function drawTopView(doc, box, params, geom) {
     const cy = transform.toY(p.y);
     const isGCorner = gPostKeys.has(`${Math.round(p.x)}|${Math.round(p.y)}`);
     if (isGCorner) {
+      const gr = Math.min(crabMarkerOpts.radius, vw * 1.1);
       doc.setFillColor(...CRAB_COLORS.G);
       doc.setDrawColor(40);
-      doc.setLineWidth(0.35);
-      doc.rect(cx - vw / 2, cy - vw / 2, vw, vw, 'FD');
-      doc.setFontSize(4.5);
+      doc.setLineWidth(0.25);
+      doc.rect(cx - gr, cy - gr, gr * 2, gr * 2, 'FD');
+      doc.setFontSize(fitCrabMarkerLabelFontSize(gr, 'G'));
       doc.setTextColor(...COLORS.dim);
-      doc.text('Г', cx, cy + 0.4, { align: 'center' });
+      doc.text('Г', cx, cy, { align: 'center', baseline: 'middle' });
     } else {
       doc.setDrawColor(...COLORS.post);
-      doc.setLineWidth(0.45);
+      doc.setLineWidth(0.3);
       doc.rect(cx - vw / 2, cy - vw / 2, vw, vw, 'S');
     }
   });
@@ -901,13 +1130,13 @@ function drawTopView(doc, box, params, geom) {
     planConnectors
       .filter((c) => c.type !== 'G')
       .forEach((c) => {
-        drawPdfCrabMarker(doc, transform.toX(c.x), transform.toY(c.y), c.type, box);
+        drawPdfCrabMarker(doc, transform.toX(c.x), transform.toY(c.y), c.type, drawBox, crabMarkerOpts);
       });
-    drawCrabLegend(doc, areas.legend, legendTypes);
   }
+  drawTopViewFooterStrip(doc, areas.legend, legendTypes, beamDimPlan.note);
 
-  // 4. Размеры (без дублирования, только от краёв труб)
-  drawTopViewDimensions(doc, areas.frame, params, geom, transform);
+  // 4. Размеры
+  drawTopViewDimensions(doc, areas.frame, params, geom, transform, beamDimPlan, drawBox);
 }
 
 function isoProject(x, y, z, cx, cy, scale) {
@@ -1257,11 +1486,8 @@ function drawChannelsInfoBlock(doc, box, pdfData) {
   }
 }
 
-function drawChannelsPage(doc, pdfData, dateStr, pageNo, totalPages) {
-  drawSheetBorder(doc);
-  doc.setFontSize(13);
-  doc.setTextColor(0);
-  doc.text('NFT-каналы — схема прокладки', 15, 14);
+function drawChannelsPage(doc, pdfData, branding, logoDataUrl, dateStr, pageNo, totalPages) {
+  drawPageChrome(doc, branding, logoDataUrl, 'NFT-каналы — схема прокладки', pageNo, totalPages);
 
   const { config, geometry } = pdfData;
   const { frontBox, sideBox, topBox, infoBox, stampBox } = PDF_CHANNELS_LAYOUT;
@@ -1284,6 +1510,12 @@ function drawSheetBorder(doc) {
   doc.rect(10, 10, PAGE_W - 20, PAGE_H - 20);
 }
 
+function drawPageChrome(doc, branding, logoDataUrl, pageTitle, pageNo, totalPages) {
+  drawSheetBorder(doc);
+  drawFramePdfBrandHeader(doc, branding, logoDataUrl, pageTitle, PAGE_W);
+  drawFramePdfBrandFooter(doc, branding, pageNo, totalPages, PAGE_W, PAGE_H);
+}
+
 function drawStamp(doc, stamp, stampBox, pageNo, totalPages, dateStr) {
   const { x, y, w, h } = stampBox;
   doc.setDrawColor(0);
@@ -1291,6 +1523,7 @@ function drawStamp(doc, stamp, stampBox, pageNo, totalPages, dateStr) {
   doc.rect(x, y, w, h);
 
   const rows = [
+    [stamp.company || 'Daogreen', ''],
     [stamp.title, ''],
     ['Тип', stamp.rackType],
     ['Габариты', stamp.size],
@@ -1300,37 +1533,39 @@ function drawStamp(doc, stamp, stampBox, pageNo, totalPages, dateStr) {
     [`Лист ${pageNo}/${totalPages}`, dateStr],
   ];
 
-  let rowY = y + 4.5;
+  let rowY = y + 4;
   doc.setFontSize(5.5);
   rows.forEach(([label, value], idx) => {
-    if (idx === 0) {
+    if (idx === 0 || idx === 1) {
       doc.setFont(undefined, 'bold');
-      doc.setFontSize(6);
+      doc.setFontSize(idx === 0 ? 5.5 : 6);
       doc.text(label, x + 2, rowY);
       doc.setFont(undefined, 'normal');
       doc.setFontSize(5.5);
-    } else if (idx === rows.length - 1) {
+      rowY += 4;
+      return;
+    }
+
+    if (idx === rows.length - 1) {
       doc.setTextColor(60);
       doc.text(label, x + 2, rowY);
       doc.setTextColor(0);
-      doc.text(String(value), x + 2, rowY + 3.5);
-      rowY += 3.5;
-    } else {
-      doc.setTextColor(60);
-      doc.text(`${label}:`, x + 2, rowY);
-      doc.setTextColor(0);
-      const val = String(value).length > 22 ? `${String(value).slice(0, 20)}…` : value;
-      doc.text(val, x + 24, rowY);
+      doc.text(String(value), x + w - 2, rowY, { align: 'right' });
+      return;
     }
-    rowY += idx === 0 ? 5 : 3.8;
+
+    doc.setTextColor(60);
+    doc.text(`${label}:`, x + 2, rowY);
+    doc.setTextColor(0);
+    const val = String(value).length > 22 ? `${String(value).slice(0, 20)}…` : value;
+    doc.text(val, x + 24, rowY);
+    rowY += 3.5;
   });
 }
 
-function drawAssemblyPage(doc, pdfData, isoImageDataUrl, dateStr, pageNo, totalPages) {
-  drawSheetBorder(doc);
-  doc.setFontSize(13);
+function drawAssemblyPage(doc, pdfData, branding, logoDataUrl, isoImageDataUrl, dateStr, pageNo, totalPages) {
+  drawPageChrome(doc, branding, logoDataUrl, 'Сборочный чертёж', pageNo, totalPages);
   doc.setTextColor(0);
-  doc.text('Сборочный чертёж', 15, 14);
 
   const { config, geometry } = pdfData;
   const params = { ...config, showDimensions: true, showConnectors: true, showTrays: true };
@@ -1349,14 +1584,50 @@ function drawAssemblyPage(doc, pdfData, isoImageDataUrl, dateStr, pageNo, totalP
   drawStamp(doc, pdfData.stamp, stampBox, pageNo, totalPages, dateStr);
 }
 
-function drawSpecPage(doc, pdfData, dateStr, autoTable, tableStyles, pageNo, totalPages) {
-  drawSheetBorder(doc);
-  doc.setFontSize(13);
-  doc.text('Спецификация реза и крепежа', 15, 14);
+function imageFormatFromDataUrl(dataUrl) {
+  if (typeof dataUrl !== 'string') return 'PNG';
+  if (dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/jpg')) return 'JPEG';
+  if (dataUrl.startsWith('data:image/webp')) return 'WEBP';
+  return 'PNG';
+}
+
+function drawHardwareTable(doc, hardwareRows, startY, leftMargin, rightCol, autoTable, tableStyles) {
+  const imgSize = 16;
+  const rowPad = 2;
+  const minRowH = imgSize + rowPad * 2;
+
+  autoTable(doc, {
+    startY,
+    margin: { left: leftMargin, right: rightCol },
+    head: [['Фото', 'Позиция', 'Кол-во', 'Примечание']],
+    body: hardwareRows.map((r) => ['', r.name, r.qty, r.note]),
+    styles: { fontSize: 7, cellPadding: 1.8, minCellHeight: minRowH, ...tableStyles.body },
+    headStyles: { fillColor: [240, 240, 240], textColor: 20, ...tableStyles.head },
+    columnStyles: {
+      0: { cellWidth: imgSize + 4, halign: 'center', valign: 'middle' },
+      2: { halign: 'right' },
+    },
+    didDrawCell: (data) => {
+      if (data.section !== 'body' || data.column.index !== 0) return;
+      const row = hardwareRows[data.row.index];
+      if (!row?.imageDataUrl) return;
+      const fmt = imageFormatFromDataUrl(row.imageDataUrl);
+      const x = data.cell.x + (data.cell.width - imgSize) / 2;
+      const y = data.cell.y + (data.cell.height - imgSize) / 2;
+      doc.addImage(row.imageDataUrl, fmt, x, y, imgSize, imgSize);
+    },
+    theme: 'grid',
+  });
+  return doc.lastAutoTable.finalY + 8;
+}
+
+function drawSpecPage(doc, pdfData, branding, logoDataUrl, dateStr, autoTable, tableStyles, pageNo, totalPages) {
+  drawPageChrome(doc, branding, logoDataUrl, 'Спецификация реза и крепежа', pageNo, totalPages);
 
   const leftMargin = 18;
   const rightCol = PAGE_W / 2 + 6;
   const rightMargin = 18;
+  const tableStartY = 32;
 
   const cutBody = pdfData.cutTableRows.map((row) => [
     row.no,
@@ -1369,7 +1640,7 @@ function drawSpecPage(doc, pdfData, dateStr, autoTable, tableStyles, pageNo, tot
   ]);
 
   autoTable(doc, {
-    startY: 18,
+    startY: tableStartY,
     margin: { left: leftMargin, right: rightCol },
     head: [['№', 'Позиция', 'Профиль', 'Длина, мм', 'Кол-во, шт', 'Рез', 'Примечание']],
     body: cutBody,
@@ -1384,16 +1655,7 @@ function drawSpecPage(doc, pdfData, dateStr, autoTable, tableStyles, pageNo, tot
     doc.setFontSize(9);
     doc.text('Крепёж', leftMargin, y);
     y += 5;
-    autoTable(doc, {
-      startY: y,
-      margin: { left: leftMargin, right: rightCol },
-      head: [['Позиция', 'Кол-во, шт', 'Примечание']],
-      body: pdfData.hardwareRows.map((r) => [r.name, r.qty, r.note]),
-      styles: { fontSize: 7, cellPadding: 1.8, ...tableStyles.body },
-      headStyles: { fillColor: [240, 240, 240], textColor: 20, ...tableStyles.head },
-      theme: 'grid',
-    });
-    y = doc.lastAutoTable.finalY + 8;
+    y = drawHardwareTable(doc, pdfData.hardwareRows, y, leftMargin, rightCol, autoTable, tableStyles);
   } else if (pdfData.weldedNote) {
     doc.setFontSize(8);
     doc.setTextColor(80);
@@ -1426,7 +1688,7 @@ function drawSpecPage(doc, pdfData, dateStr, autoTable, tableStyles, pageNo, tot
   }
 
   autoTable(doc, {
-    startY: 18,
+    startY: tableStartY,
     margin: { left: rightCol, right: rightMargin },
     head: [['Параметр', 'Значение']],
     body: pdfData.paramsList,
@@ -1458,6 +1720,7 @@ export async function buildFramePdfDocument({
   cutList,
   isoImageDataUrl = null,
   preferVectorIso = true,
+  branding = null,
 }) {
   if (!canExportFramePdf(geometry)) {
     throw new Error('PDF export blocked: geometry validation errors');
@@ -1470,7 +1733,17 @@ export async function buildFramePdfDocument({
   ]);
   const autoTable = autoTableMod.default;
 
+  const pdfBranding = normalizeFramePdfBranding(branding);
+  const logoDataUrl = await loadFramePdfLogoDataUrl(pdfBranding);
+
   const pdfData = prepareFramePdfData(config, geometry, cutList);
+  pdfData.stamp = {
+    ...pdfData.stamp,
+    company: pdfBranding.companyName || 'Daogreen',
+  };
+  if (pdfData.hardwareRows.length > 0) {
+    pdfData.hardwareRows = await loadHardwareRowImages(pdfData.hardwareRows);
+  }
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
   await setupPdfFonts(doc);
 
@@ -1483,17 +1756,17 @@ export async function buildFramePdfDocument({
   const totalPages = pdfData.hasChannelsPage ? 3 : 2;
   let pageNo = 1;
 
-  drawAssemblyPage(doc, pdfData, preferVectorIso ? null : isoImageDataUrl, dateStr, pageNo, totalPages);
+  drawAssemblyPage(doc, pdfData, pdfBranding, logoDataUrl, preferVectorIso ? null : isoImageDataUrl, dateStr, pageNo, totalPages);
   pageNo += 1;
 
   if (pdfData.hasChannelsPage) {
     doc.addPage('a3', 'landscape');
-    drawChannelsPage(doc, pdfData, dateStr, pageNo, totalPages);
+    drawChannelsPage(doc, pdfData, pdfBranding, logoDataUrl, dateStr, pageNo, totalPages);
     pageNo += 1;
   }
 
   doc.addPage('a3', 'landscape');
-  drawSpecPage(doc, pdfData, dateStr, autoTable, tableStyles, pageNo, totalPages);
+  drawSpecPage(doc, pdfData, pdfBranding, logoDataUrl, dateStr, autoTable, tableStyles, pageNo, totalPages);
 
   return { doc, filename: pdfData.filename, pdfData };
 }

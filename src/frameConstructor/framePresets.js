@@ -30,6 +30,7 @@ export const defaultFrameParams = {
   showDimensions: true,
   showConnectors: true,
   showTrays: true,
+  crabPostOverrides: {},
 };
 
 export const framePresets = [
