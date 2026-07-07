@@ -908,3 +908,69 @@ describe("generateWallDimensions — thicknessSide-aware inner faces (WALL-DIMEN
   });
 });
 
+// S. WALL-DIMENSIONS-011 — complex/L-shaped contour suppression
+describe("generateWallDimensions — complex contour suppression (WALL-DIMENSIONS-011)", () => {
+  it("S-1: L-shaped closed room does not emit internal_clear or wall_length", () => {
+    const plan = mkPlan([
+      mkWall("t",  0,    0,    4000, 0,    100),
+      mkWall("ru", 4000, 0,    4000, 2000, 100),
+      mkWall("si", 4000, 2000, 2000, 2000, 100),
+      mkWall("sd", 2000, 2000, 2000, 4000, 100),
+      mkWall("b",  2000, 4000, 0,    4000, 100),
+      mkWall("l",  0,    4000, 0,    0,    100),
+    ]);
+    const dims = getDims(plan);
+    expect(dims.filter((d) => d.kind === "internal_clear")).toHaveLength(0);
+    expect(dims.filter((d) => d.kind === "external_overall").length).toBeGreaterThan(0);
+    expect(dims.filter((d) => d.kind === "wall_length")).toHaveLength(0);
+  });
+
+  it("S-2: simple rectangle still keeps internal_clear", () => {
+    const plan = mkPlan([
+      mkWall("t", 0,    0,    4000, 0,    100),
+      mkWall("b", 0,    3000, 4000, 3000, 100),
+      mkWall("l", 0,    0,    0,    3000, 100),
+      mkWall("r", 4000, 0,    4000, 3000, 100),
+    ]);
+    const ic = getDims(plan).filter((d) => d.kind === "internal_clear");
+    expect(ic.length).toBeGreaterThan(0);
+  });
+
+  it("S-3: split rectangle keeps room cell internal_clear", () => {
+    const plan = mkPlan([
+      mkWall("t",  0,    0,    4000, 0,    100),
+      mkWall("b",  0,    4000, 4000, 4000, 100),
+      mkWall("l",  0,    0,    0,    4000, 100),
+      mkWall("r",  4000, 0,    4000, 4000, 100),
+      mkWall("mh", 0,    2000, 4000, 2000, 100),
+    ]);
+    const ic = getDims(plan).filter((d) => d.kind === "internal_clear");
+    expect(ic.length).toBeGreaterThan(0);
+  });
+
+  it("S-4: U-shaped complex closed loop suppresses per-wall clutter", () => {
+    const plan = mkPlan([
+      mkWall("t",  0,    0,    6000, 0,    100),
+      mkWall("r",  6000, 0,    6000, 4000, 100),
+      mkWall("br", 6000, 4000, 4000, 4000, 100),
+      mkWall("ir", 4000, 4000, 4000, 2000, 100),
+      mkWall("it", 4000, 2000, 2000, 2000, 100),
+      mkWall("il", 2000, 2000, 2000, 4000, 100),
+      mkWall("bl", 2000, 4000, 0,    4000, 100),
+      mkWall("lw", 0,    4000, 0,    0,    100),
+    ]);
+    const dims = getDims(plan);
+    expect(dims.filter((d) => d.kind === "wall_length")).toHaveLength(0);
+    expect(dims.filter((d) => d.kind === "internal_clear")).toHaveLength(0);
+    expect(dims.filter((d) => d.kind === "external_overall").length).toBeGreaterThan(0);
+  });
+
+  it("S-5: standalone diagonal wall keeps wall_length", () => {
+    const plan = mkPlan([
+      mkWall("diag", 0, 0, 3000, 4000, 100),
+    ]);
+    const wl = getDims(plan).filter((d) => d.kind === "wall_length");
+    expect(wl.length).toBeGreaterThan(0);
+  });
+});
+

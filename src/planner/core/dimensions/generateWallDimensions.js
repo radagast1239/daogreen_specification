@@ -144,6 +144,38 @@ function isClosedLoop(walls) {
   return valence.size > 0 && [...valence.values()].every((v) => v === 2);
 }
 
+function classifyWallGroup(walls) {
+  if (!walls?.length) return "open_or_standalone";
+  if (!isClosedLoop(walls)) return "open_or_standalone";
+  const axisAligned = walls.every((w) => {
+    const pts = w.pts || [];
+    for (let i = 1; i < pts.length; i++) {
+      const adx = Math.abs(pts[i].x - pts[i - 1].x);
+      const ady = Math.abs(pts[i].y - pts[i - 1].y);
+      if (adx > CELL_AXIS_TOL && ady > CELL_AXIS_TOL) return false;
+    }
+    return true;
+  });
+  if (!axisAligned) return "complex_closed_loop";
+  const corners = new Set();
+  walls.forEach((w) => {
+    const pts = w.pts || [];
+    if (pts.length) {
+      corners.add(endptKey(pts[0]));
+      corners.add(endptKey(pts[pts.length - 1]));
+    }
+  });
+  if (corners.size === 4) return "simple_rect_closed_loop";
+  const cells = detectRectCells(walls);
+  if (!cells.length) return "complex_closed_loop";
+  const b = wallPointsBounds(walls, {});
+  const bboxArea = (b.maxX - b.minX) * (b.maxY - b.minY);
+  if (bboxArea <= 0) return "complex_closed_loop";
+  let cellArea = 0;
+  cells.forEach((c) => { cellArea += (c.x1 - c.x0) * (c.y1 - c.y0); });
+  return cellArea / bboxArea > 0.95 ? "rect_cell_grid" : "complex_closed_loop";
+}
+
 function collectExteriorAxisCuts(walls, axis, edgeValue) {
   const cuts = [];
   (walls || []).forEach((w) => {
@@ -352,10 +384,18 @@ export function resolveCellInnerRect(cell, hSegs, vSegs, fallbackThk) {
 
 // Generate internal_clear dims measured from inner wall faces, not centerlines.
 function generateInternalClearForCells(walls) {
-  const cells = detectRectCells(walls);
+  const groups = groupWallsByConnectivity(walls);
+  const complexIds = new Set();
+  groups.forEach((g) => {
+    if (classifyWallGroup(g) === "complex_closed_loop") {
+      g.forEach((w) => { if (w?.id != null) complexIds.add(w.id); });
+    }
+  });
+  const eligible = complexIds.size > 0 ? walls.filter((w) => !complexIds.has(w.id)) : walls;
+  const cells = detectRectCells(eligible);
   if (!cells.length) return [];
-  const { hSegs, vSegs } = buildAxisSegs(walls);
-  const fallbackThk = repThk(walls);
+  const { hSegs, vSegs } = buildAxisSegs(eligible);
+  const fallbackThk = repThk(eligible);
   const out = [];
   cells.forEach((cell, idx) => {
     const { innerLeft, innerRight, innerTop, innerBot, width, height } =
@@ -393,6 +433,13 @@ function generatePerWallDimensions(walls, room, displayMode) {
   const cells = detectRectCells(walls);
   const { hSegs: bAxisH, vSegs: bAxisV } = buildAxisSegs(walls);
   const suppressedWallIds = collectFullCellBoundaryWallIds(cells, bAxisH, bAxisV);
+
+  const groups = groupWallsByConnectivity(walls);
+  groups.forEach((g) => {
+    if (classifyWallGroup(g) === "complex_closed_loop") {
+      g.forEach((w) => { if (w?.id != null) suppressedWallIds.add(w.id); });
+    }
+  });
 
   const b = wallPointsBounds(walls, room);
   const cx = (b.minX + b.maxX) / 2;
