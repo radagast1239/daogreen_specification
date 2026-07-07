@@ -63,9 +63,10 @@ export default function FrameConstructorPage() {
   const geomOk = !hasErrors && geom.posts;
 
   const cutList = useMemo(() => (geomOk ? generateCutList(params) : []), [params, geomOk]);
+  const isAngle = params.constructionType === 'perforated_angle';
   const crabs = useMemo(
-    () => (params.connectionType === 'crab' && geomOk ? countConnectorsByType(geom.connectors) : null),
-    [params.connectionType, geomOk, geom.connectors],
+    () => (!isAngle && params.connectionType === 'crab' && geomOk ? countConnectorsByType(geom.connectors) : null),
+    [isAngle, params.connectionType, geomOk, geom.connectors],
   );
 
   const dims = geomOk ? geom.dimensions : null;
@@ -78,7 +79,7 @@ export default function FrameConstructorPage() {
       <div className="fc-page-head">
         <PageHeader
           title="Конструктор каркасов"
-          sub="Проектирование стеллажей из профильной трубы"
+          sub="Проектирование стеллажей из профильной трубы или перфоуголка"
           actions={geomOk ? (
             <FramePdfButton
               params={params}
@@ -177,7 +178,7 @@ export default function FrameConstructorPage() {
         </div>
       </div>
 
-      {geomOk && params.connectionType === 'crab' && (
+      {geomOk && params.connectionType === 'crab' && !isAngle && (
         <FrameCrabGallery counts={crabs} />
       )}
 
@@ -193,7 +194,7 @@ export default function FrameConstructorPage() {
             >
               Чертежи 2D
             </button>
-            {params.connectionType === 'crab' && (
+            {!isAngle && params.connectionType === 'crab' && (
               <button
                 type="button"
                 role="tab"
@@ -218,7 +219,7 @@ export default function FrameConstructorPage() {
             {activeTab === 'drawings' && (
               <FrameDrawings2D params={params} geom={geom} />
             )}
-            {activeTab === 'crabs' && params.connectionType === 'crab' && (
+            {activeTab === 'crabs' && !isAngle && params.connectionType === 'crab' && (
               <FrameCrabAudit
                 key={`crab-${params.postCountX}x${params.postCountY}-${params.tierCount}`}
                 params={params}

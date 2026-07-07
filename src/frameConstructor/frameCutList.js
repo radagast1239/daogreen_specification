@@ -1,6 +1,7 @@
 import { calculateFrameGeometry } from './frameGeometry.js';
 import { countConnectorsByTypeForBom, crabCutListQty, crabSpecNote, resolveManualCrabSets } from './frameCrabRules.js';
 import { calculateNftChannelBill, NFT_CHANNEL_STOCK_MM, supportsNftChannels, formatNftQtyWithMargin } from './frameNftChannels.js';
+import { perforatedAngleProfileShort } from './frameAngleStock.js';
 
 export function generateCutList(params) {
   const geom = calculateFrameGeometry(params);
@@ -8,16 +9,19 @@ export function generateCutList(params) {
     return [];
   }
 
-  const { tubeWidthMm, tubeHeightMm, connectionType } = params;
+  const { tubeWidthMm, tubeHeightMm, connectionType, constructionType, angleProfile } = params;
 
-  const profile = `${tubeWidthMm}×${tubeHeightMm}`;
+  const isAngle = constructionType === 'perforated_angle';
+  const profile = isAngle
+    ? perforatedAngleProfileShort(angleProfile)
+    : `${tubeWidthMm}×${tubeHeightMm}`;
 
   const list = [];
 
   if (geom.postHeight > 0) {
     list.push({
       id: 'post',
-      name: 'Стойка',
+      name: isAngle ? 'Стойка (уголок)' : 'Стойка',
       profile,
       length: Math.round(geom.postHeight),
       qty: geom.posts.length,
@@ -29,7 +33,7 @@ export function generateCutList(params) {
   if (geom.spanX > 0) {
     list.push({
       id: 'longitudinal',
-      name: 'Продольная труба',
+      name: isAngle ? 'Продольный уголок' : 'Продольная труба',
       profile,
       length: Math.round(geom.spanX),
       qty: geom.longitudinalBeams.length,
@@ -41,7 +45,7 @@ export function generateCutList(params) {
   if (geom.crossBeamLength > 0) {
     list.push({
       id: 'cross',
-      name: 'Поперечная труба',
+      name: isAngle ? 'Поперечный уголок' : 'Поперечная труба',
       profile,
       length: Math.round(geom.crossBeamLength),
       qty: geom.crossBeams.length,
@@ -50,7 +54,7 @@ export function generateCutList(params) {
     });
   }
 
-  if (connectionType === 'crab' && geom.connectors.length > 0) {
+  if (!isAngle && connectionType === 'crab' && geom.connectors.length > 0) {
     const { G: gCount, T: tCount, X: xCount, A4: a4Count, A6: a6Count } = countConnectorsByTypeForBom(
       geom.connectors,
       geom.zLevels ?? geom.levels,

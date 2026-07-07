@@ -31,6 +31,11 @@ export const defaultFrameParams = {
   showConnectors: true,
   showTrays: true,
   crabPostOverrides: {},
+  constructionType: 'tube_crab',
+  angleProfile: '30×30',
+  angleOverlapMm: 150,
+  crossBeamFasteningMode: 'bolts_only',
+  angleStockLengthsMm: [2000, 2500],
 };
 
 export const framePresets = [

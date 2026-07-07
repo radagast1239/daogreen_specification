@@ -62,5 +62,10 @@ export function normalizeFrameConfig(config) {
     channelStockMarginPct: safeNum(config.channelStockMarginPct, 0, 8, 100),
     channelSleeveMarginPct: safeNum(config.channelSleeveMarginPct, 0, 8, 100),
     channelElbowMarginPct: safeNum(config.channelElbowMarginPct, 0, 8, 100),
+    constructionType: config.constructionType || 'tube_crab',
+    angleProfile: config.angleProfile || '30×30',
+    angleOverlapMm: safeNum(config.angleOverlapMm, 0, 150, 1000),
+    crossBeamFasteningMode: config.crossBeamFasteningMode || 'bolts_only',
+    angleStockLengthsMm: config.angleStockLengthsMm || [2000, 2500],
   };
 }

@@ -1,19 +1,72 @@
 import React, { useMemo } from 'react';
 import { generateCutList } from './frameCutList.js';
+import { calculateFrameGeometry } from './frameGeometry.js';
 import { crabCatalogByConnectorId } from './frameCrabCatalog.js';
 import { resolveCrabImageSrc } from './frameCrabPhotos.js';
 import { useCrabPhotoVersion } from './useCrabPhotoVersion.js';
 import { extractTubeCutsFromCutList, calculateTubeStockOptions } from './frameTubeStock.js';
+import { calculateAngleStockOptions, calculateAngleFastenerVariants, perforatedAngleProfileLabel } from './frameAngleStock.js';
+
+function renderFastenerBlock(title, fasteners, profile) {
+  const rows = [
+    fasteners.fasteningAngles > 0 && ['Крепёжный уголок', profile, fasteners.fasteningAngles],
+    fasteners.boltsM6x20 > 0 && ['Болт М6×20', 'М6', fasteners.boltsM6x20],
+    fasteners.nutsM6 > 0 && ['Гайка М6', 'М6', fasteners.nutsM6],
+    fasteners.growersM6 > 0 && ['Гровер М6', 'М6', fasteners.growersM6],
+    fasteners.footPlates > 0 && ['Подпятник пластиковый', profile, fasteners.footPlates],
+  ].filter(Boolean);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div key={title} style={{ marginTop: '16px' }}>
+      <h5 style={{ margin: '0 0 8px' }}>{title}</h5>
+      <div className="table-responsive">
+        <table style={{ width: '100%', fontSize: '0.85em', background: '#fff' }}>
+          <thead>
+            <tr>
+              <th>Позиция</th>
+              <th>Профиль</th>
+              <th>Кол-во</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([name, prof, qty]) => (
+              <tr key={name}>
+                <td>{name}</td>
+                <td>{prof}</td>
+                <td>{qty}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 export default function FrameCutList({ params }) {
   useCrabPhotoVersion();
   const cutList = useMemo(() => generateCutList(params), [params]);
 
+  const isAngle = params.constructionType === 'perforated_angle';
+
+  const geom = useMemo(() => (isAngle ? calculateFrameGeometry(params) : null), [params, isAngle]);
+
   const stockOptions = useMemo(() => {
     if (!cutList || cutList.length === 0) return null;
-    const cuts = extractTubeCutsFromCutList(cutList);
-    return calculateTubeStockOptions(cuts);
-  }, [cutList]);
+    if (isAngle) {
+      return calculateAngleStockOptions(cutList, { overlapMm: params.angleOverlapMm });
+    } else {
+      const cuts = extractTubeCutsFromCutList(cutList);
+      return calculateTubeStockOptions(cuts);
+    }
+  }, [cutList, isAngle, params.angleOverlapMm]);
+
+  const fastenerVariants = useMemo(() => {
+    if (!isAngle || !geom || geom.validationErrors?.length) return null;
+    return calculateAngleFastenerVariants(geom);
+  }, [isAngle, geom]);
 
   if (cutList.length === 0) {
     return (
@@ -74,7 +127,12 @@ export default function FrameCutList({ params }) {
 
       {recommended && (
         <div className="fc-tube-stock" style={{ marginTop: '24px', padding: '16px', background: '#f8f9fa', borderRadius: '8px' }}>
-          <h4 style={{ marginTop: 0, marginBottom: '12px' }}>Закупка трубы (профиль {params.tubeWidthMm}×{params.tubeHeightMm})</h4>
+          <h4 style={{ marginTop: 0, marginBottom: '12px' }}>
+            {isAngle
+              ? `Закупка: ${perforatedAngleProfileLabel(params.angleProfile)}`
+              : `Закупка трубы (профиль ${params.tubeWidthMm}×${params.tubeHeightMm})`
+            }
+          </h4>
           <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 300px' }}>
               <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>
@@ -83,18 +141,54 @@ export default function FrameCutList({ params }) {
               <div style={{ marginBottom: '8px' }}>Варианты раскроя:</div>
               {options.map((opt, i) => (
                 <div key={opt.key} style={{ marginBottom: '12px' }}>
-                  <strong>Вариант {i + 1} — если {opt.key === 'mixed_3000_6000' ? 'можно закупить смешанно 3 м + 6 м' : opt.key === 'only_6000' ? 'есть труба 6 м' : 'есть только труба 3 м'}:</strong>
+                  <strong>
+                    {isAngle ? (
+                      <>
+                        Вариант {i + 1} — если {opt.key === 'auto_2000_2500' ? 'можно закупить смешанно 2 м + 2.5 м' : opt.key === 'only_2500' ? 'есть уголок 2.5 м' : 'есть только уголок 2 м'}:
+                      </>
+                    ) : (
+                      <>
+                        Вариант {i + 1} — если {opt.key === 'mixed_3000_6000' ? 'можно закупить смешанно 3 м + 6 м' : opt.key === 'only_6000' ? 'есть труба 6 м' : 'есть только труба 3 м'}:
+                      </>
+                    )}
+                  </strong>
                   <div>
-                    {opt.stockCounts[6000] > 0 && `6 м — ${opt.stockCounts[6000]} шт`}
-                    {opt.stockCounts[6000] > 0 && opt.stockCounts[3000] > 0 && <br />}
-                    {opt.stockCounts[3000] > 0 && `3 м — ${opt.stockCounts[3000]} шт`}
-                    {(opt.stockCounts[6000] === 0 && opt.stockCounts[3000] === 0) && '0 шт'}
+                    {isAngle ? (
+                      <>
+                        {opt.stockCounts[2500] > 0 && `2.5 м — ${opt.stockCounts[2500]} шт`}
+                        {opt.stockCounts[2500] > 0 && opt.stockCounts[2000] > 0 && <br />}
+                        {opt.stockCounts[2000] > 0 && `2 м — ${opt.stockCounts[2000]} шт`}
+                        {(opt.stockCounts[2500] === 0 && opt.stockCounts[2000] === 0) && '0 шт'}
+                      </>
+                    ) : (
+                      <>
+                        {opt.stockCounts[6000] > 0 && `6 м — ${opt.stockCounts[6000]} шт`}
+                        {opt.stockCounts[6000] > 0 && opt.stockCounts[3000] > 0 && <br />}
+                        {opt.stockCounts[3000] > 0 && `3 м — ${opt.stockCounts[3000]} шт`}
+                        {(opt.stockCounts[6000] === 0 && opt.stockCounts[3000] === 0) && '0 шт'}
+                      </>
+                    )}
                   </div>
                   <div className="muted" style={{ fontSize: '0.9em', marginTop: '4px' }}>
-                    Закупить — {(opt.totalStockLengthMm / 1000).toFixed(1)} м<br />
-                    Суммарный рез — {(opt.totalCutLengthMm / 1000).toFixed(1)} м<br />
-                    Остаток — {(opt.wasteMm / 1000).toFixed(1)} м<br />
-                    Использование — {(opt.utilizationRatio * 100).toFixed(1)}%
+                    {isAngle ? (
+                      <>
+                        Чистый рез — {(opt.cleanCutLengthMm / 1000).toFixed(1)} м<br />
+                        Нахлёсты — {(opt.totalSpliceCount || 0) > 0
+                          ? `${opt.totalSpliceCount} шт (+${(opt.overlapMaterialMm / 1000).toFixed(1)} м)`
+                          : 'не требуются'}<br />
+                        Рез с нахлёстом — {(opt.requiredCutLengthMm / 1000).toFixed(1)} м<br />
+                        Закупить — {(opt.totalStockLengthMm / 1000).toFixed(1)} м<br />
+                        Остаток — {(opt.wasteMm / 1000).toFixed(1)} м<br />
+                        Использование — {(opt.utilizationRatio * 100).toFixed(1)}%
+                      </>
+                    ) : (
+                      <>
+                        Закупить — {(opt.totalStockLengthMm / 1000).toFixed(1)} м<br />
+                        Суммарный рез — {(opt.totalCutLengthMm / 1000).toFixed(1)} м<br />
+                        Остаток — {(opt.wasteMm / 1000).toFixed(1)} м<br />
+                        Использование — {(opt.utilizationRatio * 100).toFixed(1)}%
+                      </>
+                    )}
                   </div>
                   {opt.warnings.length > 0 && (
                     <div style={{ color: '#d32f2f', marginTop: '4px', fontSize: '0.9em', fontWeight: '500' }}>
@@ -108,7 +202,7 @@ export default function FrameCutList({ params }) {
                         <thead>
                           <tr>
                             <th>№</th>
-                            <th>Труба, мм</th>
+                            <th>{isAngle ? 'Уголок, мм' : 'Труба, мм'}</th>
                             <th>Резы, мм</th>
                             <th>Занято</th>
                             <th>Остаток</th>
@@ -132,6 +226,26 @@ export default function FrameCutList({ params }) {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {isAngle && fastenerVariants && (
+        <div className="fc-tube-stock" style={{ marginTop: '16px', padding: '16px', background: '#f8f9fa', borderRadius: '8px' }}>
+          <h4 style={{ marginTop: 0, marginBottom: '8px' }}>Крепёж</h4>
+          {renderFastenerBlock(
+            'Вариант А — поперечины без крепёжных уголков',
+            fastenerVariants.variantA,
+            params.angleProfile || '30×30',
+          )}
+          {renderFastenerBlock(
+            'Вариант Б — поперечины с крепёжными уголками',
+            fastenerVariants.variantB,
+            params.angleProfile || '30×30',
+          )}
+          <p className="muted" style={{ fontSize: '0.85em', marginTop: '12px', marginBottom: 0 }}>
+            Рекомендация: для жёсткости можно использовать крепёжные уголки на поперечинах.
+            Если нагрузка небольшая, допускается крепление поперечин только болт + гайка с двух сторон.
+          </p>
         </div>
       )}
     </>

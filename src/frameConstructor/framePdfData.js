@@ -3,6 +3,7 @@ import { crabCatalogByConnectorId } from './frameCrabCatalog.js';
 import { supportsTrays, totalFrameDepthMm } from './frameCrabRules.js';
 import { countNftChannelsAcrossDepth, calculateNftChannelBill, shouldShowNftChannels, formatNftQtyWithMargin } from './frameNftChannels.js';
 import { extractTubeCutsFromCutList, calculateTubeStockOptions } from './frameTubeStock.js';
+import { calculateAngleStockOptions, calculateAngleFastenerVariants, perforatedAngleProfileLabel } from './frameAngleStock.js';
 
 const RACK_TYPE_LABELS = {
   nft: 'NFT проточная гидропоника',
@@ -41,7 +42,7 @@ export function canExportFramePdf(geometry) {
 
 function tubeItems(cutList) {
   return cutList.filter(
-    (item) => !item.id.startsWith('connector') && !item.id.startsWith('nft-channel'),
+    (item) => item.id === 'post' || item.id === 'longitudinal' || item.id === 'cross',
   );
 }
 
@@ -49,13 +50,21 @@ function channelItems(cutList) {
   return cutList.filter((item) => item.id.startsWith('nft-channel'));
 }
 
-function hardwareItems(cutList, connectionType) {
+function hardwareItems(cutList, connectionType, constructionType) {
+  if (constructionType === 'perforated_angle') {
+    return cutList.filter(
+      (item) => item.id === 'angle-bracket' || item.id === 'bolt-m6' || item.id === 'nut-m6' || item.id === 'grower-m6' || item.id === 'foot-plate',
+    );
+  }
   if (connectionType === 'welded') return [];
   return cutList.filter((item) => item.id.startsWith('connector'));
 }
 
 function profileLabel(config) {
   const c = normalizeFrameConfig(config);
+  if (c.constructionType === 'perforated_angle') {
+    return perforatedAngleProfileLabel(c.angleProfile);
+  }
   return `${c.tubeWidthMm}×${c.tubeHeightMm}`;
 }
 
@@ -63,7 +72,10 @@ function rackTypeLabel(rackType) {
   return RACK_TYPE_LABELS[rackType] || rackType || '—';
 }
 
-function connectionLabel(connectionType) {
+function connectionLabel(connectionType, constructionType) {
+  if (constructionType === 'perforated_angle') {
+    return 'Болтовое (перфоуг.)';
+  }
   return CONNECTION_LABELS[connectionType] || connectionType || '—';
 }
 
@@ -83,7 +95,7 @@ export function prepareFramePdfData(config, geometry, cutList) {
   const normalized = normalizeFrameConfig(config);
   const height = frameHeight(normalized, geometry);
   const tubes = tubeItems(cutList);
-  const hardware = hardwareItems(cutList, normalized.connectionType);
+  const hardware = hardwareItems(cutList, normalized.connectionType, normalized.constructionType);
   const channels = channelItems(cutList);
   const channelBill = calculateNftChannelBill(normalized, geometry);
 
@@ -123,9 +135,18 @@ export function prepareFramePdfData(config, geometry, cutList) {
   const totalDepth = geometry?.dimensions?.depthMm
     ?? totalFrameDepthMm(normalized.depthMm, normalized.tubeWidthMm, normalized.postCountY);
     
-  // Calculate tube stock options
-  const tubeCuts = extractTubeCutsFromCutList(cutList);
-  const tubeStock = calculateTubeStockOptions(tubeCuts);
+  // Calculate stock options
+  let tubeStock = null;
+  let angleStock = null;
+  let angleFasteners = null;
+
+  if (normalized.constructionType === 'perforated_angle') {
+    angleStock = calculateAngleStockOptions(cutList, { overlapMm: normalized.angleOverlapMm });
+    angleFasteners = calculateAngleFastenerVariants(geometry || normalized);
+  } else {
+    const tubeCuts = extractTubeCutsFromCutList(cutList);
+    tubeStock = calculateTubeStockOptions(tubeCuts);
+  }
 
   const paramsList = [
     ['Длина, мм', normalized.lengthMm],
@@ -137,7 +158,7 @@ export function prepareFramePdfData(config, geometry, cutList) {
     ['Количество уровней', geometry?.levelCount ?? normalized.tierCount + 1],
     ['Шаг ярусов, мм', normalized.tierSpacingMm],
     ['Нижний отступ, мм', normalized.bottomOffsetMm],
-    ['Профиль трубы', profileLabel(normalized)],
+    [normalized.constructionType === 'perforated_angle' ? 'Профиль уголка' : 'Профиль трубы', profileLabel(normalized)],
     ['Количество стоек по X', normalized.postCountX],
     ['Количество стоек по Y', normalized.postCountY],
     ['Поперечных балок на уровень', normalized.crossBeamsPerLevel],
@@ -151,7 +172,7 @@ export function prepareFramePdfData(config, geometry, cutList) {
           .filter((v) => v != null)
           .join(', ') || 'нет уровней'
       : 'выключены'],
-    ['Тип соединения', connectionLabel(normalized.connectionType)],
+    ['Тип соединения', connectionLabel(normalized.connectionType, normalized.constructionType)],
     ['Поддоны', traysActive ? 'включены' : 'выключены'],
     [
       'Размер поддона',
@@ -199,7 +220,7 @@ export function prepareFramePdfData(config, geometry, cutList) {
       tiers: normalized.tierCount,
       tierSpacing: normalized.tierSpacingMm,
       profile: profileLabel(normalized),
-      connection: connectionLabel(normalized.connectionType),
+      connection: connectionLabel(normalized.connectionType, normalized.constructionType),
     },
     cutTableRows,
     hardwareRows,
@@ -208,6 +229,8 @@ export function prepareFramePdfData(config, geometry, cutList) {
     notes: FRAME_PDF_NOTES,
     weldedNote,
     tubeStock,
+    angleStock,
+    angleFasteners,
     hasChannelsPage: channelsActive && (geometry?.nftChannels?.runs?.length ?? 0) > 0,
     channelsSummary: channelsActive && channelBill
       ? {

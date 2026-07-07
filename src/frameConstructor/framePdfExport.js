@@ -830,6 +830,13 @@ export function collectFrontViewStrokes(params, geom, box) {
   return strokes;
 }
 
+function drawAngleIcon(doc, x, y, size = 3) {
+  doc.setLineWidth(0.4);
+  doc.setDrawColor(80);
+  doc.line(x, y, x, y + size);
+  doc.line(x, y + size, x + size, y + size);
+}
+
 function drawFrontView(doc, box, params, geom) {
   const { lengthMm, tubeWidthMm, tubeHeightMm, bottomOffsetMm, tierSpacingMm, tierCount } = params;
   const postHeight = geom.postHeight;
@@ -936,7 +943,15 @@ function drawFrontView(doc, box, params, geom) {
 
   doc.setFontSize(5);
   doc.setTextColor(80);
-  doc.text(`Профиль ${tubeWidthMm}×${tubeHeightMm}`, box.x + 2, box.y + box.h - 2);
+  const profileLabelStr = params.constructionType === 'perforated_angle'
+    ? `перфорированный уголок ${params.angleProfile || '30×30'}`
+    : `Профиль ${tubeWidthMm}×${tubeHeightMm}`;
+  doc.text(profileLabelStr, box.x + 2, box.y + box.h - 2);
+
+  if (params.constructionType === 'perforated_angle') {
+    const textWidth = doc.getTextWidth(profileLabelStr);
+    drawAngleIcon(doc, box.x + 2 + textWidth + 2, box.y + box.h - 4.5, 2.5);
+  }
 }
 
 function drawSideView(doc, box, params, geom) {
@@ -1568,7 +1583,12 @@ function drawAssemblyPage(doc, pdfData, branding, logoDataUrl, isoImageDataUrl, 
   doc.setTextColor(0);
 
   const { config, geometry } = pdfData;
-  const params = { ...config, showDimensions: true, showConnectors: true, showTrays: true };
+  const params = {
+    ...config,
+    showDimensions: true,
+    showConnectors: config.constructionType !== 'perforated_angle',
+    showTrays: true
+  };
   const { frontBox, sideBox, topBox, isoBox, stampBox } = PDF_LAYOUT;
 
   drawViewFrame(doc, frontBox, 'Вид спереди');
@@ -1589,6 +1609,50 @@ function imageFormatFromDataUrl(dataUrl) {
   if (dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/jpg')) return 'JPEG';
   if (dataUrl.startsWith('data:image/webp')) return 'WEBP';
   return 'PNG';
+}
+
+function drawCompactFastenersTable(doc, title, fasteners, startY, leftMargin, rightCol, autoTable, tableStyles) {
+  doc.setFontSize(8.5);
+  doc.setFont('Roboto', 'bold');
+  doc.setTextColor(0);
+  doc.text(title, leftMargin, startY);
+  doc.setFont('Roboto', 'normal');
+
+  const rows = [];
+  let idx = 1;
+  const profile = fasteners.angleProfile || '30×30';
+
+  if (fasteners.fasteningAngles > 0) {
+    rows.push([idx++, 'Крепёжный уголок', profile, `${fasteners.fasteningAngles} шт`, 'Оцинкованный крепёжный уголок']);
+  }
+  if (fasteners.boltsM6x20 > 0) {
+    rows.push([idx++, 'Болт М6×20', 'М6', `${fasteners.boltsM6x20} шт`, 'Для сборки каркаса']);
+  }
+  if (fasteners.nutsM6 > 0) {
+    rows.push([idx++, 'Гайка М6', 'М6', `${fasteners.nutsM6} шт`, 'Для сборки каркаса']);
+  }
+  if (fasteners.growersM6 > 0) {
+    rows.push([idx++, 'Гровер М6', 'М6', `${fasteners.growersM6} шт`, 'Для сборки каркаса']);
+  }
+  if (fasteners.footPlates > 0) {
+    rows.push([idx++, 'Подпятник пластиковый', profile, `${fasteners.footPlates} шт`, 'Заглушка/подпятник для стоек']);
+  }
+
+  autoTable(doc, {
+    startY: startY + 4,
+    margin: { left: leftMargin, right: rightCol },
+    head: [['№', 'Позиция', 'Профиль', 'Кол-во', 'Примечание']],
+    body: rows,
+    styles: { fontSize: 7, cellPadding: 1.5, ...tableStyles.body },
+    headStyles: { fillColor: [240, 240, 240], textColor: 20, ...tableStyles.head },
+    columnStyles: {
+      0: { cellWidth: 8 },
+      3: { halign: 'right' },
+    },
+    theme: 'grid',
+  });
+
+  return doc.lastAutoTable.finalY + 6;
 }
 
 function drawHardwareTable(doc, hardwareRows, startY, leftMargin, rightCol, autoTable, tableStyles) {
@@ -1651,7 +1715,70 @@ function drawSpecPage(doc, pdfData, branding, logoDataUrl, dateStr, autoTable, t
 
   let y = doc.lastAutoTable.finalY + 8;
 
-  if (pdfData.tubeStock?.options) {
+  if (pdfData.angleStock?.options) {
+    const { recommended, options } = pdfData.angleStock;
+    doc.setFontSize(9);
+    doc.setTextColor(0);
+    doc.setFont('Roboto', 'bold');
+    doc.text(`Закупка: ${pdfData.dimensions.profile}`, leftMargin, y);
+    doc.setFont('Roboto', 'normal');
+    y += 5;
+
+    doc.setFontSize(8);
+    doc.setTextColor(80);
+    doc.text(`Самый экономичный по отходу: ${recommended.title}`, leftMargin, y);
+    doc.setTextColor(0);
+    y += 6;
+
+    for (const opt of options) {
+      if (y > PAGE_H - 45) {
+        doc.addPage('a3', 'landscape');
+        y = 20;
+      }
+      
+      doc.setFont('Roboto', 'bold');
+      if (opt.key === 'only_2000') {
+        doc.text(`Если есть уголок 2 м:`, leftMargin, y);
+      } else if (opt.key === 'only_2500') {
+        doc.text(`Если есть уголок 2.5 м:`, leftMargin, y);
+      } else {
+        doc.text(`Смешанный вариант:`, leftMargin, y);
+      }
+      doc.setFont('Roboto', 'normal');
+      y += 4;
+      
+      if (opt.stockCounts[2500] > 0) doc.text(`2.5 м — ${opt.stockCounts[2500]} шт`, leftMargin + 2, y), y += 4;
+      if (opt.stockCounts[2000] > 0) doc.text(`2 м — ${opt.stockCounts[2000]} шт`, leftMargin + 2, y), y += 4;
+      
+      const cleanCutM = (opt.cleanCutLengthMm / 1000).toFixed(1);
+      const requiredCutM = (opt.requiredCutLengthMm / 1000).toFixed(1);
+      const overlapM = (opt.overlapMaterialMm / 1000).toFixed(1);
+      const buyM = (opt.totalStockLengthMm / 1000).toFixed(1);
+      const wasteM = (opt.wasteMm / 1000).toFixed(1);
+      const spliceCount = opt.totalSpliceCount || 0;
+
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Чистый рез: ${cleanCutM} м  |  Нахлёсты: ${spliceCount > 0 ? `${spliceCount} шт (+${overlapM} м)` : 'не требуются'}  |  Рез с нахлёстом: ${requiredCutM} м`, leftMargin + 2, y);
+      y += 3.5;
+      doc.text(`Закупить: ${buyM} м  |  Остаток: ${wasteM} м  |  Использование: ${(opt.utilizationRatio * 100).toFixed(1)}%`, leftMargin + 2, y);
+      y += 5;
+      doc.setFontSize(8);
+      doc.setTextColor(0);
+      
+      if (opt.warnings && opt.warnings.length > 0) {
+        doc.setTextColor(200, 0, 0);
+        for (const w of opt.warnings) {
+          const splitWarning = doc.splitTextToSize(`Предупреждение: ${w}`, rightCol - leftMargin - 10);
+          doc.text(splitWarning, leftMargin + 2, y);
+          y += 4 * splitWarning.length;
+        }
+        doc.setTextColor(0);
+      }
+      y += 1;
+    }
+    y += 4;
+  } else if (pdfData.tubeStock?.options) {
     const { recommended, options } = pdfData.tubeStock;
     doc.setFontSize(9);
     doc.setTextColor(0);
@@ -1706,12 +1833,36 @@ function drawSpecPage(doc, pdfData, branding, logoDataUrl, dateStr, autoTable, t
     y += 4;
   }
 
-  if (pdfData.hardwareRows.length > 0) {
-    doc.setFontSize(9);
-    doc.text('Крепёж', leftMargin, y);
-    y += 5;
-    y = drawHardwareTable(doc, pdfData.hardwareRows, y, leftMargin, rightCol, autoTable, tableStyles);
-  } else if (pdfData.weldedNote) {
+  if (pdfData.angleStock?.options && pdfData.angleFasteners) {
+    const { variantA, variantB } = pdfData.angleFasteners;
+
+    if (y > PAGE_H - 100) {
+      doc.addPage('a3', 'landscape');
+      y = 20;
+    }
+
+    y = drawCompactFastenersTable(doc, 'Крепёж — вариант А: поперечины без крепёжных уголков', {
+      ...variantA,
+      angleProfile: pdfData.config.angleProfile,
+    }, y, leftMargin, rightCol, autoTable, tableStyles);
+
+    if (y > PAGE_H - 100) {
+      doc.addPage('a3', 'landscape');
+      y = 20;
+    }
+
+    y = drawCompactFastenersTable(doc, 'Крепёж — вариант Б: поперечины с крепёжными уголками', {
+      ...variantB,
+      angleProfile: pdfData.config.angleProfile,
+    }, y, leftMargin, rightCol, autoTable, tableStyles);
+
+    doc.setFontSize(7.5);
+    doc.setTextColor(80);
+    const splitNote = doc.splitTextToSize("Рекомендация: для жёсткости можно использовать крепёжные уголки на поперечинах. Если нагрузка небольшая, допускается крепление поперечин только болт + гайка с двух сторон.", rightCol - leftMargin - 4);
+    doc.text(splitNote, leftMargin, y);
+    y += 4 * splitNote.length + 2;
+    doc.setTextColor(0);
+  } else if (pdfData.hardwareRows.length > 0) {
     doc.setFontSize(8);
     doc.setTextColor(80);
     doc.text(pdfData.weldedNote, leftMargin, y);
@@ -1719,6 +1870,10 @@ function drawSpecPage(doc, pdfData, branding, logoDataUrl, dateStr, autoTable, t
   }
 
   if (pdfData.channelTableRows?.length > 0) {
+    if (y > PAGE_H - 45) {
+      doc.addPage('a3', 'landscape');
+      y = 20;
+    }
     doc.setFontSize(9);
     doc.setTextColor(0);
     doc.text('NFT-каналы (заготовки 2 м, с запасом)', leftMargin, y);
@@ -1742,6 +1897,8 @@ function drawSpecPage(doc, pdfData, branding, logoDataUrl, dateStr, autoTable, t
     y = doc.lastAutoTable.finalY + 8;
   }
 
+  const leftColumnEndY = y;
+
   autoTable(doc, {
     startY: tableStartY,
     margin: { left: rightCol, right: rightMargin },
@@ -1754,7 +1911,12 @@ function drawSpecPage(doc, pdfData, branding, logoDataUrl, dateStr, autoTable, t
 
   doc.setFontSize(8);
   doc.setTextColor(40);
-  let noteY = Math.max(y, doc.lastAutoTable.finalY + 10);
+  const notesBlockHeight = 5 + pdfData.notes.length * 4.5;
+  let noteY = leftColumnEndY + 6;
+  if (noteY + notesBlockHeight > PAGE_H - 12) {
+    doc.addPage('a3', 'landscape');
+    noteY = 20;
+  }
   doc.text('Примечания:', leftMargin, noteY);
   noteY += 5;
   pdfData.notes.forEach((note) => {

@@ -354,12 +354,81 @@ export default function FrameForm({ params, onChange }) {
           <summary className="fc-section__title">Конструкция</summary>
           <div className="fc-section__body">
             <div className="fc-grid">
-              <Field label="Ширина трубы, мм">
-                <input type="number" name="tubeWidthMm" value={params.tubeWidthMm} onChange={handleChange} onBlur={handleBlur} />
+              <Field label="Тип конструкции" span>
+                <select name="constructionType" value={params.constructionType || 'tube_crab'} onChange={handleChange}>
+                  <option value="tube_crab">Профильная труба + краб-система</option>
+                  <option value="perforated_angle">Перфорированный уголок 30×30</option>
+                </select>
               </Field>
-              <Field label="Высота трубы, мм">
-                <input type="number" name="tubeHeightMm" value={params.tubeHeightMm} onChange={handleChange} onBlur={handleBlur} />
-              </Field>
+
+              {params.constructionType === 'perforated_angle' ? (
+                <>
+                  <Field label="Профиль уголка">
+                    <select name="angleProfile" value={params.angleProfile || '30×30'} onChange={handleChange}>
+                      <option value="30×30">30×30 мм</option>
+                    </select>
+                  </Field>
+                  <Field label="Нахлёст уголка, мм" hint="0 — без нахлёста. Добавляется только для деталей длиннее 2 м / 2.5 м.">
+                    <input
+                      type="number"
+                      name="angleOverlapMm"
+                      min={0}
+                      max={1000}
+                      value={params.angleOverlapMm !== undefined && params.angleOverlapMm !== null ? params.angleOverlapMm : 150}
+                      onChange={handleChange}
+                      onBlur={handleBlur}
+                    />
+                  </Field>
+                  <Field label="Длина заготовки уголка" span>
+                    <select
+                      name="angleStockSelection"
+                      value={
+                        params.angleStockLengthsMm?.length === 1
+                          ? params.angleStockLengthsMm[0]
+                          : 'auto'
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'auto') {
+                          onChange({ ...params, angleStockLengthsMm: [2000, 2500] });
+                        } else {
+                          onChange({ ...params, angleStockLengthsMm: [Number(val)] });
+                        }
+                      }}
+                    >
+                      <option value="2000">Только 2 м</option>
+                      <option value="2500">Только 2.5 м</option>
+                      <option value="auto">Автоподбор 2 м / 2.5 м</option>
+                    </select>
+                  </Field>
+                  <Field label="Крепление поперечин" span>
+                    <select
+                      name="crossBeamFasteningMode"
+                      value={params.crossBeamFasteningMode || 'bolts_only'}
+                      onChange={handleChange}
+                    >
+                      <option value="bolts_only">Без крепёжных уголков (напрямую болтом)</option>
+                      <option value="brackets">С крепёжными уголками</option>
+                    </select>
+                  </Field>
+                </>
+              ) : (
+                <>
+                  <Field label="Ширина трубы, мм">
+                    <input type="number" name="tubeWidthMm" value={params.tubeWidthMm} onChange={handleChange} onBlur={handleBlur} />
+                  </Field>
+                  <Field label="Высота трубы, мм">
+                    <input type="number" name="tubeHeightMm" value={params.tubeHeightMm} onChange={handleChange} onBlur={handleBlur} />
+                  </Field>
+                  <Field label="Соединение" span>
+                    <select name="connectionType" value={params.connectionType} onChange={handleChange}>
+                      <option value="crab">Краб-система</option>
+                      <option value="welded">Сварка</option>
+                    </select>
+                  </Field>
+                </>
+              )}
+
               <Field label="Стоек по X">
                 <input type="number" name="postCountX" value={params.postCountX} onChange={handleChange} onBlur={handleBlur} />
               </Field>
@@ -368,12 +437,6 @@ export default function FrameForm({ params, onChange }) {
               </Field>
               <Field label="Поперечин на ярус" span hint="На каждом горизонтальном уровне. При изменении стоек по Y пересчитывается автоматически.">
                 <input type="number" name="crossBeamsPerLevel" value={params.crossBeamsPerLevel} onChange={handleChange} onBlur={handleBlur} />
-              </Field>
-              <Field label="Соединение" span>
-                <select name="connectionType" value={params.connectionType} onChange={handleChange}>
-                  <option value="crab">Краб-система</option>
-                  <option value="welded">Сварка</option>
-                </select>
               </Field>
             </div>
           </div>
