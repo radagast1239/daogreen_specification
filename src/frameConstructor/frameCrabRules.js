@@ -122,11 +122,10 @@ export function postCrabCountsForLevel({ px, py, postCountX, postCountY, isTopLe
 
   if (isTopLevel) {
     if (longSide) {
-      // Углы стеллажа на верхнем ярусе — только Г-краб (без X)
-      return { g: corner ? 1 : 0, t: 0, x: corner ? 0 : 1, a4: 2, a6: 0 };
+      return { g: 1, t: 0, x: 0, a4: 0, a6: 0 };
     }
     if (middleY && internalX) {
-      return { g: 0, t: 0, x: 1, a4: 2, a6: 0 };
+      return { g: 0, t: 1, x: 0, a4: 0, a6: 0 };
     }
     if (frontBack && internalX) {
       return { g: 0, t: 1, x: 0, a4: 0, a6: 0 };
@@ -135,13 +134,16 @@ export function postCrabCountsForLevel({ px, py, postCountX, postCountY, isTopLe
   }
 
   if (middleY && internalX) {
-    return { g: 0, t: 0, x: 0, a4: 0, a6: 4 };
+    return { g: 0, t: 0, x: 0, a4: 0, a6: 1 };
   }
   if (middleY && longSide) {
-    return { g: 0, t: 0, x: 0, a4: 2, a6: 0 };
+    return { g: 0, t: 1, x: 0, a4: 0, a6: 0 };
   }
   if (frontBack && internalX) {
     return { g: 0, t: 0, x: 1, a4: 0, a6: 0 };
+  }
+  if (longSide) {
+    return { g: 0, t: 1, x: 0, a4: 0, a6: 0 };
   }
   return null;
 }
@@ -298,23 +300,10 @@ function inferPostCountYFromConnectors(connectors) {
 }
 
 /**
- * Для спецификации.
- * postCountY=2: все уровни (1-й рабочий … верх) входят в закупку.
- * postCountY>2: уровень 0 — нижнее кольцо; в закупку только X на внутренних стойках.
+ * Для спецификации — все уровни (1-й рабочий … верх) входят в закупку.
  */
 export function countConnectorsByTypeForBom(connectors, zLevels, postCountY) {
-  const yCount = postCountY ?? inferPostCountYFromConnectors(connectors);
-  if (isSingleBayRack(yCount)) {
-    return countConnectorsByType(connectors);
-  }
-
-  const bottomZ = zLevels?.[0];
-  if (bottomZ == null) return countConnectorsByType(connectors);
-  const filtered = (connectors || []).filter((c) => {
-    if (Math.abs(c.z - bottomZ) <= 0.01 && c.type === 'X') return true;
-    return Math.abs(c.z - bottomZ) > 0.01;
-  });
-  return countConnectorsByType(filtered);
+  return countConnectorsByType(connectors);
 }
 
 function postConnectorOrientation(px, py, postCountX, postCountY, type) {
@@ -408,6 +397,26 @@ export function mergeBeamXPositions(basePositions, extraPositions, tubeWidthMm) 
   return merged.sort((a, b) => a - b);
 }
 
+/** X-позиции поперечин, не совпадающие с осями стоек. */
+export function crossJunctionXPositions(xPositions, posts, tubeWidthMm) {
+  return (xPositions || []).filter(
+    (x) => !posts.some((p) => Math.abs(p.x - x) < tubeWidthMm),
+  );
+}
+
+/**
+ * T на внешних продольных.
+ * Верхний ярус при 4 стойках по X: крайние стыки закрывает G (−4 T).
+ * При 3 или 5+ стойках по X на верху — полный набор T как на рабочих ярусах.
+ */
+export function outerRailCrossXPositions(xPositions, posts, tubeWidthMm, { topLevel, multiBayDepth, postCountX }) {
+  const positions = crossJunctionXPositions(xPositions, posts, tubeWidthMm);
+  if (multiBayDepth && topLevel && postCountX === 4 && positions.length > 2) {
+    return positions.slice(1, -1);
+  }
+  return positions;
+}
+
 export function generateConnectors({
   rackType,
   connectionType,
@@ -488,35 +497,64 @@ export function generateConnectors({
       }
     }
 
-    // T на поперечной: 2 комплекта на балку (стык с продольной спереди и сзади), 1 комплект = 2 шт.
+    // T на внешних продольных; X на средних продольных (стык поперечины с средним рядом)
     const yBayCount = Math.max(1, postCountY - 1);
+    const multiBayDepth = postCountY > 2;
+
     for (let bay = 0; bay < yBayCount; bay++) {
       const y1 = postYPosition(bay, depthMm, tubeWidthMm);
       const y2 = postYPosition(bay + 1, depthMm, tubeWidthMm);
       const yFrontRail = y1 + tubeWidthMm / 2;
       const yBackRail = y2 - tubeWidthMm / 2;
-      for (const x of layout.xPositions) {
-        const onPostColumn = posts.some((p) => Math.abs(p.x - x) < tubeWidthMm);
-        if (onPostColumn) continue;
+      const isFirstBay = bay === 0;
+      const isLastBay = bay === yBayCount - 1;
 
-        add({
-          x,
-          y: yFrontRail,
-          z,
-          type: 'T',
-          axis: 'cross',
-          orientation: 'down',
-          slot: `cross-rail-f-${bay}`,
-        });
-        add({
-          x,
-          y: yBackRail,
-          z,
-          type: 'T',
-          axis: 'cross',
-          orientation: 'up',
-          slot: `cross-rail-b-${bay}`,
-        });
+      const outerCrossX = outerRailCrossXPositions(layout.xPositions, posts, tubeWidthMm, {
+        topLevel: isTopLevel,
+        multiBayDepth,
+        postCountX,
+      });
+
+      for (const x of outerCrossX) {
+        if (!multiBayDepth || isFirstBay) {
+          add({
+            x,
+            y: yFrontRail,
+            z,
+            type: 'T',
+            axis: 'cross',
+            orientation: 'down',
+            slot: `cross-rail-f-${bay}`,
+          });
+        }
+        if (!multiBayDepth || isLastBay) {
+          add({
+            x,
+            y: yBackRail,
+            z,
+            type: 'T',
+            axis: 'cross',
+            orientation: 'up',
+            slot: `cross-rail-b-${bay}`,
+          });
+        }
+      }
+    }
+
+    if (multiBayDepth) {
+      for (let py = 1; py < postCountY - 1; py++) {
+        const yMid = postYPosition(py, depthMm, tubeWidthMm);
+        for (const x of crossJunctionXPositions(layout.xPositions, posts, tubeWidthMm)) {
+          add({
+            x,
+            y: yMid,
+            z,
+            type: 'X',
+            axis: 'cross',
+            orientation: 'center',
+            slot: `cross-mid-${py}`,
+          });
+        }
       }
     }
   }

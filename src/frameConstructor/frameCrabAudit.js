@@ -13,7 +13,6 @@ import {
   isCornerPost,
   isLongSidePost,
   isMiddleYPost,
-  isSingleBayRack,
 } from './frameCrabRules.js';
 
 export const CRAB_CHIP_COLORS = {
@@ -67,9 +66,7 @@ function levelCountsFromBadges(grid) {
 
 /** Ожидаемое кол-во комплектов по шаблонам ярусов (должно совпадать с BOM). */
 export function impliedCrabSetsFromTiers(regularTier, topTier, tierCount, postCountY = 2) {
-  const repeat = isSingleBayRack(postCountY)
-    ? Math.max(0, tierCount ?? 0)
-    : Math.max(0, (tierCount ?? 1) - 1);
+  const repeat = Math.max(0, tierCount ?? 0);
   const types = ['G', 'T', 'X', 'A4', 'A6'];
   const totals = {};
   for (const type of types) {
@@ -174,18 +171,15 @@ export function buildCrabAudit(params, geom, cutList = []) {
   const levelCount = geom.levelCount ?? levels.length;
   const tierCount = params.tierCount ?? Math.max(0, levelCount - 1);
   const topIdx = Math.max(0, levelCount - 1);
-  const singleBay = isSingleBayRack(postCountY);
-  const regularIdx = tierCount > 0 ? (singleBay ? 0 : Math.min(1, topIdx)) : 0;
-  const regularLevelCount = singleBay ? Math.max(0, tierCount) : Math.max(0, tierCount - 1);
+  const regularIdx = 0;
+  const regularLevelCount = Math.max(0, tierCount);
 
   const regularTier = buildTierGrid({
     levelIndex: regularIdx,
     isTop: false,
     tierId: CRAB_TIER_REGULAR,
     label: 'Обычные ярусы',
-    hint: singleBay
-      ? `Шаблон для рабочих ярусов 1–${tierCount} (${regularLevelCount} шт.)`
-      : `Шаблон для ярусов 1–${tierCount - 1} (${regularLevelCount} шт.)`,
+    hint: `Шаблон для рабочих ярусов 1–${tierCount} (${regularLevelCount} шт.)`,
     z: levels[regularIdx] ?? 0,
     params,
     connectors,

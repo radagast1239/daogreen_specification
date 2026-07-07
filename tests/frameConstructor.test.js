@@ -458,19 +458,22 @@ describe('Frame Constructor Geometry', () => {
     expect(cutList.find((c) => c.id === 'connector-a4')).toBeUndefined();
   });
 
-  it('extra Y rows: 6-way internal middle, 4-way external, X on front/back internals', () => {
+  it('extra Y rows: 6-way internal middle, T on long sides, X on front/back internals', () => {
     const regular = postCrabCountsForLevel({ px: 1, py: 1, postCountX: 4, postCountY: 3, isTopLevel: false });
-    expect(regular).toEqual({ g: 0, t: 0, x: 0, a4: 0, a6: 4 });
+    expect(regular).toEqual({ g: 0, t: 0, x: 0, a4: 0, a6: 1 });
     expect(postCrabCountsForLevel({ px: 0, py: 1, postCountX: 4, postCountY: 3, isTopLevel: false })).toEqual({
-      g: 0, t: 0, x: 0, a4: 2, a6: 0,
+      g: 0, t: 1, x: 0, a4: 0, a6: 0,
     });
     expect(postCrabCountsForLevel({ px: 1, py: 0, postCountX: 4, postCountY: 3, isTopLevel: false })).toEqual({
       g: 0, t: 0, x: 1, a4: 0, a6: 0,
     });
     const topCorner = postCrabCountsForLevel({ px: 0, py: 0, postCountX: 4, postCountY: 3, isTopLevel: true });
-    expect(topCorner).toEqual({ g: 1, t: 0, x: 0, a4: 2, a6: 0 });
+    expect(topCorner).toEqual({ g: 1, t: 0, x: 0, a4: 0, a6: 0 });
+    expect(postCrabCountsForLevel({ px: 0, py: 1, postCountX: 4, postCountY: 3, isTopLevel: true })).toEqual({
+      g: 1, t: 0, x: 0, a4: 0, a6: 0,
+    });
     expect(postCrabCountsForLevel({ px: 1, py: 1, postCountX: 4, postCountY: 3, isTopLevel: true })).toEqual({
-      g: 0, t: 0, x: 1, a4: 2, a6: 0,
+      g: 0, t: 1, x: 0, a4: 0, a6: 0,
     });
     expect(postCrabCountsForLevel({ px: 1, py: 0, postCountX: 4, postCountY: 3, isTopLevel: true })).toEqual({
       g: 0, t: 1, x: 0, a4: 0, a6: 0,
@@ -492,27 +495,103 @@ describe('Frame Constructor Geometry', () => {
     const nonTopLevels = levelCount - 1;
     const topZ = geom.levels[levelCount - 1];
 
-    const expectedA6 = nonTopLevels * 2 * 4;
-    const expectedA4Regular = nonTopLevels * 2 * 2;
+    const beamsPerBay = Math.max(1, Math.round(params.crossBeamsPerLevel / (params.postCountY - 1)));
+    const crossXPerLevel = beamsPerBay;
+    const expectedCrossX = levelCount * crossXPerLevel;
+    const expectedA6 = nonTopLevels * 2;
     const expectedXRegular = nonTopLevels * 4;
-    const expectedA4Top = 6 * 2 + 2 * 2;
-    const expectedXTop = 4;
+    const expectedXTop = 0;
     const expectedTTop = 4;
+    const expectedGTop = 6;
 
     expect(counts.A6).toBe(expectedA6);
-    expect(counts.A4).toBe(expectedA4Regular + expectedA4Top);
-    expect(counts.X).toBe(expectedXRegular + expectedXTop);
+    expect(counts.A4).toBe(0);
+    expect(counts.X).toBe(expectedXRegular + expectedXTop + expectedCrossX);
+    expect(counts.G).toBe(expectedGTop);
     expect(geom.connectors.filter((c) => c.type === 'T' && Math.abs(c.z - topZ) < 0.01 && c.axis === 'post').length)
       .toBeGreaterThanOrEqual(expectedTTop);
 
     const cutList = generateCutList(params);
     expect(cutList.find((c) => c.id === 'connector-a6')?.name).toBe('Краб система угол на 6 сторон');
-    expect(cutList.find((c) => c.id === 'connector-a4')?.name).toBe('Краб система угол на 4 стороны');
-    const a4Row = cutList.find((c) => c.id === 'connector-a4');
-    expect(a4Row.qty).toBe(bomCounts.A4);
-    expect(a4Row.note).toMatch(/компл\./);
+    expect(cutList.find((c) => c.id === 'connector-a4')).toBeUndefined();
     const a6Row = cutList.find((c) => c.id === 'connector-a6');
     expect(a6Row.qty).toBe(bomCounts.A6 * 4);
+  });
+
+  it('4x3 Y-bays user grid (2 tiers, 12 cross beams)', () => {
+    const params = {
+      ...defaultFrameParams,
+      postCountX: 4,
+      postCountY: 3,
+      crossBeamsPerLevel: 12,
+      tierCount: 2,
+      connectionType: 'crab',
+    };
+    const geom = calculateFrameGeometry(params);
+    const counts = countConnectorsByType(geom.connectors);
+    expect(counts).toEqual({ G: 6, T: 50, X: 26, A4: 0, A6: 4 });
+  });
+
+  it('4x3 Y-bays user grid (3 tiers, 12 cross beams)', () => {
+    const params = {
+      ...defaultFrameParams,
+      postCountX: 4,
+      postCountY: 3,
+      crossBeamsPerLevel: 12,
+      tierCount: 3,
+      connectionType: 'crab',
+    };
+    const geom = calculateFrameGeometry(params);
+    const counts = countConnectorsByType(geom.connectors);
+    expect(counts).toEqual({ G: 6, T: 68, X: 36, A4: 0, A6: 6 });
+  });
+
+  it('3x3 Y-bays 7 tiers 16 cross beams: T=173 kits (346 pcs) per user count', () => {
+    const params = {
+      ...defaultFrameParams,
+      postCountX: 3,
+      postCountY: 3,
+      crossBeamsPerLevel: 16,
+      tierCount: 7,
+      lengthMm: 3000,
+      depthMm: 500,
+      connectionType: 'crab',
+    };
+    const geom = calculateFrameGeometry(params);
+    const cutList = generateCutList(params);
+    const counts = countConnectorsByType(geom.connectors);
+    const topZ = geom.levels[geom.levelCount - 1];
+    const topT = geom.connectors.filter((c) => c.type === 'T' && Math.abs(c.z - topZ) < 0.01);
+
+    expect(counts.T).toBe(173);
+    expect(topT).toHaveLength(19);
+    expect(topT.filter((c) => c.axis === 'post')).toHaveLength(3);
+    expect(topT.filter((c) => c.axis === 'cross')).toHaveLength(16);
+    expect(cutList.find((c) => c.id === 'connector-t')?.qty).toBe(346);
+  });
+
+  it('5x3 Y-bays 7 tiers 16 cross beams: T=179 kits (358 pcs) per user count', () => {
+    const params = {
+      ...defaultFrameParams,
+      postCountX: 5,
+      postCountY: 3,
+      crossBeamsPerLevel: 16,
+      tierCount: 7,
+      lengthMm: 3000,
+      depthMm: 500,
+      connectionType: 'crab',
+    };
+    const geom = calculateFrameGeometry(params);
+    const cutList = generateCutList(params);
+    const counts = countConnectorsByType(geom.connectors);
+    const topZ = geom.levels[geom.levelCount - 1];
+    const topT = geom.connectors.filter((c) => c.type === 'T' && Math.abs(c.z - topZ) < 0.01);
+
+    expect(counts.T).toBe(179);
+    expect(topT).toHaveLength(25);
+    expect(topT.filter((c) => c.axis === 'post')).toHaveLength(9);
+    expect(topT.filter((c) => c.axis === 'cross')).toHaveLength(16);
+    expect(cutList.find((c) => c.id === 'connector-t')?.qty).toBe(358);
   });
 
   it('T crab BOM: 1 connection = 1 kit = 2 pcs (4x2, 12 beams, 7 tiers)', () => {
@@ -529,6 +608,34 @@ describe('Frame Constructor Geometry', () => {
     const tRow = cutList.find((c) => c.id === 'connector-t');
     expect(tRow.qty).toBe(448);
     expect(tRow.note).toBe('224 компл. × 2 шт = 448 шт');
+  });
+
+  it('3x3 Y-bays: 6 G on top long sides and X on middle longitudinal cross junctions', () => {
+    const params = {
+      ...defaultFrameParams,
+      postCountX: 3,
+      postCountY: 3,
+      crossBeamsPerLevel: 8,
+      tierCount: 2,
+      connectionType: 'crab',
+    };
+    const geom = calculateFrameGeometry(params);
+    const counts = countConnectorsByType(geom.connectors);
+    const topZ = geom.levels[geom.levelCount - 1];
+    const topG = geom.connectors.filter(
+      (c) => c.type === 'G' && c.axis === 'post' && Math.abs(c.z - topZ) < 0.01,
+    );
+    const crossXPerLevel = geom.connectors.filter(
+      (c) => c.type === 'X' && c.axis === 'cross' && Math.abs(c.z - geom.levels[0]) < 0.01,
+    ).length;
+
+    expect(topG).toHaveLength(6);
+    expect(crossXPerLevel).toBe(4);
+    expect(counts.G).toBe(6);
+    expect(counts.T).toBe(39);
+    expect(counts.X).toBe(16);
+    expect(counts.A4).toBe(0);
+    expect(counts.A6).toBe(2);
   });
 
   it('single-bay crab BOM counts all horizontal levels (3 tiers, 6x2, 8 beams)', () => {
@@ -1390,7 +1497,7 @@ describe('frame crab overrides', () => {
     expect(level0.some((c) => c.type === 'T')).toBe(true);
     expect(level0.some((c) => c.type === 'A6')).toBe(false);
     expect(levelMid.some((c) => c.type === 'T')).toBe(true);
-    expect(levelTop.some((c) => c.type === 'A4')).toBe(true);
+    expect(levelTop.some((c) => c.type === 'T')).toBe(true);
   });
 
   it('setCrabPostOverride adds and removes override keys', async () => {
