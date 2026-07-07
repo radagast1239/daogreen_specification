@@ -1,8 +1,17 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { db, initDb } from '../backend/src/db.js';
-import { getClientProjectDocuments } from '../backend/src/routes/projects.js';
-import { syncDrawingFilesVisibility } from '../backend/src/routes/frameDrawings.js';
+import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
+const testId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const tempDir = path.join(os.tmpdir(), `daogreen-test-${testId}`);
+const tempDbPath = path.join(tempDir, 'daogreen-test.db');
+
+let db;
+let initDb;
+let getDbPath;
+let getClientProjectDocuments;
+let syncDrawingFilesVisibility;
 let seedCounter = 0;
 
 function seedProject(id = 'proj1') {
@@ -59,15 +68,55 @@ function insertDrawingWithFile({
   );
 }
 
-beforeEach(() => {
+beforeAll(async () => {
+  fs.mkdirSync(tempDir, { recursive: true });
+  process.env.DATABASE_PATH = tempDbPath;
+  process.env.DB_PATH = tempDbPath;
+  process.env.NODE_ENV = 'test';
+  vi.resetModules();
+  const dbMod = await import('../backend/src/db.js');
+  const projectsMod = await import('../backend/src/routes/projects.js');
+  const frameMod = await import('../backend/src/routes/frameDrawings.js');
+  db = dbMod.db;
+  initDb = dbMod.initDb;
+  getDbPath = dbMod.getDbPath;
+  getClientProjectDocuments = projectsMod.getClientProjectDocuments;
+  syncDrawingFilesVisibility = frameMod.syncDrawingFilesVisibility;
   initDb();
+});
+
+beforeEach(() => {
+  seedCounter = 0;
   db.prepare('DELETE FROM files').run();
   db.prepare('DELETE FROM frame_drawings').run();
   db.prepare('DELETE FROM projects').run();
   seedProject();
 });
 
+afterAll(() => {
+  delete process.env.DATABASE_PATH;
+  delete process.env.DB_PATH;
+  vi.resetModules();
+  for (const suffix of ['', '-wal', '-shm']) {
+    try {
+      fs.unlinkSync(tempDbPath + suffix);
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+});
+
 describe('getClientProjectDocuments', () => {
+  it('uses isolated temp database, not production file', () => {
+    expect(getDbPath()).toBe(tempDbPath);
+    expect(getDbPath()).not.toMatch(/backend[\\/]data[\\/]daogreen\.db$/);
+  });
+
   it('includes visible frame_drawing with /uploads URL (not admin API)', () => {
     const fileId = syncDrawingFilesVisibility({
       projectId: 'proj1',

@@ -1,16 +1,21 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import { db, initDb } from '../backend/src/db.js';
-import {
-  rowToDrawing,
-  syncDrawingFilesVisibility,
-  removeDrawingFilesRow,
-  isFrameDrawingUploadPath,
-  safeDeleteFrameDrawingPdf,
-} from '../backend/src/routes/frameDrawings.js';
 
+const testId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const tempDir = path.join(os.tmpdir(), `daogreen-test-${testId}`);
+const tempDbPath = path.join(tempDir, 'daogreen-test.db');
+const tempUploadsRoot = path.join(tempDir, 'uploads');
+
+let db;
+let initDb;
+let getDbPath;
+let rowToDrawing;
+let syncDrawingFilesVisibility;
+let removeDrawingFilesRow;
+let isFrameDrawingUploadPath;
+let safeDeleteFrameDrawingPdf;
 let seedCounter = 0;
 
 function seedProject(id = 'proj1') {
@@ -53,15 +58,60 @@ function insertDrawing(overrides = {}) {
   return id;
 }
 
-beforeEach(() => {
+beforeAll(async () => {
+  fs.mkdirSync(tempDir, { recursive: true });
+  fs.mkdirSync(tempUploadsRoot, { recursive: true });
+  process.env.DATABASE_PATH = tempDbPath;
+  process.env.DB_PATH = tempDbPath;
+  process.env.UPLOAD_ROOT = tempUploadsRoot;
+  process.env.NODE_ENV = 'test';
+  vi.resetModules();
+  const dbMod = await import('../backend/src/db.js');
+  const frameMod = await import('../backend/src/routes/frameDrawings.js');
+  db = dbMod.db;
+  initDb = dbMod.initDb;
+  getDbPath = dbMod.getDbPath;
+  rowToDrawing = frameMod.rowToDrawing;
+  syncDrawingFilesVisibility = frameMod.syncDrawingFilesVisibility;
+  removeDrawingFilesRow = frameMod.removeDrawingFilesRow;
+  isFrameDrawingUploadPath = frameMod.isFrameDrawingUploadPath;
+  safeDeleteFrameDrawingPdf = frameMod.safeDeleteFrameDrawingPdf;
   initDb();
+});
+
+beforeEach(() => {
+  seedCounter = 0;
   db.prepare('DELETE FROM files').run();
   db.prepare('DELETE FROM frame_drawings').run();
   db.prepare('DELETE FROM projects').run();
   seedProject();
 });
 
+afterAll(() => {
+  delete process.env.DATABASE_PATH;
+  delete process.env.DB_PATH;
+  delete process.env.UPLOAD_ROOT;
+  vi.resetModules();
+  for (const suffix of ['', '-wal', '-shm']) {
+    try {
+      fs.unlinkSync(tempDbPath + suffix);
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+});
+
 describe('frame_drawings db', () => {
+  it('uses isolated temp database, not production file', () => {
+    expect(getDbPath()).toBe(tempDbPath);
+    expect(getDbPath()).not.toMatch(/backend[\\/]data[\\/]daogreen\.db$/);
+  });
+
   it('rowToDrawing maps snake_case row to API shape', () => {
     insertDrawing({ id: 'd1', stellage_id: 'st_1', title: 'NFT 3m' });
     const row = db.prepare('SELECT * FROM frame_drawings WHERE id = ?').get('d1');
@@ -236,10 +286,7 @@ describe('frame_drawings db', () => {
   });
 
   it('safeDeleteFrameDrawingPdf removes file under frame-drawings only', () => {
-    const testDir = path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      '../backend/uploads/frame-drawings/test-proj',
-    );
+    const testDir = path.join(tempUploadsRoot, 'frame-drawings', 'test-proj');
     const absPath = path.join(testDir, 'test-del.pdf');
     fs.mkdirSync(testDir, { recursive: true });
     fs.writeFileSync(absPath, '%PDF-test');

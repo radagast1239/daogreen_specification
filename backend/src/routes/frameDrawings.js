@@ -8,7 +8,9 @@ import { db } from "../db.js";
 import { multerFileFilter } from "../services/uploadFilter.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadRoot = path.join(__dirname, "../../uploads");
+const uploadRoot = process.env.UPLOAD_ROOT
+  ? path.resolve(process.env.UPLOAD_ROOT)
+  : path.join(__dirname, "../../uploads");
 
 const pdfUpload = multer({
   storage: multer.memoryStorage(),
