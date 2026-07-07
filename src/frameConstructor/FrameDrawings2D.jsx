@@ -117,7 +117,9 @@ export default function FrameDrawings2D({ params, geom }) {
     return null;
   }
 
-  const { lengthMm, depthMm, tubeWidthMm, tubeHeightMm, tierCount, showDimensions, showConnectors, connectionType, showTrays, trayEnabled } = params;
+  const { lengthMm, depthMm, tubeWidthMm, tubeHeightMm, tierCount, showDimensions, connectionType, showTrays, trayEnabled } = params;
+  const isAngle = params.constructionType === 'perforated_angle';
+  const showConnectors = isAngle ? false : params.showConnectors;
   const showChannelVis = shouldShowNftChannels(params);
   const nft = geom.nftChannels;
   const totalDepthMm = geom.dimensions?.depthMm ?? depthMm;

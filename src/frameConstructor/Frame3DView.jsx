@@ -86,7 +86,9 @@ export default function Frame3DView({ params, geom, captureRef, hasErrors }) {
     );
   }
 
-  const { tubeWidthMm, tubeHeightMm, connectionType, showConnectors, showTrays, trayEnabled } = params;
+  const { tubeWidthMm, tubeHeightMm, connectionType, showTrays, trayEnabled } = params;
+  const isAngle = params.constructionType === 'perforated_angle';
+  const showConnectors = isAngle ? false : params.showConnectors;
   const showChannelVis = shouldShowNftChannels(params);
   const nft = geom.nftChannels;
 

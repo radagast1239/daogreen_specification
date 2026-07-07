@@ -237,7 +237,7 @@ export function calculateTubeStockOptions(rawCuts, options = {}) {
 export function extractTubeCutsFromCutList(cutList) {
   const cuts = [];
   for (const item of cutList) {
-    if (!item.id || item.id.startsWith('connector') || item.id.startsWith('nft-channel')) {
+    if (item.id !== 'post' && item.id !== 'longitudinal' && item.id !== 'cross') {
       continue;
     }
     const len = Number(item.length);
