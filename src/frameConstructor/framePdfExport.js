@@ -1651,6 +1651,61 @@ function drawSpecPage(doc, pdfData, branding, logoDataUrl, dateStr, autoTable, t
 
   let y = doc.lastAutoTable.finalY + 8;
 
+  if (pdfData.tubeStock?.options) {
+    const { recommended, options } = pdfData.tubeStock;
+    doc.setFontSize(9);
+    doc.setTextColor(0);
+    doc.setFont('Roboto', 'bold');
+    doc.text(`Закупка профильной трубы ${pdfData.dimensions.profile}`, leftMargin, y);
+    doc.setFont('Roboto', 'normal');
+    y += 5;
+
+    doc.setFontSize(8);
+    doc.setTextColor(80);
+    doc.text(`Самый экономичный по отходу: ${recommended.title}`, leftMargin, y);
+    doc.setTextColor(0);
+    y += 6;
+
+    for (const opt of options) {
+      if (y > PAGE_H - 40) {
+        doc.addPage('a3', 'landscape');
+        y = 20;
+      }
+      
+      doc.setFont('Roboto', 'bold');
+      if (opt.key === 'only_6000') {
+        doc.text(`Если есть труба 6 м:`, leftMargin, y);
+      } else if (opt.key === 'only_3000') {
+        doc.text(`Если есть только труба 3 м:`, leftMargin, y);
+      } else {
+        doc.text(`Смешанный вариант:`, leftMargin, y);
+      }
+      doc.setFont('Roboto', 'normal');
+      y += 4;
+      
+      if (opt.stockCounts[6000] > 0) doc.text(`6 м — ${opt.stockCounts[6000]} шт`, leftMargin + 2, y), y += 4;
+      if (opt.stockCounts[3000] > 0) doc.text(`3 м — ${opt.stockCounts[3000]} шт`, leftMargin + 2, y), y += 4;
+      
+      doc.text(`Закупить — ${(opt.totalStockLengthMm / 1000).toFixed(1)} м`, leftMargin + 2, y);
+      y += 4;
+      doc.text(`Остаток — ${(opt.wasteMm / 1000).toFixed(1)} м`, leftMargin + 2, y);
+      y += 4;
+      
+      if (opt.warnings && opt.warnings.length > 0) {
+        doc.setTextColor(200, 0, 0);
+        for (const w of opt.warnings) {
+          const splitWarning = doc.splitTextToSize(`Предупреждение: ${w}`, rightCol - leftMargin - 10);
+          doc.text(splitWarning, leftMargin + 2, y);
+          y += 4 * splitWarning.length;
+        }
+        doc.setTextColor(0);
+      }
+      y += 2;
+    }
+    
+    y += 4;
+  }
+
   if (pdfData.hardwareRows.length > 0) {
     doc.setFontSize(9);
     doc.text('Крепёж', leftMargin, y);

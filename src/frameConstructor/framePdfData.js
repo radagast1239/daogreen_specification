@@ -2,6 +2,7 @@ import { normalizeFrameConfig } from './frameConfig.js';
 import { crabCatalogByConnectorId } from './frameCrabCatalog.js';
 import { supportsTrays, totalFrameDepthMm } from './frameCrabRules.js';
 import { countNftChannelsAcrossDepth, calculateNftChannelBill, shouldShowNftChannels, formatNftQtyWithMargin } from './frameNftChannels.js';
+import { extractTubeCutsFromCutList, calculateTubeStockOptions } from './frameTubeStock.js';
 
 const RACK_TYPE_LABELS = {
   nft: 'NFT проточная гидропоника',
@@ -121,6 +122,10 @@ export function prepareFramePdfData(config, geometry, cutList) {
   const channelsPerRow = channelsActive ? countNftChannelsAcrossDepth(normalized.depthMm) : 0;
   const totalDepth = geometry?.dimensions?.depthMm
     ?? totalFrameDepthMm(normalized.depthMm, normalized.tubeWidthMm, normalized.postCountY);
+    
+  // Calculate tube stock options
+  const tubeCuts = extractTubeCutsFromCutList(cutList);
+  const tubeStock = calculateTubeStockOptions(tubeCuts);
 
   const paramsList = [
     ['Длина, мм', normalized.lengthMm],
@@ -202,6 +207,7 @@ export function prepareFramePdfData(config, geometry, cutList) {
     paramsList,
     notes: FRAME_PDF_NOTES,
     weldedNote,
+    tubeStock,
     hasChannelsPage: channelsActive && (geometry?.nftChannels?.runs?.length ?? 0) > 0,
     channelsSummary: channelsActive && channelBill
       ? {
