@@ -6,6 +6,8 @@ import { resolveCrabImageSrc } from './frameCrabPhotos.js';
 import { useCrabPhotoVersion } from './useCrabPhotoVersion.js';
 import { extractTubeCutsFromCutList, calculateTubeStockOptions } from './frameTubeStock.js';
 import { calculateAngleStockOptions, calculateAngleFastenerVariants, perforatedAngleProfileLabel } from './frameAngleStock.js';
+import FrameBomPurchasePreview from './FrameBomPurchasePreview.jsx';
+import { buildFramePurchaseDraftFromContext } from './frameBomPurchasePreviewData.js';
 
 function renderFastenerBlock(title, fasteners, profile) {
   const rows = [
@@ -67,6 +69,17 @@ export default function FrameCutList({ params }) {
     if (!isAngle || !geom || geom.validationErrors?.length) return null;
     return calculateAngleFastenerVariants(geom);
   }, [isAngle, geom]);
+
+  const purchaseDraft = useMemo(
+    () =>
+      buildFramePurchaseDraftFromContext({
+        params,
+        cutList,
+        geom: isAngle ? geom : null,
+        stockOptions,
+      }),
+    [params, cutList, geom, isAngle, stockOptions],
+  );
 
   if (cutList.length === 0) {
     return (
@@ -248,6 +261,12 @@ export default function FrameCutList({ params }) {
           </p>
         </div>
       )}
+
+      <FrameBomPurchasePreview
+        purchaseDraft={purchaseDraft}
+        constructionType={params.constructionType || 'tube_crab'}
+        stockRecommended={recommended}
+      />
     </>
   );
 }
