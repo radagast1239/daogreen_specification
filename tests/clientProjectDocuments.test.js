@@ -45,20 +45,25 @@ function insertDrawingWithFile({
   stellageId = 'st_1',
   title = 'Rack',
   sourceType = 'project_stellage',
+  frameConfigJson = '{}',
 }) {
   const now = new Date().toISOString();
+  const configJson = typeof frameConfigJson === 'string'
+    ? frameConfigJson
+    : JSON.stringify(frameConfigJson);
   db.prepare(`
     INSERT INTO frame_drawings (
       id, project_id, stellage_id, module_rack_key, source_type, title, rack_type,
       frame_config_json, pdf_url, pdf_filename, file_id,
       is_client_visible, version, created_at, updated_at
-    ) VALUES (?, ?, ?, NULL, ?, ?, 'nft', '{}', ?, ?, ?, ?, 1, ?, ?)
+    ) VALUES (?, ?, ?, NULL, ?, ?, 'nft', ?, ?, ?, ?, ?, 1, ?, ?)
   `).run(
     drawingId,
     projectId,
     stellageId,
     sourceType,
     title,
+    configJson,
     `/uploads/frame-drawings/${projectId}/${drawingId}.pdf`,
     `${drawingId}.pdf`,
     fileId,
@@ -178,5 +183,78 @@ describe('getClientProjectDocuments', () => {
 
     const docs = getClientProjectDocuments('proj1');
     expect(docs).toHaveLength(0);
+  });
+
+  it('keeps visible frame_drawing PDF when frame_config_json has constructionType', () => {
+    const fileId = syncDrawingFilesVisibility({
+      projectId: 'proj1',
+      isClientVisible: true,
+      pdfFilename: 'angle-rack.pdf',
+      pdfUrl: '/uploads/frame-drawings/proj1/angle-doc.pdf',
+      title: 'Angle rack PDF',
+    });
+    insertDrawingWithFile({
+      drawingId: 'angle_doc',
+      fileId,
+      visible: true,
+      stellageId: 'st_angle',
+      title: 'Angle rack PDF',
+      frameConfigJson: {
+        constructionType: 'perforated_angle',
+        angleProfile: '30×30',
+        angleStockLengthsMm: [2000, 2500],
+        angleOverlapMm: 150,
+        crossBeamFasteningMode: 'bolts_only',
+      },
+    });
+
+    const docs = getClientProjectDocuments('proj1');
+    expect(docs).toHaveLength(1);
+    expect(docs[0].type).toBe('frame_drawing');
+    expect(docs[0].url).toBe('/uploads/frame-drawings/proj1/angle-doc.pdf');
+    expect(docs[0].filename).toBe('angle-rack.pdf');
+    expect(docs[0].drawingTitle).toBe('Angle rack PDF');
+    expect(docs[0].frameConfig).toBeUndefined();
+  });
+
+  it('keeps both tube and angle frame drawings visible for the same project', () => {
+    const tubeFileId = syncDrawingFilesVisibility({
+      projectId: 'proj1',
+      isClientVisible: true,
+      pdfFilename: 'tube.pdf',
+      pdfUrl: '/uploads/frame-drawings/proj1/tube.pdf',
+      title: 'Tube rack',
+    });
+    const angleFileId = syncDrawingFilesVisibility({
+      projectId: 'proj1',
+      isClientVisible: true,
+      pdfFilename: 'angle.pdf',
+      pdfUrl: '/uploads/frame-drawings/proj1/angle.pdf',
+      title: 'Angle rack',
+    });
+    insertDrawingWithFile({
+      drawingId: 'doc_tube',
+      fileId: tubeFileId,
+      stellageId: 'st_tube',
+      title: 'Tube rack',
+      frameConfigJson: { constructionType: 'tube_crab', connectionType: 'crab' },
+    });
+    insertDrawingWithFile({
+      drawingId: 'doc_angle',
+      fileId: angleFileId,
+      stellageId: 'st_angle',
+      title: 'Angle rack',
+      frameConfigJson: { constructionType: 'perforated_angle', angleProfile: '30×30' },
+    });
+
+    const docs = getClientProjectDocuments('proj1');
+    expect(docs).toHaveLength(2);
+    const urls = docs.map((d) => d.url).sort();
+    expect(urls).toEqual([
+      '/uploads/frame-drawings/proj1/angle.pdf',
+      '/uploads/frame-drawings/proj1/tube.pdf',
+    ]);
+    expect(docs.every((d) => d.type === 'frame_drawing')).toBe(true);
+    expect(docs.every((d) => d.frameConfig === undefined)).toBe(true);
   });
 });

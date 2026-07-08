@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vites
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { normalizeFrameConfig } from '../src/frameConstructor/frameConfig.js';
 
 const testId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const tempDir = path.join(os.tmpdir(), `daogreen-test-${testId}`);
@@ -56,6 +57,11 @@ function insertDrawing(overrides = {}) {
     now,
   );
   return id;
+}
+
+function readDrawing(id) {
+  const row = db.prepare('SELECT * FROM frame_drawings WHERE id = ?').get(id);
+  return rowToDrawing(row);
 }
 
 beforeAll(async () => {
@@ -306,5 +312,122 @@ describe('frame_drawings db', () => {
       .all('preset_a');
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe('pr1');
+  });
+});
+
+describe('frame_config_json roundtrip', () => {
+  it('tube_crab settings survive DB insert and rowToDrawing read', () => {
+    const config = {
+      constructionType: 'tube_crab',
+      profile: '20×20',
+      crabSystem: true,
+      stockLengthsMm: [3000, 6000],
+      connectionType: 'crab',
+      lengthMm: 3000,
+    };
+    insertDrawing({
+      id: 'tube_rt',
+      stellage_id: 'st_tube',
+      frame_config_json: JSON.stringify(config),
+    });
+
+    const drawing = readDrawing('tube_rt');
+    expect(drawing.frameConfig.constructionType).toBe('tube_crab');
+    expect(drawing.frameConfig.profile).toBe('20×20');
+    expect(drawing.frameConfig.crabSystem).toBe(true);
+    expect(drawing.frameConfig.stockLengthsMm).toEqual([3000, 6000]);
+    expect(drawing.frameConfig.connectionType).toBe('crab');
+  });
+
+  it('perforated_angle settings survive DB insert and rowToDrawing read', () => {
+    const config = {
+      constructionType: 'perforated_angle',
+      angleProfile: '30×30',
+      angleStockLengthsMm: [2000, 2500],
+      angleOverlapMm: 150,
+      crossBeamFasteningMode: 'bolts_only',
+      lengthMm: 3000,
+    };
+    insertDrawing({
+      id: 'angle_rt',
+      stellage_id: 'st_angle',
+      frame_config_json: JSON.stringify(config),
+    });
+
+    const drawing = readDrawing('angle_rt');
+    expect(drawing.frameConfig.constructionType).toBe('perforated_angle');
+    expect(drawing.frameConfig.angleProfile).toBe('30×30');
+    expect(drawing.frameConfig.angleStockLengthsMm).toEqual([2000, 2500]);
+    expect(drawing.frameConfig.angleOverlapMm).toBe(150);
+    expect(drawing.frameConfig.crossBeamFasteningMode).toBe('bolts_only');
+  });
+
+  it('two stellages in one project keep separate construction types', () => {
+    const tubeConfig = {
+      constructionType: 'tube_crab',
+      profile: '20×20',
+      crabSystem: true,
+      stockLengthsMm: [3000, 6000],
+      connectionType: 'crab',
+    };
+    const angleConfig = {
+      constructionType: 'perforated_angle',
+      angleProfile: '30×30',
+      angleStockLengthsMm: [2000, 2500],
+      angleOverlapMm: 150,
+      crossBeamFasteningMode: 'bolts_only',
+    };
+
+    insertDrawing({
+      id: 'rack_tube',
+      stellage_id: 'st_tube',
+      module_rack_key: 'proj1:st_tube',
+      frame_config_json: JSON.stringify(tubeConfig),
+      title: 'Tube rack',
+    });
+    insertDrawing({
+      id: 'rack_angle',
+      stellage_id: 'st_angle',
+      module_rack_key: 'proj1:st_angle',
+      frame_config_json: JSON.stringify(angleConfig),
+      title: 'Angle rack',
+    });
+
+    const rows = db
+      .prepare('SELECT id, stellage_id, module_rack_key FROM frame_drawings WHERE project_id = ? ORDER BY id')
+      .all('proj1');
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.stellage_id).sort()).toEqual(['st_angle', 'st_tube']);
+    expect(rows.map((r) => r.module_rack_key).sort()).toEqual(['proj1:st_angle', 'proj1:st_tube']);
+
+    const tube = readDrawing('rack_tube');
+    const angle = readDrawing('rack_angle');
+    expect(tube.frameConfig.constructionType).toBe('tube_crab');
+    expect(angle.frameConfig.constructionType).toBe('perforated_angle');
+    expect(tube.stellageId).not.toBe(angle.stellageId);
+    expect(tube.id).not.toBe(angle.id);
+  });
+
+  it('legacy JSON without constructionType defaults to tube_crab on normalize', () => {
+    const legacy = {
+      lengthMm: 3000,
+      depthMm: 500,
+      connectionType: 'crab',
+      tubeWidthMm: 20,
+      tubeHeightMm: 20,
+    };
+    insertDrawing({
+      id: 'legacy_rt',
+      stellage_id: 'st_legacy',
+      frame_config_json: JSON.stringify(legacy),
+    });
+
+    const raw = readDrawing('legacy_rt').frameConfig;
+    expect(raw.constructionType).toBeUndefined();
+
+    const normalized = normalizeFrameConfig(raw);
+    expect(normalized.constructionType).toBe('tube_crab');
+    expect(normalized.connectionType).toBe('crab');
+    expect(normalized.lengthMm).toBe(3000);
   });
 });
