@@ -64,7 +64,7 @@ describe('frameDrawingContext', () => {
     expect(canCreateFrameDrawingFromBuilder('')).toBe(false);
     expect(canCreateFrameDrawingFromBuilder('p1')).toBe(true);
     expect(DRAFT_PROJECT_FRAME_DRAWING_DISABLED_REASON).toMatch(/Сначала сохраните проект/);
-    expect(DRAFT_PROJECT_FRAME_DRAWING_SECTION_HINT).toMatch(/после сохранения проекта/i);
+    expect(DRAFT_PROJECT_FRAME_DRAWING_SECTION_HINT).toMatch(/после сохранения черновика/i);
   });
 
   it('saved project frame drawing link includes projectId and moduleRackKey', () => {
@@ -85,8 +85,8 @@ describe('frameDrawingContext', () => {
       projectName: 'Farm A',
       stellage: { id: 'st1', moduleId: 'mod1', name: 'Стеллаж 1' },
     });
-    expect(ctx.returnTo).toBe('/new?projectId=p1&step=stellages');
-    expect(buildFrameDrawingLink(ctx)).toContain('returnTo=%2Fnew%3FprojectId%3Dp1%26step%3Dstellages');
+    expect(ctx.returnTo).toBe('/new?projectId=p1&mode=draft&step=stellages&editRack=mod1%3Ast1');
+    expect(buildFrameDrawingLink(ctx)).toContain('returnTo=%2Fnew%3FprojectId%3Dp1%26mode%3Ddraft%26step%3Dstellages%26editRack%3Dmod1%253Ast1');
   });
 
   it('resolveFramePdfExportUi hides save actions without projectId', () => {
@@ -172,7 +172,9 @@ describe('frameDrawingContext', () => {
   it('builds stellages return paths and labels', () => {
     expect(buildBuilderStellagesReturnPath()).toBe('/new?step=stellages');
     expect(buildProjectStellagesReturnPath('p1')).toBe('/project/p1?section=stellages');
-    expect(buildBuilderEditStellagesPath('p1')).toBe('/new?projectId=p1&step=stellages');
+    expect(buildBuilderEditStellagesPath('p1')).toBe('/new?projectId=p1&mode=draft&step=stellages');
+    expect(buildBuilderEditStellagesPath('p1', { editRack: 'mod1:st1' }))
+      .toBe('/new?projectId=p1&mode=draft&step=stellages&editRack=mod1%3Ast1');
     expect(buildStellagesReturnLabel('/new?projectId=p1&step=stellages')).toBe('Вернуться к настройке проекта');
     expect(buildStellagesReturnLabel('/project/p1?section=stellages')).toBe('Вернуться к стеллажам проекта');
     expect(buildStellagesReturnLabel('/new?step=stellages')).toBe('Вернуться');

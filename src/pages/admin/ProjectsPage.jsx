@@ -12,16 +12,29 @@ import { getPinnedIds, isPinned, sortWithPinned, togglePinned } from "../../lib/
 import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
 import HomeDashboard from "../../components/HomeDashboard.jsx";
 import DuplicateProjectModal from "../../components/DuplicateProjectModal.jsx";
+import {
+  isActiveProject,
+  isDraftProject,
+  projectLifecycleBadge,
+  projectOpenLabel,
+  projectOpenPath,
+  resolveBuilderWizardStep,
+} from "../../../shared/projectLifecycle.js";
 
 function clientKey(name) {
   return (name || "Без имени").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-export default function ProjectsPage() {
+export default function ProjectsPage({ variant = "active" } = {}) {
+  const isInProgress = variant === "in-progress";
   const { state, actions } = useStore();
   const nav = useNavigate();
   const { confirm, success } = useToast();
   const projects = state.projects;
+  const visibleProjects = useMemo(
+    () => projects.filter((p) => (isInProgress ? isDraftProject(p) : isActiveProject(p))),
+    [projects, isInProgress],
+  );
   const dash = state.dashboard;
   const [linkModal, setLinkModal] = useState(null);
   const [dupSource, setDupSource] = useState(null);
@@ -64,18 +77,18 @@ export default function ProjectsPage() {
 
   const clients = useMemo(() => {
     const names = new Map();
-    for (const p of projects) {
+    for (const p of visibleProjects) {
       const key = clientKey(p.client);
       if (!names.has(key)) names.set(key, (p.client || "Без имени").trim());
     }
     return [...names.entries()].sort((a, b) => a[1].localeCompare(b[1], "ru"));
-  }, [projects]);
+  }, [visibleProjects]);
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
     const now = Date.now();
     const day = 86400000;
-    let list = projects.filter((p) => {
+    let list = visibleProjects.filter((p) => {
       if (ql) {
         const hay = `${p.name} ${p.client || ""} ${p.city || ""}`.toLowerCase();
         if (!hay.includes(ql)) return false;
@@ -95,7 +108,7 @@ export default function ProjectsPage() {
       return true;
     });
     return sortWithPinned(list, pinned);
-  }, [projects, q, clientF, statusF, dateF, problemsOnly, clientMap, problemIds, pinned]);
+  }, [visibleProjects, q, clientF, statusF, dateF, problemsOnly, clientMap, problemIds, pinned]);
 
   const onPin = (id) => setPinned(togglePinned(id));
 
@@ -150,8 +163,8 @@ export default function ProjectsPage() {
         />
       )}
       <PageHeader
-        title="Проекты"
-        sub={`${projects.length} проект(ов)${matCount != null ? ` · база: ${matCount} материалов` : ""}`}
+        title={isInProgress ? "Проекты в настройке" : "Проекты"}
+        sub={`${visibleProjects.length} ${isInProgress ? "черновик(ов)" : "проект(ов)"}${matCount != null ? ` · база: ${matCount} материалов` : ""}`}
         actions={
           <button className="btn btn-primary" onClick={() => nav("/new")}>
             ＋ Новый проект
@@ -159,7 +172,7 @@ export default function ProjectsPage() {
         }
       />
       <div className="content">
-        <HomeDashboard dash={dash} />
+        {!isInProgress && <HomeDashboard dash={dash} />}
 
         <div className="project-filters no-print">
           <input placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 200 }} />
@@ -190,14 +203,17 @@ export default function ProjectsPage() {
             С проблемами
           </label>
           <span className="muted" style={{ marginLeft: "auto", fontSize: 13 }}>
-            {filtered.length} из {projects.length}
+            {filtered.length} из {visibleProjects.length}
           </span>
         </div>
 
-        {projects.length === 0 ? (
-          <Empty title="Пока нет проектов" hint="Создай первый проект через мастер.">
+        {visibleProjects.length === 0 ? (
+          <Empty
+            title={isInProgress ? "Нет проектов в настройке" : "Пока нет проектов"}
+            hint={isInProgress ? "Сохраните черновик в мастере — он появится здесь." : "Создай первый проект через мастер."}
+          >
             <button className="btn btn-primary" onClick={() => nav("/new")}>
-              Создать проект
+              {isInProgress ? "Новый проект" : "Создать проект"}
             </button>
           </Empty>
         ) : filtered.length === 0 ? (
@@ -206,9 +222,11 @@ export default function ProjectsPage() {
           <div className="grid projects-grid">
             {filtered.map((p) => {
               const t = p.totals || projectTotals(p);
-              const link = p.clientToken ? clientLink(p.clientToken) : "";
+              const link = !isInProgress && p.clientToken ? clientLink(p.clientToken) : "";
               const pinnedOn = isPinned(p.id);
               const cStatus = clientStatusMeta(clientMap[clientKey(p.client)]?.status);
+              const openPath = projectOpenPath(p);
+              const lifecycleBadge = projectLifecycleBadge(p);
               return (
                 <div key={p.id} className="card" style={{ padding: 18 }}>
                   <div className="between">
@@ -223,49 +241,66 @@ export default function ProjectsPage() {
                           ★
                         </button>
                         <div className="eyebrow">{p.type || "ферма"} · v{p.version || 1}</div>
-                        <span className={`chip chip--${cStatus.chip}`} style={{ fontSize: 10 }}>
-                          {cStatus.label}
-                        </span>
+                        {lifecycleBadge && (
+                          <span className="chip" style={{ fontSize: 10 }}>
+                            {lifecycleBadge}
+                          </span>
+                        )}
+                        {!isInProgress && (
+                          <span className={`chip chip--${cStatus.chip}`} style={{ fontSize: 10 }}>
+                            {cStatus.label}
+                          </span>
+                        )}
                       </div>
-                      <Link to={`/project/${p.id}`} style={{ fontSize: 16, fontWeight: 700 }}>
+                      <Link to={openPath} style={{ fontSize: 16, fontWeight: 700 }}>
                         {p.name}
                       </Link>
                       <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
                         {p.client || "—"}
                         {p.city ? ` · ${p.city}` : ""}
                         {p.area ? ` · ${p.area} м²` : ""}
+                        {isInProgress && (
+                          <span>
+                            {" · шаг: "}
+                            {resolveBuilderWizardStep(p, "basics")}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  <div className="between" style={{ marginTop: 14, marginBottom: 6 }}>
-                    <span className="muted" style={{ fontSize: 12 }}>
-                      Закуплено
-                    </span>
-                    <span className="num" style={{ fontWeight: 700 }}>
-                      {t.progress}%
-                    </span>
-                  </div>
-                  <Progress value={t.progress} />
+                  {!isInProgress && (
+                    <>
+                      <div className="between" style={{ marginTop: 14, marginBottom: 6 }}>
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          Закуплено
+                        </span>
+                        <span className="num" style={{ fontWeight: 700 }}>
+                          {t.progress}%
+                        </span>
+                      </div>
+                      <Progress value={t.progress} />
 
-                  <div className="stat-grid" style={{ marginTop: 14 }}>
-                    <div>
-                      <div className="eyebrow">Бюджет</div>
-                      <div className="num" style={{ fontWeight: 700 }}>
-                        {money(t.budget, p.currency)}
+                      <div className="stat-grid" style={{ marginTop: 14 }}>
+                        <div>
+                          <div className="eyebrow">Бюджет</div>
+                          <div className="num" style={{ fontWeight: 700 }}>
+                            {money(t.budget, p.currency)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="eyebrow">Осталось</div>
+                          <div className="num" style={{ fontWeight: 700 }}>
+                            {money(t.remaining, p.currency)}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    <div>
-                      <div className="eyebrow">Осталось</div>
-                      <div className="num" style={{ fontWeight: 700 }}>
-                        {money(t.remaining, p.currency)}
-                      </div>
-                    </div>
-                  </div>
+                    </>
+                  )}
 
                   <div className="row wrap" style={{ marginTop: 16, gap: 6 }}>
-                    <Link className="btn btn-sm" to={`/project/${p.id}`}>
-                      Открыть
+                    <Link className={`btn btn-sm${isInProgress ? " btn-primary" : ""}`} to={openPath}>
+                      {projectOpenLabel(p)}
                     </Link>
                     {link && (
                       <>
@@ -286,12 +321,16 @@ export default function ProjectsPage() {
                         </a>
                       </>
                     )}
-                    <button className="btn btn-sm" onClick={() => setDupSource(p)}>
-                      На основе прошлого
-                    </button>
-                    <button className="btn btn-sm btn-ghost" onClick={() => actions.projectDuplicate(p.id, { name: `${p.name} (копия)` })}>
-                      Быстрая копия
-                    </button>
+                    {!isInProgress && (
+                      <>
+                        <button className="btn btn-sm" onClick={() => setDupSource(p)}>
+                          На основе прошлого
+                        </button>
+                        <button className="btn btn-sm btn-ghost" onClick={() => actions.projectDuplicate(p.id, { name: `${p.name} (копия)` })}>
+                          Быстрая копия
+                        </button>
+                      </>
+                    )}
                     <button className="btn btn-sm btn-ghost" onClick={() => archive(p)}>
                       Архив
                     </button>

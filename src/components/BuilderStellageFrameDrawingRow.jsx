@@ -48,7 +48,7 @@ export default function BuilderStellageFrameDrawingRow({
             disabled={saving}
             onClick={() => onSaveProjectAndOpen?.(stellage)}
           >
-            {saving ? 'Сохраняем проект…' : 'Сохранить проект и создать схему'}
+            {saving ? 'Сохраняем черновик…' : 'Сохранить черновик и создать схему'}
           </button>
         </span>
       </div>

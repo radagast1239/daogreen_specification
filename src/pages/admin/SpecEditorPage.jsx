@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, Link, useSearchParams } from "react-router-dom";
+import { useParams, Link, useSearchParams, useNavigate } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import {
   projectTotals,
@@ -25,6 +25,7 @@ import PageSkeleton from "../../components/PageSkeleton.jsx";
 import { useToast } from "../../components/Toast.jsx";
 import StellageFrameDrawingsPanel from "../../components/StellageFrameDrawingsPanel.jsx";
 import { buildProjectStellagesReturnPath } from "../../../shared/frameDrawingContext.js";
+import { buildBuilderDraftPath, isDraftProject, resolveBuilderWizardStep } from "../../../shared/projectLifecycle.js";
 import SaveSectionTemplateModal from "../../components/SaveSectionTemplateModal.jsx";
 import { api } from "../../lib/api.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
@@ -70,6 +71,7 @@ const TAB_LABELS = {
 
 export default function SpecEditorPage() {
   const { id } = useParams();
+  const nav = useNavigate();
   const [searchParams] = useSearchParams();
   const highlightItemId = searchParams.get("item");
   const sectionParam = searchParams.get("section");
@@ -180,6 +182,12 @@ export default function SpecEditorPage() {
     setLoading(true);
     actions.loadProject(id).finally(() => setLoading(false));
   }, [id, actions]);
+
+  useEffect(() => {
+    if (!project || loading) return;
+    if (!isDraftProject(project)) return;
+    nav(buildBuilderDraftPath(project.id, { step: resolveBuilderWizardStep(project) }), { replace: true });
+  }, [project, loading, nav]);
 
   if (loading && !project) {
     return (

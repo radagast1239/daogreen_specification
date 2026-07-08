@@ -9,6 +9,7 @@ import { useStore } from "../store/StoreContext.jsx";
 
 const NAV = [
   { to: "/", label: "Проекты", icon: "projects", end: true },
+  { to: "/projects/in-progress", label: "В процессе", icon: "progress" },
   { to: "/clients", label: "Клиенты", icon: "clients" },
   { to: "/materials", label: "Материалы", icon: "materials" },
   { to: "/modules", label: "Модули и шаблоны", icon: "modules" },

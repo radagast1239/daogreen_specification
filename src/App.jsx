@@ -7,6 +7,7 @@ import PageSkeleton from "./components/PageSkeleton.jsx";
 import LoginPage from "./pages/admin/LoginPage.jsx";
 
 const ProjectsPage = lazy(() => import("./pages/admin/ProjectsPage.jsx"));
+const ProjectsInProgressPage = lazy(() => import("./pages/admin/ProjectsInProgressPage.jsx"));
 const ProjectBuilderPage = lazy(() => import("./pages/admin/ProjectBuilderPage.jsx"));
 const SpecEditorPage = lazy(() => import("./pages/admin/SpecEditorPage.jsx"));
 const MaterialsPage = lazy(() => import("./pages/admin/MaterialsPage.jsx"));
@@ -65,6 +66,7 @@ export default function App() {
       <Route element={<AdminGuard />}>
         <Route element={<Layout />}>
           <Route path="/" element={<Lazy><ProjectsPage /></Lazy>} />
+          <Route path="/projects/in-progress" element={<Lazy><ProjectsInProgressPage /></Lazy>} />
           <Route path="/clients" element={<Lazy><ClientsPage /></Lazy>} />
           <Route path="/modules" element={<Lazy><ModulesPage /></Lazy>} />
           <Route path="/materials" element={<Lazy><MaterialsPage /></Lazy>} />

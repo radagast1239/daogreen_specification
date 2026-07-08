@@ -9,6 +9,7 @@ import {
   FRAME_SOURCE_STANDALONE,
 } from './frameDrawingTargets.js';
 import { buildModuleRackKey } from './moduleRackIds.js';
+import { buildBuilderDraftPath } from './projectLifecycle.js';
 
 export const FRAME_DRAWING_SOURCE_TYPES = [
   FRAME_SOURCE_PROJECT,
@@ -73,18 +74,18 @@ export const DRAFT_PROJECT_FRAME_DRAWING_DISABLED_REASON =
   'Сначала сохраните проект. После сохранения схемы каркасов будут доступны в мастере настройки проекта.';
 
 export const DRAFT_PROJECT_FRAME_DRAWING_SECTION_HINT =
-  'Схемы каркасов и добавление BOM в закупку доступны после сохранения проекта. Используйте кнопку «Сохранить проект и создать схему» — проект сохранится, и откроется конструктор каркаса.';
+  'Схемы каркасов и добавление BOM в закупку доступны после сохранения черновика. Используйте «Сохранить черновик и создать схему» — черновик сохранится, и откроется конструктор каркаса.';
 
 export const BUILDER_SAVE_AND_CREATE_FRAME_HINT =
-  'Проект будет сохранён, после этого откроется конструктор каркаса. Это нужно, чтобы схема и BOM были привязаны к конкретному проекту.';
+  'Черновик проекта будет сохранён, после этого откроется конструктор каркаса. Схема и BOM будут привязаны к этому проекту.';
 
 export const STANDALONE_FRAME_SAVE_HINT =
   'Чтобы сохранить чертёж к проекту и добавить BOM, откройте конструктор из сохранённого проекта или через мастер настройки проекта.';
 
-export function buildBuilderEditStellagesPath(projectId) {
+export function buildBuilderEditStellagesPath(projectId, { editRack, step = 'stellages' } = {}) {
   const id = String(projectId || '').trim();
   if (!id) return buildBuilderStellagesReturnPath();
-  return `/new?projectId=${encodeURIComponent(id)}&step=stellages`;
+  return buildBuilderDraftPath(id, { step, editRack });
 }
 
 export function isBuilderWizardReturnPath(returnTo = '') {
@@ -133,17 +134,18 @@ export function buildBuilderFrameDrawingContext({ projectId, projectName, stella
   const rackId = stellage.id;
   const moduleId = stellage.moduleId;
   const id = String(projectId || '').trim();
+  const moduleRackKey = buildModuleRackKey({ moduleId, rackId });
   return {
     projectId: id,
     moduleId,
     rackId,
     stellageId: rackId,
-    moduleRackKey: buildModuleRackKey({ moduleId, rackId }),
+    moduleRackKey,
     presetId: stellage.presetId || '',
     sourceType: FRAME_SOURCE_PROJECT_STELLAGE,
     rackLabel: stellage.name,
     projectName: projectName || '',
-    returnTo: returnTo || buildBuilderEditStellagesPath(id),
+    returnTo: returnTo || buildBuilderEditStellagesPath(id, { editRack: moduleRackKey }),
   };
 }
 
