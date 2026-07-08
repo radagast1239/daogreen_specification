@@ -3,7 +3,7 @@ import { calculateAngleFasteners } from "./frameAngleStock.js";
 
 export const PREVIEW_BANNER_TEXT = "Предпросмотр. В закупку ещё не добавлено.";
 export const PREVIEW_FUTURE_NOTE =
-  "Запись в закупочный лист будет добавлена отдельной кнопкой после проверки.";
+  "Повторное нажатие заменит BOM только этого стеллажа, ручные позиции проекта не трогаются.";
 
 export const CRAB_PREVIEW_LABELS = {
   crab_g: "Краб G",

@@ -12,12 +12,17 @@ import {
   groupPurchasePreviewItems,
   findMissingMaterialIds,
 } from "../src/frameConstructor/frameBomPurchasePreviewData.js";
+import {
+  FRAME_BOM_ADD_BUTTON_LABEL,
+  FRAME_BOM_NO_PROJECT_REASON,
+  evaluateFrameBomAddToProject,
+} from "../src/frameConstructor/frameBomAddToProject.js";
 import FrameBomPurchasePreview from "../src/frameConstructor/FrameBomPurchasePreview.jsx";
 
 describe("frameBomPurchasePreview data", () => {
-  it("exposes preview banner and future-note copy", () => {
+  it("exposes preview banner and hint copy", () => {
     expect(PREVIEW_BANNER_TEXT).toBe("Предпросмотр. В закупку ещё не добавлено.");
-    expect(PREVIEW_FUTURE_NOTE).toContain("отдельной кнопкой");
+    expect(PREVIEW_FUTURE_NOTE).toContain("Повторное нажатие");
   });
 
   it("filters out qty=0 positions", () => {
@@ -106,5 +111,18 @@ describe("FrameBomPurchasePreview component", () => {
   it("is a pure UI component without api imports", () => {
     expect(FrameBomPurchasePreview).toBeTypeOf("function");
     expect(String(FrameBomPurchasePreview)).not.toMatch(/api\./);
+  });
+
+  it("add gating disables without projectId", () => {
+    const evalResult = evaluateFrameBomAddToProject({
+      projectId: "",
+      project: null,
+      purchaseDraft: [{ key: "crab_g", materialId: "m072", qty: 1 }],
+      drawingContext: { moduleRackKey: "rack1" },
+      materials: [{ id: "m072" }],
+    });
+    expect(evalResult.canAddToProject).toBe(false);
+    expect(evalResult.addDisabledReason).toBe(FRAME_BOM_NO_PROJECT_REASON);
+    expect(FRAME_BOM_ADD_BUTTON_LABEL).toContain("стеллажа");
   });
 });

@@ -695,6 +695,30 @@
   line-height: 1.45;
 }
 
+.fc-bom-preview__actions {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.fc-bom-preview__disabled {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.fc-bom-preview__success {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #ecf8f4;
+  font-size: 13px;
+}
+
+.fc-bom-preview__success-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
 /* Crab type gallery */
 .fc-crab-gallery {
   position: relative;

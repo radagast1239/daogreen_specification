@@ -19,6 +19,11 @@ import {
   frameDrawingSaveHint,
 } from '../../shared/frameDrawingContext.js';
 import { api } from '../lib/api.js';
+import { useToast } from '../components/Toast.jsx';
+import {
+  requestFrameBomAddConfirmation,
+  applyFrameBomProjectAdd,
+} from './frameBomAddToProject.js';
 import './frameConstructor.css';
 
 const RACK_TYPE_LABELS = {
@@ -31,6 +36,7 @@ const RACK_TYPE_LABELS = {
 
 export default function FrameConstructorPage() {
   const [searchParams] = useSearchParams();
+  const { confirm } = useToast();
   const drawingContext = useMemo(
     () => parseFrameDrawingSearchParams(searchParams),
     [searchParams],
@@ -39,6 +45,10 @@ export default function FrameConstructorPage() {
   const [params, setParams] = useState(framePresets[0].params);
   const [activeTab, setActiveTab] = useState('drawings');
   const [contextLoaded, setContextLoaded] = useState(!drawingContext.drawingId);
+  const [project, setProject] = useState(null);
+  const [materials, setMaterials] = useState(null);
+  const [bomAddSaving, setBomAddSaving] = useState(false);
+  const [bomAddResult, setBomAddResult] = useState(null);
   const captureRef = useRef(null);
 
   useEffect(() => {
@@ -57,6 +67,68 @@ export default function FrameConstructorPage() {
       });
     return () => { cancelled = true; };
   }, [drawingContext.drawingId]);
+
+  useEffect(() => {
+    if (!drawingContext.projectId) {
+      setProject(null);
+      return;
+    }
+    let cancelled = false;
+    api.getProject(drawingContext.projectId)
+      .then((p) => {
+        if (!cancelled) setProject(p);
+      })
+      .catch(() => {
+        if (!cancelled) setProject(null);
+      });
+    return () => { cancelled = true; };
+  }, [drawingContext.projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getMaterials()
+      .then((rows) => {
+        if (!cancelled) setMaterials(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setMaterials(null);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleAddFrameBomToProject = async (purchaseDraft) => {
+    if (!drawingContext.projectId || !project?.items) return;
+    try {
+      const { ok } = await requestFrameBomAddConfirmation({
+        project,
+        purchaseDraft,
+        drawingContext: { ...drawingContext, projectId: drawingContext.projectId },
+        confirm,
+      });
+      if (!ok) return;
+
+      setBomAddSaving(true);
+      const outcome = await applyFrameBomProjectAdd({
+        project,
+        purchaseDraft,
+        drawingContext: { ...drawingContext, projectId: drawingContext.projectId },
+        updateProject: api.updateProject,
+      });
+      if (outcome.skipped) return;
+      setProject(outcome.updated);
+      setBomAddResult({
+        success: true,
+        ...outcome.summary,
+      });
+    } catch (err) {
+      setBomAddResult({
+        success: false,
+        error: err?.message || 'Не удалось обновить закупочный лист проекта.',
+      });
+    } finally {
+      setBomAddSaving(false);
+    }
+  };
 
   const geom = useMemo(() => calculateFrameGeometry(params), [params]);
   const hasErrors = geom.validationErrors && geom.validationErrors.length > 0;
@@ -229,7 +301,15 @@ export default function FrameConstructorPage() {
               />
             )}
             {activeTab === 'cutlist' && (
-              <FrameCutList params={params} />
+              <FrameCutList
+                params={params}
+                drawingContext={drawingContext}
+                project={project}
+                materials={materials}
+                onAddFrameBomToProject={handleAddFrameBomToProject}
+                bomAddSaving={bomAddSaving}
+                bomAddResult={bomAddResult}
+              />
             )}
           </div>
         </section>

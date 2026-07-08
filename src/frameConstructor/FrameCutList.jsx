@@ -8,6 +8,7 @@ import { extractTubeCutsFromCutList, calculateTubeStockOptions } from './frameTu
 import { calculateAngleStockOptions, calculateAngleFastenerVariants, perforatedAngleProfileLabel } from './frameAngleStock.js';
 import FrameBomPurchasePreview from './FrameBomPurchasePreview.jsx';
 import { buildFramePurchaseDraftFromContext } from './frameBomPurchasePreviewData.js';
+import { evaluateFrameBomAddToProject } from './frameBomAddToProject.js';
 
 function renderFastenerBlock(title, fasteners, profile) {
   const rows = [
@@ -47,7 +48,15 @@ function renderFastenerBlock(title, fasteners, profile) {
   );
 }
 
-export default function FrameCutList({ params }) {
+export default function FrameCutList({
+  params,
+  drawingContext = {},
+  project = null,
+  materials = null,
+  onAddFrameBomToProject = null,
+  bomAddSaving = false,
+  bomAddResult = null,
+}) {
   useCrabPhotoVersion();
   const cutList = useMemo(() => generateCutList(params), [params]);
 
@@ -79,6 +88,21 @@ export default function FrameCutList({ params }) {
         stockOptions,
       }),
     [params, cutList, geom, isAngle, stockOptions],
+  );
+
+  const bomAddEval = useMemo(
+    () =>
+      evaluateFrameBomAddToProject({
+        projectId: drawingContext.projectId,
+        project,
+        purchaseDraft,
+        drawingContext: {
+          ...drawingContext,
+          projectId: drawingContext.projectId,
+        },
+        materials,
+      }),
+    [drawingContext, project, purchaseDraft, materials],
   );
 
   if (cutList.length === 0) {
@@ -266,6 +290,16 @@ export default function FrameCutList({ params }) {
         purchaseDraft={purchaseDraft}
         constructionType={params.constructionType || 'tube_crab'}
         stockRecommended={recommended}
+        canAddToProject={bomAddEval.canAddToProject}
+        addDisabledReason={bomAddEval.addDisabledReason}
+        addWarnings={bomAddEval.warnings}
+        onAddToProject={
+          drawingContext.projectId && onAddFrameBomToProject
+            ? () => onAddFrameBomToProject(purchaseDraft)
+            : null
+        }
+        isSaving={bomAddSaving}
+        lastResult={bomAddResult}
       />
     </>
   );

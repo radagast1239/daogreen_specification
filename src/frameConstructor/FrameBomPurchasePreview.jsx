@@ -8,6 +8,9 @@ import {
   groupPurchasePreviewItems,
   visiblePurchaseDraftItems,
 } from "./frameBomPurchasePreviewData.js";
+import {
+  FRAME_BOM_ADD_BUTTON_LABEL,
+} from "./frameBomAddToProject.js";
 
 function PreviewLine({ label, qty, unit }) {
   return (
@@ -49,6 +52,12 @@ export default function FrameBomPurchasePreview({
   constructionType = "tube_crab",
   stockRecommended = null,
   warnings = [],
+  canAddToProject = false,
+  addDisabledReason = "",
+  addWarnings = [],
+  onAddToProject = null,
+  isSaving = false,
+  lastResult = null,
 }) {
   const isAngle = constructionType === "perforated_angle";
   const visible = visiblePurchaseDraftItems(purchaseDraft);
@@ -165,6 +174,49 @@ export default function FrameBomPurchasePreview({
                   />
                 ))}
               </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {onAddToProject != null && (
+        <div className="fc-bom-preview__actions">
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={!canAddToProject || isSaving}
+            onClick={onAddToProject}
+          >
+            {isSaving ? "Сохранение…" : FRAME_BOM_ADD_BUTTON_LABEL}
+          </button>
+          <p className="fc-bom-preview__future muted">{PREVIEW_FUTURE_NOTE}</p>
+          {!canAddToProject && addDisabledReason && (
+            <p className="fc-bom-preview__disabled muted" role="status">
+              {addDisabledReason}
+            </p>
+          )}
+          {addWarnings.length > 0 && (
+            <div className="fc-bom-preview__warn" role="status">
+              {addWarnings.map((w) => (
+                <div key={w}>{w}</div>
+              ))}
+            </div>
+          )}
+          {lastResult?.success && (
+            <div className="fc-bom-preview__success" role="status">
+              <div className="fc-bom-preview__success-title">{lastResult.title}</div>
+              <div>
+                добавлено: {lastResult.addedCount}, заменено старых: {lastResult.removedCount},
+                оставлено прочих позиций: {lastResult.keptCount}
+              </div>
+              {lastResult.sourceRackPrefix && (
+                <div className="muted">Ключ стеллажа: {lastResult.sourceRackPrefix}</div>
+              )}
+            </div>
+          )}
+          {lastResult?.success === false && lastResult.error && (
+            <div className="fc-bom-preview__warn" role="alert">
+              {lastResult.error}
             </div>
           )}
         </div>
