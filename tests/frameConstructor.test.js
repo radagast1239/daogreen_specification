@@ -888,6 +888,22 @@ describe('Frame Constructor PDF export', () => {
     expect(data.canExport).toBe(true);
   });
 
+  it('exportFrameToPdfBlob succeeds for crab hardware without welded note', async () => {
+    const { params, geom, cutList } = pdfFixture({ connectionType: 'crab' });
+    const data = prepareFramePdfData(params, geom, cutList);
+    expect(data.hardwareRows.length).toBeGreaterThan(0);
+    expect(data.weldedNote).toBeNull();
+    const { exportFrameToPdfBlob } = await import('../src/frameConstructor/framePdfExport.js');
+    const { blob, filename } = await exportFrameToPdfBlob({
+      config: params,
+      geometry: geom,
+      cutList,
+      branding: { companyName: 'Daogreen' },
+    });
+    expect(filename).toMatch(/\.pdf$/);
+    expect(blob.size).toBeGreaterThan(1000);
+  });
+
   it('supportsTrays is true only for flood, seedling, strawberry', () => {
     expect(supportsTrays('flood')).toBe(true);
     expect(supportsTrays('seedling')).toBe(true);

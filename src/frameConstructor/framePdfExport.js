@@ -1979,10 +1979,14 @@ function drawSpecPage(doc, pdfData, branding, logoDataUrl, dateStr, autoTable, t
     y += 4 * splitNote.length + 2;
     doc.setTextColor(0);
   } else if (pdfData.hardwareRows.length > 0) {
-    doc.setFontSize(8);
-    doc.setTextColor(80);
-    doc.text(pdfData.weldedNote, leftMargin, y);
-    y += 8;
+    y = drawHardwareTable(doc, pdfData.hardwareRows, y, leftMargin, rightCol, autoTable, tableStyles);
+    if (pdfData.weldedNote) {
+      doc.setFontSize(8);
+      doc.setTextColor(80);
+      doc.text(pdfData.weldedNote, leftMargin, y);
+      y += 8;
+      doc.setTextColor(0);
+    }
   }
 
   if (pdfData.channelTableRows?.length > 0) {
