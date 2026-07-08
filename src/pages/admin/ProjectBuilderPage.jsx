@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
 import { useToast } from "../../components/Toast.jsx";
+import { api } from "../../lib/api.js";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
 import { resolveCategories } from "../../lib/categories.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
