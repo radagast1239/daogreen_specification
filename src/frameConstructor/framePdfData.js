@@ -5,6 +5,25 @@ import { countNftChannelsAcrossDepth, calculateNftChannelBill, shouldShowNftChan
 import { extractTubeCutsFromCutList, calculateTubeStockOptions } from './frameTubeStock.js';
 import { calculateAngleStockOptions, calculateAngleFastenerVariants, perforatedAngleProfileLabel } from './frameAngleStock.js';
 
+const ANGLE_PDF_NOTES = [
+  'Размеры указаны в мм.',
+  'Рез уголков прямой / 90°.',
+  'Перед изготовлением проверить размеры под фактический поддон.',
+  'PDF сформирован автоматически из конструктора каркасов Daogreen.',
+];
+
+function isPerforatedAngle(config) {
+  return config?.constructionType === 'perforated_angle';
+}
+
+function angleConstructionTitle(config) {
+  return `Перфорированный уголок ${config?.angleProfile || '30×30'}`;
+}
+
+function angleProfileLongLabel(config) {
+  return `L-образный перфорированный уголок ${config?.angleProfile || '30×30'}`;
+}
+
 const RACK_TYPE_LABELS = {
   nft: 'NFT проточная гидропоника',
   dwc: 'DWC глубоководная',
@@ -74,7 +93,7 @@ function rackTypeLabel(rackType) {
 
 function connectionLabel(connectionType, constructionType) {
   if (constructionType === 'perforated_angle') {
-    return 'Болтовое (перфоуг.)';
+    return 'Болтовое (перфоуг.) · болты М6×20';
   }
   return CONNECTION_LABELS[connectionType] || connectionType || '—';
 }
@@ -154,6 +173,13 @@ export function prepareFramePdfData(config, geometry, cutList) {
     ['Полная глубина, мм', totalDepth],
     ['Высота, мм', height],
     ['Тип стеллажа', rackTypeLabel(normalized.rackType)],
+    ...(isPerforatedAngle(normalized)
+      ? [
+        ['Тип конструкции', angleConstructionTitle(normalized)],
+        ['Профиль', angleProfileLongLabel(normalized)],
+        ['Поперечины', 'вар. А — болт+гайка; вар. Б — крепёжные уголки'],
+      ]
+      : []),
     ['Количество ярусов', normalized.tierCount],
     ['Количество уровней', geometry?.levelCount ?? normalized.tierCount + 1],
     ['Шаг ярусов, мм', normalized.tierSpacingMm],
@@ -226,7 +252,13 @@ export function prepareFramePdfData(config, geometry, cutList) {
     hardwareRows,
     channelTableRows,
     paramsList,
-    notes: FRAME_PDF_NOTES,
+    notes: isPerforatedAngle(normalized) ? ANGLE_PDF_NOTES : FRAME_PDF_NOTES,
+    constructionType: normalized.constructionType,
+    constructionLabel: isPerforatedAngle(normalized)
+      ? angleConstructionTitle(normalized)
+      : 'Профильная труба + краб-система',
+    profileKind: isPerforatedAngle(normalized) ? 'angle' : 'tube',
+    showAngleVisual: isPerforatedAngle(normalized),
     weldedNote,
     tubeStock,
     angleStock,

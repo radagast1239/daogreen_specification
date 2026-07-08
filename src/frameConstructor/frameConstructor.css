@@ -389,6 +389,40 @@
   background: linear-gradient(180deg, #fafcfb 0%, #eef5f1 100%);
 }
 
+.fc-viewer__angle-hint {
+  margin-left: auto;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--ink-muted, #555);
+  white-space: nowrap;
+}
+
+.fc-angle-info {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid rgba(17, 99, 85, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.fc-angle-info--compact {
+  padding: 0.35rem 0.55rem;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.fc-angle-info__icon {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 22px;
+}
+
 .fc-viewer__canvas > div {
   position: absolute !important;
   inset: 0;

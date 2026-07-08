@@ -37,6 +37,10 @@ const STAMP_H = 36;
 const STAMP_X = PAGE_W - SHEET_INSET - STAMP_W - SHEET_PAD;
 const STAMP_Y = PAGE_H - SHEET_INSET - STAMP_H - SHEET_PAD;
 const CONTENT_BOTTOM = STAMP_Y - 6;
+/** Нижняя граница левой колонки спецификации (штамп справа, слева можно ниже) */
+const LEFT_COL_MAX_Y = PAGE_H - SHEET_INSET - 8;
+/** Нижняя граница правой колонки — над штампом */
+const RIGHT_COL_CONTENT_MAX_Y = STAMP_Y - 4;
 const RIGHT_COL_X = 218;
 const RIGHT_COL_W = STAMP_X + STAMP_W - RIGHT_COL_X;
 
@@ -95,12 +99,15 @@ export function beamElevationCenterZ(beamZ, geom, tubeHeightMm) {
 }
 
 const BRAND_Y = FRAME_PDF_BRAND_HEADER_H;
+const UPPER_ROW_Y = 20 + BRAND_Y;
+const UPPER_ROW_BOTTOM = 164;
+const TOP_ROW_Y = UPPER_ROW_BOTTOM + 3;
 
 export const PDF_LAYOUT = {
-  frontBox: { x: 15, y: 20 + BRAND_Y, w: 185, h: 136 - BRAND_Y },
-  sideBox: { x: 208, y: 20 + BRAND_Y, w: 85, h: 136 - BRAND_Y },
-  topBox: { x: 15, y: 154 + BRAND_Y, w: STAMP_X - 20, h: CONTENT_BOTTOM - (154 + BRAND_Y) },
-  isoBox: { x: 290, y: 20 + BRAND_Y, w: 110, h: 136 - BRAND_Y },
+  frontBox: { x: 15, y: UPPER_ROW_Y, w: 178, h: UPPER_ROW_BOTTOM - UPPER_ROW_Y },
+  sideBox: { x: 196, y: UPPER_ROW_Y, w: 80, h: UPPER_ROW_BOTTOM - UPPER_ROW_Y },
+  isoBox: { x: 281, y: UPPER_ROW_Y, w: PAGE_W - SHEET_INSET - 281, h: UPPER_ROW_BOTTOM - UPPER_ROW_Y },
+  topBox: { x: 15, y: TOP_ROW_Y, w: PAGE_W - SHEET_INSET - 15, h: CONTENT_BOTTOM - TOP_ROW_Y },
   stampBox: { x: STAMP_X, y: STAMP_Y, w: STAMP_W, h: STAMP_H },
 };
 
@@ -114,19 +121,26 @@ export const PDF_CHANNELS_LAYOUT = {
 };
 
 /** @returns {{ scale: number, originX: number, originY: number, drawW: number, drawH: number }} */
-export function fitToBox(realW, realH, box, padding = 8) {
+export function fitToBox(realW, realH, box, padding = 8, options = {}) {
   const availW = Math.max(1, box.w - padding * 2);
   const availH = Math.max(1, box.h - padding * 2);
   const scale = Math.min(availW / realW, availH / realH);
   const drawW = realW * scale;
   const drawH = realH * scale;
   const originX = box.x + (box.w - drawW) / 2;
-  const originY = box.y + padding + drawH;
+  const originY = options.vCenter
+    ? box.y + (box.h + drawH) / 2
+    : box.y + padding + drawH;
   return { scale, originX, originY, drawW, drawH };
 }
 
 export function visualTubeWidth(tubeWidthMm, scale, min = 0.8, max = 2.2) {
   return Math.min(max, Math.max(min, tubeWidthMm * scale));
+}
+
+/** Ширина стойки на чертеже: для перфоуголка — в 2 раза шире */
+export function visualPostWidth(tubeWidthMm, scale, isAngle) {
+  return visualTubeWidth(isAngle ? tubeWidthMm * 2 : tubeWidthMm, scale, 0.8, isAngle ? 2.8 : 2.2);
 }
 
 /** Тонкие линии труб на виде сверху — не перекрывают крабы и пролёты */
@@ -304,8 +318,8 @@ export function estimateCrossBeamDimRowCount(params, geom) {
   return Math.min(plan.mode === 'summary' ? 3 : 4, Math.ceil(plan.chainItems.length / 3));
 }
 
-function createViewTransform(box, contentW, contentH, padding = 10) {
-  const fit = fitToBox(contentW, contentH, box, padding);
+function createViewTransform(box, contentW, contentH, padding = 10, options = {}) {
+  const fit = fitToBox(contentW, contentH, box, padding, options);
   return {
     ...fit,
     box,
@@ -797,7 +811,7 @@ function drawTopViewDimensions(doc, box, params, geom, transform, beamDimPlan, d
 export function collectFrontViewStrokes(params, geom, box) {
   const { lengthMm, tubeWidthMm } = params;
   const postHeight = geom.postHeight;
-  const transform = createViewTransform(box, lengthMm, postHeight, 12);
+  const transform = createViewTransform(box, lengthMm, postHeight, 7);
   const strokes = [];
   const frontY = tubeWidthMm / 2;
 
@@ -831,22 +845,69 @@ export function collectFrontViewStrokes(params, geom, box) {
 }
 
 function drawAngleIcon(doc, x, y, size = 3) {
-  doc.setLineWidth(0.4);
-  doc.setDrawColor(80);
+  doc.setLineWidth(0.45);
+  doc.setDrawColor(40);
   doc.line(x, y, x, y + size);
   doc.line(x, y + size, x + size, y + size);
+}
+
+function isPerforatedAngle(params) {
+  return params?.constructionType === 'perforated_angle';
+}
+
+function drawAngleConstructionBlock(doc, pdfData, x, y, textWidth) {
+  const profile = pdfData.config?.angleProfile || '30×30';
+  const iconSize = 5;
+  drawAngleIcon(doc, x, y, iconSize);
+  const textX = x + iconSize + 3;
+  doc.setFontSize(7);
+  doc.setFont('Roboto', 'bold');
+  doc.setTextColor(0);
+  doc.text(`Тип конструкции: Перфорированный уголок ${profile}`, textX, y + 3.5);
+  doc.setFont('Roboto', 'normal');
+  doc.setFontSize(6.2);
+  doc.setTextColor(50);
+  const lines = [
+    `Профиль: L-образный перфорированный уголок ${profile}`,
+    'Соединение продольных балок: крепёжные уголки + болты М6×20',
+    'Поперечины: вариант А — болт + гайка; вариант Б — через крепёжные уголки',
+    'Крабы G/T/X/A4/A6 не используются.',
+  ];
+  let lineY = y + 7;
+  lines.forEach((line) => {
+    const wrapped = doc.splitTextToSize(line, textWidth - iconSize - 4);
+    doc.text(wrapped, textX, lineY);
+    lineY += wrapped.length * 3;
+  });
+  return lineY - y + 1;
+}
+
+function resolveAssemblyLayout(angleBlockHeight = 0) {
+  const base = PDF_LAYOUT;
+  if (angleBlockHeight <= 0) return base;
+  const dy = angleBlockHeight + 2;
+  return {
+    frontBox: { ...base.frontBox, y: base.frontBox.y + dy },
+    sideBox: { ...base.sideBox, y: base.sideBox.y + dy },
+    isoBox: { ...base.isoBox, y: base.isoBox.y + dy },
+    topBox: { ...base.topBox, y: base.topBox.y + dy, h: Math.max(38, base.topBox.h - dy) },
+    stampBox: base.stampBox,
+  };
 }
 
 function drawFrontView(doc, box, params, geom) {
   const { lengthMm, tubeWidthMm, tubeHeightMm, bottomOffsetMm, tierSpacingMm, tierCount } = params;
   const postHeight = geom.postHeight;
-  const transform = createViewTransform(box, lengthMm, postHeight, 12);
+  const transform = createViewTransform(box, lengthMm, postHeight, 7);
   const frontY = tubeWidthMm / 2;
 
   collectFrontViewStrokes(params, geom, box).forEach((s) => {
+    const sw = s.role === 'post'
+      ? visualPostWidth(tubeWidthMm, transform.scale, isPerforatedAngle(params))
+      : visualTubeWidth(tubeWidthMm, transform.scale);
     drawPdfTube(doc, s.x1, s.y1, s.x2, s.y2, {
       color: s.role === 'post' ? COLORS.post : COLORS.longitudinal,
-      strokeWidth: visualTubeWidth(tubeWidthMm, transform.scale),
+      strokeWidth: sw,
       box,
     });
   });
@@ -940,31 +1001,20 @@ function drawFrontView(doc, box, params, geom) {
       tierLabelGap,
     );
   }
-
-  doc.setFontSize(5);
-  doc.setTextColor(80);
-  const profileLabelStr = params.constructionType === 'perforated_angle'
-    ? `перфорированный уголок ${params.angleProfile || '30×30'}`
-    : `Профиль ${tubeWidthMm}×${tubeHeightMm}`;
-  doc.text(profileLabelStr, box.x + 2, box.y + box.h - 2);
-
-  if (params.constructionType === 'perforated_angle') {
-    const textWidth = doc.getTextWidth(profileLabelStr);
-    drawAngleIcon(doc, box.x + 2 + textWidth + 2, box.y + box.h - 4.5, 2.5);
-  }
 }
 
 function drawSideView(doc, box, params, geom) {
   const { tubeWidthMm, tubeHeightMm, bottomOffsetMm, tierSpacingMm, tierCount } = params;
   const depthMm = renderDepthMm(params, geom);
   const postHeight = geom.postHeight;
-  const transform = createViewTransform(box, depthMm, postHeight, 12);
+  const transform = createViewTransform(box, depthMm, postHeight, 7);
   const sideX = tubeWidthMm / 2;
 
   geom.posts
     .filter((p) => Math.abs(p.x - sideX) < 0.01)
     .forEach((p) => {
-      drawPdfTubeV(doc, transform, p.y, 0, postHeight, tubeWidthMm, COLORS.post, box);
+      const postW = isPerforatedAngle(params) ? tubeWidthMm * 2 : tubeWidthMm;
+      drawPdfTubeV(doc, transform, p.y, 0, postHeight, postW, COLORS.post, box);
     });
 
   const refX = geom.crossBeams[0]?.x;
@@ -1035,7 +1085,7 @@ function drawSideView(doc, box, params, geom) {
   }
 
   if (geom.crossBeamLength > 0) {
-    const midY = transform.toY(postHeight * 0.45);
+    const midY = transform.toY(postHeight * 0.32);
     drawDimH(
       doc,
       transform.toX(tubeWidthMm),
@@ -1066,7 +1116,10 @@ function drawTopView(doc, box, params, geom) {
     ? planTopViewCrossBeamDims(layout.xPositions, lengthMm, tubeWidthMm)
     : { mode: 'none', chainItems: [], note: null };
   const dimRowCount = estimateCrossBeamDimRowCount(params, geom);
-  const dimMargins = measureTopViewDimMargins(params, geom, dimRowCount);
+  const angleMode = isPerforatedAngle(params);
+  const dimMargins = angleMode
+    ? { top: 4, bottom: 7, left: 6, right: 7 }
+    : measureTopViewDimMargins(params, geom, dimRowCount);
   const areas = topViewLayoutAreas(box, {
     hasLegend: legendTypes.length > 0,
     legendTypes,
@@ -1074,8 +1127,14 @@ function drawTopView(doc, box, params, geom) {
     beamNote: beamDimPlan.note,
   });
   const beamCount = layout?.xPositions?.length || 0;
-  const transform = createViewTransform(areas.drawing, lengthMm, depthMm, 2);
+  const aspect = lengthMm / Math.max(1, depthMm);
+  const transform = createViewTransform(areas.drawing, lengthMm, depthMm, 1, {
+    vCenter: aspect > 3,
+  });
   const vw = topViewVisualTubeWidth(tubeWidthMm, transform.scale);
+  const postVw = isPerforatedAngle(params)
+    ? topViewVisualTubeWidth(tubeWidthMm * 2, transform.scale)
+    : vw;
   const crabMarkerOpts = resolveTopViewCrabMarkerOptions(
     transform.scale,
     planConnectors.length,
@@ -1137,7 +1196,7 @@ function drawTopView(doc, box, params, geom) {
     } else {
       doc.setDrawColor(...COLORS.post);
       doc.setLineWidth(0.3);
-      doc.rect(cx - vw / 2, cy - vw / 2, vw, vw, 'S');
+      doc.rect(cx - postVw / 2, cy - postVw / 2, postVw, postVw, 'S');
     }
   });
 
@@ -1166,7 +1225,7 @@ function drawIsoWireframe(doc, box, params, geom) {
   const postHeight = geom.postHeight;
   const projW = lengthMm + depthMm;
   const projH = postHeight + (lengthMm + depthMm) * 0.5;
-  const fit = fitToBox(projW, projH, box, 6);
+  const fit = fitToBox(projW, projH, box, 4);
   const scale = fit.scale;
   const cx = fit.originX + fit.drawW / 2;
   const cy = fit.originY - fit.drawH / 2;
@@ -1174,6 +1233,7 @@ function drawIsoWireframe(doc, box, params, geom) {
   const oy = postHeight / 2;
   const oz = depthMm / 2;
   const sw = visualTubeWidth(tubeWidthMm, scale);
+  const postSw = visualPostWidth(tubeWidthMm, scale, isPerforatedAngle(params));
   const boxClip = box;
 
   const isoLine = (x1, y1, z1, x2, y2, z2, color, lineW = sw) => {
@@ -1183,7 +1243,7 @@ function drawIsoWireframe(doc, box, params, geom) {
   };
 
   geom.posts.forEach((p) => {
-    isoLine(p.x, 0, p.y, p.x, postHeight, p.y, COLORS.post);
+    isoLine(p.x, 0, p.y, p.x, postHeight, p.y, COLORS.post, postSw);
   });
 
   geom.longitudinalBeams.forEach((b) => {
@@ -1589,7 +1649,15 @@ function drawAssemblyPage(doc, pdfData, branding, logoDataUrl, isoImageDataUrl, 
     showConnectors: config.constructionType !== 'perforated_angle',
     showTrays: true
   };
-  const { frontBox, sideBox, topBox, isoBox, stampBox } = PDF_LAYOUT;
+
+  const headerBottom = 11 + (FRAME_PDF_BRAND_HEADER_H - 2) + 2;
+  let layout = PDF_LAYOUT;
+  if (isPerforatedAngle(config)) {
+    const blockH = drawAngleConstructionBlock(doc, pdfData, 15, headerBottom, PAGE_W - 30);
+    layout = resolveAssemblyLayout(blockH + 2);
+  }
+
+  const { frontBox, sideBox, topBox, isoBox, stampBox } = layout;
 
   drawViewFrame(doc, frontBox, 'Вид спереди');
   drawViewFrame(doc, sideBox, 'Вид сбоку');
@@ -1609,6 +1677,54 @@ function imageFormatFromDataUrl(dataUrl) {
   if (dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/jpg')) return 'JPEG';
   if (dataUrl.startsWith('data:image/webp')) return 'WEBP';
   return 'PNG';
+}
+
+function measureWrappedNotesBlock(doc, notes, contentWidth, lineHeight = 4.5) {
+  doc.setFontSize(8);
+  let height = 5;
+  const wrapped = notes.map((note) => {
+    const lines = doc.splitTextToSize(`• ${note}`, Math.max(20, contentWidth - 2));
+    height += lines.length * lineHeight;
+    return lines;
+  });
+  return { height, wrapped, lineHeight };
+}
+
+function drawWrappedNotesBlock(doc, x, startY, wrapped, lineHeight = 4.5) {
+  doc.setFontSize(8);
+  doc.setTextColor(40);
+  doc.text('Примечания:', x, startY);
+  let y = startY + 5;
+  wrapped.forEach((lines) => {
+    doc.text(lines, x + 2, y);
+    y += lines.length * lineHeight;
+  });
+  return y;
+}
+
+function resolveNotesPlacement(doc, notes, {
+  leftColumnEndY,
+  rightColumnEndY,
+  leftMargin,
+  rightCol,
+}) {
+  const gap = 6;
+  const leftWidth = rightCol - leftMargin - 4;
+  const rightWidth = STAMP_X - rightCol - 4;
+
+  const leftStartY = leftColumnEndY + gap;
+  const leftBlock = measureWrappedNotesBlock(doc, notes, leftWidth);
+  if (leftStartY + leftBlock.height <= LEFT_COL_MAX_Y) {
+    return { x: leftMargin, startY: leftStartY, ...leftBlock };
+  }
+
+  const rightStartY = rightColumnEndY + gap;
+  const rightBlock = measureWrappedNotesBlock(doc, notes, rightWidth);
+  if (rightStartY + rightBlock.height <= RIGHT_COL_CONTENT_MAX_Y) {
+    return { x: rightCol, startY: rightStartY, ...rightBlock };
+  }
+
+  return null;
 }
 
 function drawCompactFastenersTable(doc, title, fasteners, startY, leftMargin, rightCol, autoTable, tableStyles) {
@@ -1908,23 +2024,29 @@ function drawSpecPage(doc, pdfData, branding, logoDataUrl, dateStr, autoTable, t
     headStyles: { fillColor: [240, 240, 240], textColor: 20, ...tableStyles.head },
     theme: 'grid',
   });
-
-  doc.setFontSize(8);
-  doc.setTextColor(40);
-  const notesBlockHeight = 5 + pdfData.notes.length * 4.5;
-  let noteY = leftColumnEndY + 6;
-  if (noteY + notesBlockHeight > PAGE_H - 12) {
-    doc.addPage('a3', 'landscape');
-    noteY = 20;
-  }
-  doc.text('Примечания:', leftMargin, noteY);
-  noteY += 5;
-  pdfData.notes.forEach((note) => {
-    doc.text(`• ${note}`, leftMargin + 2, noteY);
-    noteY += 4.5;
-  });
+  const rightColumnEndY = doc.lastAutoTable.finalY;
 
   drawStamp(doc, pdfData.stamp, PDF_LAYOUT.stampBox, pageNo, totalPages, dateStr);
+
+  let notesPlacement = resolveNotesPlacement(doc, pdfData.notes, {
+    leftColumnEndY,
+    rightColumnEndY,
+    leftMargin,
+    rightCol,
+  });
+  if (!notesPlacement) {
+    doc.addPage('a3', 'landscape');
+    drawPageChrome(doc, branding, logoDataUrl, 'Спецификация реза и крепежа', pageNo, totalPages);
+    const overflowBlock = measureWrappedNotesBlock(doc, pdfData.notes, rightCol - leftMargin - 4);
+    notesPlacement = { x: leftMargin, startY: 32, ...overflowBlock };
+  }
+  drawWrappedNotesBlock(
+    doc,
+    notesPlacement.x,
+    notesPlacement.startY,
+    notesPlacement.wrapped,
+    notesPlacement.lineHeight,
+  );
 }
 
 /**

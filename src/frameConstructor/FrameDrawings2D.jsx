@@ -120,6 +120,8 @@ export default function FrameDrawings2D({ params, geom }) {
   const { lengthMm, depthMm, tubeWidthMm, tubeHeightMm, tierCount, showDimensions, connectionType, showTrays, trayEnabled } = params;
   const isAngle = params.constructionType === 'perforated_angle';
   const showConnectors = isAngle ? false : params.showConnectors;
+  const angleProfile = params.angleProfile || '30×30';
+  const postVisW = isAngle ? tubeWidthMm * 2 : tubeWidthMm;
   const showChannelVis = shouldShowNftChannels(params);
   const nft = geom.nftChannels;
   const totalDepthMm = geom.dimensions?.depthMm ?? depthMm;
@@ -149,6 +151,14 @@ export default function FrameDrawings2D({ params, geom }) {
 
   return (
     <div className="fc-drawings">
+      {isAngle && (
+        <div className="fc-angle-info fc-angle-info--compact">
+          <span><strong>Уголок {angleProfile}</strong> · L-профиль · крепёжные уголки + М6×20 · крабы не используются</span>
+          <svg className="fc-angle-info__icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M 4 4 L 4 20 L 20 20" fill="none" stroke="#222" strokeWidth="2.5" strokeLinecap="square" />
+          </svg>
+        </div>
+      )}
       {/* FRONT VIEW */}
       <div className="fc-drawing">
         <h4 className="fc-drawing__title">Вид спереди</h4>
@@ -157,7 +167,7 @@ export default function FrameDrawings2D({ params, geom }) {
             <g transform={`translate(${padding}, ${padding})`}>
               {/* Posts */}
               {geom.posts.filter(p => p.y === tubeWidthMm / 2).map((p, i) => (
-                <rect key={`p-${i}`} x={p.x - tubeWidthMm / 2} y={postHeight - p.z - p.length / 2} width={tubeWidthMm} height={p.length} style={styles.post} />
+                <rect key={`p-${i}`} x={p.x - postVisW / 2} y={postHeight - p.z - p.length / 2} width={postVisW} height={p.length} style={styles.post} />
               ))}
               {/* Longitudinal Beams */}
               {geom.longitudinalBeams.filter(b => b.y === tubeWidthMm / 2).map((b, i) => (
@@ -248,7 +258,7 @@ export default function FrameDrawings2D({ params, geom }) {
             <g transform={`translate(${padding}, ${padding})`}>
               {/* Posts */}
               {geom.posts.filter(p => p.x === tubeWidthMm / 2).map((p, i) => (
-                <rect key={`p-${i}`} x={p.y - tubeWidthMm / 2} y={postHeight - p.z - p.length / 2} width={tubeWidthMm} height={p.length} style={styles.post} />
+                <rect key={`p-${i}`} x={p.y - postVisW / 2} y={postHeight - p.z - p.length / 2} width={postVisW} height={p.length} style={styles.post} />
               ))}
               {/* Cross Beams */}
               {geom.crossBeams.filter(b => geom.crossBeams[0] && b.x === geom.crossBeams[0].x).map((b, i) => {
@@ -346,7 +356,7 @@ export default function FrameDrawings2D({ params, geom }) {
               ))}
               {/* Posts (top) */}
               {geom.posts.map((p, i) => (
-                <rect key={`p-${i}`} x={p.x - tubeWidthMm / 2} y={p.y - tubeWidthMm / 2} width={tubeWidthMm} height={tubeWidthMm} style={styles.post} />
+                <rect key={`p-${i}`} x={p.x - postVisW / 2} y={p.y - postVisW / 2} width={postVisW} height={postVisW} style={styles.post} />
               ))}
             {/* Connectors (top) */}
             {showConnectors && connectionType === 'crab' && geom.connectors.filter(c => c.z === geom.levels[geom.levels.length - 1]).map((c, i) => {

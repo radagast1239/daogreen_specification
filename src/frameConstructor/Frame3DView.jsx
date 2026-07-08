@@ -97,6 +97,7 @@ export default function Frame3DView({ params, geom, captureRef, hasErrors }) {
   const colorCross = '#666666';
   const colorTray = '#b0b8c0';
   const colorChannel = '#1e9fd4';
+  const postVisW = isAngle ? tubeWidthMm * 2 : tubeWidthMm;
 
   const center = [geom.dimensions.lengthMm / 2, geom.dimensions.postHeight / 2, geom.dimensions.depthMm / 2];
   const size = [geom.dimensions.lengthMm, geom.dimensions.postHeight, geom.dimensions.depthMm];
@@ -117,6 +118,11 @@ export default function Frame3DView({ params, geom, captureRef, hasErrors }) {
             </button>
           ))}
         </div>
+        {isAngle && (
+          <span className="fc-viewer__angle-hint">
+            Уголок {params.angleProfile || '30×30'} · L-профиль · без крабов
+          </span>
+        )}
         <button
           type="button"
           className="btn btn-outline btn-sm"
@@ -143,7 +149,7 @@ export default function Frame3DView({ params, geom, captureRef, hasErrors }) {
           <group>
             {geom.posts.map((p, i) => (
               <mesh key={`post-${i}`} position={[p.x, p.z, p.y]}>
-                <boxGeometry args={[tubeWidthMm, p.length, tubeHeightMm]} />
+                <boxGeometry args={[postVisW, p.length, tubeHeightMm]} />
                 <meshStandardMaterial color={colorPost} />
               </mesh>
             ))}

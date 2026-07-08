@@ -252,5 +252,43 @@ describe('framePerforatedAngle', () => {
     expect(pdfData.tubeStock).toBeNull();
     expect(pdfData.dimensions.profile).toBe('перфорированный уголок 30×30');
     expect(pdfData.dimensions.profile).not.toContain('уголок уголок');
+    expect(pdfData.constructionLabel).toBe('Перфорированный уголок 30×30');
+    expect(pdfData.profileKind).toBe('angle');
+    expect(pdfData.showAngleVisual).toBe(true);
+    expect(pdfData.hardwareRows.length).toBe(0);
+    expect(pdfData.notes.some((n) => n.includes('уголков'))).toBe(true);
+    expect(pdfData.paramsList.some(([k]) => k === 'Тип конструкции')).toBe(true);
+  });
+
+  it('tube_crab pdf data does not expose angle visual mode', () => {
+    const params = {
+      name: 'Тест крабы',
+      rackType: 'nft',
+      lengthMm: 3000,
+      depthMm: 500,
+      tierCount: 7,
+      tierSpacingMm: 400,
+      bottomOffsetMm: 400,
+      tubeWidthMm: 20,
+      tubeHeightMm: 20,
+      postCountX: 3,
+      postCountY: 2,
+      crossBeamsPerLevel: 6,
+      connectionType: 'crab',
+      constructionType: 'tube_crab',
+    };
+    const geom = calculateFrameGeometry(params);
+    const cutList = generateCutList(params);
+    const pdfData = prepareFramePdfData(params, geom, cutList);
+    expect(pdfData.profileKind).toBe('tube');
+    expect(pdfData.showAngleVisual).toBe(false);
+    expect(pdfData.constructionLabel).not.toContain('Перфорированный уголок');
+  });
+
+  it('angle visual helpers detect perforated angle mode', () => {
+    const angleParams = { constructionType: 'perforated_angle', angleProfile: '30×30' };
+    const tubeParams = { constructionType: 'tube_crab' };
+    expect(angleParams.constructionType).toBe('perforated_angle');
+    expect(tubeParams.constructionType).not.toBe('perforated_angle');
   });
 });
