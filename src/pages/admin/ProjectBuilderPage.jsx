@@ -7,8 +7,18 @@ import { api } from "../../lib/api.js";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
 import { resolveCategories } from "../../lib/categories.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
-import FrameDrawingTargetRow from "../../components/FrameDrawingTargetRow.jsx";
-import { buildModuleRackKey, buildBuilderStellagesReturnPath, FRAME_SOURCE_MODULE_RACK } from "../../../shared/frameDrawingContext.js";
+import BuilderStellageFrameDrawingRow from "../../components/BuilderStellageFrameDrawingRow.jsx";
+import {
+  DRAFT_PROJECT_FRAME_DRAWING_SECTION_HINT,
+  buildBuilderEditStellagesPath,
+  buildFrameDrawingLink,
+  buildBuilderFrameDrawingContext,
+} from "../../../shared/frameDrawingContext.js";
+import {
+  hydrateBuilderFromProject,
+  stellagesForProjectSave,
+  validateStellageForFrameDrawing,
+} from "../../lib/projectBuilderHydrate.js";
 import {
   filterSectionsForFarmType,
   GROUP_LABEL,
@@ -61,13 +71,18 @@ export default function ProjectBuilderPage() {
   const ref = state.reference;
   const { confirm, success, error } = useToast();
   const nav = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const savedProjectIdFromUrl = String(searchParams.get("projectId") || "").trim();
 
   const [step, setStep] = useState(() => {
     const fromUrl = searchParams.get("step");
     return STEPS.some((s) => s.id === fromUrl) ? fromUrl : "basics";
   });
   const [saving, setSaving] = useState(false);
+  const [frameSchemeSaving, setFrameSchemeSaving] = useState(false);
+  const [projectLoading, setProjectLoading] = useState(false);
+  const [loadedProjectId, setLoadedProjectId] = useState(savedProjectIdFromUrl);
+  const isEditMode = Boolean(loadedProjectId);
   const [presets, setPresets] = useState([]);
   const [farmCatalogs, setFarmCatalogs] = useState({});
   const [stellageCatalogs, setStellageCatalogs] = useState({});
@@ -97,6 +112,42 @@ export default function ProjectBuilderPage() {
   const [farmLoaded, setFarmLoaded] = useState(false);
   const [rooms, setRooms] = useState(defaultRooms);
   const [activeCoolingRoomId, setActiveCoolingRoomId] = useState(null);
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("projectId");
+    if (fromUrl && fromUrl !== loadedProjectId) {
+      setLoadedProjectId(fromUrl);
+    }
+  }, [searchParams, loadedProjectId]);
+
+  useEffect(() => {
+    if (!savedProjectIdFromUrl || !farmSettings) return;
+    let cancelled = false;
+    setProjectLoading(true);
+    actions.loadProject(savedProjectIdFromUrl)
+      .then((project) => {
+        if (cancelled || !project) return;
+        const hydrated = hydrateBuilderFromProject(project, {
+          sections: filterSectionsForFarmType(resolveFarmSections(farmSettings || {}), project.type || "проточка"),
+          farmCatalogs,
+          materials: state.materials,
+        });
+        setForm(hydrated.form);
+        setStellages(hydrated.stellages);
+        setRooms(hydrated.rooms);
+        setFarmSectionLines(hydrated.farmSectionLines);
+        setFarmLoaded(hydrated.farmLoaded);
+        setLoadedProjectId(project.id);
+        setDraft(null);
+      })
+      .catch((e) => {
+        if (!cancelled) error(e.message || "Не удалось загрузить проект");
+      })
+      .finally(() => {
+        if (!cancelled) setProjectLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [savedProjectIdFromUrl, farmSettings, farmCatalogs, actions, error]);
 
   useEffect(() => {
     const fromUrl = searchParams.get("step");
@@ -385,28 +436,113 @@ export default function ProjectBuilderPage() {
     form.name.trim() &&
     (stellages.some((s) => activeLines(s.items).length > 0) || farmHasItems);
 
+  const buildProjectPayload = () => {
+    const farmSections = sections.map((sec) => ({
+      sectionId: sec.id,
+      sectionName: sec.name,
+      defaultResponsible: sec.defaultResponsible || "",
+      items: farmSectionLines[sec.id] || [],
+    }));
+    return buildProjectFromBuilder({
+      form,
+      stellages: stellagesForProjectSave(stellages, draft),
+      farmSections,
+      materials: state.materials,
+      rooms,
+      stellageModuleMeta,
+    });
+  };
+
+  const syncBuilderProjectUrl = (projectId, nextStep = step) => {
+    const params = new URLSearchParams();
+    if (projectId) params.set("projectId", projectId);
+    if (nextStep) params.set("step", nextStep);
+    setSearchParams(params, { replace: true });
+  };
+
+  const persistProject = async () => {
+    if (!form.name.trim()) {
+      throw new Error("Укажите название проекта на шаге «Проект».");
+    }
+    const payload = buildProjectPayload();
+    if (loadedProjectId) {
+      const updated = await actions.projectUpdate(loadedProjectId, payload);
+      setLoadedProjectId(updated.id);
+      return updated;
+    }
+    const created = await actions.projectCreate(payload);
+    setLoadedProjectId(created.id);
+    syncBuilderProjectUrl(created.id, step);
+    return created;
+  };
+
+  const openFrameForStellage = (project, stellage, frameCtx = null) => {
+    const baseCtx = buildBuilderFrameDrawingContext({
+      projectId: project.id,
+      projectName: project.name || form.name,
+      stellage,
+    });
+    const ctx = frameCtx
+      ? { ...baseCtx, ...frameCtx, returnTo: baseCtx.returnTo }
+      : baseCtx;
+    nav(buildFrameDrawingLink(ctx));
+  };
+
+  const saveProjectAndOpenFrame = async (stellage, frameCtx = null) => {
+    if (frameSchemeSaving) return;
+    const validationError = validateStellageForFrameDrawing(stellage);
+    if (validationError) {
+      error(validationError);
+      return;
+    }
+    if (!form.name.trim()) {
+      error("Укажите название проекта на шаге «Проект».");
+      return;
+    }
+    setFrameSchemeSaving(true);
+    try {
+      const project = await persistProject();
+      openFrameForStellage(project, stellage, frameCtx);
+    } catch (e) {
+      error(e.message || "Не удалось сохранить проект");
+    } finally {
+      setFrameSchemeSaving(false);
+    }
+  };
+
+  const openSavedProjectFrame = async (stellage, frameCtx = null) => {
+    if (frameSchemeSaving) return;
+    const validationError = validateStellageForFrameDrawing(stellage);
+    if (validationError) {
+      error(validationError);
+      return;
+    }
+    setFrameSchemeSaving(true);
+    try {
+      const project = await persistProject();
+      openFrameForStellage(project, stellage, frameCtx);
+    } catch (e) {
+      error(e.message || "Не удалось обновить проект");
+    } finally {
+      setFrameSchemeSaving(false);
+    }
+  };
+
+  const handleFrameDrawingAction = (stellage, frameCtx = null) => {
+    if (loadedProjectId) return openSavedProjectFrame(stellage, frameCtx);
+    return saveProjectAndOpenFrame(stellage, frameCtx);
+  };
+
   const create = async () => {
     if (!canCreate) return;
     setSaving(true);
     try {
-      const farmSections = sections.map((sec) => ({
-        sectionId: sec.id,
-        sectionName: sec.name,
-        defaultResponsible: sec.defaultResponsible || "",
-        items: farmSectionLines[sec.id] || [],
-      }));
-      const payload = buildProjectFromBuilder({
-        form,
-        stellages,
-        farmSections,
-        materials: state.materials,
-        rooms,
-        stellageModuleMeta,
-      });
-      const project = await actions.projectCreate(payload);
-      nav(`/project/${project.id}`);
+      const wasEdit = Boolean(loadedProjectId);
+      const project = await persistProject();
+      success(wasEdit ? "Проект обновлён" : "Проект сохранён");
+      syncBuilderProjectUrl(project.id, "review");
     } catch (e) {
-      error(e.message || "Ошибка создания");
+      error(e.message || "Ошибка сохранения");
     } finally {
       setSaving(false);
     }
@@ -417,8 +553,10 @@ export default function ProjectBuilderPage() {
   return (
     <>
       <PageHeader
-        title="Новый проект"
-        sub="Соберите стеллажи и разделы фермы. Шаблоны разделов — в «Модули и шаблоны → Разделы фермы»."
+        title={isEditMode ? "Настройка проекта" : "Новый проект"}
+        sub={isEditMode
+          ? "Продолжайте сборку фермы в мастере: стеллажи, разделы, охлаждение, закупка."
+          : "Соберите стеллажи и разделы фермы. Шаблоны разделов — в «Модули и шаблоны → Разделы фермы»."}
         back={{ to: "/", label: "Проекты" }}
         actions={
           <>
@@ -429,6 +567,10 @@ export default function ProjectBuilderPage() {
           </>
         }
       />
+
+      {projectLoading && (
+        <p className="muted" style={{ marginBottom: 12 }}>Загрузка проекта…</p>
+      )}
 
       <div className="step-tabs">
         {STEPS.map((s) => (
@@ -508,6 +650,12 @@ export default function ProjectBuilderPage() {
             </button>
           </div>
 
+          <div className="card" style={{ marginBottom: 14, padding: 12, borderColor: 'var(--border)' }}>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {DRAFT_PROJECT_FRAME_DRAWING_SECTION_HINT}
+            </p>
+          </div>
+
           {stellages.length > 0 && (
             <div className="card" style={{ marginBottom: 14, padding: 12 }}>
               <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>В проекте ({stellages.length})</div>
@@ -534,25 +682,12 @@ export default function ProjectBuilderPage() {
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeStellage(st.id)}>✕</button>
                   </span>
                   </div>
-                  <FrameDrawingTargetRow
-                    context={{
-                      moduleId: st.moduleId,
-                      rackId: st.id,
-                      sourceType: FRAME_SOURCE_MODULE_RACK,
-                      moduleRackKey: buildModuleRackKey({
-                        moduleId: st.moduleId,
-                        rackId: st.id,
-                      }),
-                      rackLabel: st.name,
-                      returnTo: buildBuilderStellagesReturnPath(),
-                    }}
-                    fetchParams={{
-                      module_id: st.moduleId,
-                      module_rack_key: buildModuleRackKey({
-                        moduleId: st.moduleId,
-                        rackId: st.id,
-                      }),
-                    }}
+                  <BuilderStellageFrameDrawingRow
+                    stellage={st}
+                    projectId={loadedProjectId}
+                    projectName={form.name}
+                    onSaveProjectAndOpen={handleFrameDrawingAction}
+                    saving={frameSchemeSaving}
                     compact
                   />
                 </div>
@@ -623,29 +758,13 @@ export default function ProjectBuilderPage() {
               </p>
             )}
             <div style={{ marginTop: 12 }}>
-              <FrameDrawingTargetRow
-                context={{
-                  moduleId: draft.moduleId,
-                  rackId: draft.id,
-                  sourceType: FRAME_SOURCE_MODULE_RACK,
-                  moduleRackKey: buildModuleRackKey({
-                    moduleId: draft.moduleId,
-                    rackId: draft.id,
-                  }),
-                  rackLabel: draft.name,
-                  returnTo: buildBuilderStellagesReturnPath(),
-                }}
-                fetchParams={{
-                  module_id: draft.moduleId,
-                  module_rack_key: buildModuleRackKey({
-                    moduleId: draft.moduleId,
-                    rackId: draft.id,
-                  }),
-                }}
+              <BuilderStellageFrameDrawingRow
+                stellage={draft}
+                projectId={loadedProjectId}
+                projectName={form.name}
+                onSaveProjectAndOpen={handleFrameDrawingAction}
+                saving={frameSchemeSaving}
               />
-              <p className="muted" style={{ fontSize: 11, margin: "6px 0 0" }}>
-                Сохранение PDF в документы клиента — после создания проекта, в карточке стеллажа.
-              </p>
             </div>
             <div className="toolbar" style={{ marginTop: 10 }}>
               <button type="button" className="btn btn-sm" onClick={saveDraftAsPreset}>

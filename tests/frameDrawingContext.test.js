@@ -6,8 +6,16 @@ import {
   buildFrameDrawingSavePayload,
   buildModuleRackKey,
   buildBuilderStellagesReturnPath,
+  buildBuilderEditStellagesPath,
   buildProjectStellagesReturnPath,
   buildStellagesReturnLabel,
+  buildSavedProjectFrameDrawingContext,
+  buildBuilderFrameDrawingContext,
+  canCreateFrameDrawingFromBuilder,
+  resolveFramePdfExportUi,
+  DRAFT_PROJECT_FRAME_DRAWING_DISABLED_REASON,
+  DRAFT_PROJECT_FRAME_DRAWING_SECTION_HINT,
+  STANDALONE_FRAME_SAVE_HINT,
 } from '../shared/frameDrawingContext.js';
 import { defaultFrameParams } from '../src/frameConstructor/framePresets.js';
 
@@ -43,12 +51,69 @@ describe('frameDrawingContext', () => {
     expect(ctx.moduleRackKey).toBe('mod1:st1');
   });
 
-  it('hasFrameDrawingSaveTarget is true when projectId exists', () => {
+  it('hasFrameDrawingSaveTarget requires project, preset or existing drawing', () => {
     expect(hasFrameDrawingSaveTarget({ projectId: 'p1' })).toBe(true);
     expect(hasFrameDrawingSaveTarget({ presetId: 'pr1' })).toBe(true);
     expect(hasFrameDrawingSaveTarget({ drawingId: 'd1' })).toBe(true);
-    expect(hasFrameDrawingSaveTarget({ moduleId: 'm1', sourceType: 'module_rack' })).toBe(true);
+    expect(hasFrameDrawingSaveTarget({ moduleId: 'm1', sourceType: 'module_rack' })).toBe(false);
+    expect(hasFrameDrawingSaveTarget({ moduleId: 'm1', moduleRackKey: 'm1:st1' })).toBe(false);
     expect(hasFrameDrawingSaveTarget({})).toBe(false);
+  });
+
+  it('draft builder cannot create frame drawing without saved projectId', () => {
+    expect(canCreateFrameDrawingFromBuilder('')).toBe(false);
+    expect(canCreateFrameDrawingFromBuilder('p1')).toBe(true);
+    expect(DRAFT_PROJECT_FRAME_DRAWING_DISABLED_REASON).toMatch(/Сначала сохраните проект/);
+    expect(DRAFT_PROJECT_FRAME_DRAWING_SECTION_HINT).toMatch(/после сохранения проекта/i);
+  });
+
+  it('saved project frame drawing link includes projectId and moduleRackKey', () => {
+    const ctx = buildSavedProjectFrameDrawingContext(
+      { id: 'p1', name: 'Farm A' },
+      { id: 'st1', moduleId: 'mod1', name: 'Стеллаж 1' },
+    );
+    const link = buildFrameDrawingLink(ctx);
+    expect(link).toContain('projectId=p1');
+    expect(link).toContain('moduleRackKey=mod1%3Ast1');
+    expect(link).toContain('returnTo=%2Fproject%2Fp1%3Fsection%3Dstellages');
+    expect(ctx.returnTo).toBe('/project/p1?section=stellages');
+  });
+
+  it('builder frame drawing context uses wizard return path', () => {
+    const ctx = buildBuilderFrameDrawingContext({
+      projectId: 'p1',
+      projectName: 'Farm A',
+      stellage: { id: 'st1', moduleId: 'mod1', name: 'Стеллаж 1' },
+    });
+    expect(ctx.returnTo).toBe('/new?projectId=p1&step=stellages');
+    expect(buildFrameDrawingLink(ctx)).toContain('returnTo=%2Fnew%3FprojectId%3Dp1%26step%3Dstellages');
+  });
+
+  it('resolveFramePdfExportUi hides save actions without projectId', () => {
+    const standalone = resolveFramePdfExportUi({
+      moduleId: 'mod1',
+      moduleRackKey: 'mod1:st1',
+      sourceType: 'module_rack',
+    });
+    expect(standalone.showSavePdfButton).toBe(false);
+    expect(standalone.showComboButton).toBe(false);
+    expect(standalone.showDownloadOnly).toBe(true);
+    expect(standalone.showStandaloneSaveHint).toBe(true);
+
+    const saved = resolveFramePdfExportUi(
+      {
+        projectId: 'p1',
+        moduleId: 'mod1',
+        moduleRackKey: 'mod1:st1',
+        returnTo: '/new?projectId=p1&step=stellages',
+      },
+      { canSavePdfAndBom: true },
+    );
+    expect(saved.showSavePdfButton).toBe(true);
+    expect(saved.showComboButton).toBe(true);
+    expect(saved.showStandaloneSaveHint).toBe(false);
+    expect(saved.showReturnToProjectSetup).toBe(true);
+    expect(STANDALONE_FRAME_SAVE_HINT).toMatch(/мастер настройки проекта/);
   });
 
   it('buildFrameDrawingLink encodes stellageId query param', () => {
@@ -107,8 +172,10 @@ describe('frameDrawingContext', () => {
   it('builds stellages return paths and labels', () => {
     expect(buildBuilderStellagesReturnPath()).toBe('/new?step=stellages');
     expect(buildProjectStellagesReturnPath('p1')).toBe('/project/p1?section=stellages');
+    expect(buildBuilderEditStellagesPath('p1')).toBe('/new?projectId=p1&step=stellages');
+    expect(buildStellagesReturnLabel('/new?projectId=p1&step=stellages')).toBe('Вернуться к настройке проекта');
     expect(buildStellagesReturnLabel('/project/p1?section=stellages')).toBe('Вернуться к стеллажам проекта');
-    expect(buildStellagesReturnLabel('/new?step=stellages')).toBe('Вернуться к стеллажам проекта');
+    expect(buildStellagesReturnLabel('/new?step=stellages')).toBe('Вернуться');
     expect(buildStellagesReturnLabel('/project/p1')).toBe('Вернуться');
   });
 

@@ -20,6 +20,8 @@ export default function FrameDrawingActions({
   onOpenPresetDrawing,
   presetDrawing = null,
   compact = false,
+  onNavigate = null,
+  navigateDisabled = false,
 }) {
   const [showOlder, setShowOlder] = useState(false);
   const latest = drawings[0] || null;
@@ -43,35 +45,39 @@ export default function FrameDrawingActions({
         </span>
         <span className="row wrap" style={{ gap: 6 }}>
           {!latest && !presetDrawing && (
-            <FrameDrawingLinkButton context={baseCtx} label="Создать схему" />
+            <FrameDrawingLinkButton context={baseCtx} label="Создать схему" onNavigate={onNavigate} disabled={navigateDisabled} />
           )}
           {!latest && presetDrawing && (
             <>
               <a className="btn btn-sm" href={photoSrc(presetDrawing.pdfUrl)} target="_blank" rel="noreferrer">
                 Чертёж пресета
               </a>
-              <FrameDrawingLinkButton context={baseCtx} label="Создать схему" />
+              <FrameDrawingLinkButton context={baseCtx} label="Создать схему" onNavigate={onNavigate} disabled={navigateDisabled} />
             </>
           )}
           {latest && (
             <>
               <span className="chip chip--ok" style={{ fontSize: 11 }}>v{latest.version}</span>
-              <FrameDrawingLinkButton context={openSchemeCtx} label="Открыть схему" />
+              <FrameDrawingLinkButton context={openSchemeCtx} label="Открыть схему" onNavigate={onNavigate} disabled={navigateDisabled} />
               <a className="btn btn-sm" href={photoSrc(latest.pdfUrl)} target="_blank" rel="noreferrer">
                 Открыть PDF
               </a>
-              <FrameDrawingLinkButton context={replaceCtx} label="Обновить схему" />
+              <FrameDrawingLinkButton context={replaceCtx} label="Обновить схему" onNavigate={onNavigate} disabled={navigateDisabled} />
               {context.projectId && (
                 <FrameDrawingLinkButton
                   context={{ ...openSchemeCtx, constructorTab: 'cutlist' }}
                   label="Обновить BOM"
                   className="btn btn-sm btn-outline"
+                  onNavigate={onNavigate}
+                  disabled={navigateDisabled}
                 />
               )}
               <FrameDrawingLinkButton
                 context={newVersionCtx}
                 label="Новая версия"
                 className="btn btn-sm btn-outline"
+                onNavigate={onNavigate}
+                disabled={navigateDisabled}
               />
             </>
           )}

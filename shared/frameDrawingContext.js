@@ -69,14 +69,91 @@ export function parseFrameDrawingSearchParams(searchParams) {
   };
 }
 
+export const DRAFT_PROJECT_FRAME_DRAWING_DISABLED_REASON =
+  'Сначала сохраните проект. После сохранения схемы каркасов будут доступны в мастере настройки проекта.';
+
+export const DRAFT_PROJECT_FRAME_DRAWING_SECTION_HINT =
+  'Схемы каркасов и добавление BOM в закупку доступны после сохранения проекта. Используйте кнопку «Сохранить проект и создать схему» — проект сохранится, и откроется конструктор каркаса.';
+
+export const BUILDER_SAVE_AND_CREATE_FRAME_HINT =
+  'Проект будет сохранён, после этого откроется конструктор каркаса. Это нужно, чтобы схема и BOM были привязаны к конкретному проекту.';
+
+export const STANDALONE_FRAME_SAVE_HINT =
+  'Чтобы сохранить чертёж к проекту и добавить BOM, откройте конструктор из сохранённого проекта или через мастер настройки проекта.';
+
+export function buildBuilderEditStellagesPath(projectId) {
+  const id = String(projectId || '').trim();
+  if (!id) return buildBuilderStellagesReturnPath();
+  return `/new?projectId=${encodeURIComponent(id)}&step=stellages`;
+}
+
+export function isBuilderWizardReturnPath(returnTo = '') {
+  const path = String(returnTo || '');
+  return path.startsWith('/new') && path.includes('projectId=');
+}
+
+export function canCreateFrameDrawingFromBuilder(projectId) {
+  return Boolean(String(projectId || '').trim());
+}
+
 export function hasFrameDrawingSaveTarget(ctx) {
   if (!ctx) return false;
   return Boolean(
     ctx.projectId
     || ctx.presetId
-    || (ctx.moduleId && (ctx.sourceType === FRAME_SOURCE_MODULE_RACK || ctx.moduleRackKey))
     || ctx.drawingId,
   );
+}
+
+export function resolveFramePdfExportUi(drawingContext, comboEval = {}) {
+  const canSave = hasFrameDrawingSaveTarget(drawingContext);
+  const isReplaceMode = drawingContext?.mode === 'replace' && drawingContext?.drawingId;
+  const isNewVersionMode = drawingContext?.mode === 'new_version';
+  const showComboButton = canSave
+    && comboEval.canSavePdfAndBom
+    && !isReplaceMode
+    && !isNewVersionMode;
+
+  return {
+    canSave,
+    showSavePdfButton: canSave,
+    showComboButton,
+    showDownloadOnly: !canSave,
+    showStandaloneSaveHint: !drawingContext?.projectId,
+    showReturnToProjectSetup: isBuilderWizardReturnPath(drawingContext?.returnTo),
+    showReturnToStellages: Boolean(
+      drawingContext?.projectId
+      && !isBuilderWizardReturnPath(drawingContext?.returnTo)
+      && String(drawingContext?.returnTo || '').includes('section=stellages'),
+    ),
+  };
+}
+
+export function buildBuilderFrameDrawingContext({ projectId, projectName, stellage, returnTo }) {
+  const rackId = stellage.id;
+  const moduleId = stellage.moduleId;
+  const id = String(projectId || '').trim();
+  return {
+    projectId: id,
+    moduleId,
+    rackId,
+    stellageId: rackId,
+    moduleRackKey: buildModuleRackKey({ moduleId, rackId }),
+    presetId: stellage.presetId || '',
+    sourceType: FRAME_SOURCE_PROJECT_STELLAGE,
+    rackLabel: stellage.name,
+    projectName: projectName || '',
+    returnTo: returnTo || buildBuilderEditStellagesPath(id),
+  };
+}
+
+export function buildSavedProjectFrameDrawingContext(project, stellage) {
+  return buildBuilderFrameDrawingContext({
+    projectId: project.id,
+    projectName: project.name,
+    stellage,
+    returnTo: buildProjectStellagesReturnPath(project.id),
+  });
 }
 
 export function buildBuilderStellagesReturnPath() {
@@ -91,7 +168,10 @@ export function buildProjectStellagesReturnPath(projectId) {
 
 export function buildStellagesReturnLabel(returnTo = '') {
   const path = String(returnTo || '');
-  if (path.includes('step=stellages') || path.includes('section=stellages')) {
+  if (isBuilderWizardReturnPath(path)) {
+    return 'Вернуться к настройке проекта';
+  }
+  if (path.includes('/project/') && path.includes('section=stellages')) {
     return 'Вернуться к стеллажам проекта';
   }
   return 'Вернуться';

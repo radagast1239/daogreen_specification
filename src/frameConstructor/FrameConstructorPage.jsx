@@ -20,6 +20,7 @@ import {
   hasFrameDrawingSaveTarget,
   frameDrawingBindingLabel,
   frameDrawingSaveHint,
+  buildStellagesReturnLabel,
 } from '../../shared/frameDrawingContext.js';
 import { api } from '../lib/api.js';
 import { useToast } from '../components/Toast.jsx';
@@ -210,10 +211,10 @@ export default function FrameConstructorPage() {
           {drawingContext.mode === 'replace' && (
             <div style={{ fontSize: 12, marginTop: 4 }}>Текущий PDF будет заменён.</div>
           )}
-          {drawingContext.returnTo && (
+          {drawingContext.returnTo && drawingContext.projectId && (
             <div style={{ marginTop: 6 }}>
               <Link to={drawingContext.returnTo}>
-                ← {drawingContext.returnTo.includes('stellages') ? 'Вернуться к стеллажам проекта' : 'Вернуться'}
+                ← {buildStellagesReturnLabel(drawingContext.returnTo)}
               </Link>
             </div>
           )}

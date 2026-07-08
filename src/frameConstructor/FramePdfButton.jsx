@@ -6,16 +6,16 @@ import { exportFrameToPdfBlob } from './framePdfExport.js';
 import { buildFramePdfFilename } from './framePdfData.js';
 import {
   buildFrameDrawingSavePayload,
-  hasFrameDrawingSaveTarget,
   normalizeFrameSourceType,
   FRAME_SOURCE_MODULE_RACK,
   FRAME_SOURCE_PRESET,
   buildStellagesReturnLabel,
+  resolveFramePdfExportUi,
+  STANDALONE_FRAME_SAVE_HINT,
 } from '../../shared/frameDrawingContext.js';
 import {
   evaluateFrameSavePdfAndBom,
   executeFrameSavePdfAndBom,
-  FRAME_BOM_FROM_PROJECT_HINT,
   FRAME_SAVE_PDF_AND_BOM_BUTTON_LABEL,
   FRAME_SAVE_PDF_ONLY_BUTTON_LABEL,
 } from './frameBomAddToProject.js';
@@ -64,11 +64,6 @@ export default function FramePdfButton({
     return () => { cancelled = true; };
   }, []);
 
-  const disabled = !canExportFramePdf(geom) || busy || saveBusy || comboBusy;
-  const canSave = hasFrameDrawingSaveTarget(drawingContext);
-  const isReplaceMode = drawingContext?.mode === 'replace' && drawingContext?.drawingId;
-  const isNewVersionMode = drawingContext?.mode === 'new_version';
-
   const comboEval = useMemo(
     () => evaluateFrameSavePdfAndBom({
       projectId: drawingContext?.projectId,
@@ -80,7 +75,16 @@ export default function FramePdfButton({
     [drawingContext, project, purchaseDraft, materials],
   );
 
-  const showComboButton = canSave && comboEval.canSavePdfAndBom && !isReplaceMode && !isNewVersionMode;
+  const exportUi = useMemo(
+    () => resolveFramePdfExportUi(drawingContext, comboEval),
+    [drawingContext, comboEval],
+  );
+
+  const disabled = !canExportFramePdf(geom) || busy || saveBusy || comboBusy;
+  const isReplaceMode = drawingContext?.mode === 'replace' && drawingContext?.drawingId;
+  const isNewVersionMode = drawingContext?.mode === 'new_version';
+  const canSave = exportUi.showSavePdfButton;
+  const showComboButton = exportUi.showComboButton;
   const showPdfOnlyAsSecondary = showComboButton;
 
   const buildPdfPayload = useCallback(async () => {
@@ -236,9 +240,9 @@ export default function FramePdfButton({
       >
         {busy ? 'Формирование PDF…' : 'Скачать PDF'}
       </button>
-      {canSave && !drawingContext?.projectId && (
+      {exportUi.showStandaloneSaveHint && (
         <p className="fc-export__hint muted" style={{ fontSize: 12, margin: '6px 0 0', width: '100%' }}>
-          {FRAME_BOM_FROM_PROJECT_HINT}
+          {STANDALONE_FRAME_SAVE_HINT}
         </p>
       )}
       {canSave && drawingContext?.projectId && !comboEval.canSavePdfAndBom && comboEval.addDisabledReason && (
@@ -257,7 +261,7 @@ export default function FramePdfButton({
               <a href={photoSrc(successDrawing.pdfUrl)} target="_blank" rel="noreferrer">Открыть PDF</a>
             </>
           )}
-          {drawingContext?.returnTo && (
+          {(exportUi.showReturnToProjectSetup || exportUi.showReturnToStellages) && (
             <>
               {' · '}
               <Link to={drawingContext.returnTo}>{returnLabel}</Link>
@@ -269,7 +273,7 @@ export default function FramePdfButton({
         <span className="fc-export__ok">
           {successDrawing.isNewVersion ? 'Новая версия сохранена. ' : 'Чертёж сохранён. '}
           <a href={photoSrc(successDrawing.pdfUrl)} target="_blank" rel="noreferrer">Открыть PDF</a>
-          {drawingContext?.returnTo && (
+          {exportUi.showReturnToStellages && (
             <> · <Link to={drawingContext.returnTo}>{returnLabel}</Link></>
           )}
         </span>

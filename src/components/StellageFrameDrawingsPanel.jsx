@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import FrameDrawingActions from './FrameDrawingActions.jsx';
 import { drawingsForProjectStellage } from '../../shared/frameDrawingTargets.js';
-import { FRAME_SOURCE_PROJECT_STELLAGE } from '../../shared/frameDrawingContext.js';
+import { buildSavedProjectFrameDrawingContext } from '../../shared/frameDrawingContext.js';
 
 export default function StellageFrameDrawingsPanel({ project, returnPath }) {
   const stellages = project?.stellageConfigs || [];
@@ -59,15 +59,10 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
           {stellages.map((st) => {
             const rackDrawings = drawingsForProjectStellage(drawings, st.id);
             const presetDrawing = st.presetId ? presetDrawings[st.presetId] : null;
+            const baseCtx = buildSavedProjectFrameDrawingContext(project, st);
             const ctx = {
-              projectId: project.id,
-              moduleId: st.moduleId,
-              rackId: st.id,
-              presetId: st.presetId || '',
-              sourceType: FRAME_SOURCE_PROJECT_STELLAGE,
-              rackLabel: st.name,
-              projectName: project.name,
-              returnTo: returnPath || `/project/${project.id}`,
+              ...baseCtx,
+              returnTo: returnPath || baseCtx.returnTo,
             };
             return (
               <li key={st.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>

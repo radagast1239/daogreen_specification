@@ -7,6 +7,8 @@ export default function FrameDrawingTargetRow({
   fetchParams,
   presetDrawing = null,
   compact = false,
+  onNavigate = null,
+  navigateDisabled = false,
 }) {
   const [drawings, setDrawings] = useState([]);
   const paramsKey = JSON.stringify(fetchParams || {});
@@ -27,6 +29,8 @@ export default function FrameDrawingTargetRow({
       drawings={drawings}
       presetDrawing={presetDrawing}
       compact={compact}
+      onNavigate={onNavigate}
+      navigateDisabled={navigateDisabled}
     />
   );
 }
