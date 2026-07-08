@@ -9,6 +9,7 @@ import {
   hasFrameDrawingSaveTarget,
   normalizeFrameSourceType,
   FRAME_SOURCE_MODULE_RACK,
+  FRAME_SOURCE_PRESET,
   buildStellagesReturnLabel,
 } from '../../shared/frameDrawingContext.js';
 import {
