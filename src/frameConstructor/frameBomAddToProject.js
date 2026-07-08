@@ -11,6 +11,15 @@ export const FRAME_BOM_NO_PROJECT_REASON =
   "Добавление в закупку доступно только внутри проекта.";
 export const FRAME_BOM_UNSAVED_DRAWING_WARNING =
   "Чертёж ещё не сохранён. BOM будет привязан только к rackKey. Лучше сначала сохранить PDF/чертёж в проект.";
+export const FRAME_SAVE_PDF_AND_BOM_BUTTON_LABEL =
+  "Сохранить чертёж и добавить BOM в закупку";
+export const FRAME_SAVE_PDF_ONLY_BUTTON_LABEL = "Сохранить только PDF";
+export const FRAME_SAVE_PDF_AND_BOM_CONFIRM_TITLE =
+  "Сохранить чертёж и добавить BOM этого стеллажа в закупочный лист проекта?";
+export const FRAME_SAVE_PDF_AND_BOM_SUCCESS_TITLE =
+  "Чертёж сохранён. BOM каркаса добавлен в закупочный лист проекта.";
+export const FRAME_BOM_FROM_PROJECT_HINT =
+  "Откройте конструктор из проекта, чтобы добавить BOM в закупку.";
 
 /**
  * @param {{ moduleRackKey?: string, rackId?: string, stellageId?: string }} drawingContext
@@ -277,5 +286,129 @@ export async function applyFrameBomProjectAdd({
     updated,
     mergeResult,
     summary: formatFrameBomAddSuccessSummary(mergeResult),
+  };
+}
+
+export function buildFrameSavePdfAndBomConfirmMessage() {
+  return [
+    "Старые BOM-позиции этого стеллажа будут заменены.",
+    "Ручные позиции проекта не будут затронуты.",
+    "",
+    "Продолжить?",
+  ].join("\n");
+}
+
+/**
+ * @param {{ confirm: (opts: object) => Promise<boolean> }} params
+ */
+export async function requestFrameSavePdfAndBomConfirmation({ confirm }) {
+  const ok = await confirm({
+    title: FRAME_SAVE_PDF_AND_BOM_CONFIRM_TITLE,
+    message: buildFrameSavePdfAndBomConfirmMessage(),
+    confirmLabel: "Продолжить",
+    cancelLabel: "Отмена",
+  });
+  return { ok: !!ok };
+}
+
+/**
+ * @param {{
+ *   projectId?: string,
+ *   project?: { items?: object[] }|null,
+ *   purchaseDraft?: object[],
+ *   drawingContext?: object,
+ *   materials?: object[]|null,
+ * }} ctx
+ */
+export function evaluateFrameSavePdfAndBom(ctx) {
+  const bomEval = evaluateFrameBomAddToProject(ctx);
+  return {
+    canSavePdfAndBom: bomEval.canAddToProject,
+    addDisabledReason: bomEval.addDisabledReason,
+    warnings: bomEval.warnings,
+    bomEval,
+  };
+}
+
+/**
+ * @param {{ bomSummary: ReturnType<typeof formatFrameBomAddSuccessSummary> }} params
+ */
+export function formatFrameSavePdfAndBomSuccess({ bomSummary }) {
+  return {
+    title: FRAME_SAVE_PDF_AND_BOM_SUCCESS_TITLE,
+    detail: `добавлено: ${bomSummary.addedCount}, заменено старых: ${bomSummary.removedCount}, оставлено прочих позиций: ${bomSummary.keptCount}`,
+    bomSummary,
+  };
+}
+
+/**
+ * @param {{
+ *   project: { items?: object[] },
+ *   purchaseDraft: object[],
+ *   drawingContext: object,
+ *   updateProject: (projectId: string, patch: object) => Promise<object>,
+ *   savedDrawing?: { id?: string }|null,
+ * }} params
+ */
+export async function applyFrameBomProjectAddAfterPdfSave({
+  project,
+  purchaseDraft,
+  drawingContext,
+  updateProject,
+  savedDrawing = null,
+}) {
+  const ctx = {
+    ...drawingContext,
+    projectId: drawingContext.projectId,
+    drawingId: savedDrawing?.id || drawingContext.drawingId || "",
+  };
+  return applyFrameBomProjectAdd({
+    project,
+    purchaseDraft,
+    drawingContext: ctx,
+    updateProject,
+  });
+}
+
+/**
+ * @param {{
+ *   confirm: (opts: object) => Promise<boolean>,
+ *   savePdf: () => Promise<{ id?: string }|null>,
+ *   project: { items?: object[] },
+ *   purchaseDraft: object[],
+ *   drawingContext: object,
+ *   updateProject: (projectId: string, patch: object) => Promise<object>,
+ * }} params
+ */
+export async function executeFrameSavePdfAndBom({
+  confirm,
+  savePdf,
+  project,
+  purchaseDraft,
+  drawingContext,
+  updateProject,
+}) {
+  const confirmation = await requestFrameSavePdfAndBomConfirmation({ confirm });
+  if (!confirmation.ok) {
+    return { cancelled: true };
+  }
+
+  const savedDrawing = await savePdf();
+  const outcome = await applyFrameBomProjectAddAfterPdfSave({
+    project,
+    purchaseDraft,
+    drawingContext,
+    updateProject,
+    savedDrawing,
+  });
+  if (outcome.skipped) {
+    return { cancelled: false, savedDrawing, skipped: true };
+  }
+
+  return {
+    cancelled: false,
+    savedDrawing,
+    ...outcome,
+    combinedSummary: formatFrameSavePdfAndBomSuccess({ bomSummary: outcome.summary }),
   };
 }

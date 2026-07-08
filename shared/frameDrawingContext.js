@@ -35,6 +35,7 @@ export function parseFrameDrawingSearchParams(searchParams) {
   const rackLabel = sp.get('rackLabel') || sp.get('rack_label') || '';
   const projectName = sp.get('projectName') || sp.get('project_name') || '';
   const mode = sp.get('mode') || '';
+  const constructorTab = sp.get('constructorTab') || sp.get('constructor_tab') || '';
 
   let sourceType = normalizeFrameSourceType(source);
   if (!source) {
@@ -64,6 +65,7 @@ export function parseFrameDrawingSearchParams(searchParams) {
     rackLabel,
     projectName,
     mode,
+    constructorTab,
   };
 }
 
@@ -75,6 +77,24 @@ export function hasFrameDrawingSaveTarget(ctx) {
     || (ctx.moduleId && (ctx.sourceType === FRAME_SOURCE_MODULE_RACK || ctx.moduleRackKey))
     || ctx.drawingId,
   );
+}
+
+export function buildBuilderStellagesReturnPath() {
+  return '/new?step=stellages';
+}
+
+export function buildProjectStellagesReturnPath(projectId) {
+  const id = String(projectId || '').trim();
+  if (!id) return '';
+  return `/project/${id}?section=stellages`;
+}
+
+export function buildStellagesReturnLabel(returnTo = '') {
+  const path = String(returnTo || '');
+  if (path.includes('step=stellages') || path.includes('section=stellages')) {
+    return 'Вернуться к стеллажам проекта';
+  }
+  return 'Вернуться';
 }
 
 export function buildFrameDrawingLink(ctx) {
@@ -91,6 +111,7 @@ export function buildFrameDrawingLink(ctx) {
   if (ctx.projectName) params.set('projectName', ctx.projectName);
   if (ctx.drawingId) params.set('drawingId', ctx.drawingId);
   if (ctx.mode) params.set('mode', ctx.mode);
+  if (ctx.constructorTab) params.set('constructorTab', ctx.constructorTab);
   const qs = params.toString();
   return `/planner/frame${qs ? `?${qs}` : ''}`;
 }

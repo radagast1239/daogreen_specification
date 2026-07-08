@@ -12,6 +12,9 @@ import { framePresets } from './framePresets.js';
 import { calculateFrameGeometry } from './frameGeometry.js';
 import { generateCutList } from './frameCutList.js';
 import { countConnectorsByType } from './frameCrabRules.js';
+import { extractTubeCutsFromCutList, calculateTubeStockOptions } from './frameTubeStock.js';
+import { calculateAngleStockOptions, calculateAngleFastenerVariants } from './frameAngleStock.js';
+import { buildFramePurchaseDraftFromContext } from './frameBomPurchasePreviewData.js';
 import {
   parseFrameDrawingSearchParams,
   hasFrameDrawingSaveTarget,
@@ -43,7 +46,10 @@ export default function FrameConstructorPage() {
   );
 
   const [params, setParams] = useState(framePresets[0].params);
-  const [activeTab, setActiveTab] = useState('drawings');
+  const [activeTab, setActiveTab] = useState(() => {
+    const tab = drawingContext.constructorTab;
+    return tab === 'cutlist' ? 'cutlist' : 'drawings';
+  });
   const [contextLoaded, setContextLoaded] = useState(!drawingContext.drawingId);
   const [project, setProject] = useState(null);
   const [materials, setMaterials] = useState(null);
@@ -136,6 +142,30 @@ export default function FrameConstructorPage() {
 
   const cutList = useMemo(() => (geomOk ? generateCutList(params) : []), [params, geomOk]);
   const isAngle = params.constructionType === 'perforated_angle';
+  const angleGeom = useMemo(
+    () => (isAngle && geomOk ? calculateFrameGeometry(params) : null),
+    [params, isAngle, geomOk],
+  );
+  const stockOptions = useMemo(() => {
+    if (!cutList.length) return null;
+    if (isAngle) {
+      return calculateAngleStockOptions(cutList, { overlapMm: params.angleOverlapMm });
+    }
+    const cuts = extractTubeCutsFromCutList(cutList);
+    return calculateTubeStockOptions(cuts);
+  }, [cutList, isAngle, params.angleOverlapMm]);
+
+  const purchaseDraft = useMemo(
+    () =>
+      buildFramePurchaseDraftFromContext({
+        params,
+        cutList,
+        geom: isAngle ? angleGeom : geomOk ? geom : null,
+        stockOptions,
+      }),
+    [params, cutList, angleGeom, geom, isAngle, geomOk, stockOptions],
+  );
+
   const crabs = useMemo(
     () => (!isAngle && params.connectionType === 'crab' && geomOk ? countConnectorsByType(geom.connectors) : null),
     [isAngle, params.connectionType, geomOk, geom.connectors],
@@ -158,6 +188,10 @@ export default function FrameConstructorPage() {
               geom={geom}
               captureRef={captureRef}
               drawingContext={drawingContext}
+              purchaseDraft={purchaseDraft}
+              project={project}
+              materials={materials}
+              onProjectUpdated={setProject}
             />
           ) : null}
         />
@@ -178,7 +212,9 @@ export default function FrameConstructorPage() {
           )}
           {drawingContext.returnTo && (
             <div style={{ marginTop: 6 }}>
-              <Link to={drawingContext.returnTo}>← Вернуться</Link>
+              <Link to={drawingContext.returnTo}>
+                ← {drawingContext.returnTo.includes('stellages') ? 'Вернуться к стеллажам проекта' : 'Вернуться'}
+              </Link>
             </div>
           )}
         </div>

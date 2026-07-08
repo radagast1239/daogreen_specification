@@ -4,14 +4,22 @@ import {
   FRAME_BOM_ADD_CONFIRM_TITLE,
   FRAME_BOM_NO_PROJECT_REASON,
   FRAME_BOM_UNSAVED_DRAWING_WARNING,
+  FRAME_SAVE_PDF_AND_BOM_BUTTON_LABEL,
+  FRAME_SAVE_PDF_AND_BOM_CONFIRM_TITLE,
+  FRAME_SAVE_PDF_AND_BOM_SUCCESS_TITLE,
   evaluateFrameBomAddToProject,
+  evaluateFrameSavePdfAndBom,
   buildFrameBomProjectMerge,
   formatFrameBomAddSuccessSummary,
+  formatFrameSavePdfAndBomSuccess,
   resolveFrameBomModuleRackKey,
   findDraftMaterialsMissingInCatalog,
   buildFrameBomAddConfirmMessage,
+  buildFrameSavePdfAndBomConfirmMessage,
   countExistingFrameBomForRack,
   executeFrameBomProjectAdd,
+  executeFrameSavePdfAndBom,
+  requestFrameSavePdfAndBomConfirmation,
 } from "../src/frameConstructor/frameBomAddToProject.js";
 
 const draft = [
@@ -207,5 +215,112 @@ describe("executeFrameBomProjectAdd confirmation", () => {
   it("counts existing BOM for rack", () => {
     expect(countExistingFrameBomForRack(project.items, drawingContext)).toBe(1);
     expect(countExistingFrameBomForRack([{ source: "manual" }], drawingContext)).toBe(0);
+  });
+});
+
+describe("evaluateFrameSavePdfAndBom", () => {
+  it("enables combined action only with project context and BOM", () => {
+    const ready = evaluateFrameSavePdfAndBom({
+      projectId: "p1",
+      project: { items: [{ id: "x" }] },
+      purchaseDraft: draft,
+      drawingContext,
+      materials,
+    });
+    expect(ready.canSavePdfAndBom).toBe(true);
+
+    const noProject = evaluateFrameSavePdfAndBom({
+      projectId: "",
+      project: { items: [] },
+      purchaseDraft: draft,
+      drawingContext: { moduleRackKey: "rack1" },
+      materials,
+    });
+    expect(noProject.canSavePdfAndBom).toBe(false);
+    expect(noProject.addDisabledReason).toBe(FRAME_BOM_NO_PROJECT_REASON);
+  });
+});
+
+describe("frame save PDF + BOM copy", () => {
+  it("exposes combined button and success labels", () => {
+    expect(FRAME_SAVE_PDF_AND_BOM_BUTTON_LABEL).toContain("BOM");
+    expect(FRAME_SAVE_PDF_AND_BOM_CONFIRM_TITLE).toContain("закупочный лист");
+    expect(FRAME_SAVE_PDF_AND_BOM_SUCCESS_TITLE).toContain("Чертёж сохранён");
+  });
+
+  it("builds combined confirm message", () => {
+    const message = buildFrameSavePdfAndBomConfirmMessage();
+    expect(message).toContain("будут заменены");
+    expect(message).toContain("Продолжить?");
+  });
+
+  it("formats combined success summary", () => {
+    const summary = formatFrameSavePdfAndBomSuccess({
+      bomSummary: formatFrameBomAddSuccessSummary({
+        addedCount: 2,
+        removedCount: 1,
+        keptCount: 5,
+        sourceRackPrefix: "frame_bom:d1:rack1",
+        warnings: [],
+      }),
+    });
+    expect(summary.title).toBe(FRAME_SAVE_PDF_AND_BOM_SUCCESS_TITLE);
+    expect(summary.detail).toContain("добавлено: 2");
+  });
+});
+
+describe("executeFrameSavePdfAndBom", () => {
+  const project = {
+    items: [
+      { id: "keep", source: "manual" },
+      {
+        id: "old",
+        source: "frame_bom",
+        sourceKey: "frame_bom:d1:rack1:profile_tube_20x20",
+      },
+    ],
+  };
+
+  it("confirm cancel does not save PDF and does not PATCH project", async () => {
+    const savePdf = vi.fn();
+    const updateProject = vi.fn();
+    const confirm = vi.fn().mockResolvedValue(false);
+    const result = await executeFrameSavePdfAndBom({
+      confirm,
+      savePdf,
+      project,
+      purchaseDraft: draft,
+      drawingContext,
+      updateProject,
+    });
+    expect(result.cancelled).toBe(true);
+    expect(savePdf).not.toHaveBeenCalled();
+    expect(updateProject).not.toHaveBeenCalled();
+  });
+
+  it("confirm ok saves PDF then PATCH project", async () => {
+    const savePdf = vi.fn().mockResolvedValue({ id: "d-new" });
+    const updateProject = vi.fn().mockResolvedValue({ id: "p1", items: [] });
+    const confirm = vi.fn().mockResolvedValue(true);
+    const result = await executeFrameSavePdfAndBom({
+      confirm,
+      savePdf,
+      project,
+      purchaseDraft: draft,
+      drawingContext,
+      updateProject,
+    });
+    expect(result.cancelled).toBe(false);
+    expect(savePdf).toHaveBeenCalledTimes(1);
+    expect(updateProject).toHaveBeenCalledTimes(1);
+    expect(result.combinedSummary.title).toBe(FRAME_SAVE_PDF_AND_BOM_SUCCESS_TITLE);
+  });
+
+  it("requestFrameSavePdfAndBomConfirmation uses combined title", async () => {
+    const confirm = vi.fn().mockResolvedValue(true);
+    await requestFrameSavePdfAndBomConfirmation({ confirm });
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ title: FRAME_SAVE_PDF_AND_BOM_CONFIRM_TITLE }),
+    );
   });
 });

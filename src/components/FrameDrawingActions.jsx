@@ -24,18 +24,23 @@ export default function FrameDrawingActions({
   const [showOlder, setShowOlder] = useState(false);
   const latest = drawings[0] || null;
   const older = drawings.slice(1);
-  const status = drawingStatusLabel(drawings);
+  const status = latest ? 'Схема создана' : drawingStatusLabel(drawings);
 
   const baseCtx = { ...context, drawingId: '' };
   const replaceCtx = latest
     ? { ...context, drawingId: latest.id, mode: 'replace' }
     : baseCtx;
   const newVersionCtx = { ...context, drawingId: '', mode: 'new_version' };
+  const openSchemeCtx = latest
+    ? { ...context, drawingId: latest.id }
+    : baseCtx;
 
   return (
     <div className={compact ? '' : 'frame-drawing-actions'}>
       <div className="row between wrap" style={{ gap: 8 }}>
-        <span className="muted" style={{ fontSize: 12 }}>{status}</span>
+        <span className={`${latest ? 'chip chip--ok' : 'muted'}`} style={{ fontSize: 12 }}>
+          {status}
+        </span>
         <span className="row wrap" style={{ gap: 6 }}>
           {!latest && !presetDrawing && (
             <FrameDrawingLinkButton context={baseCtx} label="Создать схему" />
@@ -51,10 +56,18 @@ export default function FrameDrawingActions({
           {latest && (
             <>
               <span className="chip chip--ok" style={{ fontSize: 11 }}>v{latest.version}</span>
+              <FrameDrawingLinkButton context={openSchemeCtx} label="Открыть схему" />
               <a className="btn btn-sm" href={photoSrc(latest.pdfUrl)} target="_blank" rel="noreferrer">
                 Открыть PDF
               </a>
-              <FrameDrawingLinkButton context={replaceCtx} label="Заменить" />
+              <FrameDrawingLinkButton context={replaceCtx} label="Обновить схему" />
+              {context.projectId && (
+                <FrameDrawingLinkButton
+                  context={{ ...openSchemeCtx, constructorTab: 'cutlist' }}
+                  label="Обновить BOM"
+                  className="btn btn-sm btn-outline"
+                />
+              )}
               <FrameDrawingLinkButton
                 context={newVersionCtx}
                 label="Новая версия"

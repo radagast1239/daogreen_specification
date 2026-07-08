@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
 import { useToast } from "../../components/Toast.jsx";
@@ -8,7 +8,7 @@ import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable
 import { resolveCategories } from "../../lib/categories.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
 import FrameDrawingTargetRow from "../../components/FrameDrawingTargetRow.jsx";
-import { buildModuleRackKey, FRAME_SOURCE_MODULE_RACK } from "../../../shared/frameDrawingContext.js";
+import { buildModuleRackKey, buildBuilderStellagesReturnPath, FRAME_SOURCE_MODULE_RACK } from "../../../shared/frameDrawingContext.js";
 import {
   filterSectionsForFarmType,
   GROUP_LABEL,
@@ -61,8 +61,12 @@ export default function ProjectBuilderPage() {
   const ref = state.reference;
   const { confirm, success, error } = useToast();
   const nav = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [step, setStep] = useState("basics");
+  const [step, setStep] = useState(() => {
+    const fromUrl = searchParams.get("step");
+    return STEPS.some((s) => s.id === fromUrl) ? fromUrl : "basics";
+  });
   const [saving, setSaving] = useState(false);
   const [presets, setPresets] = useState([]);
   const [farmCatalogs, setFarmCatalogs] = useState({});
@@ -93,6 +97,13 @@ export default function ProjectBuilderPage() {
   const [farmLoaded, setFarmLoaded] = useState(false);
   const [rooms, setRooms] = useState(defaultRooms);
   const [activeCoolingRoomId, setActiveCoolingRoomId] = useState(null);
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("step");
+    if (fromUrl && STEPS.some((s) => s.id === fromUrl) && fromUrl !== step) {
+      setStep(fromUrl);
+    }
+  }, [searchParams, step]);
 
   const sections = useMemo(
     () => filterSectionsForFarmType(resolveFarmSections(farmSettings || {}), form.type),
@@ -501,7 +512,8 @@ export default function ProjectBuilderPage() {
             <div className="card" style={{ marginBottom: 14, padding: 12 }}>
               <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>В проекте ({stellages.length})</div>
               {stellages.map((st) => (
-                <div key={st.id} className="row between stellage-list-row" style={{ marginBottom: 8, gap: 10 }}>
+                <div key={st.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
+                  <div className="row between stellage-list-row" style={{ marginBottom: 8, gap: 10 }}>
                   <StellagePhotoThumb
                     url={resolveStellagePhoto(stellageModuleMeta, st.moduleId, st.photoUrl || st.params?.photoUrl)}
                     size={48}
@@ -521,6 +533,28 @@ export default function ProjectBuilderPage() {
                     <button type="button" className="btn btn-sm" onClick={() => duplicateStellage(st.id)}>Копия</button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeStellage(st.id)}>✕</button>
                   </span>
+                  </div>
+                  <FrameDrawingTargetRow
+                    context={{
+                      moduleId: st.moduleId,
+                      rackId: st.id,
+                      sourceType: FRAME_SOURCE_MODULE_RACK,
+                      moduleRackKey: buildModuleRackKey({
+                        moduleId: st.moduleId,
+                        rackId: st.id,
+                      }),
+                      rackLabel: st.name,
+                      returnTo: buildBuilderStellagesReturnPath(),
+                    }}
+                    fetchParams={{
+                      module_id: st.moduleId,
+                      module_rack_key: buildModuleRackKey({
+                        moduleId: st.moduleId,
+                        rackId: st.id,
+                      }),
+                    }}
+                    compact
+                  />
                 </div>
               ))}
             </div>
@@ -599,7 +633,7 @@ export default function ProjectBuilderPage() {
                     rackId: draft.id,
                   }),
                   rackLabel: draft.name,
-                  returnTo: "/new",
+                  returnTo: buildBuilderStellagesReturnPath(),
                 }}
                 fetchParams={{
                   module_id: draft.moduleId,

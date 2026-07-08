@@ -5,6 +5,9 @@ import {
   buildFrameDrawingLink,
   buildFrameDrawingSavePayload,
   buildModuleRackKey,
+  buildBuilderStellagesReturnPath,
+  buildProjectStellagesReturnPath,
+  buildStellagesReturnLabel,
 } from '../shared/frameDrawingContext.js';
 import { defaultFrameParams } from '../src/frameConstructor/framePresets.js';
 
@@ -99,5 +102,22 @@ describe('frameDrawingContext', () => {
     const key2 = buildFrameDrawingSavePayload(defaultFrameParams, { ...base, rackLabel: 'B' }).moduleRackKey;
     expect(key1).toBe(key2);
     expect(key1).toBe('mod1:st1');
+  });
+
+  it('builds stellages return paths and labels', () => {
+    expect(buildBuilderStellagesReturnPath()).toBe('/new?step=stellages');
+    expect(buildProjectStellagesReturnPath('p1')).toBe('/project/p1?section=stellages');
+    expect(buildStellagesReturnLabel('/project/p1?section=stellages')).toBe('Вернуться к стеллажам проекта');
+    expect(buildStellagesReturnLabel('/new?step=stellages')).toBe('Вернуться к стеллажам проекта');
+    expect(buildStellagesReturnLabel('/project/p1')).toBe('Вернуться');
+  });
+
+  it('buildFrameDrawingLink encodes constructorTab', () => {
+    const link = buildFrameDrawingLink({
+      projectId: 'p1',
+      rackId: 'st1',
+      constructorTab: 'cutlist',
+    });
+    expect(link).toContain('constructorTab=cutlist');
   });
 });

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { generateCutList } from './frameCutList.js';
 import { canExportFramePdf, exportFrameToPdf } from './framePdfExport.js';
@@ -9,12 +9,21 @@ import {
   hasFrameDrawingSaveTarget,
   normalizeFrameSourceType,
   FRAME_SOURCE_MODULE_RACK,
-  FRAME_SOURCE_PRESET,
+  buildStellagesReturnLabel,
 } from '../../shared/frameDrawingContext.js';
+import {
+  evaluateFrameSavePdfAndBom,
+  executeFrameSavePdfAndBom,
+  FRAME_BOM_FROM_PROJECT_HINT,
+  FRAME_SAVE_PDF_AND_BOM_BUTTON_LABEL,
+  FRAME_SAVE_PDF_ONLY_BUTTON_LABEL,
+} from './frameBomAddToProject.js';
 import { buildClientBrand } from '../lib/clientBrandConfig.js';
 import { api, photoSrc } from '../lib/api.js';
+import { useToast } from '../components/Toast.jsx';
 
-function saveButtonLabel(ctx) {
+function saveButtonLabel(ctx, pdfOnlyMode = false) {
+  if (pdfOnlyMode) return FRAME_SAVE_PDF_ONLY_BUTTON_LABEL;
   const src = normalizeFrameSourceType(ctx?.sourceType);
   if (src === FRAME_SOURCE_PRESET) return 'Сохранить PDF к пресету';
   if (src === FRAME_SOURCE_MODULE_RACK && !ctx?.projectId) return 'Сохранить PDF к модулю';
@@ -28,11 +37,18 @@ export default function FramePdfButton({
   captureRef,
   drawingContext,
   onSaved,
+  purchaseDraft = [],
+  project = null,
+  materials = null,
+  onProjectUpdated = null,
 }) {
+  const { confirm } = useToast();
   const [busy, setBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
+  const [comboBusy, setComboBusy] = useState(false);
   const [error, setError] = useState('');
   const [savedDrawing, setSavedDrawing] = useState(null);
+  const [combinedResult, setCombinedResult] = useState(null);
   const [branding, setBranding] = useState(() => buildClientBrand({}));
 
   useEffect(() => {
@@ -47,10 +63,24 @@ export default function FramePdfButton({
     return () => { cancelled = true; };
   }, []);
 
-  const disabled = !canExportFramePdf(geom) || busy || saveBusy;
+  const disabled = !canExportFramePdf(geom) || busy || saveBusy || comboBusy;
   const canSave = hasFrameDrawingSaveTarget(drawingContext);
   const isReplaceMode = drawingContext?.mode === 'replace' && drawingContext?.drawingId;
   const isNewVersionMode = drawingContext?.mode === 'new_version';
+
+  const comboEval = useMemo(
+    () => evaluateFrameSavePdfAndBom({
+      projectId: drawingContext?.projectId,
+      project,
+      purchaseDraft,
+      drawingContext,
+      materials,
+    }),
+    [drawingContext, project, purchaseDraft, materials],
+  );
+
+  const showComboButton = canSave && comboEval.canSavePdfAndBom && !isReplaceMode && !isNewVersionMode;
+  const showPdfOnlyAsSecondary = showComboButton;
 
   const buildPdfPayload = useCallback(async () => {
     const cutList = generateCutList(params);
@@ -65,6 +95,38 @@ export default function FramePdfButton({
     return { config: params, geometry: geom, cutList, isoImageDataUrl, branding };
   }, [params, geom, captureRef, branding]);
 
+  const performSavePdf = useCallback(async (replace = false) => {
+    const payload = await buildPdfPayload();
+    const { blob, filename } = await exportFrameToPdfBlob(payload);
+    const savePayload = buildFrameDrawingSavePayload(params, drawingContext, {
+      replace: replace && !isNewVersionMode,
+      drawingId: isNewVersionMode ? null : (replace ? drawingContext.drawingId : drawingContext.drawingId || null),
+    });
+    savePayload.pdfFilename = filename || buildFramePdfFilename(params);
+    const result = await api.uploadFrameDrawing(
+      {
+        projectId: savePayload.projectId,
+        moduleId: savePayload.moduleId,
+        stellageId: savePayload.stellageId,
+        moduleRackKey: savePayload.moduleRackKey,
+        presetId: savePayload.presetId,
+        sourceType: savePayload.sourceType,
+        title: savePayload.title,
+        rackType: savePayload.rackType,
+        frameConfigJson: savePayload.frameConfigJson,
+        isClientVisible: savePayload.isClientVisible,
+        drawingId: replace ? drawingContext.drawingId : null,
+        pdfFilename: savePayload.pdfFilename,
+      },
+      blob,
+      savePayload.pdfFilename,
+      replace && !isNewVersionMode,
+    );
+    setSavedDrawing(result);
+    onSaved?.(result);
+    return result;
+  }, [buildPdfPayload, params, drawingContext, isNewVersionMode, onSaved]);
+
   const handleExport = useCallback(async () => {
     if (!canExportFramePdf(geom)) {
       setError('Исправьте ошибки параметров перед экспортом PDF.');
@@ -72,6 +134,7 @@ export default function FramePdfButton({
     }
     setBusy(true);
     setError('');
+    setCombinedResult(null);
     try {
       const payload = await buildPdfPayload();
       await exportFrameToPdf(payload);
@@ -86,51 +149,70 @@ export default function FramePdfButton({
     if (!canExportFramePdf(geom) || !drawingContext) return;
     setSaveBusy(true);
     setError('');
+    setCombinedResult(null);
     try {
-      const payload = await buildPdfPayload();
-      const { blob, filename } = await exportFrameToPdfBlob(payload);
-      const savePayload = buildFrameDrawingSavePayload(params, drawingContext, {
-        replace: replace && !isNewVersionMode,
-        drawingId: isNewVersionMode ? null : (replace ? drawingContext.drawingId : drawingContext.drawingId || null),
-      });
-      savePayload.pdfFilename = filename || buildFramePdfFilename(params);
-      const result = await api.uploadFrameDrawing(
-        {
-          projectId: savePayload.projectId,
-          moduleId: savePayload.moduleId,
-          stellageId: savePayload.stellageId,
-          moduleRackKey: savePayload.moduleRackKey,
-          presetId: savePayload.presetId,
-          sourceType: savePayload.sourceType,
-          title: savePayload.title,
-          rackType: savePayload.rackType,
-          frameConfigJson: savePayload.frameConfigJson,
-          isClientVisible: savePayload.isClientVisible,
-          drawingId: replace ? drawingContext.drawingId : null,
-          pdfFilename: savePayload.pdfFilename,
-        },
-        blob,
-        savePayload.pdfFilename,
-        replace && !isNewVersionMode,
-      );
-      setSavedDrawing(result);
-      onSaved?.(result);
-      if (result.isNewVersion) {
-        setError('');
-      }
+      await performSavePdf(replace);
     } catch (err) {
       setError(err?.message || 'Не удалось сохранить PDF.');
     } finally {
       setSaveBusy(false);
     }
-  }, [geom, drawingContext, params, buildPdfPayload, onSaved, isNewVersionMode]);
+  }, [geom, drawingContext, performSavePdf]);
+
+  const handleSavePdfAndBom = useCallback(async () => {
+    if (!canExportFramePdf(geom) || !drawingContext?.projectId || !project?.items) return;
+    setComboBusy(true);
+    setError('');
+    setCombinedResult(null);
+    try {
+      const outcome = await executeFrameSavePdfAndBom({
+        confirm,
+        savePdf: () => performSavePdf(isReplaceMode),
+        project,
+        purchaseDraft,
+        drawingContext: { ...drawingContext, projectId: drawingContext.projectId },
+        updateProject: api.updateProject,
+      });
+      if (outcome.cancelled) return;
+      if (outcome.skipped) return;
+      onProjectUpdated?.(outcome.updated);
+      setCombinedResult(outcome.combinedSummary);
+    } catch (err) {
+      setError(err?.message || 'Не удалось сохранить чертёж и BOM.');
+    } finally {
+      setComboBusy(false);
+    }
+  }, [
+    geom,
+    drawingContext,
+    project,
+    purchaseDraft,
+    confirm,
+    performSavePdf,
+    isReplaceMode,
+    onProjectUpdated,
+  ]);
+
+  const returnLabel = buildStellagesReturnLabel(drawingContext?.returnTo);
+  const successDrawing = savedDrawing;
 
   return (
     <div className="fc-export">
-      {canSave && (
+      {showComboButton && (
         <button
           type="button"
           className="btn btn-primary"
+          onClick={handleSavePdfAndBom}
+          disabled={disabled}
+          title={FRAME_SAVE_PDF_AND_BOM_BUTTON_LABEL}
+        >
+          {comboBusy ? 'Сохранение…' : FRAME_SAVE_PDF_AND_BOM_BUTTON_LABEL}
+        </button>
+      )}
+      {canSave && (
+        <button
+          type="button"
+          className={`btn ${showPdfOnlyAsSecondary ? 'btn-outline' : 'btn-primary'}`}
           onClick={() => handleSave(isReplaceMode)}
           disabled={disabled}
           title={isReplaceMode ? 'Заменить существующий PDF' : 'Сохранить PDF'}
@@ -141,7 +223,7 @@ export default function FramePdfButton({
               ? 'Заменить PDF'
               : isNewVersionMode
                 ? 'Сохранить новую версию'
-                : saveButtonLabel(drawingContext)}
+                : saveButtonLabel(drawingContext, showPdfOnlyAsSecondary)}
         </button>
       )}
       <button
@@ -153,12 +235,41 @@ export default function FramePdfButton({
       >
         {busy ? 'Формирование PDF…' : 'Скачать PDF'}
       </button>
-      {savedDrawing && (
+      {canSave && !drawingContext?.projectId && (
+        <p className="fc-export__hint muted" style={{ fontSize: 12, margin: '6px 0 0', width: '100%' }}>
+          {FRAME_BOM_FROM_PROJECT_HINT}
+        </p>
+      )}
+      {canSave && drawingContext?.projectId && !comboEval.canSavePdfAndBom && comboEval.addDisabledReason && (
+        <p className="fc-export__hint muted" style={{ fontSize: 12, margin: '6px 0 0', width: '100%' }}>
+          {comboEval.addDisabledReason}
+        </p>
+      )}
+      {combinedResult && (
         <span className="fc-export__ok">
-          {savedDrawing.isNewVersion ? 'Новая версия сохранена. ' : 'Чертёж сохранён. '}
-          <a href={photoSrc(savedDrawing.pdfUrl)} target="_blank" rel="noreferrer">Открыть PDF</a>
+          <strong>{combinedResult.title}</strong>
+          {' '}
+          <span className="muted">{combinedResult.detail}</span>
+          {successDrawing && (
+            <>
+              {' · '}
+              <a href={photoSrc(successDrawing.pdfUrl)} target="_blank" rel="noreferrer">Открыть PDF</a>
+            </>
+          )}
           {drawingContext?.returnTo && (
-            <> · <Link to={drawingContext.returnTo}>Вернуться</Link></>
+            <>
+              {' · '}
+              <Link to={drawingContext.returnTo}>{returnLabel}</Link>
+            </>
+          )}
+        </span>
+      )}
+      {!combinedResult && successDrawing && (
+        <span className="fc-export__ok">
+          {successDrawing.isNewVersion ? 'Новая версия сохранена. ' : 'Чертёж сохранён. '}
+          <a href={photoSrc(successDrawing.pdfUrl)} target="_blank" rel="noreferrer">Открыть PDF</a>
+          {drawingContext?.returnTo && (
+            <> · <Link to={drawingContext.returnTo}>{returnLabel}</Link></>
           )}
         </span>
       )}

@@ -22,7 +22,9 @@ import { Progress, Stat, Empty, ClientLinkModal } from "../../components/ui.jsx"
 import Breadcrumbs from "../../components/Breadcrumbs.jsx";
 import Collapsible from "../../components/Collapsible.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
+import { useToast } from "../../components/Toast.jsx";
 import StellageFrameDrawingsPanel from "../../components/StellageFrameDrawingsPanel.jsx";
+import { buildProjectStellagesReturnPath } from "../../../shared/frameDrawingContext.js";
 import SaveSectionTemplateModal from "../../components/SaveSectionTemplateModal.jsx";
 import { api } from "../../lib/api.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
@@ -70,6 +72,8 @@ export default function SpecEditorPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const highlightItemId = searchParams.get("item");
+  const sectionParam = searchParams.get("section");
+  const stellagesPanelRef = useRef(null);
   const { state, actions } = useStore();
   const { confirm, success, error } = useToast();
   const project = state.projects.find((p) => p.id === id);
@@ -157,6 +161,15 @@ export default function SpecEditorPage() {
   useEffect(() => {
     if (highlightItemId) setTab("spec");
   }, [highlightItemId]);
+
+  useEffect(() => {
+    if (sectionParam !== "stellages" || !project?.id) return;
+    setTab("spec");
+    const timer = window.setTimeout(() => {
+      stellagesPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [sectionParam, project?.id]);
 
   useEffect(() => {
     api.listSectionTemplates().then(setSectionTemplates).catch(() => setSectionTemplates([]));
@@ -646,7 +659,12 @@ export default function SpecEditorPage() {
           </div>
         )}
 
-        <StellageFrameDrawingsPanel project={project} returnPath={`/project/${project.id}`} />
+        <div ref={stellagesPanelRef}>
+          <StellageFrameDrawingsPanel
+            project={project}
+            returnPath={buildProjectStellagesReturnPath(project.id)}
+          />
+        </div>
         <ProjectDocuments projectId={project.id} />
 
         <Collapsible title="История: клиент и Daogreen" subtitle={`${activity.length} записей`} defaultOpen={activity.length > 0}>

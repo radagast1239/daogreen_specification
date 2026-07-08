@@ -47,10 +47,10 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
   if (!stellages.length) return null;
 
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+    <div className="card" id="stellages-panel" style={{ padding: 14, marginBottom: 12 }}>
       <h3 style={{ marginTop: 0, fontSize: 15 }}>Схемы каркасов</h3>
       <p className="muted" style={{ fontSize: 12, margin: '0 0 10px' }}>
-        PDF-схемы из конструктора каркасов. Привязаны к конкретным стеллажам проекта. Не влияют на спецификацию материалов.
+        PDF-схемы из конструктора каркасов. Привязаны к стеллажам проекта. BOM каркаса добавляется в закупку отдельной кнопкой в конструкторе.
       </p>
       {loading ? (
         <p className="muted" style={{ fontSize: 13 }}>Загрузка…</p>
