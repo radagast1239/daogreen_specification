@@ -177,6 +177,7 @@ export default function FramePdfButton({
         purchaseDraft,
         drawingContext: { ...drawingContext, projectId: drawingContext.projectId },
         updateProject: api.updateProject,
+        materials,
       });
       if (outcome.cancelled) return;
       if (outcome.skipped) return;

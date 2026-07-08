@@ -23,6 +23,7 @@ import {
 import { resolveItemType } from "../../shared/itemTypes.js";
 import { isSplitSystemName } from "../../shared/splitSpecs.js";
 import { buildAcLineFromRoom, AC_ITEM_SECTION } from "../../shared/roomAcSpec.js";
+import { FRAME_BOM_SOURCE } from "../../shared/frameBomProjectItems.js";
 
 export { blankLine, lineFromMaterial };
 
@@ -214,6 +215,7 @@ export function buildProjectFromBuilder({
       })),
     });
     for (const line of activeLines(syncFastenersFromCrabs(st.items, materials))) {
+      if ((line.source || line.sourceType) === FRAME_BOM_SOURCE) continue;
       const baseQty = resolveBuilderLineQty(line);
       if (baseQty <= 0) continue;
       pushLine(

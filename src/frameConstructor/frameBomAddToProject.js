@@ -1,4 +1,9 @@
-import { mergeFrameBomIntoProjectItems, buildFrameBomSourceRackPrefix, isFrameBomItemForRack } from "../../shared/frameBomProjectItems.js";
+import {
+  mergeFrameBomIntoProjectItems,
+  frameBomItemsForModuleRack,
+  findMissingFrameBomMaterials,
+  formatFrameBomMissingMaterialsMessage,
+} from "../../shared/frameBomProjectItems.js";
 import { visiblePurchaseDraftItems } from "./frameBomPurchasePreviewData.js";
 
 export const FRAME_BOM_ADD_BUTTON_LABEL =
@@ -33,17 +38,7 @@ export function resolveFrameBomModuleRackKey(drawingContext = {}) {
 }
 
 export function findDraftMaterialsMissingInCatalog(purchaseDraft, materials) {
-  if (!Array.isArray(materials) || materials.length === 0) return [];
-  const ids = new Set(
-    materials.map((m) => m.id || m.materialId).filter(Boolean),
-  );
-  return [
-    ...new Set(
-      visiblePurchaseDraftItems(purchaseDraft)
-        .map((item) => item.materialId)
-        .filter((id) => id && !ids.has(id)),
-    ),
-  ];
+  return findMissingFrameBomMaterials(purchaseDraft, materials);
 }
 
 /**
@@ -111,22 +106,26 @@ export function evaluateFrameBomAddToProject({
     warnings.push(FRAME_BOM_UNSAVED_DRAWING_WARNING);
   }
 
-  const missingMaterialIds = materials
-    ? findDraftMaterialsMissingInCatalog(purchaseDraft, materials)
-    : [];
-
-  if (materials && missingMaterialIds.length > 0) {
+  if (!materials?.length) {
     return {
       canAddToProject: false,
-      addDisabledReason: `Не найдены материалы: ${missingMaterialIds.join(", ")}`,
+      addDisabledReason: "Загрузка каталога материалов…",
       warnings,
-      missingMaterialIds,
+      missingMaterialIds: [],
       moduleRackKey,
     };
   }
 
-  if (!materials?.length) {
-    warnings.push("Проверьте, что материалы BOM есть в базе.");
+  const missingMaterialIds = findDraftMaterialsMissingInCatalog(purchaseDraft, materials);
+
+  if (missingMaterialIds.length > 0) {
+    return {
+      canAddToProject: false,
+      addDisabledReason: formatFrameBomMissingMaterialsMessage(missingMaterialIds),
+      warnings,
+      missingMaterialIds,
+      moduleRackKey,
+    };
   }
 
   return {
@@ -143,7 +142,7 @@ export function evaluateFrameBomAddToProject({
  * @param {object[]} purchaseDraft
  * @param {object} drawingContext
  */
-export function buildFrameBomProjectMerge(project, purchaseDraft, drawingContext = {}) {
+export function buildFrameBomProjectMerge(project, purchaseDraft, drawingContext = {}, materials = null) {
   const existingItems = project?.items || [];
   const mergeResult = mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, {
     projectId: drawingContext.projectId || "",
@@ -153,7 +152,13 @@ export function buildFrameBomProjectMerge(project, purchaseDraft, drawingContext
     rackLabel: drawingContext.rackLabel || "",
     visibleToClient: true,
     included: true,
+    materials: materials || undefined,
   });
+  if (mergeResult.blocked) {
+    const err = new Error(mergeResult.blockedReason || "BOM не добавлен: материалы не найдены в базе.");
+    err.missingMaterialIds = mergeResult.missingMaterialIds || [];
+    throw err;
+  }
   return {
     mergeResult,
     patch: { items: mergeResult.items },
@@ -173,12 +178,8 @@ export function formatFrameBomAddSuccessSummary(mergeResult) {
 
 export function countExistingFrameBomForRack(projectItems, drawingContext = {}) {
   const moduleRackKey = resolveFrameBomModuleRackKey(drawingContext);
-  const { prefix } = buildFrameBomSourceRackPrefix({
-    drawingId: drawingContext.drawingId,
-    moduleRackKey,
-  });
-  if (!prefix) return 0;
-  return (projectItems || []).filter((item) => isFrameBomItemForRack(item, prefix)).length;
+  if (!moduleRackKey) return 0;
+  return frameBomItemsForModuleRack(projectItems, moduleRackKey).length;
 }
 
 /**
@@ -237,6 +238,7 @@ export async function executeFrameBomProjectAdd({
   drawingContext,
   confirm,
   updateProject,
+  materials = null,
 }) {
   const projectId = drawingContext?.projectId;
   if (!projectId || !project?.items) {
@@ -258,6 +260,7 @@ export async function executeFrameBomProjectAdd({
     purchaseDraft,
     drawingContext,
     updateProject,
+    materials,
   }).then((result) => ({ cancelled: false, ...result }));
 }
 
@@ -274,13 +277,14 @@ export async function applyFrameBomProjectAdd({
   purchaseDraft,
   drawingContext,
   updateProject,
+  materials = null,
 }) {
   const projectId = drawingContext?.projectId;
   if (!projectId || !project?.items) {
     return { skipped: true };
   }
   const ctx = { ...drawingContext, projectId };
-  const { mergeResult, patch } = buildFrameBomProjectMerge(project, purchaseDraft, ctx);
+  const { mergeResult, patch } = buildFrameBomProjectMerge(project, purchaseDraft, ctx, materials);
   const updated = await updateProject(projectId, patch);
   return {
     updated,
@@ -356,6 +360,7 @@ export async function applyFrameBomProjectAddAfterPdfSave({
   drawingContext,
   updateProject,
   savedDrawing = null,
+  materials = null,
 }) {
   const ctx = {
     ...drawingContext,
@@ -367,6 +372,7 @@ export async function applyFrameBomProjectAddAfterPdfSave({
     purchaseDraft,
     drawingContext: ctx,
     updateProject,
+    materials,
   });
 }
 
@@ -387,6 +393,7 @@ export async function executeFrameSavePdfAndBom({
   purchaseDraft,
   drawingContext,
   updateProject,
+  materials = null,
 }) {
   const confirmation = await requestFrameSavePdfAndBomConfirmation({ confirm });
   if (!confirmation.ok) {
@@ -400,6 +407,7 @@ export async function executeFrameSavePdfAndBom({
     drawingContext,
     updateProject,
     savedDrawing,
+    materials,
   });
   if (outcome.skipped) {
     return { cancelled: false, savedDrawing, skipped: true };

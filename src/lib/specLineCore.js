@@ -1,4 +1,5 @@
 import { uid } from "./ids.js";
+import { FRAME_BOM_SOURCE, isFrameBomLine } from "../../shared/frameBomProjectItems.js";
 import { normalizeStoredCatalogLine } from "../../shared/catalogLine.js";
 import { mergeLineSpecOverrides } from "../../shared/lineSpecOverrides.js";
 import { materialCompositionGroup } from "../../shared/stellageComposition.js";
@@ -124,7 +125,9 @@ export function lineFromMaterial(mat, overrides = {}) {
 export function hydrateCatalogEditorLine(ln, materials) {
   if (!ln) return blankLine();
   const stored = normalizeStoredCatalogLine(ln);
-  const qty = Number(stored.defaultQty ?? ln.qty) || 0;
+  const qty = isFrameBomLine(ln)
+    ? Number(ln.qty ?? stored.qty ?? stored.defaultQty) || 0
+    : Number(stored.defaultQty ?? ln.qty) || 0;
   const sub = stored.subcategory || ln.farmGroup || ln.subcategory || "";
   const included = ln.included !== false;
 

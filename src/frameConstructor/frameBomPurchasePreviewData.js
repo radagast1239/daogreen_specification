@@ -26,6 +26,11 @@ const FASTENER_KEYS = new Set([
   "foot_plate",
 ]);
 const CRAB_KEYS = new Set(Object.keys(CRAB_PREVIEW_LABELS));
+const NFT_KEYS = new Set([
+  "air_duct_55x110_2000",
+  "air_duct_connector_55x110",
+  "air_duct_elbow_55x110_90",
+]);
 
 /** @param {Array<{ qty?: number }>} draft */
 export function visiblePurchaseDraftItems(draft) {
@@ -78,12 +83,14 @@ export function groupPurchasePreviewItems(draft) {
     angleStock: visible.filter((item) => ANGLE_STOCK_KEYS.has(item.key)),
     fasteners: visible.filter((item) => FASTENER_KEYS.has(item.key)),
     crabs: visible.filter((item) => CRAB_KEYS.has(item.key)),
+    channels: visible.filter((item) => NFT_KEYS.has(item.key)),
     other: visible.filter(
       (item) =>
         !TUBE_KEYS.has(item.key) &&
         !ANGLE_STOCK_KEYS.has(item.key) &&
         !FASTENER_KEYS.has(item.key) &&
-        !CRAB_KEYS.has(item.key),
+        !CRAB_KEYS.has(item.key) &&
+        !NFT_KEYS.has(item.key),
     ),
   };
 }

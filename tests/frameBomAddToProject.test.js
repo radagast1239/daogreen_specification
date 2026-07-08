@@ -35,8 +35,8 @@ const draft = [
 ];
 
 const materials = [
-  { id: "m036", name: "Труба" },
-  { id: "m072", name: "Краб" },
+  { id: "m036", name: "Труба", unit: "м", basePrice: 100, supplier: "S1", link: "https://t", imageUrl: "/t.jpg" },
+  { id: "m072", name: "Краб", unit: "шт", basePrice: 50, supplier: "S2", link: "https://c", photoUrl: "/c.jpg" },
 ];
 
 const drawingContext = {
@@ -90,11 +90,24 @@ describe("evaluateFrameBomAddToProject", () => {
       project: { items: [] },
       purchaseDraft: draft,
       drawingContext,
-      materials: [{ id: "m036" }],
+      materials: [{ id: "m036", name: "Труба" }],
     });
     expect(result.canAddToProject).toBe(false);
+    expect(result.addDisabledReason).toContain("BOM не добавлен");
     expect(result.addDisabledReason).toContain("m072");
     expect(findDraftMaterialsMissingInCatalog(draft, [{ id: "m036" }])).toEqual(["m072"]);
+  });
+
+  it("disables while materials catalog is loading", () => {
+    const result = evaluateFrameBomAddToProject({
+      projectId: "p1",
+      project: { items: [] },
+      purchaseDraft: draft,
+      drawingContext,
+      materials: null,
+    });
+    expect(result.canAddToProject).toBe(false);
+    expect(result.addDisabledReason).toContain("Загрузка каталога");
   });
 
   it("uses stellage fallback for moduleRackKey", () => {
@@ -117,7 +130,7 @@ describe("buildFrameBomProjectMerge", () => {
       ],
     };
     const snapshot = JSON.parse(JSON.stringify(project));
-    const { patch, mergeResult } = buildFrameBomProjectMerge(project, draft, drawingContext);
+    const { patch, mergeResult } = buildFrameBomProjectMerge(project, draft, drawingContext, materials);
 
     expect(project).toEqual(snapshot);
     expect(patch).toEqual({ items: mergeResult.items });
@@ -127,6 +140,45 @@ describe("buildFrameBomProjectMerge", () => {
     expect(mergeResult.items.some((i) => i.id === "keep")).toBe(true);
     expect(mergeResult.items.some((i) => i.id === "old")).toBe(false);
     expect(mergeResult.sourceRackPrefix).toBe("frame_bom:d1:rack1");
+    const tube = mergeResult.items.find((i) => i.materialId === "m036");
+    expect(tube.price).toBe(100);
+    expect(tube.supplier).toBe("S1");
+  });
+
+  it("throws when materials missing from catalog", () => {
+    const project = { items: [] };
+    expect(() =>
+      buildFrameBomProjectMerge(project, draft, drawingContext, [{ id: "m036", name: "Труба" }]),
+    ).toThrow(/BOM не добавлен/);
+  });
+
+  it("second save with new drawingId replaces rack BOM without duplicates", () => {
+    const project = {
+      items: [
+        { id: "keep", source: "manual", materialId: "m999", qty: 1 },
+        {
+          id: "old_bom",
+          source: "frame_bom",
+          sourceType: "frame_bom",
+          sourceKey: "frame_bom:drawing_v1:rack1:profile_tube_20x20",
+          sourceObjectIds: { moduleRackKey: "rack1", frameDrawingId: "drawing_v1" },
+          materialId: "m036",
+          qty: 88,
+        },
+      ],
+    };
+    const { patch: patchV2 } = buildFrameBomProjectMerge(
+      project,
+      [{ ...draft[0], qty: 70 }],
+      { ...drawingContext, drawingId: "drawing_v2" },
+      materials,
+    );
+    const bomLines = patchV2.items.filter((i) => i.source === "frame_bom");
+    expect(bomLines).toHaveLength(1);
+    expect(bomLines[0].qty).toBe(70);
+    expect(bomLines[0].sourceKey).toContain("drawing_v2");
+    expect(patchV2.items.some((i) => i.id === "old_bom")).toBe(false);
+    expect(patchV2.items.some((i) => i.id === "keep")).toBe(true);
   });
 });
 
@@ -187,6 +239,7 @@ describe("executeFrameBomProjectAdd confirmation", () => {
       drawingContext,
       confirm,
       updateProject,
+      materials,
     });
     expect(result.cancelled).toBe(true);
     expect(updateProject).not.toHaveBeenCalled();
@@ -204,6 +257,7 @@ describe("executeFrameBomProjectAdd confirmation", () => {
       drawingContext,
       confirm,
       updateProject,
+      materials,
     });
     expect(result.cancelled).toBe(false);
     expect(updateProject).toHaveBeenCalledTimes(1);
@@ -292,6 +346,7 @@ describe("executeFrameSavePdfAndBom", () => {
       purchaseDraft: draft,
       drawingContext,
       updateProject,
+      materials,
     });
     expect(result.cancelled).toBe(true);
     expect(savePdf).not.toHaveBeenCalled();
@@ -309,6 +364,7 @@ describe("executeFrameSavePdfAndBom", () => {
       purchaseDraft: draft,
       drawingContext,
       updateProject,
+      materials,
     });
     expect(result.cancelled).toBe(false);
     expect(savePdf).toHaveBeenCalledTimes(1);

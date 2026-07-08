@@ -45,4 +45,24 @@ describe("fastenerRules", () => {
     expect(bolt.qty).toBe(1);
     expect(screw.qty).toBe(2);
   });
+
+  it("не пересчитывает frame_bom крепёж по крабам", () => {
+    const materials = [
+      { id: "c1", name: "краб система Г образная" },
+      { id: "b1", name: "Болт М6×20 мм" },
+    ];
+    const lines = [
+      { materialId: "c1", qty: 2, included: true },
+      {
+        materialId: "b1",
+        qty: 312,
+        defaultQty: 312,
+        included: true,
+        source: "frame_bom",
+        sourceType: "frame_bom",
+      },
+    ];
+    const out = syncFastenersFromCrabs(lines, materials);
+    expect(out.find((l) => l.materialId === "b1")?.qty).toBe(312);
+  });
 });

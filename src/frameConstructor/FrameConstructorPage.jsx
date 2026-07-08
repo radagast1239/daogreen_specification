@@ -120,6 +120,7 @@ export default function FrameConstructorPage() {
         purchaseDraft,
         drawingContext: { ...drawingContext, projectId: drawingContext.projectId },
         updateProject: api.updateProject,
+        materials,
       });
       if (outcome.skipped) return;
       setProject(outcome.updated);

@@ -3,6 +3,10 @@ import { normalizePipeCuts, pipeCutsClientNote } from "./profilePipeCuts.js";
 
 export const FRAME_BOM_SOURCE = "frame_bom";
 
+export function isFrameBomLine(item) {
+  return (item?.source || item?.sourceType || item?.source_type) === FRAME_BOM_SOURCE;
+}
+
 const PROFILE_TUBE_BOM_KEY = "profile_tube_20x20";
 const PROFILE_TUBE_MATERIAL_ID = "m036";
 
@@ -25,15 +29,71 @@ export function buildFrameBomSourceRackPrefix({ drawingId, moduleRackKey } = {})
 }
 
 /**
- * @param {object} item
- * @param {string} rackPrefix
+ * @param {unknown} raw
  */
-export function isFrameBomItemForRack(item, rackPrefix) {
-  if (!rackPrefix) return false;
-  const source = item?.source || item?.source_type;
-  if (source !== FRAME_BOM_SOURCE) return false;
-  const key = String(item?.sourceKey || item?.source_key || "");
-  return key === rackPrefix || key.startsWith(`${rackPrefix}:`);
+function parseSourceObjectIds(raw) {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof raw === "object" ? raw : {};
+}
+
+/**
+ * Rack identity from a saved frame_bom project item (camelCase + snake_case).
+ * @param {object} item
+ */
+export function resolveFrameBomItemModuleRackKey(item) {
+  if (!item) return "";
+  const obj = parseSourceObjectIds(item.sourceObjectIds ?? item.source_object_ids);
+  const fromObj = String(obj.moduleRackKey || obj.module_rack_key || "").trim();
+  if (fromObj) return fromObj;
+  const rackKey = String(item.sourceRackKey || item.source_rack_key || "").trim();
+  if (rackKey) return rackKey;
+  const stellageId = String(obj.stellageId || obj.stellage_id || "").trim();
+  if (stellageId) return `stellage:${stellageId}`;
+  return "";
+}
+
+/**
+ * @param {string} sourceKey
+ * @param {string} moduleRackKey
+ */
+export function sourceKeyMatchesModuleRack(sourceKey, moduleRackKey) {
+  const sk = String(sourceKey || "");
+  const rack = String(moduleRackKey || "").trim();
+  if (!sk.startsWith("frame_bom:") || !rack) return false;
+  return sk.includes(`:${rack}:`);
+}
+
+/**
+ * True when item is frame_bom belonging to the given rack scope (moduleRackKey).
+ * drawingId is NOT part of the match — same rack replaces all prior BOM versions.
+ *
+ * @param {object} item
+ * @param {string} moduleRackKey
+ */
+export function isFrameBomItemForRack(item, moduleRackKey) {
+  const rack = String(moduleRackKey || "").trim();
+  if (!rack) return false;
+  if (!isFrameBomLine(item)) return false;
+
+  const itemRack = resolveFrameBomItemModuleRackKey(item);
+  if (itemRack && itemRack === rack) return true;
+
+  const sk = item?.sourceKey || item?.source_key || "";
+  if (sourceKeyMatchesModuleRack(sk, rack)) return true;
+
+  const obj = parseSourceObjectIds(item?.sourceObjectIds ?? item?.source_object_ids);
+  const stellageId = String(obj.stellageId || obj.stellage_id || "").trim();
+  if (stellageId && rack === `stellage:${stellageId}`) return true;
+
+  return false;
 }
 
 function frameBomItemId({ drawingId, moduleRackKey, bomKey }) {
@@ -50,6 +110,155 @@ function resolvePipeCutsForDraft(draft) {
   return normalizePipeCuts(draft.pipeCuts ?? []);
 }
 
+function materialCatalogIndex(materials = []) {
+  const map = new Map();
+  for (const mat of materials || []) {
+    const id = mat?.id || mat?.materialId;
+    if (id) map.set(id, mat);
+  }
+  return map;
+}
+
+export function frameBomMaterialLabel(materialId) {
+  const id = String(materialId || "").trim();
+  if (!id) return "";
+  for (const entry of Object.values(FRAME_BOM_MATERIALS)) {
+    if (entry.materialId === id) return entry.name;
+  }
+  return id;
+}
+
+/**
+ * Snapshot of catalog fields used by project/client purchase rows.
+ * @param {object} mat
+ */
+export function materialSnapshotForFrameBom(mat) {
+  if (!mat) return null;
+  const img = mat.imageUrl || mat.photoUrl || "";
+  return {
+    materialId: mat.id || mat.materialId,
+    name: mat.name || "",
+    unit: mat.unit || "шт.",
+    category: mat.category || "Прочее",
+    subcategory: mat.subcategory || "",
+    supplier: mat.supplier || "",
+    link: mat.link || "",
+    linkAlt: mat.linkAlt || "",
+    imageUrl: img,
+    photoUrl: img,
+    price: Number(mat.basePrice ?? mat.price) || 0,
+    vatRate: [0, 5, 20].includes(Number(mat.vatRate)) ? Number(mat.vatRate) : 0,
+    clientSection: mat.clientSection || "",
+    clientSubsection: mat.clientSubsection || "",
+    purchaseKey: mat.purchaseKey || "",
+    itemType: mat.itemType || "material",
+    responsible: mat.responsible || "",
+    clientNote: mat.clientNote || mat.comment || "",
+    techNote: mat.techNote || "",
+  };
+}
+
+/**
+ * @param {object[]} purchaseDraft
+ * @param {object[]} materials
+ */
+export function findMissingFrameBomMaterials(purchaseDraft, materials = []) {
+  const index = materialCatalogIndex(materials);
+  const missing = new Set();
+  for (const line of purchaseDraft || []) {
+    const qty = Number(line?.qty) || 0;
+    if (qty <= 0) continue;
+    const materialId = String(line?.materialId || "").trim();
+    if (!materialId) {
+      missing.add(line?.key || line?.name || "unknown");
+      continue;
+    }
+    if (!index.has(materialId)) missing.add(materialId);
+  }
+  return [...missing];
+}
+
+export function formatFrameBomMissingMaterialsMessage(missingIds = []) {
+  if (!missingIds.length) return "";
+  const lines = missingIds.map((id) => {
+    const label = frameBomMaterialLabel(id);
+    return label && label !== id ? `${id} — ${label}` : String(id);
+  });
+  return [
+    "BOM не добавлен. В базе материалов не найдены позиции:",
+    ...lines,
+    "Сначала добавьте эти материалы в базу через «+ новая позиция в базу».",
+  ].join("\n");
+}
+
+/**
+ * @param {object} draftItem
+ * @param {object[]} materials
+ */
+export function enrichFrameBomDraftWithMaterials(draftItem, materials = []) {
+  const materialId = String(draftItem?.materialId || "").trim();
+  if (!materialId) {
+    return { enriched: null, missing: draftItem?.key || draftItem?.name || "unknown" };
+  }
+  const mat = materialCatalogIndex(materials).get(materialId);
+  if (!mat) {
+    return { enriched: null, missing: materialId };
+  }
+  const base = materialSnapshotForFrameBom(mat);
+  const pipeCuts = resolvePipeCutsForDraft(draftItem);
+  const bomTechNote = draftItem.techNote ? String(draftItem.techNote) : "";
+  const bomClientNote = pipeCuts.length
+    ? pipeCutsClientNote(pipeCuts) || bomTechNote
+    : bomTechNote;
+  return {
+    enriched: {
+      ...draftItem,
+      ...base,
+      name: base.name,
+      qty: Number(draftItem.qty) || 0,
+      unit: draftItem.unit || base.unit,
+      pipeCuts,
+      techNote: bomTechNote || base.techNote,
+      clientNote: bomClientNote || base.clientNote,
+    },
+    missing: null,
+  };
+}
+
+/**
+ * Enrich saved project item snapshot from materials catalog (for hydrate/client view).
+ * @param {object} item
+ * @param {object[]} materials
+ */
+export function enrichProjectItemFromMaterial(item, materials = []) {
+  const materialId = String(item?.materialId || "").trim();
+  if (!materialId) return item;
+  const mat = materialCatalogIndex(materials).get(materialId);
+  if (!mat) return item;
+  const base = materialSnapshotForFrameBom(mat);
+  const pipeCuts = item.pipeCuts?.length ? normalizePipeCuts(item.pipeCuts) : [];
+  const bomClientNote = pipeCuts.length
+    ? pipeCutsClientNote(pipeCuts) || item.clientNote
+    : item.clientNote;
+  return {
+    ...item,
+    ...base,
+    name: base.name,
+    qty: Number(item.qty) || 0,
+    unit: item.unit || base.unit,
+    pipeCuts: pipeCuts.length ? pipeCuts : item.pipeCuts,
+    techNote: item.techNote || base.techNote,
+    clientNote: bomClientNote || base.clientNote,
+    comment: bomClientNote || item.comment || base.clientNote,
+    price: Number(item.price) > 0 ? Number(item.price) : base.price,
+    supplier: item.supplier || base.supplier,
+    link: item.link || base.link,
+    linkAlt: item.linkAlt || base.linkAlt,
+    imageUrl: item.imageUrl || item.photoUrl || base.imageUrl,
+    photoUrl: item.photoUrl || item.imageUrl || base.photoUrl,
+  };
+}
+
 /**
  * @param {object} draft
  * @param {object} options
@@ -61,10 +270,11 @@ export function frameBomDraftToProjectItem(draft, options, rackPrefix, sortOrder
   const sourceKey = `${rackPrefix}:${bomKey}`;
   const pipeCuts = resolvePipeCutsForDraft(draft);
   const techNote = draft.techNote ? String(draft.techNote) : "";
-  const clientNote = pipeCuts.length ? pipeCutsClientNote(pipeCuts) || techNote : techNote;
+  const clientNote = pipeCuts.length ? pipeCutsClientNote(pipeCuts) || techNote : (draft.clientNote || techNote);
   const section = String(options.rackLabel || options.moduleRackKey || "").trim();
   const included = options.included !== false;
   const visibleToClient = options.visibleToClient !== false;
+  const img = draft.imageUrl || draft.photoUrl || "";
 
   return {
     id: frameBomItemId({
@@ -78,7 +288,16 @@ export function frameBomDraftToProjectItem(draft, options, rackPrefix, sortOrder
     qty: Number(draft.qty) || 0,
     module: section,
     section,
-    category: "Каркас и крепёж",
+    category: draft.category || "Прочее",
+    subcategory: draft.subcategory || "",
+    supplier: draft.supplier || "",
+    link: draft.link || "",
+    linkAlt: draft.linkAlt || "",
+    imageUrl: img,
+    photoUrl: img,
+    clientSection: draft.clientSection || "",
+    clientSubsection: draft.clientSubsection || "",
+    purchaseKey: draft.purchaseKey || "",
     pipeCuts,
     techNote,
     clientNote,
@@ -98,12 +317,13 @@ export function frameBomDraftToProjectItem(draft, options, rackPrefix, sortOrder
     visible: visibleToClient,
     approved: visibleToClient,
     enabled: included,
-    itemType: "material",
+    itemType: draft.itemType || "material",
     itemRole: "purchase",
     status: "not_bought",
     sortOrder,
-    price: 0,
-    vatRate: 0,
+    price: Number(draft.price) || 0,
+    vatRate: Number(draft.vatRate) || 0,
+    responsible: draft.responsible || "",
   };
 }
 
@@ -120,29 +340,58 @@ export function frameBomDraftToProjectItem(draft, options, rackPrefix, sortOrder
  *   rackLabel?: string,
  *   visibleToClient?: boolean,
  *   included?: boolean,
+ *   materials?: object[],
  * }} options
  */
 export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, options = {}) {
   const warnings = [];
   const existing = Array.isArray(existingItems) ? existingItems : [];
   const draft = Array.isArray(purchaseDraft) ? purchaseDraft : [];
+  const materials = options.materials || null;
 
   const { prefix: sourceRackPrefix, warnings: prefixWarnings } = buildFrameBomSourceRackPrefix(options);
   warnings.push(...prefixWarnings);
 
-  if (!String(options.moduleRackKey || "").trim()) {
-    warnings.push("moduleRackKey is required for frame BOM merge");
+  const moduleRackKey = String(options.moduleRackKey || "").trim();
+
+  if (!moduleRackKey) {
+    const blockedReason = "BOM не добавлен: нет привязки к стеллажу.";
+    warnings.push(blockedReason);
     return {
       items: [...existing],
       removedCount: 0,
       addedCount: 0,
       keptCount: existing.length,
       sourceRackPrefix,
+      rackScopeKey: "",
       warnings,
+      blocked: true,
+      blockedReason,
+      missingMaterialIds: [],
     };
   }
 
-  const kept = existing.filter((it) => !isFrameBomItemForRack(it, sourceRackPrefix));
+  if (materials) {
+    const missingMaterialIds = findMissingFrameBomMaterials(draft, materials);
+    if (missingMaterialIds.length) {
+      const blockedReason = formatFrameBomMissingMaterialsMessage(missingMaterialIds);
+      warnings.push(blockedReason);
+      return {
+        items: [...existing],
+        removedCount: 0,
+        addedCount: 0,
+        keptCount: existing.length,
+        sourceRackPrefix,
+        rackScopeKey: moduleRackKey,
+        warnings,
+        blocked: true,
+        blockedReason,
+        missingMaterialIds,
+      };
+    }
+  }
+
+  const kept = existing.filter((it) => !isFrameBomItemForRack(it, moduleRackKey));
   const removedCount = existing.length - kept.length;
 
   const added = [];
@@ -157,7 +406,17 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
       continue;
     }
 
-    added.push(frameBomDraftToProjectItem(line, options, sourceRackPrefix, sortOrder));
+    let enrichedLine = line;
+    if (materials) {
+      const { enriched, missing } = enrichFrameBomDraftWithMaterials(line, materials);
+      if (!enriched) {
+        warnings.push(`Материал не найден в базе: ${missing}`);
+        continue;
+      }
+      enrichedLine = enriched;
+    }
+
+    added.push(frameBomDraftToProjectItem(enrichedLine, options, sourceRackPrefix, sortOrder));
     sortOrder += 1;
   }
 
@@ -167,6 +426,21 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
     addedCount: added.length,
     keptCount: kept.length,
     sourceRackPrefix,
+    rackScopeKey: moduleRackKey,
     warnings,
+    blocked: false,
+    missingMaterialIds: [],
   };
+}
+
+/**
+ * Frame BOM lines already merged into a saved project for one rack.
+ *
+ * @param {object[]} items
+ * @param {string} moduleRackKey
+ */
+export function frameBomItemsForModuleRack(items, moduleRackKey) {
+  const rackKey = String(moduleRackKey || "").trim();
+  if (!rackKey) return [];
+  return (items || []).filter((it) => isFrameBomItemForRack(it, rackKey));
 }

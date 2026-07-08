@@ -10,12 +10,25 @@ import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
 import BuilderStellageFrameDrawingRow from "../../components/BuilderStellageFrameDrawingRow.jsx";
 import {
   DRAFT_PROJECT_FRAME_DRAWING_SECTION_HINT,
-  buildBuilderEditStellagesPath,
   buildFrameDrawingLink,
   buildBuilderFrameDrawingContext,
 } from "../../../shared/frameDrawingContext.js";
+import { frameBomItemsForModuleRack } from "../../../shared/frameBomProjectItems.js";
+import { buildModuleRackKey } from "../../../shared/moduleRackIds.js";
 import {
+  PROJECT_STATUS_ACTIVE,
+  PROJECT_STATUS_DRAFT,
+  buildBuilderDraftPath,
+  isDraftProject,
+  mergeBuilderWizardParams,
+  parseBuilderSearchParams,
+} from "../../../shared/projectLifecycle.js";
+import {
+  findStellageByEditRack,
   hydrateBuilderFromProject,
+  mergeStellageBuilderLines,
+  preserveFrameBomProjectItems,
+  mergeFrameBomQtyFromBuilderLines,
   stellagesForProjectSave,
   validateStellageForFrameDrawing,
 } from "../../lib/projectBuilderHydrate.js";
@@ -73,6 +86,8 @@ export default function ProjectBuilderPage() {
   const nav = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const savedProjectIdFromUrl = String(searchParams.get("projectId") || "").trim();
+  const editRackFromUrl = String(searchParams.get("editRack") || "").trim();
+  const builderUrl = parseBuilderSearchParams(searchParams);
 
   const [step, setStep] = useState(() => {
     const fromUrl = searchParams.get("step");
@@ -80,8 +95,13 @@ export default function ProjectBuilderPage() {
   });
   const [saving, setSaving] = useState(false);
   const [frameSchemeSaving, setFrameSchemeSaving] = useState(false);
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [saveState, setSaveState] = useState("idle");
   const [projectLoading, setProjectLoading] = useState(false);
   const [loadedProjectId, setLoadedProjectId] = useState(savedProjectIdFromUrl);
+  const [loadedProject, setLoadedProject] = useState(null);
+  const [pendingEditRack, setPendingEditRack] = useState(() => String(searchParams.get("editRack") || "").trim());
+  const isDraftSession = !loadedProjectId || isDraftProject(loadedProject) || builderUrl.mode === "draft";
   const isEditMode = Boolean(loadedProjectId);
   const [presets, setPresets] = useState([]);
   const [farmCatalogs, setFarmCatalogs] = useState({});
@@ -130,6 +150,7 @@ export default function ProjectBuilderPage() {
         const hydrated = hydrateBuilderFromProject(project, {
           sections: filterSectionsForFarmType(resolveFarmSections(farmSettings || {}), project.type || "проточка"),
           farmCatalogs,
+          stellageCatalogs,
           materials: state.materials,
         });
         setForm(hydrated.form);
@@ -138,7 +159,12 @@ export default function ProjectBuilderPage() {
         setFarmSectionLines(hydrated.farmSectionLines);
         setFarmLoaded(hydrated.farmLoaded);
         setLoadedProjectId(project.id);
+        setLoadedProject(project);
         setDraft(null);
+        const stepFromUrl = searchParams.get("step");
+        if (!stepFromUrl && hydrated.lastStep && STEPS.some((s) => s.id === hydrated.lastStep)) {
+          setStep(hydrated.lastStep);
+        }
       })
       .catch((e) => {
         if (!cancelled) error(e.message || "Не удалось загрузить проект");
@@ -147,7 +173,12 @@ export default function ProjectBuilderPage() {
         if (!cancelled) setProjectLoading(false);
       });
     return () => { cancelled = true; };
-  }, [savedProjectIdFromUrl, farmSettings, farmCatalogs, actions, error]);
+  }, [savedProjectIdFromUrl, editRackFromUrl, farmSettings, farmCatalogs, stellageCatalogs, actions, error, state.materials]);
+
+  useEffect(() => {
+    const fromUrl = String(searchParams.get("editRack") || "").trim();
+    if (fromUrl) setPendingEditRack(fromUrl);
+  }, [searchParams]);
 
   useEffect(() => {
     const fromUrl = searchParams.get("step");
@@ -235,6 +266,9 @@ export default function ProjectBuilderPage() {
       setDraft(null);
     }
     setStep(next);
+    if (form.name.trim()) {
+      saveDraftSilently(next).catch(() => {});
+    }
   };
 
   const changeFarmType = async (newType) => {
@@ -310,21 +344,38 @@ export default function ProjectBuilderPage() {
     setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 2, stellageCatalogs, stellageModuleMeta));
   };
 
-  const editStellage = async (id) => {
-    const st = stellages.find((s) => s.id === id);
+  const openStellageEditor = async (st, { skipConfirm = false } = {}) => {
     if (!st) return;
     if (
-      !(await confirm({
-        title: "Изменить стеллаж?",
+      !skipConfirm
+      && !(await confirm({
+        title: "Продолжить спецификацию стеллажа?",
         message:
           "Стеллаж временно уберётся из списка до нажатия «Стеллаж готов». Не уходите с шага, пока не сохраните.",
       }))
     ) {
       return;
     }
-    if (draft?.items?.some((ln) => ln.included) && !(await confirm({ title: "Заменить сборку?" }))) return;
-    setStellages((list) => list.filter((s) => s.id !== id));
-    setDraft({ ...st, items: st.items.map((ln) => ({ ...ln })) });
+    if (
+      !skipConfirm
+      && draft?.items?.some((ln) => ln.included)
+      && !(await confirm({ title: "Заменить сборку?" }))
+    ) {
+      return;
+    }
+    const mergedItems = mergeStellageBuilderLines(
+      st,
+      stellageCatalogs,
+      state.materials,
+      loadedProject?.items || [],
+    );
+    setStellages((list) => list.filter((s) => s.id !== st.id));
+    setDraft({ ...st, items: mergedItems.map((ln) => ({ ...ln })) });
+  };
+
+  const editStellage = (id) => {
+    const st = stellages.find((s) => s.id === id);
+    return openStellageEditor(st);
   };
 
   const removeStellage = async (id) => {
@@ -434,46 +485,87 @@ export default function ProjectBuilderPage() {
 
   const canCreate =
     form.name.trim() &&
-    (stellages.some((s) => activeLines(s.items).length > 0) || farmHasItems);
+    (stellages.length > 0 || farmHasItems || Boolean(draft?.name?.trim()));
 
-  const buildProjectPayload = () => {
+  const canFinalize = canCreate;
+
+  const buildProjectPayload = ({ status = PROJECT_STATUS_DRAFT, nextStep = step } = {}) => {
     const farmSections = sections.map((sec) => ({
       sectionId: sec.id,
       sectionName: sec.name,
       defaultResponsible: sec.defaultResponsible || "",
       items: farmSectionLines[sec.id] || [],
     }));
-    return buildProjectFromBuilder({
-      form,
+    const built = buildProjectFromBuilder({
+      form: {
+        ...form,
+        manualParams: mergeBuilderWizardParams(form.manualParams, { lastStep: nextStep }),
+      },
       stellages: stellagesForProjectSave(stellages, draft),
       farmSections,
       materials: state.materials,
       rooms,
       stellageModuleMeta,
     });
+    built.status = status;
+    if (loadedProject?.items?.length) {
+      const stellageList = stellagesForProjectSave(stellages, draft);
+      built.items = preserveFrameBomProjectItems(built.items, loadedProject.items);
+      built.items = mergeFrameBomQtyFromBuilderLines(built.items, stellageList);
+    }
+    return built;
   };
 
   const syncBuilderProjectUrl = (projectId, nextStep = step) => {
-    const params = new URLSearchParams();
-    if (projectId) params.set("projectId", projectId);
-    if (nextStep) params.set("step", nextStep);
+    if (!projectId) return;
+    const url = buildBuilderDraftPath(projectId, { step: nextStep });
+    const params = new URLSearchParams(url.split("?")[1] || "");
     setSearchParams(params, { replace: true });
   };
 
-  const persistProject = async () => {
+  const markSaved = () => {
+    setSaveState("saved");
+    window.setTimeout(() => setSaveState("idle"), 2500);
+  };
+
+  const persistProject = async ({ status = PROJECT_STATUS_DRAFT, nextStep = step, silent = false } = {}) => {
     if (!form.name.trim()) {
       throw new Error("Укажите название проекта на шаге «Проект».");
     }
-    const payload = buildProjectPayload();
-    if (loadedProjectId) {
-      const updated = await actions.projectUpdate(loadedProjectId, payload);
-      setLoadedProjectId(updated.id);
-      return updated;
+    if (!silent) setDraftSaving(true);
+    try {
+      const payload = buildProjectPayload({ status, nextStep });
+      if (loadedProjectId) {
+        const updated = await actions.projectUpdate(loadedProjectId, payload);
+        setLoadedProjectId(updated.id);
+        setLoadedProject(updated);
+        syncBuilderProjectUrl(updated.id, nextStep);
+        if (!silent) markSaved();
+        return updated;
+      }
+      const created = await actions.projectCreate(payload);
+      setLoadedProjectId(created.id);
+      setLoadedProject(created);
+      syncBuilderProjectUrl(created.id, nextStep);
+      if (!silent) markSaved();
+      return created;
+    } finally {
+      if (!silent) setDraftSaving(false);
     }
-    const created = await actions.projectCreate(payload);
-    setLoadedProjectId(created.id);
-    syncBuilderProjectUrl(created.id, step);
-    return created;
+  };
+
+  const saveDraftSilently = async (nextStep = step) => {
+    if (!form.name.trim()) return null;
+    return persistProject({ status: PROJECT_STATUS_DRAFT, nextStep, silent: true });
+  };
+
+  const saveDraft = async () => {
+    try {
+      await persistProject({ status: PROJECT_STATUS_DRAFT, silent: false });
+      success("Черновик сохранён");
+    } catch (e) {
+      error(e.message || "Не удалось сохранить черновик");
+    }
   };
 
   const openFrameForStellage = (project, stellage, frameCtx = null) => {
@@ -533,16 +625,32 @@ export default function ProjectBuilderPage() {
     return saveProjectAndOpenFrame(stellage, frameCtx);
   };
 
-  const create = async () => {
-    if (!canCreate) return;
+  useEffect(() => {
+    if (!pendingEditRack || projectLoading || step !== "stellages") return;
+    const target = findStellageByEditRack(stellages, pendingEditRack);
+    if (!target) return;
+    openStellageEditor(target, { skipConfirm: true });
+    setPendingEditRack("");
+    const params = new URLSearchParams(searchParams);
+    params.delete("editRack");
+    setSearchParams(params, { replace: true });
+  }, [pendingEditRack, projectLoading, step, stellages]);
+
+  const draftFrameBomItems = useMemo(() => {
+    if (!draft?.id || !draft?.moduleId || !loadedProject?.items?.length) return [];
+    const moduleRackKey = buildModuleRackKey({ moduleId: draft.moduleId, rackId: draft.id });
+    return frameBomItemsForModuleRack(loadedProject.items, moduleRackKey);
+  }, [draft, loadedProject]);
+
+  const finalizeProject = async () => {
+    if (!canFinalize) return;
     setSaving(true);
     try {
-      const wasEdit = Boolean(loadedProjectId);
-      const project = await persistProject();
-      success(wasEdit ? "Проект обновлён" : "Проект сохранён");
-      syncBuilderProjectUrl(project.id, "review");
+      const project = await persistProject({ status: PROJECT_STATUS_ACTIVE, nextStep: "review", silent: true });
+      success("Проект создан");
+      nav(`/project/${project.id}`);
     } catch (e) {
-      error(e.message || "Ошибка сохранения");
+      error(e.message || "Ошибка создания проекта");
     } finally {
       setSaving(false);
     }
@@ -553,13 +661,26 @@ export default function ProjectBuilderPage() {
   return (
     <>
       <PageHeader
-        title={isEditMode ? "Настройка проекта" : "Новый проект"}
+        title={isDraftSession ? "Проект в настройке" : "Новый проект"}
         sub={isEditMode
-          ? "Продолжайте сборку фермы в мастере: стеллажи, разделы, охлаждение, закупка."
-          : "Соберите стеллажи и разделы фермы. Шаблоны разделов — в «Модули и шаблоны → Разделы фермы»."}
-        back={{ to: "/", label: "Проекты" }}
+          ? "Продолжайте сборку фермы в мастере: стеллажи, разделы, охлаждение, закупка. Проект сохраняется как черновик до финального создания."
+          : "Соберите стеллажи и разделы фермы. После первого сохранения черновик появится в «В процессе»."}
+        back={{ to: isEditMode ? "/projects/in-progress" : "/", label: isEditMode ? "В процессе" : "Проекты" }}
         actions={
           <>
+            {isDraftSession && (
+              <span className="chip" style={{ fontSize: 11, marginRight: 8 }}>
+                {saveState === "saved" ? "Сохранено" : draftSaving ? "Сохранение…" : "Черновик"}
+              </span>
+            )}
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={!form.name.trim() || draftSaving}
+              onClick={saveDraft}
+            >
+              {draftSaving ? "Сохранение…" : "Сохранить черновик"}
+            </button>
             <CompactTableToggle />
             <Link to="/modules" className="btn btn-sm">
               Модули и шаблоны
@@ -677,7 +798,9 @@ export default function ProjectBuilderPage() {
                     </span>
                   </span>
                   <span className="row" style={{ gap: 6 }}>
-                    <button type="button" className="btn btn-sm" onClick={() => editStellage(st.id)}>Изменить</button>
+                    <button type="button" className="btn btn-sm btn-primary" onClick={() => editStellage(st.id)}>
+                      Продолжить спецификацию
+                    </button>
                     <button type="button" className="btn btn-sm" onClick={() => duplicateStellage(st.id)}>Копия</button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeStellage(st.id)}>✕</button>
                   </span>
@@ -781,6 +904,22 @@ export default function ProjectBuilderPage() {
               Отметьте позиции и укажите кол-во — без кол-ва клиенту не попадёт
             </span>
           </div>
+
+          {draftFrameBomItems.length > 0 && (
+            <div className="card" style={{ marginBottom: 12, padding: 12, background: "var(--surface-alt)" }}>
+              <h4 style={{ marginTop: 0, fontSize: 14 }}>Добавлено из схемы каркаса</h4>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+                {draftFrameBomItems.map((it) => (
+                  <li key={it.id}>
+                    {it.name} — {it.qty} {it.unit}
+                  </li>
+                ))}
+              </ul>
+              <p className="muted" style={{ fontSize: 11, margin: "8px 0 0" }}>
+                Эти позиции уже сохранены в черновик проекта. Ниже можно добавить остальные материалы стеллажа.
+              </p>
+            </div>
+          )}
 
           <SpecPickerTable
             lines={draft.items}
@@ -1035,13 +1174,20 @@ export default function ProjectBuilderPage() {
               </li>
             )}
           </ul>
-          {!canCreate && (
-            <p style={{ color: "var(--danger)", fontSize: 13 }}>Нужно название и хотя бы одна позиция.</p>
+          {!canFinalize && (
+            <p style={{ color: "var(--danger)", fontSize: 13 }}>
+              Нужно название проекта и хотя бы один стеллаж или раздел фермы.
+            </p>
+          )}
+          {canFinalize && !farmHasItems && stellages.every((s) => activeLines(s.items).length === 0) && (
+            <p className="muted" style={{ fontSize: 13 }}>
+              Закупка пока пустая — это нормально для черновика. Можно завершить настройку и дополнить позиции позже в штабе проекта.
+            </p>
           )}
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button type="button" className="btn" onClick={() => goToStep("consumables")}>← Назад</button>
-            <button type="button" className="btn btn-primary" disabled={!canCreate || saving} onClick={create}>
-              {saving ? "Создание…" : "Создать проект"}
+            <button type="button" className="btn btn-primary" disabled={!canFinalize || saving} onClick={finalizeProject}>
+              {saving ? "Создание…" : "Завершить настройку и создать проект"}
             </button>
           </div>
         </div>

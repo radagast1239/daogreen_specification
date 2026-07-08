@@ -8,6 +8,7 @@ import {
   validateFrameBomMaterialMap,
   assertNoExcludedTubeMaterials,
   totalPipeCutMeters,
+  tubeCrabFastenerQtyFromCutList,
 } from "../shared/frameBomMaterialMap.js";
 import { calculateAngleFasteners } from "../src/frameConstructor/frameAngleStock.js";
 
@@ -102,6 +103,52 @@ describe("buildTubeCrabBomPurchaseDraft", () => {
       unit: "компл.",
       qty: 3,
     });
+  });
+
+  it("adds bolt/nut/washer fasteners from crab cutList", () => {
+    const items = buildTubeCrabBomPurchaseDraft({
+      cutList: [
+        { id: "connector-g", qty: 8 },
+        { id: "connector-t", qty: 252 },
+        { id: "connector-x", qty: 28 },
+      ],
+    });
+    const expected = 8 * 0.5 + 252 * 1 + 28 * 2;
+    expect(items.find((i) => i.key === "bolt_m6x20")?.qty).toBe(expected);
+    expect(items.find((i) => i.key === "nut_m6")?.qty).toBe(expected);
+    expect(items.find((i) => i.key === "spring_washer_m6")?.qty).toBe(expected);
+  });
+
+  it("maps NFT channel cutList rows to air duct materials", () => {
+    const items = buildTubeCrabBomPurchaseDraft({
+      cutList: [
+        { id: "nft-channel-horizontal", qty: 12, note: "гориз." },
+        { id: "nft-channel-sleeve", qty: 8 },
+        { id: "nft-channel-elbow", qty: 4 },
+      ],
+    });
+    const duct = items.find((i) => i.key === "air_duct_55x110_2000");
+    const sleeve = items.find((i) => i.key === "air_duct_connector_55x110");
+    const elbow = items.find((i) => i.key === "air_duct_elbow_55x110_90");
+    expect(duct).toMatchObject({
+      materialId: "m010",
+      name: "Воздуховод пластиковый 55×110 мм, L=2000 мм",
+      qty: 12,
+    });
+    expect(sleeve).toMatchObject({ materialId: "m034", qty: 8 });
+    expect(elbow).toMatchObject({ materialId: "m011", qty: 4 });
+    expect(duct.techNote).toContain("NFT-канал");
+    expect(duct.clientNote).toContain("NFT-канал");
+  });
+});
+
+describe("tubeCrabFastenerQtyFromCutList", () => {
+  it("sums bolt/nut/washer qty from G/T/X crabs", () => {
+    expect(tubeCrabFastenerQtyFromCutList([
+      { id: "connector-g", qty: 8 },
+      { id: "connector-t", qty: 252 },
+      { id: "connector-x", qty: 28 },
+    ])).toBe(312);
   });
 });
 

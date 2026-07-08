@@ -1,5 +1,7 @@
 /** Frame BOM → purchase draft mapping (pure functions, no DB writes). */
 
+import { CRAB_FASTENER_PER_UNIT } from "./fastenerRules.js";
+
 export const FRAME_BOM_MATERIALS = {
   profile_tube_20x20: {
     materialId: "m036",
@@ -69,6 +71,21 @@ export const FRAME_BOM_MATERIALS = {
     name: "Краб-система A6",
     unit: "шт",
   },
+  air_duct_55x110_2000: {
+    materialId: "m010",
+    name: "Воздуховод пластиковый 55×110 мм, L=2000 мм",
+    unit: "шт",
+  },
+  air_duct_connector_55x110: {
+    materialId: "m034",
+    name: "Соединитель пластикового воздуховода 55×110 мм",
+    unit: "шт",
+  },
+  air_duct_elbow_55x110_90: {
+    materialId: "m011",
+    name: "Колено воздуховода 55×110 мм, 90°",
+    unit: "шт",
+  },
 };
 
 const TUBE_CUT_IDS = new Set(["post", "longitudinal", "cross"]);
@@ -80,6 +97,20 @@ const CONNECTOR_TO_KEY = {
   "connector-a4": "crab_a4",
   "connector-a6": "crab_a6",
 };
+
+const CONNECTOR_TO_CRAB_KIND = {
+  "connector-g": "g",
+  "connector-t": "t",
+  "connector-x": "x",
+};
+
+const NFT_CHANNEL_TO_KEY = {
+  "nft-channel-horizontal": "air_duct_55x110_2000",
+  "nft-channel-sleeve": "air_duct_connector_55x110",
+  "nft-channel-elbow": "air_duct_elbow_55x110_90",
+};
+
+const NFT_CHANNEL_TECH_NOTE = "Используется как NFT-канал в схеме стеллажа.";
 
 const EXCLUDED_TUBE_MATERIAL_IDS = new Set(["m_duCvR9Oz2Q", "m_W4-F6fVebH"]);
 
@@ -156,6 +187,57 @@ export function totalPipeCutMeters(pipeCuts) {
   return round2(totalMm / 1000);
 }
 
+export function tubeCrabFastenerQtyFromCutList(cutList = []) {
+  let total = 0;
+  for (const row of cutList) {
+    const kind = CONNECTOR_TO_CRAB_KIND[row.id];
+    if (!kind) continue;
+    const qty = Number(row.qty) || 0;
+    if (qty <= 0) continue;
+    total += qty * (CRAB_FASTENER_PER_UNIT[kind] || 0);
+  }
+  return total;
+}
+
+function appendTubeCrabFasteners(items, frameData) {
+  const fastenerQty = tubeCrabFastenerQtyFromCutList(frameData.cutList);
+  if (fastenerQty <= 0) return items;
+  const techNote = "Крепёж для краб-системы по норме проекта.";
+  for (const key of ["bolt_m6x20", "nut_m6", "spring_washer_m6"]) {
+    items.push(
+      baseDraft(
+        key,
+        withSource({ qty: fastenerQty, techNote }, frameData),
+      ),
+    );
+  }
+  return items;
+}
+
+function appendNftChannelItems(items, frameData) {
+  for (const row of frameData.cutList || []) {
+    const key = NFT_CHANNEL_TO_KEY[row.id];
+    if (!key) continue;
+    const qty = Number(row.qty) || 0;
+    if (qty <= 0) continue;
+    const note = row.note ? String(row.note) : "";
+    items.push(
+      baseDraft(
+        key,
+        withSource(
+          {
+            qty,
+            techNote: note ? `${NFT_CHANNEL_TECH_NOTE} ${note}` : NFT_CHANNEL_TECH_NOTE,
+            clientNote: NFT_CHANNEL_TECH_NOTE,
+          },
+          frameData,
+        ),
+      ),
+    );
+  }
+  return items;
+}
+
 /**
  * @param {{ cutList?: object[], tubeStock?: object, sourceFrameDrawingId?: string, sourceRackKey?: string }} frameData
  */
@@ -201,6 +283,9 @@ export function buildTubeCrabBomPurchaseDraft(frameData = {}) {
       ),
     );
   }
+
+  appendTubeCrabFasteners(items, frameData);
+  appendNftChannelItems(items, frameData);
 
   return items.filter(Boolean);
 }

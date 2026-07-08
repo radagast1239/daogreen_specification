@@ -10,6 +10,101 @@ import { resolveBreakerSpecs } from "../../shared/breakerSpecs.js";
 import { resolveFlowSpecs } from "../../shared/flowSpecs.js";
 import { resolveSplitSpecs } from "../../shared/splitSpecs.js";
 import { resolveItemType } from "../../shared/itemTypes.js";
+import { FRAME_BOM_SOURCE, frameBomItemsForModuleRack, enrichProjectItemFromMaterial } from "../../shared/frameBomProjectItems.js";
+import { buildModuleRackKey } from "../../shared/moduleRackIds.js";
+import { builderWizardFromManualParams } from "../../shared/projectLifecycle.js";
+
+export const FRAME_BOM_SOURCE_LABEL = "Из схемы каркаса";
+
+export function frameBomItemsForStellage(project, stellageConfig) {
+  const moduleRackKey = buildModuleRackKey({
+    moduleId: stellageConfig.moduleId,
+    rackId: stellageConfig.id,
+  });
+  return frameBomItemsForModuleRack(project?.items || [], moduleRackKey);
+}
+
+function materialExistsInCatalog(materialId, materials = []) {
+  if (!materialId || !materials?.length) return false;
+  return materials.some((m) => (m.id || m.materialId) === materialId);
+}
+
+export function frameBomProjectItemToBuilderLine(item, { materials = null } = {}) {
+  const enriched = materials?.length
+    ? enrichProjectItemFromMaterial(item, materials)
+    : item;
+  const line = projectItemToBuilderLine(enriched, { stCount: 1 });
+  const bomQty = Number(line.qty) || 0;
+  return {
+    ...line,
+    qty: bomQty,
+    defaultQty: bomQty,
+    included: true,
+    source: FRAME_BOM_SOURCE,
+    sourceType: FRAME_BOM_SOURCE,
+    sourceKey: item.sourceKey || item.source_key || "",
+    sourceLabel: FRAME_BOM_SOURCE_LABEL,
+    visibleToClient: item.visibleToClient !== false && item.visible !== false,
+    pipeCuts: enriched.pipeCuts?.length ? enriched.pipeCuts : line.pipeCuts,
+    techNote: enriched.techNote || line.techNote,
+    clientNote: enriched.clientNote || enriched.comment || line.clientNote,
+  };
+}
+
+function applyFrameBomOverlayToCatalogLine(catalogLine, bomLine) {
+  const bomQty = Number(bomLine.qty) || 0;
+  return {
+    ...catalogLine,
+    ...bomLine,
+    id: catalogLine.id,
+    included: true,
+    qty: bomQty,
+    defaultQty: bomQty,
+    pipeCuts: bomLine.pipeCuts?.length ? bomLine.pipeCuts : catalogLine.pipeCuts,
+  };
+}
+
+function overlayFrameBomOnLines(lines, frameBomItems, { stCount = 1, materials = null } = {}) {
+  if (!frameBomItems?.length) return lines || [];
+  const bomByMaterial = new Map();
+  const bomByName = new Map();
+  for (const it of frameBomItems) {
+    if (it.materialId) bomByMaterial.set(it.materialId, it);
+    if (it.name) bomByName.set(it.name, it);
+  }
+  const usedBomIds = new Set();
+  const merged = (lines || []).map((ln) => {
+    const bom = (ln.materialId && bomByMaterial.get(ln.materialId)) || bomByName.get(ln.name);
+    if (!bom) return ln;
+    usedBomIds.add(bom.id);
+    const bomLine = frameBomProjectItemToBuilderLine(bom, { materials });
+    return applyFrameBomOverlayToCatalogLine(ln, bomLine);
+  });
+  const usedMaterialIds = new Set(merged.map((ln) => ln.materialId).filter(Boolean));
+  for (const bom of frameBomItems) {
+    if (usedBomIds.has(bom.id)) continue;
+    if (bom.materialId && usedMaterialIds.has(bom.materialId)) continue;
+    if (materials?.length && bom.materialId && !materialExistsInCatalog(bom.materialId, materials)) {
+      continue;
+    }
+    merged.push(frameBomProjectItemToBuilderLine(bom, { materials }));
+    if (bom.materialId) usedMaterialIds.add(bom.materialId);
+  }
+  return merged;
+}
+
+export function mergeStellageEditorLines({
+  catalogLines = [],
+  manualItems = [],
+  frameBomItems = [],
+  stCount = 1,
+  materials = null,
+} = {}) {
+  const lines = catalogLines.length
+    ? applySavedItemsToCatalogLines(catalogLines, manualItems, { stCount })
+    : manualItems.map((it) => projectItemToBuilderLine(it, { stCount }));
+  return overlayFrameBomOnLines(lines, frameBomItems, { stCount, materials });
+}
 
 export function parseBuilderLineIdFromProjectItem(itemId, instanceId = "") {
   const id = String(itemId || "");
@@ -59,7 +154,9 @@ export function projectItemToBuilderLine(item, { stCount = 1 } = {}) {
 }
 
 export function stellageItemsFromProject(project, stellageConfig) {
-  const items = project?.items || [];
+  const items = (project?.items || []).filter(
+    (it) => (it.source || it.sourceType) !== FRAME_BOM_SOURCE,
+  );
   const prefix = `${stellageConfig.id}__`;
   const byPrefix = items.filter((it) => String(it.id || "").startsWith(prefix));
   if (byPrefix.length) return byPrefix;
@@ -69,14 +166,25 @@ export function stellageItemsFromProject(project, stellageConfig) {
   );
 }
 
-export function stellagesFromProject(project) {
+export function stellagesFromProject(project, { stellageCatalogs = {}, materials = [] } = {}) {
   const configs = project?.stellageConfigs || [];
   return configs.map((cfg) => {
     const stCount = Math.max(1, Number(cfg.count) || 1);
-    const savedItems = stellageItemsFromProject(project, cfg);
-    const items = savedItems.length
-      ? savedItems.map((it) => projectItemToBuilderLine(it, { stCount }))
-      : projectStellageLinesFromCatalog({}, cfg.moduleId, [], cfg.moduleName);
+    const catalogLines = projectStellageLinesFromCatalog(
+      stellageCatalogs,
+      cfg.moduleId,
+      materials,
+      cfg.moduleName,
+    );
+    const savedProjectItems = stellageItemsFromProject(project, cfg);
+    const frameBomItems = frameBomItemsForStellage(project, cfg);
+    const items = mergeStellageEditorLines({
+      catalogLines,
+      manualItems: savedProjectItems,
+      frameBomItems,
+      stCount,
+      materials,
+    });
     return {
       id: cfg.id,
       moduleId: cfg.moduleId,
@@ -113,15 +221,54 @@ function applySavedItemsToCatalogLines(catalogLines, savedItems, { stCount = 1 }
     used.add(saved.id);
     return {
       ...ln,
-      ...projectItemToBuilderLine(saved, { stCount: 1 }),
-      included: true,
+      ...projectItemToBuilderLine(saved, { stCount }),
+      included: projectItemToBuilderLine(saved, { stCount }).included,
     };
   });
   for (const it of savedItems) {
     if (used.has(it.id)) continue;
-    merged.push({ ...projectItemToBuilderLine(it, { stCount: 1 }), included: true });
+    merged.push({ ...projectItemToBuilderLine(it, { stCount }), included: projectItemToBuilderLine(it, { stCount }).included });
   }
   return merged;
+}
+
+export function mergeStellageBuilderLines(
+  stellage,
+  stellageCatalogs = {},
+  materials = [],
+  projectItems = [],
+) {
+  const catalogLines = projectStellageLinesFromCatalog(
+    stellageCatalogs,
+    stellage.moduleId,
+    materials,
+    stellage.moduleName,
+  );
+  const manualItems = (stellage.items || [])
+    .filter((ln) => (ln.source || ln.sourceType) !== FRAME_BOM_SOURCE)
+    .map((ln) => ({
+      id: ln.id,
+      materialId: ln.materialId,
+      name: ln.name,
+      qty: ln.qty,
+      includedInProject: ln.included,
+      enabled: ln.included,
+      unit: ln.unit,
+      techNote: ln.techNote,
+      clientNote: ln.clientNote,
+      pipeCuts: ln.pipeCuts,
+    }));
+  const frameBomItems = frameBomItemsForModuleRack(
+    projectItems,
+    buildModuleRackKey({ moduleId: stellage.moduleId, rackId: stellage.id }),
+  );
+  return mergeStellageEditorLines({
+    catalogLines,
+    manualItems,
+    frameBomItems,
+    stCount: Math.max(1, Number(stellage.count) || 1),
+    materials,
+  });
 }
 
 export function farmSectionLinesFromProject(project, sections = [], farmCatalogs = {}, materials = []) {
@@ -161,20 +308,23 @@ export function builderFormFromProject(project) {
 export function hydrateBuilderFromProject(project, {
   sections = [],
   farmCatalogs = {},
+  stellageCatalogs = {},
   materials = [],
 } = {}) {
   const form = builderFormFromProject(project);
-  const stellages = stellagesFromProject(project);
+  const stellages = stellagesFromProject(project, { stellageCatalogs, materials });
   const rooms = Array.isArray(project?.rooms) && project.rooms.length ? project.rooms : defaultRooms;
   const farmSectionLines = farmSectionLinesFromProject(project, sections, farmCatalogs, materials);
   const farmLoaded = sections.length > 0
     && Object.values(farmSectionLines).some((lines) => (lines || []).some((ln) => ln.included));
+  const lastStep = builderWizardFromManualParams(project?.manualParams).lastStep || 'basics';
   return {
     form,
     stellages,
     rooms,
     farmSectionLines,
     farmLoaded,
+    lastStep,
   };
 }
 
@@ -184,7 +334,6 @@ export function stellagesForProjectSave(stellages = [], draft = null) {
     items: (st.items || []).map((ln) => ({ ...ln })),
   }));
   if (!draft?.name?.trim()) return list;
-  if (!draft.items?.some((ln) => ln.included)) return list;
   const idx = list.findIndex((st) => st.id === draft.id);
   const snapshot = {
     ...draft,
@@ -197,14 +346,56 @@ export function stellagesForProjectSave(stellages = [], draft = null) {
   return [...list, snapshot];
 }
 
+export function findStellageByEditRack(stellages = [], editRack = "") {
+  const key = String(editRack || "").trim();
+  if (!key) return null;
+  return stellages.find(
+    (st) =>
+      st.id === key
+      || buildModuleRackKey({ moduleId: st.moduleId, rackId: st.id }) === key,
+  ) || null;
+}
+
+export function preserveFrameBomProjectItems(builderItems = [], loadedItems = []) {
+  const ids = new Set((builderItems || []).map((it) => it.id));
+  const preserved = (loadedItems || []).filter((it) => {
+    if (ids.has(it.id)) return false;
+    return (it.source || it.sourceType) === FRAME_BOM_SOURCE;
+  });
+  return [...builderItems, ...preserved];
+}
+
+/**
+ * Apply editor qty/pipeCuts from frame_bom builder lines back onto preserved project items.
+ * @param {object[]} projectItems
+ * @param {object[]} stellages
+ */
+export function mergeFrameBomQtyFromBuilderLines(projectItems = [], stellages = []) {
+  const editorByMaterial = new Map();
+  for (const st of stellages || []) {
+    for (const ln of st.items || []) {
+      if ((ln.source || ln.sourceType) !== FRAME_BOM_SOURCE) continue;
+      if (ln.materialId) editorByMaterial.set(ln.materialId, ln);
+    }
+  }
+  if (!editorByMaterial.size) return projectItems;
+  return (projectItems || []).map((it) => {
+    if ((it.source || it.sourceType) !== FRAME_BOM_SOURCE) return it;
+    const editor = it.materialId && editorByMaterial.get(it.materialId);
+    if (!editor) return it;
+    const qty = Number(editor.qty);
+    const next = { ...it };
+    if (Number.isFinite(qty) && qty > 0) next.qty = qty;
+    if (editor.pipeCuts?.length) next.pipeCuts = editor.pipeCuts;
+    return next;
+  });
+}
+
 export function validateStellageForFrameDrawing(stellage) {
   if (!stellage?.name?.trim()) {
     return "Укажите название стеллажа в проекте.";
   }
   const included = (stellage.items || []).filter((ln) => ln.included && ln.name?.trim());
-  if (!included.length) {
-    return "Отметьте хотя бы одну позицию галочкой.";
-  }
   if (included.some((ln) => resolveBuilderLineQty(ln) <= 0)) {
     return "У отмеченных позиций укажите количество.";
   }

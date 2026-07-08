@@ -89,6 +89,7 @@ export function syncFastenersFromCrabs(lines, materials) {
   if (boltNutTotal <= 0 && screwTotal <= 0) return lines;
 
   return lines.map((ln) => {
+    if (ln?.source === "frame_bom" || ln?.sourceType === "frame_bom") return ln;
     const n = lineDisplayName(ln, materials);
     if (isBoltM6(n) || isNutM6(n) || isWasherM6(n)) {
       if (boltNutTotal <= 0) return ln;
