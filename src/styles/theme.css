@@ -1991,6 +1991,84 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   font-size: 12px;
 }
 
+.client-delivery {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+.client-delivery__title { font-size: 16px; }
+.client-delivery__subtitle { font-size: 12px; margin: 4px 0 0; }
+.client-delivery__total {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.client-delivery__total-value { font-size: 20px; color: var(--brand); }
+.client-delivery__metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.client-delivery__metric {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-light);
+  cursor: default;
+  text-align: left;
+}
+.client-delivery__metric:disabled { opacity: 0.65; cursor: default; }
+.client-delivery__metric:not(:disabled) { cursor: pointer; }
+.client-delivery__metric:not(:disabled):hover { border-color: var(--brand); }
+.client-delivery__metric--active { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); }
+.client-delivery__metric-value { font-size: 18px; font-weight: 700; line-height: 1.1; }
+.client-delivery__metric-label { font-size: 11px; color: var(--muted); }
+.client-delivery__metric-sub { font-size: 10px; }
+.client-delivery__metric--ok { border-color: rgba(17, 99, 85, 0.35); }
+.client-delivery__metric--warn { border-color: rgba(245, 158, 11, 0.45); }
+.client-delivery__metric--bad { border-color: rgba(220, 38, 38, 0.35); }
+.client-delivery__warnings {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.client-delivery__warning-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  font-size: 12px;
+  color: var(--warn, #b45309);
+  cursor: pointer;
+}
+.client-delivery__warning-btn:hover { text-decoration: underline; }
+.client-delivery__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.client-delivery__table th,
+.client-delivery__table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.client-delivery__table th {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  text-align: left;
+  background: var(--bg-light);
+}
+
 .pre-publish-status {
   padding: 10px 12px;
   border-radius: var(--radius);

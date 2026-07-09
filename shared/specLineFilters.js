@@ -1,6 +1,6 @@
 import { lineVisibleToClient, isCoolingSpecItem } from "./itemTypes.js";
 import { resolveClientSection, isMiscCategory, subsectionsForSection, isSubsectionValid } from "./clientSections.js";
-import { normalizePurchaseStatus, PURCHASE_STATUS } from "./purchaseStatusRules.js";
+import { normalizePurchaseStatus, PURCHASE_STATUS, isClosedPurchaseStatusId } from "./purchaseStatusRules.js";
 import { isFrameBomLine } from "./frameBomProjectItems.js";
 
 export const SPEC_LINE_FILTERS = [
@@ -18,6 +18,9 @@ export const SPEC_LINE_FILTERS = [
   { id: "need_help", label: "Нужна помощь" },
   { id: "replacement_check", label: "Замена на проверке" },
   { id: "not_fit", label: "Не подходит" },
+  { id: "not_bought", label: "Не куплено" },
+  { id: "ordered", label: "Заказано" },
+  { id: "purchase_closed", label: "Куплено/доставлено" },
   { id: "frame_bom", label: "Из схемы стеллажа" },
   { id: "no_client_section", label: "Без клиентского раздела" },
   { id: "no_client_subsection", label: "Без клиентского подраздела" },
@@ -118,6 +121,15 @@ export function matchSpecLineFilter(line, filterId, mode = "builder") {
       return normalizePurchaseStatus(line) === PURCHASE_STATUS.REPLACEMENT_CHECK;
     case "not_fit":
       return normalizePurchaseStatus(line) === PURCHASE_STATUS.NOT_FIT;
+    case "not_bought":
+      return normalizePurchaseStatus(line) === PURCHASE_STATUS.NOT_BOUGHT;
+    case "ordered":
+      return (
+        normalizePurchaseStatus(line) === PURCHASE_STATUS.ORDERED ||
+        normalizePurchaseStatus(line) === PURCHASE_STATUS.SEARCHING
+      );
+    case "purchase_closed":
+      return isClosedPurchaseStatusId(normalizePurchaseStatus(line));
     case "frame_bom":
       return isFrameBomLine(line);
     case "no_client_section":

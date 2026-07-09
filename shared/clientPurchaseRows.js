@@ -1,5 +1,5 @@
 import { lineVisibleToClient, isPurchasableLineType, resolveItemType, isCoolingSpecItem } from "./itemTypes.js";
-import { enrichProjectItemFromMaterial } from "./frameBomProjectItems.js";
+import { enrichProjectItemFromMaterial, isFrameBomLine } from "./frameBomProjectItems.js";
 import { structuredClientNote } from "./structuredClientNote.js";
 import { pipeCutsClientNote, normalizePipeCuts } from "./profilePipeCuts.js";
 import {
@@ -71,10 +71,12 @@ export function stripClientTechnicalFields(item) {
 }
 
 export function prepareClientPurchaseItem(item, materials = []) {
+  const frameBom = isFrameBomLine(item);
   const base = stripClientTechnicalFields(enrichClientPurchaseItem(item, materials));
   const status = normalizePurchaseStatus(base);
   return {
     ...base,
+    frameBom,
     status,
     purchaseStatus: status,
     statusLabel: getPurchaseStatusLabel(status),

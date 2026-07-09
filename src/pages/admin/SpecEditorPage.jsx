@@ -13,7 +13,7 @@ import { SPECIALIST_MAP, PURCHASE_STATUSES } from "../../data/modules.js";
 import { VAT_RATES, lineGross, lineContributesToSum, RESPONSIBLE_OPTIONS } from "../../lib/itemHelpers.js";
 import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient } from "../../../shared/itemTypes.js";
 import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
-import { PROJECT_DASHBOARD_FILTERS, resolveDashboardFilterLabel } from "../../../shared/projectDashboardSummary.js";
+import { PROJECT_DASHBOARD_FILTERS, resolveDashboardFilterLabel, buildProjectDashboardSummary } from "../../../shared/projectDashboardSummary.js";
 import { FARM_LINE_GROUPS, farmLineGroupLabel } from "../../../shared/farmLineGroups.js";
 import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
 import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
@@ -50,6 +50,7 @@ import { findStaleProjectPrices } from "../../../shared/staleProjectPrices.js";
 import ActivityFeed from "../../components/ActivityFeed.jsx";
 import PublishChecklist, { PublishGateModal } from "../../components/PublishChecklist.jsx";
 import ProjectHqBar from "../../components/ProjectHqBar.jsx";
+import ClientDeliveryPanel from "../../components/ClientDeliveryPanel.jsx";
 import PrePublishCheckModal from "../../components/PrePublishCheckModal.jsx";
 import ImportFromProjectModal from "../../components/ImportFromProjectModal.jsx";
 import CompareProjectsModal from "../../components/CompareProjectsModal.jsx";
@@ -101,6 +102,13 @@ export default function SpecEditorPage() {
   const [replacementReviewItem, setReplacementReviewItem] = useState(null);
   const [activeCoolingRoomId, setActiveCoolingRoomId] = useState(null);
   const [specQuickFilter, setSpecQuickFilter] = useState("");
+  const [specSelectedIds, setSpecSelectedIds] = useState([]);
+  const clearSpecSelectionRef = useRef(null);
+
+  const deliveryPreSend = useMemo(
+    () => buildProjectDashboardSummary(project?.items || [], { publishCheck }).preSendMessages,
+    [project?.items, publishCheck]
+  );
 
   const stalePrices = useMemo(
     () => findStaleProjectPrices(project?.items || [], state.materials),
@@ -405,6 +413,32 @@ export default function SpecEditorPage() {
     setSpecQuickFilter(filterId || "");
   };
 
+  const bulkDeliveryPatch = async (patch) => {
+    if (!specSelectedIds.length || !project) return;
+    try {
+      await api.bulkPatchItems(project.id, { itemIds: specSelectedIds, patch });
+      await actions.loadProject(project.id);
+      success(`Обновлено позиций: ${specSelectedIds.length}`);
+    } catch (e) {
+      error(e.message);
+    }
+  };
+
+  const bulkDeliveryRefreshPrice = async () => {
+    if (!specSelectedIds.length || !project) return;
+    try {
+      const res = await api.refreshItemsFromMaterial(
+        project.id,
+        { itemIds: specSelectedIds, fields: ["price"] },
+        { items: project.items, materials: state.materials }
+      );
+      await actions.loadProject(project.id);
+      success(`Обновлено позиций: ${res.updated?.length || 0}`);
+    } catch (e) {
+      error(e.message);
+    }
+  };
+
   const breadcrumbs = (
     <Breadcrumbs
       items={[
@@ -561,6 +595,28 @@ export default function SpecEditorPage() {
           onPrepareClient={prepareClientNotice}
           onFilterSelect={handleDashboardFilter}
           activeFilter={specQuickFilter}
+        />
+
+        <ClientDeliveryPanel
+          items={project.items || []}
+          materials={state.materials}
+          currency={project.currency}
+          activeFilter={specQuickFilter}
+          onFilterSelect={handleDashboardFilter}
+          selectedItemIds={specSelectedIds}
+          onBulkShowClient={() =>
+            bulkDeliveryPatch({ visibleToClient: true, visible: true, approved: true })
+          }
+          onBulkHideClient={() =>
+            bulkDeliveryPatch({ visibleToClient: false, visible: false, approved: false })
+          }
+          onBulkRefreshPrice={bulkDeliveryRefreshPrice}
+          onClearSelection={() => clearSpecSelectionRef.current?.()}
+          onExportPdf={exportClientPdf}
+          onExportExcel={exportClientExcel}
+          onOpenClientLink={() => url && window.open(url, "_blank", "noopener,noreferrer")}
+          onCopyClientLink={copyClientLink}
+          preSendMessages={deliveryPreSend}
         />
 
         <div className="print-header">
@@ -768,6 +824,10 @@ export default function SpecEditorPage() {
               viewMode={viewMode}
               quickFilter={specQuickFilter}
               onQuickFilterChange={setSpecQuickFilter}
+              onSelectionChange={setSpecSelectedIds}
+              registerClearSelection={(fn) => {
+                clearSpecSelectionRef.current = fn;
+              }}
             />
           </>
         )}
@@ -894,6 +954,8 @@ function SpecTab({
   viewMode = "designer",
   quickFilter = "",
   onQuickFilterChange,
+  onSelectionChange,
+  registerClearSelection,
 }) {
   const { confirm, success, error } = useToast();
   const { state } = useStore();
@@ -928,6 +990,14 @@ function SpecTab({
     }
     return ids;
   }, [moduleSelected]);
+
+  useEffect(() => {
+    onSelectionChange?.(selectedItemIds);
+  }, [selectedItemIds, onSelectionChange]);
+
+  useEffect(() => {
+    registerClearSelection?.(() => setModuleSelected({}));
+  }, [registerClearSelection]);
 
   const refreshFromBase = async (itemIds, fields) => {
     if (!itemIds.length) {
