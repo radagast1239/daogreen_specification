@@ -11,7 +11,7 @@ import {
 } from "../../store/helpers.js";
 import { SPECIALIST_MAP, PURCHASE_STATUSES } from "../../data/modules.js";
 import { VAT_RATES, lineGross, lineContributesToSum, RESPONSIBLE_OPTIONS } from "../../lib/itemHelpers.js";
-import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient } from "../../../shared/itemTypes.js";
+import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient, buildClientVisibilityPatch } from "../../../shared/itemTypes.js";
 import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
 import { buildModuleSelectionFromIds } from "../../../shared/specLineSelection.js";
 import { PROJECT_DASHBOARD_FILTERS, resolveDashboardFilterLabel, buildProjectDashboardSummary } from "../../../shared/projectDashboardSummary.js";
@@ -418,10 +418,16 @@ export default function SpecEditorPage() {
 
   const bulkDeliveryPatch = async (patch) => {
     if (!specSelectedIds.length || !project) return;
+    const ids = [...specSelectedIds];
+    const normalizedPatch =
+      patch.visibleToClient != null ? buildClientVisibilityPatch(patch.visibleToClient) : patch;
     try {
-      await api.bulkPatchItems(project.id, { itemIds: specSelectedIds, patch });
+      await api.bulkPatchItems(project.id, { itemIds: ids, patch: normalizedPatch });
       await actions.loadProject(project.id);
-      success(`Обновлено позиций: ${specSelectedIds.length}`);
+      if (patch.visibleToClient != null) {
+        actions.applyItemsVisibilityPatch(project.id, ids, normalizedPatch);
+      }
+      success(`Обновлено позиций: ${ids.length}`);
     } catch (e) {
       error(e.message);
     }
@@ -607,12 +613,8 @@ export default function SpecEditorPage() {
           activeFilter={specQuickFilter}
           onFilterSelect={handleDashboardFilter}
           selectedItemIds={specSelectedIds}
-          onBulkShowClient={() =>
-            bulkDeliveryPatch({ visibleToClient: true, visible: true, approved: true })
-          }
-          onBulkHideClient={() =>
-            bulkDeliveryPatch({ visibleToClient: false, visible: false, approved: false })
-          }
+          onBulkShowClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(true))}
+          onBulkHideClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(false))}
           onBulkRefreshPrice={bulkDeliveryRefreshPrice}
           onClearSelection={() => clearSpecSelectionRef.current?.()}
           onExportPdf={exportClientPdf}
@@ -630,12 +632,8 @@ export default function SpecEditorPage() {
           onFilterSelect={handleDashboardFilter}
           selectedItemIds={specSelectedIds}
           onSelectItems={(ids) => applySpecSelectionRef.current?.(ids)}
-          onBulkShowClient={() =>
-            bulkDeliveryPatch({ visibleToClient: true, visible: true, approved: true })
-          }
-          onBulkHideClient={() =>
-            bulkDeliveryPatch({ visibleToClient: false, visible: false, approved: false })
-          }
+          onBulkShowClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(true))}
+          onBulkHideClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(false))}
           onBulkRefreshPrice={bulkDeliveryRefreshPrice}
           onClearSelection={() => clearSpecSelectionRef.current?.()}
         />

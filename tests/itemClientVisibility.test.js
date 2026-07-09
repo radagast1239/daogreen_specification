@@ -3,6 +3,8 @@ import {
   lineVisibleToClient,
   reconcileItemClientVisibilityFlags,
   reconcileProjectItemsVisibility,
+  buildClientVisibilityPatch,
+  applyClientVisibilityPatch,
 } from "../shared/itemTypes.js";
 import { buildRefreshPatchForItem } from "../shared/refreshItemFromMaterial.js";
 import { buildProjectDashboardSummary } from "../shared/projectDashboardSummary.js";
@@ -53,6 +55,35 @@ describe("item client visibility override", () => {
     expect(lineVisibleToClient(item, m034Material)).toBe(false);
   });
 
+  it("hide payload forces hidden even when material default is visible", () => {
+    const material = { id: "m010", visibleToClient: true, clientVisibleDefault: true };
+    const shown = baseItem({
+      materialId: "m010",
+      visibleToClient: true,
+      visible: true,
+      approved: true,
+    });
+    const hidden = applyClientVisibilityPatch(shown, buildClientVisibilityPatch(false));
+    expect(hidden).toMatchObject({
+      visibleToClient: false,
+      visible: false,
+      approved: false,
+      showToClient: false,
+      clientVisible: false,
+    });
+    expect(lineVisibleToClient(hidden, material)).toBe(false);
+  });
+
+  it("m034 show/hide patches round-trip via applyClientVisibilityPatch", () => {
+    const hidden = applyClientVisibilityPatch(
+      baseItem({ visibleToClient: false, visible: false, approved: false }),
+      buildClientVisibilityPatch(true)
+    );
+    expect(lineVisibleToClient(hidden, m034Material)).toBe(true);
+    const againHidden = applyClientVisibilityPatch(hidden, buildClientVisibilityPatch(false));
+    expect(lineVisibleToClient(againHidden, m034Material)).toBe(false);
+  });
+
   it("m034 material default hidden + no item override → hidden", () => {
     const item = baseItem();
     expect(lineVisibleToClient(item, m034Material)).toBe(false);
@@ -69,6 +100,15 @@ describe("item client visibility override", () => {
     expect(reconciled.visibleToClient).toBe(true);
     expect(reconciled.visible).toBe(true);
     expect(reconciled.approved).toBe(true);
+  });
+
+  it("hide with showToClient:false wins over stale visible/approved true", () => {
+    const item = {
+      ...baseItem({ visibleToClient: false, visible: true, approved: true }),
+      showToClient: false,
+      clientVisible: false,
+    };
+    expect(lineVisibleToClient(item)).toBe(false);
   });
 
   it("refreshItemFromMaterial does not reset visibleToClient=true", () => {

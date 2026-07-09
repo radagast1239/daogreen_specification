@@ -6,7 +6,45 @@ export const FRAME_BOM_SOURCE = "frame_bom";
 export const FRAME_BOM_ADMIN_SOURCE_LABEL = "Из схемы стеллажа";
 
 export function isFrameBomLine(item) {
-  return (item?.source || item?.sourceType || item?.source_type) === FRAME_BOM_SOURCE;
+  if (!item) return false;
+
+  const source = item.source || item.sourceType || item.source_type || "";
+  if (source === FRAME_BOM_SOURCE) return true;
+
+  if (item.fromFrameBom === true || item.frameBom === true || item.isFrameBom === true) {
+    return true;
+  }
+
+  const sourceKey = String(item.sourceKey || item.source_key || "");
+  if (sourceKey.startsWith("frame_bom:")) return true;
+
+  const id = String(item.id || "");
+  if (id.startsWith("it_fbom_") || id.startsWith("it_fbom:") || id.startsWith("frame_bom:")) {
+    return true;
+  }
+
+  const obj = parseSourceObjectIds(item.sourceObjectIds ?? item.source_object_ids);
+  if (String(obj.bomKey || item.bomKey || "").trim()) return true;
+  if (String(obj.moduleRackKey || obj.module_rack_key || item.moduleRackKey || "").trim() && sourceKey) {
+    return true;
+  }
+
+  const rackKey = resolveFrameBomItemModuleRackKey(item);
+  const pipeCuts = normalizePipeCuts(item.pipeCuts ?? []);
+  if (rackKey && pipeCuts.length > 0) return true;
+
+  const sourceLabel = String(item.sourceLabel || item.source_label || "");
+  if (
+    sourceLabel === FRAME_BOM_ADMIN_SOURCE_LABEL ||
+    /из схемы (?:каркаса|стеллажа)/i.test(sourceLabel)
+  ) {
+    return true;
+  }
+
+  const note = String(item.note || item.clientNote || "");
+  if (/из схемы (?:каркаса|стеллажа)/i.test(note)) return true;
+
+  return false;
 }
 
 /** Админский бейдж источника (без техполей frame_bom/sourceKey). */
@@ -88,7 +126,16 @@ export function sourceKeyMatchesModuleRack(sourceKey, moduleRackKey) {
 export function isFrameBomItemForRack(item, moduleRackKey) {
   const rack = String(moduleRackKey || "").trim();
   if (!rack) return false;
-  if (!isFrameBomLine(item)) return false;
+
+  // Rack replace/merge must only touch canonical frame_bom rows.
+  // Broad UI detection (sourceKey-only) must not delete manual lines.
+  const source = item?.source || item?.sourceType || item?.source_type || "";
+  const isCanonical =
+    source === FRAME_BOM_SOURCE ||
+    item?.fromFrameBom === true ||
+    item?.frameBom === true ||
+    item?.isFrameBom === true;
+  if (!isCanonical) return false;
 
   const itemRack = resolveFrameBomItemModuleRackKey(item);
   if (itemRack && itemRack === rack) return true;

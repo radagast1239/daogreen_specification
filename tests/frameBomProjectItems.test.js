@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   mergeFrameBomIntoProjectItems,
   isFrameBomItemForRack,
+  isFrameBomLine,
   buildFrameBomSourceRackPrefix,
   frameBomItemsForModuleRack,
   enrichFrameBomDraftWithMaterials,
@@ -427,5 +428,67 @@ describe("frameBom source helpers", () => {
     const rack1 = frameBomItemsForModuleRack(items, "rack1");
     expect(rack1).toHaveLength(1);
     expect(rack1[0].sourceKey).toContain("rack1");
+  });
+});
+
+describe("isFrameBomLine detection", () => {
+  it("detects sourceKey prefix without source field", () => {
+    expect(
+      isFrameBomLine({
+        id: "frame_bom:d1:rack1:bolt_m6",
+        sourceKey: "frame_bom:d1:rack1:bolt_m6",
+      })
+    ).toBe(true);
+  });
+
+  it("detects bomKey in sourceObjectIds", () => {
+    expect(
+      isFrameBomLine({
+        id: "it_row",
+        sourceObjectIds: { bomKey: "crab_g", moduleRackKey: "rack1" },
+      })
+    ).toBe(true);
+  });
+
+  it("detects moduleRackKey with sourceKey", () => {
+    expect(
+      isFrameBomLine({
+        id: "it_row",
+        sourceKey: "frame_bom:d1:rack1:crab_t",
+        sourceObjectIds: { moduleRackKey: "rack1" },
+      })
+    ).toBe(true);
+  });
+
+  it("detects pipeCuts + moduleRackKey from frame constructor", () => {
+    expect(
+      isFrameBomLine({
+        id: "it_row",
+        materialId: "m036",
+        sourceKey: "frame_bom:d1:rack1:profile_tube_20x20",
+        sourceObjectIds: { moduleRackKey: "rack1", bomKey: "profile_tube_20x20" },
+        pipeCuts: [{ lengthMm: 3200, qty: 6 }],
+      })
+    ).toBe(true);
+  });
+
+  it("does not treat manual tube without BOM markers as frame BOM", () => {
+    expect(
+      isFrameBomLine({
+        id: "it_manual",
+        materialId: "m036",
+        name: "Труба профильная 20/20/1,5 мм",
+        pipeCuts: [{ lengthMm: 3200, qty: 6 }],
+      })
+    ).toBe(false);
+  });
+
+  it("detects sourceLabel Из схемы каркаса", () => {
+    expect(
+      isFrameBomLine({
+        id: "it_row",
+        sourceLabel: "Из схемы каркаса",
+      })
+    ).toBe(true);
   });
 });

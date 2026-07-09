@@ -3,6 +3,7 @@ import {
   bulkPatchItemsWithFallback,
   refreshItemsFromMaterialWithFallback,
 } from "../src/lib/projectItemApiFallback.js";
+import { lineVisibleToClient } from "../shared/itemTypes.js";
 
 describe("projectItemApiFallback", () => {
   it("bulkPatch falls back to sequential patchItem on 404", async () => {
@@ -25,6 +26,36 @@ describe("projectItemApiFallback", () => {
     expect(res.fallback).toBe(true);
     expect(res.updated).toHaveLength(2);
     expect(calls.some((c) => c.path.includes(encodeURIComponent("it:colon")))).toBe(true);
+  });
+
+  it("hide selected payload syncs visibleToClient/visible/approved to false", async () => {
+    const bodies = [];
+    const request = vi.fn(async (path, opts) => {
+      if (path.endsWith("/bulk-patch")) {
+        const err = new Error("HTTP 404");
+        err.status = 404;
+        throw err;
+      }
+      bodies.push(opts.body);
+      return { id: "it1", visible: true, approved: true, ...opts.body };
+    });
+
+    const res = await bulkPatchItemsWithFallback(request, "p1", {
+      itemIds: ["it1"],
+      patch: { visibleToClient: false },
+    });
+
+    expect(bodies[0]).toMatchObject({
+      visibleToClient: false,
+      visible: false,
+      approved: false,
+      showToClient: false,
+      clientVisible: false,
+    });
+    expect(res.updated[0].visibleToClient).toBe(false);
+    expect(res.updated[0].visible).toBe(false);
+    expect(res.updated[0].approved).toBe(false);
+    expect(lineVisibleToClient(res.updated[0])).toBe(false);
   });
 
   it("refresh falls back to per-item patch on 404", async () => {

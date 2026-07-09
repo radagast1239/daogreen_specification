@@ -1,16 +1,26 @@
 import { buildRefreshPatchForItem } from "../../shared/refreshItemFromMaterial.js";
-import { reconcileItemClientVisibilityFlags } from "../../shared/itemTypes.js";
+import {
+  applyClientVisibilityPatch,
+  buildClientVisibilityPatch,
+  reconcileItemClientVisibilityFlags,
+} from "../../shared/itemTypes.js";
+
+function normalizeVisibilityPatch(patch = {}) {
+  if (patch.visibleToClient == null) return patch;
+  return { ...buildClientVisibilityPatch(patch.visibleToClient), ...patch };
+}
 
 async function patchItemSequential(request, projectId, { itemIds = [], patch = {} } = {}) {
+  const normalizedPatch = normalizeVisibilityPatch(patch);
   const updated = [];
   const skipped = [];
   for (const itemId of itemIds) {
     try {
       const item = await request(
         `/api/projects/${projectId}/items/${encodeURIComponent(itemId)}`,
-        { method: "PATCH", body: patch }
+        { method: "PATCH", body: normalizedPatch }
       );
-      updated.push(reconcileItemClientVisibilityFlags({ ...item, ...patch }));
+      updated.push(applyClientVisibilityPatch({ ...item, ...normalizedPatch }, normalizedPatch));
     } catch (e) {
       if (e?.status === 404) {
         skipped.push({ itemId, reason: "not_found" });
@@ -23,11 +33,18 @@ async function patchItemSequential(request, projectId, { itemIds = [], patch = {
 }
 
 export async function bulkPatchItemsWithFallback(request, projectId, body = {}) {
+  const normalizedBody = {
+    ...body,
+    patch: normalizeVisibilityPatch(body.patch || {}),
+  };
   try {
-    return await request(`/api/projects/${projectId}/items/bulk-patch`, { method: "POST", body });
+    return await request(`/api/projects/${projectId}/items/bulk-patch`, {
+      method: "POST",
+      body: normalizedBody,
+    });
   } catch (e) {
     if (e?.status !== 404) throw e;
-    return patchItemSequential(request, projectId, body);
+    return patchItemSequential(request, projectId, normalizedBody);
   }
 }
 

@@ -316,4 +316,44 @@ describe("buildProjectPreSendChecklist", () => {
     expect(checklist.clientTotalCount).toBe(1);
     expect(checklist.groups.find((g) => g.key === "client_total").count).toBe(1);
   });
+
+  it("frame_bom group counts items with bomKey only", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem(),
+      baseItem({
+        id: "bom-key",
+        sourceObjectIds: { bomKey: "crab_g", moduleRackKey: "rack1" },
+      }),
+    ]);
+    expect(checklist.groups.find((g) => g.key === "frame_bom").count).toBe(1);
+  });
+
+  it("frame_bom group counts items with moduleRackKey and sourceKey", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({
+        id: "frame_bom:d1:rack1:crab_t",
+        sourceKey: "frame_bom:d1:rack1:crab_t",
+        sourceObjectIds: { moduleRackKey: "rack1" },
+      }),
+    ]);
+    expect(checklist.groups.find((g) => g.key === "frame_bom").count).toBe(1);
+  });
+
+  it("select BOM returns canonical item ids for production-style rows", () => {
+    const bomId = "frame_bom:d1:rack1:bolt_m6";
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ id: bomId, sourceKey: "frame_bom:d1:rack1:bolt_m6" }),
+    ]);
+    const ids = selectPreSendGroupIds(checklist, "frame_bom");
+    expect(ids).toEqual([bomId]);
+  });
+
+  it("Выбрать BOM is enabled when frame_bom count > 0", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ id: "frame_bom:d1:rack1:crab_g", sourceKey: "frame_bom:d1:rack1:crab_g" }),
+    ]);
+    const group = checklist.groups.find((g) => g.key === "frame_bom");
+    expect(group.count).toBeGreaterThan(0);
+    expect(group.selectable).toBe(true);
+  });
 });

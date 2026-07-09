@@ -6,6 +6,7 @@ import { api as apiClient } from "../lib/api.js";
 import {
   reconcileItemClientVisibilityFlags,
   reconcileProjectItemsVisibility,
+  applyClientVisibilityPatch,
 } from "../../shared/itemTypes.js";
 
 export { buildItemsFromModules };
@@ -99,6 +100,24 @@ function reducer(state, action) {
             : p
         ),
       };
+    case "PROJECT_ITEMS_VISIBILITY_PATCH": {
+      const idSet = new Set(action.itemIds || []);
+      return {
+        ...state,
+        projects: state.projects.map((p) =>
+          p.id !== action.projectId
+            ? p
+            : {
+                ...p,
+                items: p.items.map((it) =>
+                  idSet.has(it.id)
+                    ? applyClientVisibilityPatch(it, action.patch)
+                    : it
+                ),
+              }
+        ),
+      };
+    }
     case "PROJECT_ENSURE": {
       const project = reconcileProjectItemsVisibility(action.project, state.materials);
       return state.projects.some((p) => p.id === project.id)
@@ -331,6 +350,9 @@ export function StoreProvider({ children }) {
         const p = await apiClient.getProject(id);
         dispatch({ type: "PROJECT_ENSURE", project: p });
         return p;
+      },
+      applyItemsVisibilityPatch(projectId, itemIds, patch) {
+        dispatch({ type: "PROJECT_ITEMS_VISIBILITY_PATCH", projectId, itemIds, patch });
       },
       async clientPatchItem(token, itemId, patch) {
         return apiClient.patchClientItem(token, itemId, patch);

@@ -99,6 +99,20 @@ describe("buildClientPurchaseSummary", () => {
     expect(s.frameBomItems).toBe(1);
   });
 
+  it("counts frame BOM items without source field (production-style)", () => {
+    const items = [
+      baseItem(),
+      baseItem({ id: "frame_bom:d1:rack1:bolt_m6", sourceKey: "frame_bom:d1:rack1:bolt_m6" }),
+      baseItem({
+        id: "crab",
+        sourceKey: "frame_bom:d1:rack1:crab_t",
+        sourceObjectIds: { moduleRackKey: "rack1", bomKey: "crab_t" },
+      }),
+    ];
+    const s = buildClientPurchaseSummary(items);
+    expect(s.frameBomItems).toBe(2);
+  });
+
   it("purchaseClosed counts bought + delivered + have", () => {
     const items = [
       baseItem({ purchaseStatus: PURCHASE_STATUS.BOUGHT }),
@@ -180,6 +194,16 @@ describe("client delivery preview", () => {
       source: FRAME_BOM_SOURCE,
       sourceType: FRAME_BOM_SOURCE,
       sourceKey: "frame_bom:draw:1:rack-a",
+    });
+    expect(resolveClientDeliverySourceLabel(item)).toMatch(/схемы/i);
+    const preview = buildClientDeliveryPreviewRows([item]);
+    expect(preview[0].sourceLabel).toMatch(/схемы/i);
+  });
+
+  it("BOM without source field shows frame source label", () => {
+    const item = baseItem({
+      id: "frame_bom:d1:rack1:bolt_m6",
+      sourceKey: "frame_bom:d1:rack1:bolt_m6",
     });
     expect(resolveClientDeliverySourceLabel(item)).toMatch(/схемы/i);
     const preview = buildClientDeliveryPreviewRows([item]);
