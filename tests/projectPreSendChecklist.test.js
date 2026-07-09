@@ -168,14 +168,14 @@ describe("buildProjectPreSendChecklist", () => {
   it("select all problematic excludes normal client-ready rows", () => {
     const checklist = buildProjectPreSendChecklist([
       baseItem({ id: "ok" }),
-      baseItem({ id: "bad", link: "" }),
+      baseItem({ id: "bad", price: 0 }),
     ]);
     const ids = selectAllPreSendProblemIds(checklist);
     expect(ids).toContain("bad");
     expect(ids).not.toContain("ok");
   });
 
-  it("select all problematic includes hidden/no_price/no_link/no_supplier/not_fit", () => {
+  it("select all problematic includes hidden/no_price/no_supplier/not_fit but not no_link", () => {
     const checklist = buildProjectPreSendChecklist([
       baseItem({ id: "p", price: 0 }),
       baseItem({ id: "l", link: "" }),
@@ -184,7 +184,8 @@ describe("buildProjectPreSendChecklist", () => {
       baseItem({ id: "f", purchaseStatus: PURCHASE_STATUS.NOT_FIT }),
     ]);
     const ids = selectAllPreSendProblemIds(checklist);
-    expect(ids).toEqual(expect.arrayContaining(["p", "l", "s", "h", "f"]));
+    expect(ids).toEqual(expect.arrayContaining(["p", "s", "h", "f"]));
+    expect(ids).not.toContain("l");
   });
 
   it("status not_ready when blockers exist", () => {
@@ -197,11 +198,24 @@ describe("buildProjectPreSendChecklist", () => {
     expect(checklist.statusTitle).toBe("Не готово к отправке");
   });
 
-  it("status warning when no blockers but warnings exist", () => {
-    const checklist = buildProjectPreSendChecklist([baseItem({ link: "" })]);
+  it("status warning when no blockers but real warnings exist", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ purchaseStatus: PURCHASE_STATUS.NEED_HELP }),
+    ]);
     expect(checklist.status).toBe("warning");
     expect(checklist.tone).toBe("warn");
     expect(checklist.statusTitle).toBe("Можно отправлять с предупреждениями");
+  });
+
+  it("status ready when only no_link exists", () => {
+    const checklist = buildProjectPreSendChecklist([baseItem({ link: "" })]);
+    expect(checklist.status).toBe("ready");
+    expect(checklist.tone).toBe("ok");
+    expect(checklist.statusTitle).toBe("Готово к отправке");
+    expect(checklist.blockers).toBe(0);
+    expect(checklist.warnings).toBe(0);
+    expect(checklist.noLinkCount).toBe(1);
+    expect(checklist.statusDetail).toMatch(/не мешает отправке/i);
   });
 
   it("status ready when no blockers/warnings", () => {
@@ -285,7 +299,7 @@ describe("buildProjectPreSendChecklist", () => {
     const items = [
       baseItem({ id: "ok1" }),
       baseItem({ id: "ok2" }),
-      baseItem({ id: "bad", link: "" }),
+      baseItem({ id: "bad", price: 0 }),
     ];
     const checklist = buildProjectPreSendChecklist(items);
     expect(checklist.groups.find((g) => g.key === "client_total").count).toBe(3);
@@ -293,6 +307,15 @@ describe("buildProjectPreSendChecklist", () => {
     expect(checklist.groups.find((g) => g.key === "ready_without_issues").label).toBe(
       "Готово без проблем"
     );
+  });
+
+  it("no_link-only rows count as ready without issues", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ id: "ok" }),
+      baseItem({ id: "nolink", link: "" }),
+    ]);
+    expect(checklist.groups.find((g) => g.key === "ready_without_issues").count).toBe(2);
+    expect(checklist.allProblemIds).not.toContain("nolink");
   });
 
   it("m034 visible override true counted in client total", () => {
@@ -355,5 +378,57 @@ describe("buildProjectPreSendChecklist", () => {
     const group = checklist.groups.find((g) => g.key === "frame_bom");
     expect(group.count).toBeGreaterThan(0);
     expect(group.selectable).toBe(true);
+  });
+
+  it("no_link group has severity info", () => {
+    const checklist = buildProjectPreSendChecklist([baseItem({ link: "" })]);
+    expect(checklist.groups.find((g) => g.key === "no_link").severity).toBe("info");
+  });
+
+  it("no_link does not increase warnings or blockers", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ id: "a", link: "" }),
+      baseItem({ id: "b", link: "" }),
+    ]);
+    expect(checklist.warnings).toBe(0);
+    expect(checklist.blockers).toBe(0);
+    expect(checklist.noLinkCount).toBe(2);
+  });
+
+  it("no_link is excluded from allProblemIds", () => {
+    const checklist = buildProjectPreSendChecklist([baseItem({ id: "l", link: "" })]);
+    expect(checklist.allProblemIds).not.toContain("l");
+    expect(checklist.groups.find((g) => g.key === "no_link").itemIds).toContain("l");
+  });
+
+  it("Выбрать без ссылки still selects no_link rows", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ id: "ok" }),
+      baseItem({ id: "l1", link: "" }),
+      baseItem({ id: "l2", link: "" }),
+    ]);
+    expect(selectPreSendGroupIds(checklist, "no_link")).toEqual(["l1", "l2"]);
+  });
+
+  it("blocker count ignores no_link when real blocker exists", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ id: "p", price: 0 }),
+      baseItem({ id: "l", link: "" }),
+    ]);
+    expect(checklist.blockers).toBe(1);
+    expect(checklist.warnings).toBe(0);
+    expect(checklist.noLinkCount).toBe(1);
+    expect(checklist.status).toBe("not_ready");
+  });
+
+  it("warning count ignores no_link when real warning exists", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ id: "w", purchaseStatus: PURCHASE_STATUS.NEED_HELP }),
+      baseItem({ id: "l", link: "" }),
+    ]);
+    expect(checklist.warnings).toBe(1);
+    expect(checklist.blockers).toBe(0);
+    expect(checklist.noLinkCount).toBe(1);
+    expect(checklist.status).toBe("warning");
   });
 });

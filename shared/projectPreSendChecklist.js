@@ -13,9 +13,10 @@ import { normalizePurchaseStatus, PURCHASE_STATUS } from "./purchaseStatusRules.
 import { isFrameBomLine } from "./frameBomProjectItems.js";
 import { getSpecLineSelectionId, normalizeSpecSelectionIds } from "./specLineSelection.js";
 
+/** Реальные проблемы для «Выбрать всё проблемное» / blockers / warnings.
+ *  no_link намеренно НЕ входит: отсутствие ссылки не мешает отправке. */
 export const PRE_SEND_PROBLEM_GROUP_KEYS = [
   "no_price",
-  "no_link",
   "no_supplier",
   "hidden_from_client",
   "needs_review",
@@ -37,9 +38,9 @@ const GROUP_DEFS = [
     key: "no_link",
     label: "Без ссылки",
     filterKey: "no_link",
-    severity: "warning",
+    severity: "info",
     selectable: true,
-    actionHint: "Добавьте ссылку на товар",
+    actionHint: "Не мешает отправке — можно выбрать отдельно",
   },
   {
     key: "no_supplier",
@@ -93,7 +94,7 @@ const GROUP_DEFS = [
     key: "frame_bom",
     label: "Из схемы каркаса",
     filterKey: "frame_bom",
-    severity: "neutral",
+    severity: "info",
     selectable: true,
     actionHint: "Позиции из схемы каркаса",
   },
@@ -101,7 +102,7 @@ const GROUP_DEFS = [
     key: "client_total",
     label: "Клиенту всего",
     filterKey: "client_visible",
-    severity: "neutral",
+    severity: "info",
     selectable: false,
     actionHint: "Все позиции, которые увидит клиент",
   },
@@ -111,7 +112,7 @@ const GROUP_DEFS = [
     filterKey: "",
     severity: "ok",
     selectable: false,
-    actionHint: "Клиентские позиции без проблем перед отправкой",
+    actionHint: "Клиентские позиции без реальных проблем перед отправкой",
   },
 ];
 
@@ -151,6 +152,8 @@ export function buildProjectPreSendChecklist(items, materials = [], options = {}
     const def = GROUP_DEFS.find((g) => g.key === key);
     problemBuckets.set(key, idsForFilter(pool, def.filterKey));
   }
+
+  const noLinkIds = idsForFilter(pool, "no_link");
 
   const allProblemIds = [];
   const seenProblem = new Set();
@@ -193,6 +196,8 @@ export function buildProjectPreSendChecklist(items, materials = [], options = {}
       itemIds = normalizeSpecSelectionIds(
         pool.filter((it) => isFrameBomLine(it)).map((it) => getSpecLineSelectionId(it))
       );
+    } else if (def.key === "no_link") {
+      itemIds = noLinkIds;
     } else {
       itemIds = problemBuckets.get(def.key) || idsForFilter(pool, def.filterKey);
     }
@@ -210,6 +215,7 @@ export function buildProjectPreSendChecklist(items, materials = [], options = {}
 
   const blockers = blockerIds.size;
   const warnings = warningIds.size;
+  const noLinkCount = noLinkIds.length;
 
   let status = "ready";
   let tone = "ok";
@@ -226,6 +232,8 @@ export function buildProjectPreSendChecklist(items, materials = [], options = {}
     tone = "warn";
     statusTitle = "Можно отправлять с предупреждениями";
     statusDetail = `Предупреждения: ${warnings}`;
+  } else if (noLinkCount > 0) {
+    statusDetail = `Без ссылок: ${noLinkCount} — не мешает отправке`;
   }
 
   return {
@@ -235,6 +243,7 @@ export function buildProjectPreSendChecklist(items, materials = [], options = {}
     statusDetail,
     blockers,
     warnings,
+    noLinkCount,
     groups,
     selectedProblemIds: allProblemIds,
     allProblemIds,
