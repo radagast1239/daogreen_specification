@@ -30,6 +30,7 @@ import {
   preserveFrameBomProjectItems,
   mergeFrameBomQtyFromBuilderLines,
   stellagesForProjectSave,
+  isMeaningfulRackDraft,
   validateStellageForFrameDrawing,
 } from "../../lib/projectBuilderHydrate.js";
 import {
@@ -275,21 +276,54 @@ export default function ProjectBuilderPage() {
 
   const goToStep = async (next) => {
     if (next === step) return;
-    if (step === "stellages" && next !== "stellages" && draft?.items?.some((ln) => ln.included)) {
-      if (
-        !(await confirm({
-          title: "Незавершённый стеллаж",
-          message:
-            "Есть незавершённая сборка стеллажа. Если уйти сейчас, отмеченные позиции не попадут в проект.",
-        }))
-      ) {
-        return;
+    let draftForSave = draft;
+    let stellagesForSave = stellages;
+    if (step === "stellages" && next !== "stellages" && draft) {
+      if (!isMeaningfulRackDraft(draft) && !draft.editingExisting && !draft.wasInProjectList) {
+        // Empty auto-draft: discard silently, never persist.
+        setDraft(null);
+        draftForSave = null;
+      } else if (draft.items?.some((ln) => ln.included) && !draft.editingExisting && !draft.wasInProjectList) {
+        if (
+          !(await confirm({
+            title: "Сохранить заполненный стеллаж?",
+            message:
+              "Есть незавершённая сборка стеллажа с отмеченными позициями. Если уйти сейчас, они не попадут в проект, пока вы не нажмёте «Стеллаж готов».",
+            confirmLabel: "Уйти без сохранения",
+            cancelLabel: "Остаться",
+          }))
+        ) {
+          return;
+        }
+        setDraft(null);
+        draftForSave = null;
+      } else if (draft.editingExisting || draft.wasInProjectList || isMeaningfulRackDraft(draft)) {
+        // Put checked-out / meaningful rack back into the list before leaving.
+        const {
+          editingExisting: _e,
+          wasInProjectList: _w,
+          forcePersistForFrame: _f,
+          frameDrawingCount: _fd,
+          frameBomCount: _fb,
+          hasFrameDrawing: _hf,
+          ...rest
+        } = draft;
+        const restored = { ...rest, items: (draft.items || []).map((ln) => ({ ...ln })) };
+        const nextList = stellages.some((s) => s.id === draft.id)
+          ? stellages.map((s) => (s.id === draft.id ? restored : s))
+          : [...stellages, restored];
+        setStellages(nextList);
+        setDraft(null);
+        stellagesForSave = nextList;
+        draftForSave = null;
+      } else {
+        setDraft(null);
+        draftForSave = null;
       }
-      setDraft(null);
     }
     setStep(next);
     if (form.name.trim()) {
-      saveDraftSilently(next).catch(() => {});
+      saveDraftSilently(next, { draftOverride: draftForSave, stellagesOverride: stellagesForSave }).catch(() => {});
     }
   };
 
@@ -366,7 +400,7 @@ export default function ProjectBuilderPage() {
       error("Укажите название стеллажа в проекте.");
       return;
     }
-    if (countIncluded(draft.items) === 0) {
+    if (countIncluded(draft.items) === 0 && !draft.wasInProjectList && !draft.hasFrameDrawing) {
       error("Отметьте хотя бы одну позицию галочкой.");
       return;
     }
@@ -374,28 +408,42 @@ export default function ProjectBuilderPage() {
       error("У отмеченных позиций укажите количество: колонка «Кол-во» или шт в параметрах насоса/вытяжки.");
       return;
     }
-    const { editingExisting: _e, ...finished } = draft;
-    setStellages((list) => [...list, { ...finished, items: draft.items.map((ln) => ({ ...ln })) }]);
+    const {
+      editingExisting: _e,
+      wasInProjectList: _w,
+      forcePersistForFrame: _f,
+      frameDrawingCount: _fd,
+      frameBomCount: _fb,
+      hasFrameDrawing: _hf,
+      ...finished
+    } = draft;
+    setStellages((list) => {
+      const row = { ...finished, items: draft.items.map((ln) => ({ ...ln })) };
+      if (list.some((s) => s.id === draft.id)) {
+        return list.map((s) => (s.id === draft.id ? row : s));
+      }
+      return [...list, row];
+    });
     // After finishing a rack, stay on the list — do not auto-open a blank "Стеллаж N+1".
     setDraft(null);
   };
 
   const openStellageEditor = async (st, { skipConfirm = false } = {}) => {
     if (!st) return;
-    if (
+    // Discard empty unrelated draft without asking — never persist it.
+    if (!skipConfirm && draft && draft.id !== st.id && !isMeaningfulRackDraft(draft)) {
+      setDraft(null);
+    } else if (
       !skipConfirm
+      && draft?.id
+      && draft.id !== st.id
+      && isMeaningfulRackDraft(draft)
       && !(await confirm({
-        title: "Продолжить спецификацию стеллажа?",
-        message:
-          "Стеллаж временно уберётся из списка до нажатия «Стеллаж готов». Не уходите с шага, пока не сохраните.",
+        title: "Сохранить заполненный стеллаж?",
+        message: "Текущая незавершённая сборка будет закрыта. Отмеченные позиции не попадут в проект, пока вы не нажмёте «Стеллаж готов».",
+        confirmLabel: "Продолжить",
+        cancelLabel: "Отмена",
       }))
-    ) {
-      return;
-    }
-    if (
-      !skipConfirm
-      && draft?.items?.some((ln) => ln.included)
-      && !(await confirm({ title: "Заменить сборку?" }))
     ) {
       return;
     }
@@ -406,7 +454,12 @@ export default function ProjectBuilderPage() {
       loadedProject?.items || [],
     );
     setStellages((list) => list.filter((s) => s.id !== st.id));
-    setDraft({ ...st, items: mergedItems.map((ln) => ({ ...ln })), editingExisting: true });
+    setDraft({
+      ...st,
+      items: mergedItems.map((ln) => ({ ...ln })),
+      editingExisting: true,
+      wasInProjectList: true,
+    });
   };
 
   const editStellage = (id) => {
@@ -521,12 +574,18 @@ export default function ProjectBuilderPage() {
 
   const canCreate =
     form.name.trim() &&
-    (stellages.length > 0 || farmHasItems || Boolean(draft?.name?.trim()));
+    (stellages.length > 0 || farmHasItems || isMeaningfulRackDraft(draft));
 
   const canFinalize = canCreate;
 
-  const buildProjectPayload = ({ status = PROJECT_STATUS_DRAFT, nextStep = step, draftOverride = null } = {}) => {
-    const draftForSave = draftOverride || draft;
+  const buildProjectPayload = ({
+    status = PROJECT_STATUS_DRAFT,
+    nextStep = step,
+    draftOverride,
+    stellagesOverride,
+  } = {}) => {
+    const draftResolved = draftOverride !== undefined ? draftOverride : draft;
+    const stellagesResolved = Array.isArray(stellagesOverride) ? stellagesOverride : stellages;
     const farmSections = sections.map((sec) => ({
       sectionId: sec.id,
       sectionName: sec.name,
@@ -538,7 +597,7 @@ export default function ProjectBuilderPage() {
         ...form,
         manualParams: mergeBuilderWizardParams(form.manualParams, { lastStep: nextStep }),
       },
-      stellages: stellagesForProjectSave(stellages, draftForSave),
+      stellages: stellagesForProjectSave(stellagesResolved, draftResolved),
       farmSections,
       materials: state.materials,
       rooms,
@@ -546,7 +605,7 @@ export default function ProjectBuilderPage() {
     });
     built.status = status;
     if (loadedProject?.items?.length) {
-      const stellageList = stellagesForProjectSave(stellages, draftForSave);
+      const stellageList = stellagesForProjectSave(stellagesResolved, draftResolved);
       built.items = preserveFrameBomProjectItems(built.items, loadedProject.items);
       built.items = mergeFrameBomQtyFromBuilderLines(built.items, stellageList);
     }
@@ -565,13 +624,19 @@ export default function ProjectBuilderPage() {
     window.setTimeout(() => setSaveState("idle"), 2500);
   };
 
-  const persistProject = async ({ status = PROJECT_STATUS_DRAFT, nextStep = step, silent = false, draftOverride = null } = {}) => {
+  const persistProject = async ({
+    status = PROJECT_STATUS_DRAFT,
+    nextStep = step,
+    silent = false,
+    draftOverride,
+    stellagesOverride,
+  } = {}) => {
     if (!form.name.trim()) {
       throw new Error("Укажите название проекта на шаге «Проект».");
     }
     if (!silent) setDraftSaving(true);
     try {
-      const payload = buildProjectPayload({ status, nextStep, draftOverride });
+      const payload = buildProjectPayload({ status, nextStep, draftOverride, stellagesOverride });
       if (loadedProjectId) {
         const updated = await actions.projectUpdate(loadedProjectId, payload);
         setLoadedProjectId(updated.id);
@@ -591,9 +656,14 @@ export default function ProjectBuilderPage() {
     }
   };
 
-  const saveDraftSilently = async (nextStep = step) => {
+  const saveDraftSilently = async (nextStep = step, overrides = {}) => {
     if (!form.name.trim()) return null;
-    return persistProject({ status: PROJECT_STATUS_DRAFT, nextStep, silent: true });
+    return persistProject({
+      status: PROJECT_STATUS_DRAFT,
+      nextStep,
+      silent: true,
+      ...overrides,
+    });
   };
 
   const saveDraft = async () => {
@@ -618,12 +688,21 @@ export default function ProjectBuilderPage() {
   };
 
   const draftOverrideForFrameStellage = (stellage) => {
-    if (!stellage?.id) return null;
+    if (!stellage?.id) return undefined;
     if (draft?.id === stellage.id) {
-      return { ...draft, editingExisting: true };
+      return {
+        ...draft,
+        editingExisting: true,
+        wasInProjectList: true,
+        forcePersistForFrame: true,
+        hasFrameDrawing: true,
+      };
     }
     // Opening scheme from a list rack while an unrelated empty draft is open —
     // do not let the empty draft hitch a ride into the save payload.
+    if (draft && !isMeaningfulRackDraft(draft) && !draft.editingExisting) {
+      return null;
+    }
     return draft;
   };
 
@@ -681,15 +760,26 @@ export default function ProjectBuilderPage() {
   };
 
   useEffect(() => {
+    // Return from frame constructor: keep the rack in the project list.
+    // Do NOT auto-checkout into draft — that emptied the list and spawned "Стеллаж 2".
     if (!pendingEditRack || projectLoading || step !== "stellages") return;
     const target = findStellageByEditRack(stellages, pendingEditRack);
-    if (!target) return;
-    openStellageEditor(target, { skipConfirm: true });
     setPendingEditRack("");
     const params = new URLSearchParams(searchParams);
     params.delete("editRack");
     setSearchParams(params, { replace: true });
-  }, [pendingEditRack, projectLoading, step, stellages]);
+    if (!target) return;
+    // Ensure any empty unrelated draft is cleared so the list UI is shown.
+    if (draft && draft.id !== target.id && !isMeaningfulRackDraft(draft)) {
+      setDraft(null);
+    } else if (!draft) {
+      // already on list view — nothing else to do
+    } else if (draft.id === target.id) {
+      // already editing the returned rack
+    } else if (!isMeaningfulRackDraft(draft)) {
+      setDraft(null);
+    }
+  }, [pendingEditRack, projectLoading, step, stellages, draft, searchParams, setSearchParams]);
 
   const draftFrameBomItems = useMemo(() => {
     if (!draft?.id || !draft?.moduleId || !loadedProject?.items?.length) return [];

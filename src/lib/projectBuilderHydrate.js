@@ -335,18 +335,35 @@ export function hydrateBuilderFromProject(project, {
 }
 
 /**
+ * True when a builder draft has real user content worth keeping.
+ * Auto-named empty "Стеллаж N" with catalog lines unchecked is NOT meaningful.
+ */
+export function isMeaningfulRackDraft(draft) {
+  if (!draft?.id || !String(draft.name || "").trim()) return false;
+  if (draft.presetId) return true;
+  if (draft.forcePersistForFrame) return true;
+  if ((draft.items || []).some((ln) => ln.included)) return true;
+  if (Number(draft.frameDrawingCount) > 0 || draft.hasFrameDrawing) return true;
+  if (Number(draft.frameBomCount) > 0) return true;
+  return false;
+}
+
+/**
  * Empty auto-draft must not be persisted as a second rack.
  * Persist draft when:
- * - it already exists in the list (in-place edit),
- * - user checked out an existing rack for editing,
- * - user selected at least one line / applied a preset.
+ * - it already exists in the list (in-place update),
+ * - user checked out an existing rack AND it still has meaning / forcePersist,
+ * - user selected at least one line / applied a preset / opened frame for it.
+ *
+ * editingExisting alone is NOT enough to invent a brand-new empty rack.
  */
 export function shouldPersistStellageDraft(draft, stellages = []) {
   if (!draft?.name?.trim() || !draft?.id) return false;
   if ((stellages || []).some((st) => st.id === draft.id)) return true;
-  if (draft.editingExisting) return true;
-  if ((draft.items || []).some((ln) => ln.included)) return true;
-  if (draft.presetId) return true;
+  if (isMeaningfulRackDraft(draft)) return true;
+  // Checked-out existing rack with no local included lines still must round-trip
+  // back into the list (scheme/BOM may live only on project.items).
+  if (draft.editingExisting && draft.wasInProjectList) return true;
   return false;
 }
 
@@ -357,7 +374,15 @@ export function stellagesForProjectSave(stellages = [], draft = null) {
   }));
   if (!shouldPersistStellageDraft(draft, list)) return list;
   const idx = list.findIndex((st) => st.id === draft.id);
-  const { editingExisting: _editingExisting, ...rest } = draft;
+  const {
+    editingExisting: _editingExisting,
+    wasInProjectList: _wasInProjectList,
+    forcePersistForFrame: _forcePersistForFrame,
+    frameDrawingCount: _frameDrawingCount,
+    frameBomCount: _frameBomCount,
+    hasFrameDrawing: _hasFrameDrawing,
+    ...rest
+  } = draft;
   const snapshot = {
     ...rest,
     items: (draft.items || []).map((ln) => ({ ...ln })),

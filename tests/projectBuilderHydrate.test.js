@@ -3,6 +3,7 @@ import {
   stellagesFromProject,
   stellagesForProjectSave,
   shouldPersistStellageDraft,
+  isMeaningfulRackDraft,
   hydrateBuilderFromProject,
   validateStellageForFrameDrawing,
   projectItemToBuilderLine,
@@ -113,13 +114,27 @@ describe('projectBuilderHydrate', () => {
     expect(merged[0].id).toBe('st1');
   });
 
-  it('persists draft with included lines or editingExisting checkout', () => {
+  it('editingExisting alone does not invent empty Стеллаж 2', () => {
+    const emptyEditing = {
+      id: 'st2',
+      name: 'Стеллаж 2',
+      moduleId: 'mod1',
+      editingExisting: true,
+      items: [{ id: 'ln2', name: 'Краб', included: false, qty: 4 }],
+    };
+    expect(isMeaningfulRackDraft(emptyEditing)).toBe(false);
+    expect(shouldPersistStellageDraft(emptyEditing, [{ id: 'st1' }])).toBe(false);
+    expect(stellagesForProjectSave(stellagesFromProject(project), emptyEditing)).toHaveLength(1);
+  });
+
+  it('persists draft with included lines or wasInProjectList checkout', () => {
     const withIncluded = {
       id: 'st2',
       name: 'Стеллаж 2',
       moduleId: 'mod1',
       items: [{ id: 'ln2', name: 'Краб', included: true, qty: 4 }],
     };
+    expect(isMeaningfulRackDraft(withIncluded)).toBe(true);
     expect(stellagesForProjectSave(stellagesFromProject(project), withIncluded)).toHaveLength(2);
 
     const editing = {
@@ -127,12 +142,30 @@ describe('projectBuilderHydrate', () => {
       name: 'Стеллаж 1',
       moduleId: 'mod1',
       editingExisting: true,
+      wasInProjectList: true,
       items: [{ id: 'ln1', name: 'Труба', included: false, qty: 1 }],
     };
     const mergedEdit = stellagesForProjectSave([], editing);
     expect(mergedEdit).toHaveLength(1);
     expect(mergedEdit[0].id).toBe('st1');
     expect(mergedEdit[0].editingExisting).toBeUndefined();
+    expect(mergedEdit[0].wasInProjectList).toBeUndefined();
+  });
+
+  it('forcePersistForFrame saves rack opened for scheme even without included lines', () => {
+    const draft = {
+      id: 'st2',
+      name: 'Стеллаж 2',
+      moduleId: 'mod1',
+      forcePersistForFrame: true,
+      hasFrameDrawing: true,
+      items: [{ id: 'ln2', name: 'Краб', included: false, qty: 4 }],
+    };
+    expect(isMeaningfulRackDraft(draft)).toBe(true);
+    const merged = stellagesForProjectSave([], draft);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe('st2');
+    expect(merged[0].forcePersistForFrame).toBeUndefined();
   });
 
   it('validates stellage before frame drawing without requiring selected items', () => {
@@ -516,6 +549,13 @@ describe('projectBuilderHydrate', () => {
       id: 'st2',
       name: 'Стеллаж 2',
       editingExisting: true,
+      items: [{ included: false }],
+    }, [])).toBe(false);
+    expect(shouldPersistStellageDraft({
+      id: 'st2',
+      name: 'Стеллаж 2',
+      editingExisting: true,
+      wasInProjectList: true,
       items: [{ included: false }],
     }, [])).toBe(true);
   });
