@@ -1,0 +1,257 @@
+import { describe, expect, it, beforeEach } from "vitest";
+import { configureClientSections, DEFAULT_CLIENT_SECTIONS } from "../shared/clientSections.js";
+import { FRAME_BOM_SOURCE } from "../shared/frameBomProjectItems.js";
+import { PURCHASE_STATUS } from "../shared/purchaseStatusRules.js";
+import { matchSpecLineFilter } from "../shared/specLineFilters.js";
+import {
+  buildProjectPreSendChecklist,
+  selectAllPreSendProblemIds,
+  selectPreSendGroupIds,
+} from "../shared/projectPreSendChecklist.js";
+
+beforeEach(() => {
+  configureClientSections(DEFAULT_CLIENT_SECTIONS);
+});
+
+const m034Material = {
+  id: "m034",
+  name: "Соединитель пластикового воздуховода 55×110 мм",
+  unit: "шт",
+  basePrice: 85,
+  supplier: "ВентПро",
+  link: "https://example.com/m034",
+  clientSection: "trays_channels",
+  clientSubsection: "NFT-каналы",
+  clientVisibleDefault: false,
+  visibleToClient: false,
+};
+
+function baseItem(over = {}) {
+  return {
+    id: over.id || "it1",
+    name: "Болт M6",
+    unit: "шт",
+    qty: 2,
+    price: 50,
+    itemType: "material",
+    includedInProject: true,
+    visibleToClient: true,
+    approved: true,
+    clientSection: "stellage",
+    clientSubsection: "Каркас и профиль",
+    supplier: "КрепёжПро",
+    link: "https://example.com/bolt",
+    photoUrl: "/photos/bolt.jpg",
+    purchaseStatus: PURCHASE_STATUS.NOT_BOUGHT,
+    ...over,
+  };
+}
+
+describe("buildProjectPreSendChecklist", () => {
+  it("counts no_price group", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem(),
+      baseItem({ id: "p", price: 0 }),
+    ]);
+    const group = checklist.groups.find((g) => g.key === "no_price");
+    expect(group.count).toBe(1);
+    expect(group.filterKey).toBe("no_price");
+  });
+
+  it("counts no_link group", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem(),
+      baseItem({ id: "l", link: "" }),
+    ]);
+    expect(checklist.groups.find((g) => g.key === "no_link").count).toBe(1);
+  });
+
+  it("counts no_supplier group", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem(),
+      baseItem({ id: "s", supplier: "" }),
+    ]);
+    expect(checklist.groups.find((g) => g.key === "no_supplier").count).toBe(1);
+  });
+
+  it("hidden_from_client is warning severity, not blocker", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ visibleToClient: false, visible: false, approved: false }),
+    ]);
+    const group = checklist.groups.find((g) => g.key === "hidden_from_client");
+    expect(group.severity).toBe("warning");
+    expect(group.count).toBe(1);
+    expect(checklist.blockers).toBe(0);
+    expect(checklist.warnings).toBe(1);
+  });
+
+  it("m034 visible override true is not hidden", () => {
+    const item = {
+      id: "it_m034",
+      materialId: "m034",
+      name: m034Material.name,
+      qty: 12,
+      price: 85,
+      supplier: "ВентПро",
+      link: "https://example.com/m034",
+      includedInProject: true,
+      itemType: "material",
+      visibleToClient: true,
+      visible: true,
+      approved: true,
+      clientSection: "trays_channels",
+      clientSubsection: "NFT-каналы",
+    };
+    const checklist = buildProjectPreSendChecklist([item], [m034Material]);
+    expect(checklist.groups.find((g) => g.key === "hidden_from_client").count).toBe(0);
+    expect(checklist.groups.find((g) => g.key === "client_ready").count).toBe(1);
+  });
+
+  it("m034 visible override false is hidden", () => {
+    const item = {
+      id: "it_m034",
+      materialId: "m034",
+      name: m034Material.name,
+      qty: 12,
+      price: 85,
+      supplier: "ВентПро",
+      link: "https://example.com/m034",
+      includedInProject: true,
+      itemType: "material",
+      visibleToClient: false,
+      visible: false,
+      approved: false,
+    };
+    const checklist = buildProjectPreSendChecklist([item], [m034Material]);
+    expect(checklist.groups.find((g) => g.key === "hidden_from_client").count).toBe(1);
+    expect(checklist.allProblemIds).toContain("it_m034");
+  });
+
+  it("not_fit is blocker", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ purchaseStatus: PURCHASE_STATUS.NOT_FIT }),
+    ]);
+    const group = checklist.groups.find((g) => g.key === "not_fit");
+    expect(group.severity).toBe("blocker");
+    expect(checklist.status).toBe("not_ready");
+    expect(checklist.blockers).toBe(1);
+  });
+
+  it("need_help is warning", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ purchaseStatus: PURCHASE_STATUS.NEED_HELP }),
+    ]);
+    expect(checklist.groups.find((g) => g.key === "need_help").severity).toBe("warning");
+    expect(checklist.status).toBe("warning");
+    expect(checklist.blockers).toBe(0);
+    expect(checklist.warnings).toBe(1);
+  });
+
+  it("replacement_check is warning", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ purchaseStatus: PURCHASE_STATUS.REPLACEMENT_CHECK }),
+    ]);
+    expect(checklist.groups.find((g) => g.key === "replacement_check").severity).toBe("warning");
+    expect(checklist.warnings).toBe(1);
+  });
+
+  it("counts frame_bom group", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem(),
+      baseItem({ id: "bom", source: FRAME_BOM_SOURCE, sourceType: FRAME_BOM_SOURCE }),
+    ]);
+    expect(checklist.groups.find((g) => g.key === "frame_bom").count).toBe(1);
+  });
+
+  it("select all problematic excludes normal client-ready rows", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ id: "ok" }),
+      baseItem({ id: "bad", link: "" }),
+    ]);
+    const ids = selectAllPreSendProblemIds(checklist);
+    expect(ids).toContain("bad");
+    expect(ids).not.toContain("ok");
+  });
+
+  it("select all problematic includes hidden/no_price/no_link/no_supplier/not_fit", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ id: "p", price: 0 }),
+      baseItem({ id: "l", link: "" }),
+      baseItem({ id: "s", supplier: "" }),
+      baseItem({ id: "h", visibleToClient: false, visible: false, approved: false }),
+      baseItem({ id: "f", purchaseStatus: PURCHASE_STATUS.NOT_FIT }),
+    ]);
+    const ids = selectAllPreSendProblemIds(checklist);
+    expect(ids).toEqual(expect.arrayContaining(["p", "l", "s", "h", "f"]));
+  });
+
+  it("status not_ready when blockers exist", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ price: 0 }),
+      baseItem({ id: "l", link: "" }),
+    ]);
+    expect(checklist.status).toBe("not_ready");
+    expect(checklist.tone).toBe("bad");
+    expect(checklist.statusTitle).toBe("Не готово к отправке");
+  });
+
+  it("status warning when no blockers but warnings exist", () => {
+    const checklist = buildProjectPreSendChecklist([baseItem({ link: "" })]);
+    expect(checklist.status).toBe("warning");
+    expect(checklist.tone).toBe("warn");
+    expect(checklist.statusTitle).toBe("Можно отправлять с предупреждениями");
+  });
+
+  it("status ready when no blockers/warnings", () => {
+    const checklist = buildProjectPreSendChecklist([baseItem()]);
+    expect(checklist.status).toBe("ready");
+    expect(checklist.tone).toBe("ok");
+    expect(checklist.statusTitle).toBe("Готово к отправке");
+    expect(checklist.blockers).toBe(0);
+    expect(checklist.warnings).toBe(0);
+  });
+
+  it("filterKey maps to existing spec filters", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ link: "" }),
+      baseItem({ id: "h", visibleToClient: false }),
+    ]);
+    for (const group of checklist.groups) {
+      if (!group.filterKey || group.key === "client_ready") continue;
+      for (const id of group.itemIds) {
+        const item = group.key === "hidden_from_client"
+          ? baseItem({ id, visibleToClient: false })
+          : group.key === "no_link"
+            ? baseItem({ id, link: "" })
+            : baseItem({ id });
+        expect(matchSpecLineFilter(item, group.filterKey, "project")).toBe(true);
+      }
+    }
+  });
+
+  it("BOM ids with colon survive selected ids", () => {
+    const bomId = "it_fbom:d1:rack1:m034";
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({
+        id: bomId,
+        approved: true,
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+      }),
+    ]);
+    const ids = selectPreSendGroupIds(checklist, "frame_bom");
+    expect(ids).toEqual([bomId]);
+    expect(checklist.allProblemIds).not.toContain(bomId);
+  });
+
+  it("excluded items are ignored", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ id: "ex", includedInProject: false, price: 0, link: "" }),
+      baseItem({ id: "ok" }),
+    ]);
+    expect(checklist.groups.find((g) => g.key === "no_price").count).toBe(0);
+    expect(checklist.groups.find((g) => g.key === "no_link").count).toBe(0);
+    expect(checklist.allProblemIds).not.toContain("ex");
+    expect(checklist.groups.find((g) => g.key === "client_ready").count).toBe(1);
+  });
+});

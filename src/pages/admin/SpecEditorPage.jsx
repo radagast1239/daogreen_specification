@@ -51,6 +51,7 @@ import ActivityFeed from "../../components/ActivityFeed.jsx";
 import PublishChecklist, { PublishGateModal } from "../../components/PublishChecklist.jsx";
 import ProjectHqBar from "../../components/ProjectHqBar.jsx";
 import ClientDeliveryPanel from "../../components/ClientDeliveryPanel.jsx";
+import ProjectPreSendPanel from "../../components/ProjectPreSendPanel.jsx";
 import PrePublishCheckModal from "../../components/PrePublishCheckModal.jsx";
 import ImportFromProjectModal from "../../components/ImportFromProjectModal.jsx";
 import CompareProjectsModal from "../../components/CompareProjectsModal.jsx";
@@ -617,6 +618,24 @@ export default function SpecEditorPage() {
           onOpenClientLink={() => url && window.open(url, "_blank", "noopener,noreferrer")}
           onCopyClientLink={copyClientLink}
           preSendMessages={deliveryPreSend}
+        />
+
+        <ProjectPreSendPanel
+          items={project.items || []}
+          materials={state.materials}
+          publishCheck={publishCheck}
+          activeFilter={specQuickFilter}
+          onFilterSelect={handleDashboardFilter}
+          selectedItemIds={specSelectedIds}
+          onSelectItems={setSpecSelectedIds}
+          onBulkShowClient={() =>
+            bulkDeliveryPatch({ visibleToClient: true, visible: true, approved: true })
+          }
+          onBulkHideClient={() =>
+            bulkDeliveryPatch({ visibleToClient: false, visible: false, approved: false })
+          }
+          onBulkRefreshPrice={bulkDeliveryRefreshPrice}
+          onClearSelection={() => clearSpecSelectionRef.current?.()}
         />
 
         <div className="print-header">
