@@ -11,7 +11,7 @@ import {
 } from "../../store/helpers.js";
 import { SPECIALIST_MAP, PURCHASE_STATUSES } from "../../data/modules.js";
 import { VAT_RATES, lineGross, lineContributesToSum, RESPONSIBLE_OPTIONS } from "../../lib/itemHelpers.js";
-import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS } from "../../../shared/itemTypes.js";
+import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient } from "../../../shared/itemTypes.js";
 import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
 import { PROJECT_DASHBOARD_FILTERS, resolveDashboardFilterLabel } from "../../../shared/projectDashboardSummary.js";
 import { FARM_LINE_GROUPS, farmLineGroupLabel } from "../../../shared/farmLineGroups.js";
@@ -1479,7 +1479,7 @@ function SpecTab({
                     <td style={{ width: 60, textAlign: "center" }} title="Скрыто от клиента">
                       <input
                         type="checkbox"
-                        checked={it.includedInProject !== false && it.visibleToClient === false}
+                        checked={it.includedInProject !== false && !lineVisibleToClient(it, materials.find((m) => m.id === it.materialId))}
                         disabled={it.includedInProject === false}
                         onChange={(e) =>
                           editItem(it.id, {

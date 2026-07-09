@@ -419,6 +419,9 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
       purchaseStatus: status,
       actualPrice: it.actualPrice,
       clientComment: it.clientComment,
+      visibleToClient: it.visibleToClient,
+      visible: it.visible,
+      approved: it.approved,
     });
   }
 
@@ -452,6 +455,11 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
       item.purchaseStatus = preserved.purchaseStatus;
       if (preserved.actualPrice != null) item.actualPrice = preserved.actualPrice;
       if (preserved.clientComment) item.clientComment = preserved.clientComment;
+      if (preserved.visibleToClient != null) {
+        item.visibleToClient = preserved.visibleToClient;
+        item.visible = preserved.visible ?? preserved.visibleToClient;
+        item.approved = preserved.approved ?? preserved.visibleToClient;
+      }
     }
     added.push(item);
     sortOrder += 1;

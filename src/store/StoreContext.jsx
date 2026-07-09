@@ -3,10 +3,21 @@ import { buildReferenceData } from "../lib/referenceData.js";
 import { applyClientSectionsFromSettings } from "../lib/clientSectionsConfig.js";
 import { buildItemsFromModules } from "../lib/apiHelpers.js";
 import { api as apiClient } from "../lib/api.js";
+import {
+  reconcileItemClientVisibilityFlags,
+  reconcileProjectItemsVisibility,
+} from "../../shared/itemTypes.js";
 
 export { buildItemsFromModules };
 
 const StoreContext = createContext(null);
+
+function reconcileStoredItem(item, materials = []) {
+  const material = item?.materialId
+    ? materials.find((m) => m.id === item.materialId)
+    : null;
+  return reconcileItemClientVisibilityFlags(item, material);
+}
 
 function reducer(state, action) {
   switch (action.type) {
@@ -63,7 +74,11 @@ function reducer(state, action) {
             ? {
                 ...p,
                 updatedAt: action.updatedAt || new Date().toISOString(),
-                items: p.items.map((it) => (it.id === action.itemId ? { ...it, ...action.item } : it)),
+                items: p.items.map((it) =>
+                  it.id === action.itemId
+                    ? reconcileStoredItem({ ...it, ...action.item }, state.materials)
+                    : it
+                ),
               }
             : p
         ),
@@ -84,13 +99,15 @@ function reducer(state, action) {
             : p
         ),
       };
-    case "PROJECT_ENSURE":
-      return state.projects.some((p) => p.id === action.project.id)
+    case "PROJECT_ENSURE": {
+      const project = reconcileProjectItemsVisibility(action.project, state.materials);
+      return state.projects.some((p) => p.id === project.id)
         ? {
             ...state,
-            projects: state.projects.map((p) => (p.id === action.project.id ? action.project : p)),
+            projects: state.projects.map((p) => (p.id === project.id ? project : p)),
           }
-        : { ...state, projects: [action.project, ...state.projects] };
+        : { ...state, projects: [project, ...state.projects] };
+    }
     default:
       return state;
   }

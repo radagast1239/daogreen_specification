@@ -1,4 +1,5 @@
 import { buildRefreshPatchForItem } from "../../shared/refreshItemFromMaterial.js";
+import { reconcileItemClientVisibilityFlags } from "../../shared/itemTypes.js";
 
 async function patchItemSequential(request, projectId, { itemIds = [], patch = {} } = {}) {
   const updated = [];
@@ -9,7 +10,7 @@ async function patchItemSequential(request, projectId, { itemIds = [], patch = {
         `/api/projects/${projectId}/items/${encodeURIComponent(itemId)}`,
         { method: "PATCH", body: patch }
       );
-      updated.push(item);
+      updated.push(reconcileItemClientVisibilityFlags({ ...item, ...patch }));
     } catch (e) {
       if (e?.status === 404) {
         skipped.push({ itemId, reason: "not_found" });
@@ -65,7 +66,7 @@ export async function refreshItemsFromMaterialWithFallback(
       method: "PATCH",
       body: patch,
     });
-    updated.push(row);
+    updated.push(reconcileItemClientVisibilityFlags(row));
   }
 
   return { updated, skipped, fallback: true };

@@ -80,33 +80,89 @@ export function lineContributesToSum(it) {
   return isPurchasableLineType(t);
 }
 
-/** Показывается клиенту (закупка / экспорт) */
-export function lineVisibleToClient(it) {
+function itemIncludedInProject(it) {
+  return it.includedInProject != null ? it.includedInProject !== false : it.enabled !== false;
+}
+
+function materialDefaultHidden(material) {
+  if (!material) return false;
+  if (material.clientVisibleDefault === false) return true;
+  if (material.visibleToClient === false) return true;
+  if (material.showToClient === false) return true;
+  return false;
+}
+
+function legacyItemClientVisible(it) {
+  if (it.showToClient != null) return !!it.showToClient;
+  if (it.clientVisible != null) return !!it.clientVisible;
+  if (it.visible != null) return !!it.visible;
+  if (it.approved != null) return !!it.approved;
+  return null;
+}
+
+/**
+ * Item-level override > legacy visible/approved > material default.
+ * @param {object|null|undefined} material
+ */
+export function resolveItemClientVisibility(it, material = null) {
+  if (!it) return false;
   const t = resolveItemType(it);
   if (t === "internal_note") return false;
+  if (!itemIncludedInProject(it)) return false;
 
-  const included =
-    it.includedInProject != null ? it.includedInProject !== false : it.enabled !== false;
-  if (!included) return false;
+  if (it.visibleToClient === true) return true;
+  if (it.visibleToClient === false) {
+    const legacy = legacyItemClientVisible(it);
+    if (legacy === true) return true;
+    return false;
+  }
 
-  if (it.visibleToClient != null) return !!it.visibleToClient;
+  const legacy = legacyItemClientVisible(it);
+  if (legacy != null) return legacy;
+
+  if (materialDefaultHidden(material)) return false;
   return true;
 }
 
-/** Синхронизация legacy-полей visible / approved / enabled */
-export function normalizeItemFlags(it) {
-  const includedInProject =
-    it.includedInProject != null ? !!it.includedInProject : it.enabled !== false;
-  const visibleToClient =
-    it.visibleToClient != null ? !!it.visibleToClient : includedInProject;
+/** Показывается клиенту (закупка / экспорт) */
+export function lineVisibleToClient(it, material = null) {
+  return resolveItemClientVisibility(it, material);
+}
+
+/** Синхронизировать visible / approved / visibleToClient после resolve. */
+export function reconcileItemClientVisibilityFlags(it, material = null) {
+  const visibleToClient = resolveItemClientVisibility(it, material);
   return {
     ...it,
-    includedInProject,
     visibleToClient,
-    enabled: includedInProject,
     visible: visibleToClient,
     approved: visibleToClient,
   };
+}
+
+/** @param {object[]} items @param {object[]} [materials] */
+export function reconcileProjectItemsVisibility(project, materials = []) {
+  if (!project?.items?.length) return project;
+  const matById = new Map((materials || []).map((m) => [m.id, m]));
+  return {
+    ...project,
+    items: project.items.map((it) =>
+      reconcileItemClientVisibilityFlags(
+        it,
+        it.materialId ? matById.get(it.materialId) : null
+      )
+    ),
+  };
+}
+
+/** Синхронизация legacy-полей visible / approved / enabled */
+export function normalizeItemFlags(it, material = null) {
+  const includedInProject =
+    it.includedInProject != null ? !!it.includedInProject : it.enabled !== false;
+  return reconcileItemClientVisibilityFlags(
+    { ...it, includedInProject, enabled: includedInProject },
+    material
+  );
 }
 
 export function itemFlagsToDb(it) {
