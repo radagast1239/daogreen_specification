@@ -1,5 +1,9 @@
 import { buildFrameBomPurchaseDraft } from "../../shared/frameBomMaterialMap.js";
 import { calculateAngleFasteners } from "./frameAngleStock.js";
+import { calculateFrameGeometry } from "./frameGeometry.js";
+import { generateCutList } from "./frameCutList.js";
+import { extractTubeCutsFromCutList, calculateTubeStockOptions } from "./frameTubeStock.js";
+import { calculateAngleStockOptions } from "./frameAngleStock.js";
 
 export const PREVIEW_BANNER_TEXT = "Предпросмотр. В закупку ещё не добавлено.";
 export const PREVIEW_FUTURE_NOTE =
@@ -73,6 +77,38 @@ export function buildFramePurchaseDraftFromContext({ params, cutList, geom, stoc
   return buildFrameBomPurchaseDraft({
     ...base,
     tubeStock: stockOptions,
+  });
+}
+
+/**
+ * Rebuild purchase draft from saved frameConfig (saved drawing JSON).
+ * @param {object|null|undefined} frameConfig
+ */
+export function buildFramePurchaseDraftFromFrameConfig(frameConfig) {
+  const params = frameConfig && typeof frameConfig === "object" ? frameConfig : null;
+  if (!params) return [];
+
+  const geom = calculateFrameGeometry(params);
+  const hasErrors = geom.validationErrors?.length > 0;
+  const geomOk = !hasErrors && geom.posts;
+  if (!geomOk) return [];
+
+  const cutList = generateCutList(params);
+  const isAngle = params.constructionType === "perforated_angle";
+  let stockOptions = null;
+  if (cutList.length) {
+    if (isAngle) {
+      stockOptions = calculateAngleStockOptions(cutList, { overlapMm: params.angleOverlapMm });
+    } else {
+      stockOptions = calculateTubeStockOptions(extractTubeCutsFromCutList(cutList));
+    }
+  }
+
+  return buildFramePurchaseDraftFromContext({
+    params,
+    cutList,
+    geom: isAngle ? geom : geom,
+    stockOptions,
   });
 }
 

@@ -4,6 +4,14 @@ import { photoSrc } from '../lib/api.js';
 import FrameDrawingLinkButton from './FrameDrawingLinkButton.jsx';
 import { buildFrameDrawingLink } from '../../shared/frameDrawingContext.js';
 import { drawingStatusLabel } from '../../shared/frameDrawingTargets.js';
+import {
+  FRAME_BOM_REFRESH_BUTTON_LABEL,
+  FRAME_DRAWING_EDIT_SCHEME_LABEL,
+  FRAME_DRAWING_OPEN_SCHEME_LABEL,
+} from '../../shared/frameDrawingActionsModel.js';
+import {
+  FRAME_BOM_UPDATE_BOM_HINT,
+} from '../frameConstructor/frameBomAddToProject.js';
 
 function formatDate(iso) {
   if (!iso) return '';
@@ -22,6 +30,9 @@ export default function FrameDrawingActions({
   compact = false,
   onNavigate = null,
   navigateDisabled = false,
+  onRefreshBom = null,
+  refreshBomBusy = false,
+  refreshBomDisabled = false,
 }) {
   const [showOlder, setShowOlder] = useState(false);
   const latest = drawings[0] || null;
@@ -36,6 +47,8 @@ export default function FrameDrawingActions({
   const openSchemeCtx = latest
     ? { ...context, drawingId: latest.id }
     : baseCtx;
+
+  const canRefreshBom = Boolean(context.projectId && latest && onRefreshBom);
 
   return (
     <div className={compact ? '' : 'frame-drawing-actions'}>
@@ -58,22 +71,33 @@ export default function FrameDrawingActions({
           {latest && (
             <>
               <span className="chip chip--ok" style={{ fontSize: 11 }}>v{latest.version}</span>
-              <FrameDrawingLinkButton context={openSchemeCtx} label="Открыть схему" onNavigate={onNavigate} disabled={navigateDisabled} />
+              <FrameDrawingLinkButton
+                context={openSchemeCtx}
+                label={FRAME_DRAWING_OPEN_SCHEME_LABEL}
+                onNavigate={onNavigate}
+                disabled={navigateDisabled}
+              />
               <a className="btn btn-sm" href={photoSrc(latest.pdfUrl)} target="_blank" rel="noreferrer">
                 Открыть PDF
               </a>
-              <FrameDrawingLinkButton context={replaceCtx} label="Обновить схему" onNavigate={onNavigate} disabled={navigateDisabled} />
-              {context.projectId && (
+              <FrameDrawingLinkButton
+                context={replaceCtx}
+                label={FRAME_DRAWING_EDIT_SCHEME_LABEL}
+                onNavigate={onNavigate}
+                disabled={navigateDisabled}
+              />
+              {canRefreshBom && (
                 <>
-                  <FrameDrawingLinkButton
-                    context={{ ...openSchemeCtx, constructorTab: 'cutlist' }}
-                    label="Обновить BOM"
+                  <button
+                    type="button"
                     className="btn btn-sm btn-outline"
-                    onNavigate={onNavigate}
-                    disabled={navigateDisabled}
-                  />
+                    disabled={refreshBomBusy || refreshBomDisabled || navigateDisabled}
+                    onClick={() => onRefreshBom({ context: openSchemeCtx, drawing: latest })}
+                  >
+                    {refreshBomBusy ? 'Обновление…' : FRAME_BOM_REFRESH_BUTTON_LABEL}
+                  </button>
                   <span className="muted" style={{ fontSize: 10, width: '100%' }}>
-                    Обновить BOM — пересоберёт позиции каркаса и уберёт старые дубли этого стеллажа.
+                    {FRAME_BOM_UPDATE_BOM_HINT}
                   </span>
                 </>
               )}

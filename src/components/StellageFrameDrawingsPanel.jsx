@@ -3,12 +3,19 @@ import { api } from '../lib/api.js';
 import FrameDrawingActions from './FrameDrawingActions.jsx';
 import { drawingsForProjectStellage } from '../../shared/frameDrawingTargets.js';
 import { buildSavedProjectFrameDrawingContext } from '../../shared/frameDrawingContext.js';
+import { useStore } from '../store/StoreContext.jsx';
+import { useToast } from './Toast.jsx';
+import { executeFrameBomRefreshFromDrawing } from '../frameConstructor/frameBomAddToProject.js';
 
 export default function StellageFrameDrawingsPanel({ project, returnPath }) {
   const stellages = project?.stellageConfigs || [];
   const [drawings, setDrawings] = useState([]);
   const [presetDrawings, setPresetDrawings] = useState({});
   const [loading, setLoading] = useState(true);
+  const [refreshBusyRack, setRefreshBusyRack] = useState('');
+  const { actions, state } = useStore();
+  const { confirm, success, error } = useToast();
+  const materials = state.reference?.materials || null;
 
   useEffect(() => {
     if (!project?.id) {
@@ -44,13 +51,43 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
     });
   }, [project?.id, project?.stellageConfigs]);
 
+  const handleRefreshBom = async ({ context, drawing }) => {
+    if (!project?.id || !drawing?.id) return;
+    const rackKey = context.moduleRackKey || context.rackId || context.stellageId || '';
+    setRefreshBusyRack(rackKey);
+    try {
+      let drawingRow = drawing;
+      if (!drawingRow?.frameConfig) {
+        drawingRow = await api.getFrameDrawing(drawing.id);
+      }
+      const outcome = await executeFrameBomRefreshFromDrawing({
+        project,
+        drawing: drawingRow,
+        drawingContext: context,
+        materials,
+        confirm,
+        deleteItem: actions.itemDelete.bind(actions),
+        updateProject: actions.projectUpdate.bind(actions),
+        loadProject: actions.loadProject.bind(actions),
+      });
+      if (outcome.cancelled || outcome.skipped) return;
+      success(
+        `${outcome.summary?.title || 'BOM обновлён'} Удалено legacy: ${outcome.summary?.removedCount ?? 0}.`,
+      );
+    } catch (err) {
+      error(err?.message || 'Не удалось обновить BOM.');
+    } finally {
+      setRefreshBusyRack('');
+    }
+  };
+
   if (!stellages.length) return null;
 
   return (
     <div className="card" id="stellages-panel" style={{ padding: 14, marginBottom: 12 }}>
       <h3 style={{ marginTop: 0, fontSize: 15 }}>Схемы каркасов</h3>
       <p className="muted" style={{ fontSize: 12, margin: '0 0 10px' }}>
-        PDF-схемы из конструктора каркасов. Привязаны к стеллажам проекта. BOM каркаса добавляется в закупку отдельной кнопкой в конструкторе.
+        PDF-схемы из конструктора каркасов. «Обновить BOM» пересобирает закупку по сохранённой схеме без открытия конструктора.
       </p>
       {loading ? (
         <p className="muted" style={{ fontSize: 13 }}>Загрузка…</p>
@@ -64,6 +101,7 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
               ...baseCtx,
               returnTo: returnPath || baseCtx.returnTo,
             };
+            const moduleRackKey = ctx.moduleRackKey || st.id;
             return (
               <li key={st.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
                 <div style={{ marginBottom: 6 }}>
@@ -77,6 +115,9 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
                   context={ctx}
                   drawings={rackDrawings}
                   presetDrawing={presetDrawing}
+                  onRefreshBom={handleRefreshBom}
+                  refreshBomBusy={refreshBusyRack === moduleRackKey}
+                  refreshBomDisabled={!materials?.length}
                 />
               </li>
             );

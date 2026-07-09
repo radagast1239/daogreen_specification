@@ -281,16 +281,58 @@ export function itemBelongsToRackMergeScope(item, moduleRackKey, options = {}) {
     if (stellageId && stellageId === sid) return true;
   }
 
+  const builderStId = resolveBuilderPrefixedStellageId(item);
+  if (builderStId) {
+    const optStellage = String(options.stellageId || "").trim();
+    if (optStellage && builderStId === optStellage) return true;
+    if (rack === builderStId || rack.endsWith(`:${builderStId}`) || rack.includes(`:${builderStId}:`)) {
+      return true;
+    }
+    if (rack.startsWith("stellage:") && rack.slice("stellage:".length) === builderStId) return true;
+  }
+
+  if (rack) {
+    const itemId = String(item.id || "");
+    if (itemId.includes(rack) && (isFrameBomLine(item) || isBuilderSyncedFrameBomLine(item))) {
+      return true;
+    }
+  }
+
   if (isFrameBomLine(item)) {
     const rackLabel = String(options.rackLabel || "").trim();
     if (rackLabel) {
       const mod = String(item.module || item.section || "").trim();
-      if (mod && mod === rackLabel) return true;
+      const itemRackForLabel = resolveFrameBomItemModuleRackKey(item);
+      if (mod && mod === rackLabel && (!itemRackForLabel || itemRackForLabel === rack)) {
+        return true;
+      }
     }
     if (sk && (sk.includes(`:${rack}:`) || sk.endsWith(`:${rack}`))) return true;
   }
 
   return false;
+}
+
+/**
+ * Stellage id from builder-synced project_item id: st_<stellageId>__...
+ * @param {object} item
+ */
+export function resolveBuilderPrefixedStellageId(item) {
+  const id = String(item?.id || "");
+  if (!id.startsWith("st_")) return "";
+  const sep = id.indexOf("__");
+  if (sep <= 3) return "";
+  return id.slice(0, sep);
+}
+
+/**
+ * Builder-hydrated BOM duplicate rows (ProjectBuilder sync), not canonical frame_bom.
+ * @param {object} item
+ */
+export function isBuilderSyncedFrameBomLine(item) {
+  if (!item || isExplicitManualProjectItem(item)) return false;
+  const id = String(item?.id || "");
+  return /^st_.+__(?:ln_|it_fbom_)/.test(id);
 }
 
 /**
@@ -303,8 +345,10 @@ export function itemBelongsToRackMergeScope(item, moduleRackKey, options = {}) {
  */
 export function shouldRemoveFrameBomOnMerge(item, moduleRackKey, options = {}) {
   if (!item || isExplicitManualProjectItem(item)) return false;
+  const inScope = itemBelongsToRackMergeScope(item, moduleRackKey, options);
+  if (isBuilderSyncedFrameBomLine(item)) return inScope;
   if (!isFrameBomLine(item)) return false;
-  return itemBelongsToRackMergeScope(item, moduleRackKey, options);
+  return inScope;
 }
 
 /**
@@ -735,7 +779,78 @@ export function frameBomItemsForModuleRack(items, moduleRackKey, options = {}) {
   const rackKey = String(moduleRackKey || "").trim();
   if (!rackKey) return [];
   const candidates = (items || []).filter(
-    (it) => isFrameBomLine(it) && itemBelongsToRackMergeScope(it, rackKey, options),
+    (it) => (isFrameBomLine(it) || isBuilderSyncedFrameBomLine(it))
+      && itemBelongsToRackMergeScope(it, rackKey, options),
   );
   return dedupeFrameBomProjectItems(candidates);
+}
+
+/**
+ * Build repair plan for explicit "Обновить BOM" in saved specification.
+ *
+ * @param {object[]} existingItems
+ * @param {object[]} purchaseDraft
+ * @param {object} options
+ */
+export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = {}) {
+  const repairOpts = { ...options, explicitRepair: true };
+  const existing = Array.isArray(existingItems) ? existingItems : [];
+  const mergeResult = mergeFrameBomIntoProjectItems(existing, purchaseDraft, repairOpts);
+
+  if (mergeResult.blocked) {
+    return {
+      blocked: true,
+      blockedReason: mergeResult.blockedReason,
+      missingMaterialIds: mergeResult.missingMaterialIds || [],
+      warnings: mergeResult.warnings || [],
+      cleanedItems: [...existing],
+      removeItemIds: [],
+      upsertItems: [],
+      preservedItems: existing.filter(
+        (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
+      ),
+      debug: { mergeResult },
+    };
+  }
+
+  const cleanedIds = new Set(
+    mergeResult.items.map((it) => String(it.id || "")).filter(Boolean),
+  );
+
+  const removeItemIds = existing
+    .filter((it) => {
+      const id = String(it.id || "");
+      if (!id || cleanedIds.has(id)) return false;
+      if (isExplicitManualProjectItem(it)) return false;
+      return isFrameBomLine(it) || isBuilderSyncedFrameBomLine(it);
+    })
+    .map((it) => it.id);
+
+  const existingById = new Map(existing.map((it) => [it.id, it]));
+  const upsertItems = mergeResult.items.filter((it) => {
+    if (!isFrameBomLine(it)) return false;
+    const prev = existingById.get(it.id);
+    return !prev || prev.qty !== it.qty || prev.price !== it.price || prev.supplier !== it.supplier;
+  });
+
+  const preservedItems = mergeResult.items.filter(
+    (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
+  );
+
+  return {
+    blocked: false,
+    blockedReason: "",
+    missingMaterialIds: [],
+    cleanedItems: mergeResult.items,
+    removeItemIds: [...new Set(removeItemIds)],
+    upsertItems,
+    preservedItems,
+    warnings: mergeResult.warnings || [],
+    debug: {
+      removedCount: mergeResult.removedCount,
+      addedCount: mergeResult.addedCount,
+      keptCount: mergeResult.keptCount,
+      mergeResult,
+    },
+  };
 }

@@ -14,6 +14,9 @@ import {
   dedupeFrameBomProjectItems,
   countDedupedFrameBomItems,
   isExplicitManualProjectItem,
+  buildFrameBomRepairPlan,
+  isBuilderSyncedFrameBomLine,
+  resolveBuilderPrefixedStellageId,
 } from "../shared/frameBomProjectItems.js";
 
 const TUBE_CUTS = [
@@ -803,5 +806,154 @@ describe("dedupeFrameBomProjectItems", () => {
       { id: "manual2", materialId: "m073", source: "manual" },
     ];
     expect(dedupeFrameBomProjectItems(items)).toHaveLength(0);
+  });
+});
+
+describe("buildFrameBomRepairPlan / builder legacy ids", () => {
+  const prodMaterials = [
+    ...catalogMaterials,
+    {
+      id: "m073",
+      name: "Болт М6×20",
+      unit: "шт",
+      basePrice: 0.5,
+      supplier: "Лемана про",
+      link: "https://example.com/bolt",
+      photoUrl: "/photos/m073.jpg",
+      category: "Каркас",
+    },
+    {
+      id: "m003",
+      name: "Краб X",
+      unit: "шт",
+      basePrice: 12,
+      supplier: "Metallist",
+      link: "https://example.com/crab",
+      photoUrl: "/photos/m003.jpg",
+      category: "Каркас",
+    },
+  ];
+
+  const prodRackOpts = {
+    projectId: "p_tvRZ7SOwL9",
+    drawingId: "fd_drawing",
+    moduleRackKey: "mod_protochka:st_mrdwu5kzthoor",
+    stellageId: "st_mrdwu5kzthoor",
+    rackLabel: "Стеллаж 1",
+    materials: prodMaterials,
+  };
+
+  function builderLegacyLn(idSuffix, materialId, overrides = {}) {
+    return {
+      id: `st_mrdwu5kzthoor__ln_${idSuffix}`,
+      materialId,
+      name: "Legacy builder",
+      qty: 312,
+      price: 0,
+      supplier: "",
+      ...overrides,
+    };
+  }
+
+  function builderLegacyFbom(materialId, bomKey = "bolt_m6x20") {
+    return {
+      id: `st_mrdwu5kzthoor__it_fbom_x_mod_protochka:st_mrdwu5kzthoor_${bomKey}`,
+      materialId,
+      name: "Legacy prefixed fbom",
+      qty: 28,
+      price: 0,
+      supplier: "",
+      clientNote: "Из схемы стеллажа",
+    };
+  }
+
+  it("detects builder-prefixed st_<rack>__ln_* ids", () => {
+    const row = builderLegacyLn("abc", "m073");
+    expect(isBuilderSyncedFrameBomLine(row)).toBe(true);
+    expect(resolveBuilderPrefixedStellageId(row)).toBe("st_mrdwu5kzthoor");
+  });
+
+  it("detects builder-prefixed st_<rack>__it_fbom_* ids", () => {
+    const row = builderLegacyFbom("m003", "crab_x");
+    expect(isBuilderSyncedFrameBomLine(row)).toBe(true);
+  });
+
+  it("explicit repair removes builder legacy and keeps canonical row", () => {
+    const existing = [
+      builderLegacyLn("bolt1", "m073"),
+      {
+        id: "it_fbom_CVKWuQfs4UCv_mod_protochka:st_mrdwu5kzthoor_bolt_m6x20",
+        materialId: "m073",
+        qty: 312,
+        price: 0.5,
+        supplier: "Лемана про",
+        clientNote: "Из схемы стеллажа",
+        sourceKey: "frame_bom:fd:mod_protochka:st_mrdwu5kzthoor:bolt_m6x20",
+        sourceObjectIds: { moduleRackKey: "mod_protochka:st_mrdwu5kzthoor", bomKey: "bolt_m6x20" },
+      },
+      { id: "manual_bolt", materialId: "m073", qty: 5, source: "manual" },
+    ];
+    const plan = buildFrameBomRepairPlan(existing, [boltDraft()], prodRackOpts);
+    expect(plan.removeItemIds).toContain("st_mrdwu5kzthoor__ln_bolt1");
+    expect(plan.cleanedItems.filter((i) => i.materialId === "m073" && i.source !== "manual")).toHaveLength(1);
+    expect(plan.cleanedItems.some((i) => i.id === "manual_bolt")).toBe(true);
+  });
+
+  it("manual same material row is preserved", () => {
+    const existing = [
+      builderLegacyLn("x", "m073"),
+      { id: "manual_bolt", materialId: "m073", qty: 20, source: "manual", note: "ручная" },
+    ];
+    const plan = buildFrameBomRepairPlan(existing, [boltDraft()], prodRackOpts);
+    expect(plan.cleanedItems.some((i) => i.id === "manual_bolt")).toBe(true);
+    expect(plan.removeItemIds).not.toContain("manual_bolt");
+  });
+
+  it("BOM of another rack is preserved", () => {
+    const otherRackItem = canonicalBomItem({
+      materialId: "m073",
+      moduleRackKey: "mod_other:st_other",
+      drawingId: "d2",
+    });
+    const existing = [
+      builderLegacyLn("x", "m073"),
+      otherRackItem,
+    ];
+    const plan = buildFrameBomRepairPlan(existing, [boltDraft()], prodRackOpts);
+    expect(plan.cleanedItems.some((i) => i.id === otherRackItem.id)).toBe(true);
+  });
+
+  it("repeated repair is idempotent", () => {
+    const dirty = [
+      builderLegacyLn("a", "m073"),
+      builderLegacyFbom("m003", "crab_x"),
+      canonicalBomItem({ materialId: "m073", moduleRackKey: "mod_protochka:st_mrdwu5kzthoor" }),
+    ];
+    const first = buildFrameBomRepairPlan(dirty, [boltDraft(), crabGDraft({ qty: 28 })], prodRackOpts);
+    const second = buildFrameBomRepairPlan(first.cleanedItems, [boltDraft(), crabGDraft({ qty: 28 })], prodRackOpts);
+    expect(second.removeItemIds).toHaveLength(0);
+    expect(second.cleanedItems.length).toBe(first.cleanedItems.length);
+  });
+
+  it("cleanedItems has no duplicate BOM material rows for same rack", () => {
+    const existing = [
+      builderLegacyLn("b1", "m073"),
+      builderLegacyLn("b2", "m003"),
+      canonicalBomItem({ materialId: "m073", moduleRackKey: "mod_protochka:st_mrdwu5kzthoor" }),
+      canonicalBomItem({ materialId: "m003", bomKey: "crab_x", moduleRackKey: "mod_protochka:st_mrdwu5kzthoor" }),
+    ];
+    const plan = buildFrameBomRepairPlan(
+      existing,
+      [
+        boltDraft(),
+        { key: "crab_x", materialId: "m003", name: "Краб X", unit: "шт", qty: 28 },
+      ],
+      prodRackOpts,
+    );
+    const rackBom = plan.cleanedItems.filter(
+      (i) => i.materialId === "m073" || i.materialId === "m003",
+    );
+    expect(rackBom.filter((i) => i.materialId === "m073")).toHaveLength(1);
+    expect(rackBom.filter((i) => i.materialId === "m003")).toHaveLength(1);
   });
 });

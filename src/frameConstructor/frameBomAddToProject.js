@@ -1,10 +1,25 @@
 import {
   mergeFrameBomIntoProjectItems,
+  buildFrameBomRepairPlan,
   frameBomItemsForModuleRack,
   findMissingFrameBomMaterials,
   formatFrameBomMissingMaterialsMessage,
 } from "../../shared/frameBomProjectItems.js";
-import { visiblePurchaseDraftItems } from "./frameBomPurchasePreviewData.js";
+import {
+  visiblePurchaseDraftItems,
+  buildFramePurchaseDraftFromFrameConfig,
+} from "./frameBomPurchasePreviewData.js";
+import {
+  FRAME_BOM_REFRESH_BUTTON_LABEL,
+  FRAME_DRAWING_EDIT_SCHEME_LABEL,
+  FRAME_DRAWING_OPEN_SCHEME_LABEL,
+} from "../../shared/frameDrawingActionsModel.js";
+
+export {
+  FRAME_BOM_REFRESH_BUTTON_LABEL,
+  FRAME_DRAWING_EDIT_SCHEME_LABEL,
+  FRAME_DRAWING_OPEN_SCHEME_LABEL,
+};
 
 export const FRAME_BOM_ADD_BUTTON_LABEL =
   "Добавить / обновить BOM этого стеллажа в закупке проекта";
@@ -14,6 +29,8 @@ export const FRAME_BOM_ADD_BUTTON_HINT =
   "Повторное нажатие заменит BOM только этого стеллажа, ручные позиции проекта не трогаются.";
 export const FRAME_BOM_UPDATE_BOM_HINT =
   "Обновить BOM — пересоберёт позиции каркаса и уберёт старые дубли этого стеллажа.";
+export const FRAME_BOM_REFRESH_CONFIRM_TITLE = "Обновить BOM этого стеллажа в спецификации?";
+export const FRAME_BOM_REFRESH_SUCCESS_TITLE = "BOM каркаса обновлён. Дубли удалены.";
 export const FRAME_BOM_NO_PROJECT_REASON =
   "Добавление в закупку доступно только внутри проекта.";
 export const FRAME_BOM_UNSAVED_DRAWING_WARNING =
@@ -176,6 +193,203 @@ export function formatFrameBomAddSuccessSummary(mergeResult) {
     sourceRackPrefix: mergeResult.sourceRackPrefix,
     warnings: mergeResult.warnings || [],
   };
+}
+
+export function buildFrameBomMergeOptions(drawingContext = {}, materials = null) {
+  return {
+    projectId: drawingContext.projectId || "",
+    drawingId: drawingContext.drawingId || "",
+    moduleRackKey: resolveFrameBomModuleRackKey(drawingContext),
+    stellageId: drawingContext.rackId || drawingContext.stellageId || "",
+    rackLabel: drawingContext.rackLabel || "",
+    visibleToClient: true,
+    included: true,
+    materials: materials || undefined,
+  };
+}
+
+export function buildFrameBomRefreshConfirmMessage({ removeCount, upsertCount }) {
+  return [
+    `Будет пересобрано BOM по сохранённой схеме.`,
+    removeCount > 0 ? `Удалено дублей/legacy: ${removeCount}.` : "",
+    upsertCount > 0 ? `Обновлено BOM-позиций: ${upsertCount}.` : "",
+    "Ручные позиции проекта не будут затронуты.",
+    "",
+    "Продолжить?",
+  ].filter(Boolean).join("\n");
+}
+
+/**
+ * @param {string} projectId
+ * @param {string[]} itemIds
+ * @param {(projectId: string, itemId: string) => Promise<void>} deleteItem
+ */
+export async function deleteProjectItemsByIds(projectId, itemIds, deleteItem) {
+  const deleted = [];
+  const errors = [];
+  for (const itemId of itemIds || []) {
+    const id = String(itemId || "").trim();
+    if (!id) continue;
+    try {
+      await deleteItem(projectId, id);
+      deleted.push(id);
+    } catch (e) {
+      if (e?.status === 404) continue;
+      errors.push({ itemId: id, message: e?.message || String(e) });
+    }
+  }
+  return { deleted, errors };
+}
+
+/**
+ * @param {{
+ *   project: { items?: object[], id?: string },
+ *   purchaseDraft: object[],
+ *   drawingContext: object,
+ *   materials?: object[]|null,
+ *   deleteItem: (projectId: string, itemId: string) => Promise<void>,
+ *   updateProject: (projectId: string, patch: object) => Promise<object>,
+ *   loadProject?: (projectId: string) => Promise<object>,
+ * }} params
+ */
+export async function applyFrameBomRefreshRepair({
+  project,
+  purchaseDraft,
+  drawingContext,
+  materials = null,
+  deleteItem,
+  updateProject,
+  loadProject = null,
+}) {
+  const projectId = drawingContext?.projectId || project?.id;
+  if (!projectId || !project?.items) {
+    return { skipped: true };
+  }
+
+  const plan = buildFrameBomRepairPlan(
+    project.items,
+    purchaseDraft,
+    buildFrameBomMergeOptions({ ...drawingContext, projectId }, materials),
+  );
+
+  if (plan.blocked) {
+    const err = new Error(plan.blockedReason || "BOM не обновлён.");
+    err.missingMaterialIds = plan.missingMaterialIds || [];
+    throw err;
+  }
+
+  const deleteResult = await deleteProjectItemsByIds(projectId, plan.removeItemIds, deleteItem);
+  if (deleteResult.errors.length) {
+    const err = new Error(
+      `Не удалось удалить ${deleteResult.errors.length} legacy-позиций BOM.`,
+    );
+    err.deleteErrors = deleteResult.errors;
+    throw err;
+  }
+
+  const updated = await updateProject(projectId, { items: plan.cleanedItems });
+  const reloaded = loadProject ? await loadProject(projectId) : updated;
+
+  return {
+    plan,
+    updated: reloaded,
+    deleteResult,
+    summary: {
+      title: FRAME_BOM_REFRESH_SUCCESS_TITLE,
+      removedCount: plan.removeItemIds.length,
+      addedCount: plan.debug?.addedCount ?? 0,
+      upsertCount: plan.upsertItems.length,
+      deletedIds: deleteResult.deleted,
+    },
+  };
+}
+
+/**
+ * @param {{
+ *   project: { items?: object[], id?: string },
+ *   drawing: { id?: string, frameConfig?: object }|null,
+ *   drawingContext: object,
+ *   materials?: object[]|null,
+ *   confirm?: (opts: object) => Promise<boolean>,
+ *   deleteItem: (projectId: string, itemId: string) => Promise<void>,
+ *   updateProject: (projectId: string, patch: object) => Promise<object>,
+ *   loadProject?: (projectId: string) => Promise<object>,
+ * }} params
+ */
+export async function executeFrameBomRefreshFromDrawing({
+  project,
+  drawing,
+  drawingContext,
+  materials = null,
+  confirm = null,
+  deleteItem,
+  updateProject,
+  loadProject = null,
+}) {
+  const projectId = drawingContext?.projectId || project?.id;
+  if (!projectId || !project?.items) {
+    return { cancelled: false, skipped: true };
+  }
+  if (!drawing?.frameConfig) {
+    throw new Error("В сохранённой схеме нет конфигурации каркаса.");
+  }
+
+  const purchaseDraft = buildFramePurchaseDraftFromFrameConfig(drawing.frameConfig);
+  const visible = visiblePurchaseDraftItems(purchaseDraft);
+  if (!visible.length) {
+    throw new Error("По сохранённой схеме не удалось рассчитать BOM.");
+  }
+
+  const ctx = {
+    ...drawingContext,
+    projectId,
+    drawingId: drawing.id || drawingContext.drawingId || "",
+  };
+
+  const evalResult = evaluateFrameBomAddToProject({
+    projectId,
+    project,
+    purchaseDraft,
+    drawingContext: ctx,
+    materials,
+  });
+  if (!evalResult.canAddToProject) {
+    throw new Error(evalResult.addDisabledReason || "BOM нельзя обновить.");
+  }
+
+  const previewPlan = buildFrameBomRepairPlan(
+    project.items,
+    purchaseDraft,
+    buildFrameBomMergeOptions(ctx, materials),
+  );
+  if (previewPlan.blocked) {
+    throw new Error(previewPlan.blockedReason || "BOM не обновлён.");
+  }
+
+  if (confirm) {
+    const ok = await confirm({
+      title: FRAME_BOM_REFRESH_CONFIRM_TITLE,
+      message: buildFrameBomRefreshConfirmMessage({
+        removeCount: previewPlan.removeItemIds.length,
+        upsertCount: previewPlan.upsertItems.length,
+      }),
+      confirmLabel: "Обновить BOM",
+      cancelLabel: "Отмена",
+    });
+    if (!ok) return { cancelled: true };
+  }
+
+  const outcome = await applyFrameBomRefreshRepair({
+    project,
+    purchaseDraft,
+    drawingContext: ctx,
+    materials,
+    deleteItem,
+    updateProject,
+    loadProject,
+  });
+
+  return { cancelled: false, ...outcome };
 }
 
 export function countExistingFrameBomForRack(projectItems, drawingContext = {}) {
