@@ -5,7 +5,12 @@ import { PURCHASE_STATUS } from "../shared/purchaseStatusRules.js";
 import {
   buildProjectDashboardSummary,
   filterProjectItems,
+  resolveDashboardFilterLabel,
+  shortPublishHeadline,
+  isCoolingPublishBlocker,
 } from "../shared/projectDashboardSummary.js";
+import { buildAdminPurchaseProgress } from "../shared/clientPurchaseStats.js";
+import { buildHqMetrics, coolingSubLabel, summarizeCoolingRooms } from "../src/lib/projectHqStats.js";
 import { matchSpecLineFilter } from "../shared/specLineFilters.js";
 import { prepareClientPurchaseItems } from "../shared/clientPurchaseRows.js";
 
@@ -187,5 +192,79 @@ describe("regression: client export rows unchanged", () => {
     const rows = prepareClientPurchaseItems(visible);
     expect(rows.length).toBe(2);
     expect(rows.every((r) => !r.sourceKey && !r.source)).toBe(true);
+  });
+});
+
+describe("dashboard UX polish", () => {
+  it("purchase summary does not label total as bought", () => {
+    const items = Array.from({ length: 10 }, (_, i) =>
+      baseItem({ id: `it${i}`, purchaseStatus: PURCHASE_STATUS.NOT_BOUGHT })
+    );
+    const card = buildAdminPurchaseProgress(items);
+    expect(card.headline).toBe("0 из 10 закрыто");
+    expect(card.title).toBe("Закупка");
+    expect(card.detail).toBe("заказано: 0 · куплено/доставлено: 0");
+    expect(card.headline).not.toContain("куплено / 10");
+  });
+
+  it("closed purchase count = bought + delivered + have", () => {
+    const items = [
+      baseItem({ id: "b", purchaseStatus: PURCHASE_STATUS.BOUGHT }),
+      baseItem({ id: "d", purchaseStatus: PURCHASE_STATUS.DELIVERED }),
+      baseItem({ id: "h", purchaseStatus: PURCHASE_STATUS.HAVE }),
+      baseItem({ id: "o", purchaseStatus: PURCHASE_STATUS.ORDERED }),
+      baseItem({ id: "n", purchaseStatus: PURCHASE_STATUS.NOT_BOUGHT }),
+    ];
+    const card = buildAdminPurchaseProgress(items);
+    expect(card.closedCount).toBe(3);
+    expect(card.headline).toBe("3 из 5 закрыто");
+    expect(card.orderedCount).toBe(1);
+    expect(card.boughtDeliveredCount).toBe(2);
+  });
+
+  it("pre-send message maps to correct filter", () => {
+    const s = buildProjectDashboardSummary([
+      baseItem({ price: 0 }),
+      baseItem({ id: "l", link: "" }),
+      baseItem({ id: "s", supplier: "" }),
+    ]);
+    const byKey = Object.fromEntries(s.preSendMessages.map((m) => [m.key, m.filter]));
+    expect(byKey.no_price).toBe("no_price");
+    expect(byKey.no_link).toBe("no_link");
+    expect(byKey.no_supplier).toBe("no_supplier");
+  });
+
+  it("filter no_price works via helper contract", () => {
+    const items = [baseItem({ price: 0 }), baseItem({ id: "ok", price: 100 })];
+    expect(filterProjectItems(items, "no_price").map((i) => i.id)).toEqual(["it1"]);
+  });
+
+  it("resolveDashboardFilterLabel returns active filter label", () => {
+    expect(resolveDashboardFilterLabel("no_price")).toBe("Без цены");
+    expect(resolveDashboardFilterLabel("")).toBe("Все позиции");
+  });
+
+  it("short publish headline avoids duplicating full status card text", () => {
+    expect(shortPublishHeadline("warnings", { warnings: 3 })).toBe("Предупреждения: 3");
+    expect(shortPublishHeadline("ok")).toBe("Готово");
+  });
+
+  it("cooling warning is not publish blocker", () => {
+    expect(isCoolingPublishBlocker()).toBe(false);
+    const cooling = summarizeCoolingRooms({
+      rooms: [
+        { id: "r1", name: "A" },
+        { id: "r2", name: "B" },
+        { id: "r3", name: "C" },
+      ],
+    });
+    expect(cooling.status).toBe("warning");
+    expect(coolingSubLabel(cooling)).toBe("Не заполнено для 3 комнат");
+    const hq = buildHqMetrics({
+      project: { rooms: [{ id: "r1" }, { id: "r2" }, { id: "r3" }] },
+      items: [baseItem()],
+      publishCheck: { status: "ok", readiness: { readinessPercent: 100 }, counts: {} },
+    });
+    expect(hq.coolingSummary.status).toBe("warning");
   });
 });

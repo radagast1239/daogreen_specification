@@ -1970,7 +1970,26 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 }
 .project-hq__presend-item--critical { color: var(--danger); }
 .project-hq__presend-item--warning { color: var(--warn, #b45309); }
-.project-hq__presend-item:disabled { cursor: default; }
+.project-hq__presend-item--clickable:hover {
+  text-decoration: underline;
+}
+.project-hq__presend-goto {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--brand);
+  white-space: nowrap;
+}
+.spec-active-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 4px;
+}
+.spec-active-filter__chip {
+  font-size: 12px;
+}
 
 .pre-publish-status {
   padding: 10px 12px;

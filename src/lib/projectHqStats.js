@@ -1,4 +1,4 @@
-import { clientPurchaseDashboard } from "../../shared/clientPurchaseStats.js";
+import { buildAdminPurchaseProgress } from "../../shared/clientPurchaseStats.js";
 import { actualCoolingFromRoom, roomAcRecommendedKw } from "../../shared/roomAcSpec.js";
 
 function toNum(v) {
@@ -39,16 +39,16 @@ function roomHasCoolingSnapshot(room) {
 /** @returns {{ totalRooms: number, roomsWithCooling: number, roomsWithoutCooling: number, roomsUnderpowered: number, status: "ok"|"warning"|"missing", label: string }} */
 export function summarizeCoolingRooms(project) {
   const rooms = project?.rooms || [];
-  const missing = {
+  const empty = {
     totalRooms: 0,
     roomsWithCooling: 0,
     roomsWithoutCooling: 0,
     roomsUnderpowered: 0,
-    status: "missing",
+    status: "warning",
     label: "Охлаждение не рассчитано",
   };
 
-  if (!rooms.length) return missing;
+  if (!rooms.length) return empty;
 
   let roomsWithCooling = 0;
   let roomsWithoutCooling = 0;
@@ -74,7 +74,7 @@ export function summarizeCoolingRooms(project) {
   let label = "Охлаждение рассчитано";
 
   if (roomsWithCooling === 0) {
-    status = "missing";
+    status = "warning";
     label = "Охлаждение не рассчитано";
   } else if (roomsUnderpowered > 0) {
     status = "warning";
@@ -92,6 +92,18 @@ export function summarizeCoolingRooms(project) {
     status,
     label,
   };
+}
+
+/** Подпись под карточкой охлаждения (не блокирует публикацию). */
+export function coolingSubLabel(summary) {
+  if (!summary?.totalRooms) return "нет комнат";
+  if (summary.roomsWithoutCooling > 0) {
+    return `Не заполнено для ${summary.roomsWithoutCooling} комнат`;
+  }
+  if (summary.roomsUnderpowered > 0) {
+    return `Недобор в ${summary.roomsUnderpowered} комнатах`;
+  }
+  return `${summary.roomsWithCooling}/${summary.totalRooms} комнат`;
 }
 
 const PUBLISH_LABELS = {
@@ -118,16 +130,16 @@ export function buildHqMetrics({ project, items, publishCheck }) {
   const version = toNum(project?.version) || 0;
   const versionLabel = version > 0 ? `v${version}` : "v0";
 
-  const dash = clientPurchaseDashboard(list);
+  const purchaseCard = buildAdminPurchaseProgress(list);
   const purchaseProgress = {
-    ordered: dash.orderedCount,
-    bought: dash.boughtCount,
-    total: dash.totalCount,
-    label:
-      dash.totalCount > 0
-        ? `${dash.orderedCount} заказано / ${dash.boughtCount} куплено`
-        : "Не начата",
-    show: dash.totalCount > 0,
+    ordered: purchaseCard.orderedCount,
+    bought: purchaseCard.boughtDeliveredCount,
+    closed: purchaseCard.closedCount,
+    total: purchaseCard.totalCount,
+    headline: purchaseCard.headline,
+    title: purchaseCard.title,
+    detail: purchaseCard.detail,
+    show: purchaseCard.show,
   };
 
   return {

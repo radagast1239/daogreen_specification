@@ -13,7 +13,7 @@ import { SPECIALIST_MAP, PURCHASE_STATUSES } from "../../data/modules.js";
 import { VAT_RATES, lineGross, lineContributesToSum, RESPONSIBLE_OPTIONS } from "../../lib/itemHelpers.js";
 import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS } from "../../../shared/itemTypes.js";
 import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
-import { PROJECT_DASHBOARD_FILTERS } from "../../../shared/projectDashboardSummary.js";
+import { PROJECT_DASHBOARD_FILTERS, resolveDashboardFilterLabel } from "../../../shared/projectDashboardSummary.js";
 import { FARM_LINE_GROUPS, farmLineGroupLabel } from "../../../shared/farmLineGroups.js";
 import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
 import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
@@ -1111,6 +1111,20 @@ function SpecTab({
       </Collapsible>
 
       <div className="spec-quick-filters no-print">
+        {quickFilter ? (
+          <div className="spec-active-filter">
+            <span className="chip chip--brand spec-active-filter__chip">
+              Показаны: <strong>{resolveDashboardFilterLabel(quickFilter)}</strong>
+            </span>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={() => onQuickFilterChange?.("")}
+            >
+              Сбросить фильтр
+            </button>
+          </div>
+        ) : null}
         <span className="muted" style={{ fontSize: 12 }}>Быстрый фильтр:</span>
         {PROJECT_DASHBOARD_FILTERS.map(({ id, label }) => (
           <button

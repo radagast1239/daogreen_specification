@@ -40,18 +40,18 @@ describe("resolveLinkStatus", () => {
 });
 
 describe("summarizeCoolingRooms", () => {
-  it("пустые rooms → missing", () => {
+  it("пустые rooms → warning (не блокирует публикацию)", () => {
     expect(summarizeCoolingRooms({ rooms: [] })).toMatchObject({
-      status: "missing",
+      status: "warning",
       label: "Охлаждение не рассчитано",
     });
   });
 
-  it("rooms без cooling snapshot → missing", () => {
+  it("rooms без cooling snapshot → warning", () => {
     const res = summarizeCoolingRooms({
       rooms: [{ id: "r1", name: "A", lightingW: 1000 }],
     });
-    expect(res.status).toBe("missing");
+    expect(res.status).toBe("warning");
     expect(res.roomsWithoutCooling).toBe(1);
   });
 
@@ -107,6 +107,6 @@ describe("buildHqMetrics", () => {
     const m = buildHqMetrics({});
     expect(m.readinessPercent).toBe(0);
     expect(m.linkStatus.status).toBe("none");
-    expect(m.coolingSummary.status).toBe("missing");
+    expect(m.coolingSummary.status).toBe("warning");
   });
 });

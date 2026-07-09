@@ -1,6 +1,10 @@
 import React, { useMemo } from "react";
-import { buildHqMetrics } from "../lib/projectHqStats.js";
-import { buildProjectDashboardSummary, metricTone } from "../../shared/projectDashboardSummary.js";
+import { buildHqMetrics, coolingSubLabel } from "../lib/projectHqStats.js";
+import {
+  buildProjectDashboardSummary,
+  metricTone,
+  shortPublishHeadline,
+} from "../../shared/projectDashboardSummary.js";
 
 function toneClass(tone) {
   if (tone === "ok") return "project-hq__kpi--ok";
@@ -29,8 +33,10 @@ function Kpi({ title, value, sub, tone = "neutral" }) {
 }
 
 function MetricChip({ label, value, tone, filter, activeFilter, onFilterSelect }) {
-  const clickable = !!filter && value > 0 && onFilterSelect;
-  const active = filter && activeFilter === filter;
+  const canReset = filter === "" && !!activeFilter;
+  const canFilter = !!filter && value > 0;
+  const clickable = !!onFilterSelect && (canReset || canFilter);
+  const active = filter ? activeFilter === filter : !activeFilter;
   return (
     <button
       type="button"
@@ -42,6 +48,22 @@ function MetricChip({ label, value, tone, filter, activeFilter, onFilterSelect }
       <span className="project-hq__metric-value num">{value}</span>
       <span className="project-hq__metric-label">{label}</span>
     </button>
+  );
+}
+
+function PreSendItem({ msg, onFilterSelect }) {
+  const clickable = !!msg.filter && !!onFilterSelect;
+  return (
+    <li>
+      <button
+        type="button"
+        className={`project-hq__presend-item project-hq__presend-item--${msg.severity}${clickable ? " project-hq__presend-item--clickable" : ""}`}
+        onClick={() => clickable && onFilterSelect(msg.filter)}
+      >
+        <span>{msg.text}</span>
+        {clickable ? <span className="project-hq__presend-goto">Показать →</span> : null}
+      </button>
+    </li>
   );
 }
 
@@ -81,12 +103,7 @@ export default function ProjectHqBar({
         ? "warn"
         : "bad";
 
-  const coolingTone =
-    metrics.coolingSummary.status === "ok"
-      ? "ok"
-      : metrics.coolingSummary.status === "warning"
-        ? "warn"
-        : "bad";
+  const coolingTone = metrics.coolingSummary.status === "ok" ? "ok" : "warn";
 
   const linkTone =
     metrics.linkStatus.status === "active"
@@ -104,6 +121,11 @@ export default function ProjectHqBar({
       : summary.readiness.status === "warnings"
         ? "warn"
         : "bad";
+
+  const headBadge = shortPublishHeadline(summary.readiness.status, {
+    blockers: summary.readiness.blockers,
+    warnings: summary.readiness.warnings,
+  });
 
   const handlePublishCheck = () => {
     if (onOpenPrePublish) {
@@ -143,7 +165,7 @@ export default function ProjectHqBar({
           </p>
         </div>
         <div className={`chip chip--${preSendTone === "ok" ? "ok" : preSendTone === "warn" ? "amber" : "danger"}`}>
-          {summary.readiness.statusLabel || metrics.publishStatusLabel}
+          {headBadge}
         </div>
       </div>
 
@@ -173,16 +195,7 @@ export default function ProjectHqBar({
         ) : (
           <ul className="project-hq__presend-list">
             {summary.preSendMessages.map((msg) => (
-              <li key={msg.key}>
-                <button
-                  type="button"
-                  className={`project-hq__presend-item project-hq__presend-item--${msg.severity}`}
-                  onClick={() => msg.filter && onFilterSelect?.(msg.filter)}
-                  disabled={!msg.filter || !onFilterSelect}
-                >
-                  {msg.text}
-                </button>
-              </li>
+              <PreSendItem key={msg.key} msg={msg} onFilterSelect={onFilterSelect} />
             ))}
           </ul>
         )}
@@ -219,11 +232,7 @@ export default function ProjectHqBar({
         <Kpi
           title="охлаждение"
           value={metrics.coolingSummary.label}
-          sub={
-            metrics.coolingSummary.totalRooms > 0
-              ? `${metrics.coolingSummary.roomsWithCooling}/${metrics.coolingSummary.totalRooms} комнат`
-              : "нет комнат"
-          }
+          sub={coolingSubLabel(metrics.coolingSummary)}
           tone={coolingTone}
         />
         <Kpi
@@ -241,9 +250,9 @@ export default function ProjectHqBar({
         <Kpi title="версия" value={metrics.versionLabel} sub="опубликованный снимок" tone="neutral" />
         {metrics.purchaseProgress.show ? (
           <Kpi
-            title="закупка"
-            value={metrics.purchaseProgress.label}
-            sub={`из ${metrics.purchaseProgress.total} поз.`}
+            title={metrics.purchaseProgress.title}
+            value={metrics.purchaseProgress.headline}
+            sub={metrics.purchaseProgress.detail}
             tone="neutral"
           />
         ) : (

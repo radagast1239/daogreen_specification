@@ -255,3 +255,27 @@ export function metricTone(count, { warnFrom = 1, badFrom = 1 } = {}) {
   if (count >= warnFrom) return "warn";
   return "neutral";
 }
+
+/** Человекочитаемая подпись активного фильтра таблицы. */
+export function resolveDashboardFilterLabel(filterId) {
+  if (!filterId) return "Все позиции";
+  const row = PROJECT_DASHBOARD_FILTERS.find((f) => f.id === filterId);
+  return row?.label || filterId;
+}
+
+/** Короткий бейдж в шапке штаба (без дубля полного текста карточки). */
+export function shortPublishHeadline(status, { blockers = 0, warnings = 0 } = {}) {
+  if (status === "ok") return "Готово";
+  if (status === "warnings") {
+    return warnings > 0 ? `Предупреждения: ${warnings}` : "Есть предупреждения";
+  }
+  if (status === "blocked") {
+    return blockers > 0 ? `Блокеры: ${blockers}` : "Есть блокеры";
+  }
+  return "Проверка";
+}
+
+/** Охлаждение не блокирует публикацию — только informational/warning. */
+export function isCoolingPublishBlocker() {
+  return false;
+}
