@@ -1902,6 +1902,75 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 .project-hq__kpi--warn { border-color: rgba(245, 158, 11, 0.45); }
 .project-hq__kpi--bad { border-color: rgba(220, 38, 38, 0.35); }
 .project-hq__actions { gap: 8px; margin-top: 4px; }
+.project-hq__section { margin-top: 12px; }
+.project-hq__section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.project-hq__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.project-hq__metric {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-light);
+  cursor: pointer;
+  min-width: 88px;
+}
+.project-hq__metric:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+.project-hq__metric--active {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 1px var(--brand);
+}
+.project-hq__metric-value { font-size: 18px; font-weight: 700; line-height: 1.1; }
+.project-hq__metric-label { font-size: 11px; color: var(--muted); text-align: left; }
+.project-hq__metric--ok { border-color: rgba(17, 99, 85, 0.35); }
+.project-hq__metric--warn { border-color: rgba(245, 158, 11, 0.45); }
+.project-hq__metric--bad { border-color: rgba(220, 38, 38, 0.35); }
+.project-hq__presend {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-light);
+}
+.project-hq__presend--ok { border-color: rgba(17, 99, 85, 0.25); }
+.project-hq__presend--warn { border-color: rgba(245, 158, 11, 0.35); }
+.project-hq__presend--bad { border-color: rgba(220, 38, 38, 0.3); }
+.project-hq__presend-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.project-hq__presend-item {
+  font-size: 13px;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+  color: inherit;
+}
+.project-hq__presend-item--critical { color: var(--danger); }
+.project-hq__presend-item--warning { color: var(--warn, #b45309); }
+.project-hq__presend-item:disabled { cursor: default; }
 
 .pre-publish-status {
   padding: 10px 12px;

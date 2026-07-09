@@ -1,4 +1,7 @@
-import { lineVisibleToClient } from "./itemTypes.js";
+import { lineVisibleToClient, isCoolingSpecItem } from "./itemTypes.js";
+import { resolveClientSection, isMiscCategory, subsectionsForSection, isSubsectionValid } from "./clientSections.js";
+import { normalizePurchaseStatus, PURCHASE_STATUS } from "./purchaseStatusRules.js";
+import { isFrameBomLine } from "./frameBomProjectItems.js";
 
 export const SPEC_LINE_FILTERS = [
   { id: "", label: "Все" },
@@ -12,6 +15,13 @@ export const SPEC_LINE_FILTERS = [
   { id: "no_photo", label: "Без фото" },
   { id: "no_supplier", label: "Без поставщика" },
   { id: "no_responsible", label: "Без ответственного" },
+  { id: "need_help", label: "Нужна помощь" },
+  { id: "replacement_check", label: "Замена на проверке" },
+  { id: "not_fit", label: "Не подходит" },
+  { id: "frame_bom", label: "Из схемы стеллажа" },
+  { id: "no_client_section", label: "Без клиентского раздела" },
+  { id: "no_client_subsection", label: "Без клиентского подраздела" },
+  { id: "problems", label: "Проблемные" },
 ];
 
 function builderIncluded(line) {
@@ -31,6 +41,28 @@ function hasPhoto(line) {
   return !!(line.imageUrl || line.photoUrl);
 }
 
+function clientSubsectionForFilter(line) {
+  const resolved = resolveClientSection(line);
+  return {
+    section: resolved.section,
+    subsection: (line.clientSubsection || resolved.subsection || "").trim(),
+  };
+}
+
+function hasNoClientSection(line) {
+  if (isCoolingSpecItem(line)) return false;
+  return isMiscCategory(line);
+}
+
+function hasNoClientSubsection(line) {
+  if (isCoolingSpecItem(line)) return false;
+  if (isMiscCategory(line)) return false;
+  const { section, subsection } = clientSubsectionForFilter(line);
+  const subs = subsectionsForSection(section);
+  if (!section || !subs.length) return false;
+  return !subsection || !isSubsectionValid(section, subsection);
+}
+
 /** @param {"builder"|"project"} mode */
 export function matchSpecLineFilter(line, filterId, mode = "builder") {
   if (!filterId) return true;
@@ -46,7 +78,11 @@ export function matchSpecLineFilter(line, filterId, mode = "builder") {
         matchSpecLineFilter(line, "no_link", mode) ||
         matchSpecLineFilter(line, "no_photo", mode) ||
         matchSpecLineFilter(line, "no_supplier", mode) ||
-        matchSpecLineFilter(line, "no_responsible", mode)
+        matchSpecLineFilter(line, "no_responsible", mode) ||
+        matchSpecLineFilter(line, "need_help", mode) ||
+        matchSpecLineFilter(line, "not_fit", mode) ||
+        matchSpecLineFilter(line, "no_client_section", mode) ||
+        matchSpecLineFilter(line, "no_client_subsection", mode)
       );
     case "included":
       return included;
@@ -55,10 +91,12 @@ export function matchSpecLineFilter(line, filterId, mode = "builder") {
     case "client_visible":
       return clientVisible;
     case "client_hidden":
+    case "not_approved":
       return included && !clientVisible;
     case "needs_review":
       return (
         line.needsApproval ||
+        normalizePurchaseStatus(line) === PURCHASE_STATUS.REPLACEMENT_CHECK ||
         line.status === "replacement_check" ||
         (mode === "project" && !line.approved && projectIncluded(line))
       );
@@ -74,6 +112,18 @@ export function matchSpecLineFilter(line, filterId, mode = "builder") {
       const r = (line.responsible || "").trim().toLowerCase();
       return !r || r === "general" || r === "none";
     }
+    case "need_help":
+      return normalizePurchaseStatus(line) === PURCHASE_STATUS.NEED_HELP;
+    case "replacement_check":
+      return normalizePurchaseStatus(line) === PURCHASE_STATUS.REPLACEMENT_CHECK;
+    case "not_fit":
+      return normalizePurchaseStatus(line) === PURCHASE_STATUS.NOT_FIT;
+    case "frame_bom":
+      return isFrameBomLine(line);
+    case "no_client_section":
+      return hasNoClientSection(line);
+    case "no_client_subsection":
+      return hasNoClientSubsection(line);
     default:
       return true;
   }

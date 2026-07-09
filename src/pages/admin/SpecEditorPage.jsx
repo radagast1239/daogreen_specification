@@ -13,6 +13,7 @@ import { SPECIALIST_MAP, PURCHASE_STATUSES } from "../../data/modules.js";
 import { VAT_RATES, lineGross, lineContributesToSum, RESPONSIBLE_OPTIONS } from "../../lib/itemHelpers.js";
 import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS } from "../../../shared/itemTypes.js";
 import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
+import { PROJECT_DASHBOARD_FILTERS } from "../../../shared/projectDashboardSummary.js";
 import { FARM_LINE_GROUPS, farmLineGroupLabel } from "../../../shared/farmLineGroups.js";
 import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
 import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
@@ -99,6 +100,7 @@ export default function SpecEditorPage() {
   const [applyTplId, setApplyTplId] = useState("");
   const [replacementReviewItem, setReplacementReviewItem] = useState(null);
   const [activeCoolingRoomId, setActiveCoolingRoomId] = useState(null);
+  const [specQuickFilter, setSpecQuickFilter] = useState("");
 
   const stalePrices = useMemo(
     () => findStaleProjectPrices(project?.items || [], state.materials),
@@ -390,7 +392,13 @@ export default function SpecEditorPage() {
   };
 
   const prepareClientNotice = () => {
-    window.alert("Мастер подготовки клиентской выдачи будет добавлен следующим шагом.");
+    setTab("spec");
+    setPrePublishOpen(true);
+  };
+
+  const handleDashboardFilter = (filterId) => {
+    setTab("spec");
+    setSpecQuickFilter(filterId || "");
   };
 
   const breadcrumbs = (
@@ -547,6 +555,8 @@ export default function SpecEditorPage() {
           onExportPdf={exportClientPdf}
           onExportExcel={exportClientExcel}
           onPrepareClient={prepareClientNotice}
+          onFilterSelect={handleDashboardFilter}
+          activeFilter={specQuickFilter}
         />
 
         <div className="print-header">
@@ -748,6 +758,8 @@ export default function SpecEditorPage() {
               onManualParamsChange={(mp) => actions.projectUpdate(project.id, { manualParams: mp })}
               highlightItemId={highlightItemId}
               viewMode={viewMode}
+              quickFilter={specQuickFilter}
+              onQuickFilterChange={setSpecQuickFilter}
             />
           </>
         )}
@@ -872,6 +884,8 @@ function SpecTab({
   onManualParamsChange,
   highlightItemId,
   viewMode = "designer",
+  quickFilter = "",
+  onQuickFilterChange,
 }) {
   const { confirm, success, error } = useToast();
   const { state } = useStore();
@@ -889,7 +903,6 @@ function SpecTab({
   const groups = useMemo(() => groupBy(displayItems, "module"), [displayItems]);
   const rooms = project.rooms?.length ? project.rooms : defaultRooms();
   const hasFarmItems = project.items.some((it) => isFarmGeneralItem(project, it));
-  const [quickFilter, setQuickFilter] = useState("");
   const [moduleFilters, setModuleFilters] = useState({});
   const [moduleSelected, setModuleSelected] = useState({});
   const [suppliers, setSuppliers] = useState([]);
@@ -981,10 +994,7 @@ function SpecTab({
   const passesFilter = (it, moduleFilter = "") => {
     if (!matchSpecLineFilter(it, moduleFilter, "project")) return false;
     if (!quickFilter) return true;
-    if (quickFilter === "no_photo") return !photoSrc(it.imageUrl || it.photoUrl);
-    if (quickFilter === "not_approved") return !it.visibleToClient;
-    if (quickFilter === "no_supplier") return !(it.supplier || "").trim();
-    return true;
+    return matchSpecLineFilter(it, quickFilter, "project");
   };
 
   const sectionNames = useMemo(() => groups.map(([m]) => m), [groups]);
@@ -1102,17 +1112,12 @@ function SpecTab({
 
       <div className="spec-quick-filters no-print">
         <span className="muted" style={{ fontSize: 12 }}>Быстрый фильтр:</span>
-        {[
-          ["", "Все"],
-          ["no_photo", "Без фото"],
-          ["not_approved", "Не для клиента"],
-          ["no_supplier", "Без поставщика"],
-        ].map(([id, label]) => (
+        {PROJECT_DASHBOARD_FILTERS.map(({ id, label }) => (
           <button
             key={id || "all"}
             type="button"
             className={`btn btn-sm${quickFilter === id ? " btn-primary" : ""}`}
-            onClick={() => setQuickFilter(id)}
+            onClick={() => onQuickFilterChange?.(id)}
           >
             {label}
           </button>
