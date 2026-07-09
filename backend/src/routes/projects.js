@@ -46,11 +46,10 @@ import {
 import { structuredClientNote } from "../../../shared/structuredClientNote.js";
 import { itemFlagsToDb, normalizeItemFlags, resolveItemType, lineVisibleToClient } from "../../../shared/itemTypes.js";
 import {
-  bulkPatchItems as runBulkPatchItems,
-  refreshItemsFromMaterial as runRefreshItemsFromMaterial,
-  parseBulkPatchRequest,
-  parseRefreshRequest,
-} from "../services/projectItems.js";
+  getMaterialById,
+  patchFromMaterial,
+  resolveRefreshFields,
+} from "../services/refreshItemFromMaterial.js";
 import {
   cloneProjectItem,
   cloneProjectItemsWithIdMap,
@@ -549,20 +548,55 @@ export function patchItem(projectId, itemId, patch) {
   return item;
 }
 
-export function bulkPatchItems(projectId, options = {}) {
-  return runBulkPatchItems(projectId, options, {
-    loadProject,
-    patchItem,
-    touchProject,
-  });
+export function bulkPatchItems(projectId, { itemIds = [], patch = {} } = {}) {
+  const p = loadProject(projectId);
+  if (!p) return { updated: [], skipped: [], before: [] };
+  const ids = new Set(itemIds);
+  const updated = [];
+  const skipped = [];
+  const before = [];
+  const found = new Set();
+  for (const it of p.items) {
+    if (!ids.has(it.id)) continue;
+    found.add(it.id);
+    before.push({ ...it });
+    updated.push(patchItem(projectId, it.id, patch));
+  }
+  for (const id of ids) {
+    if (!found.has(id)) skipped.push({ itemId: id, reason: "not_found" });
+  }
+  if (updated.length) touchProject(projectId);
+  return { updated: updated.filter(Boolean), skipped, before, patch };
 }
 
-export function refreshItemsFromMaterial(projectId, options = {}) {
-  return runRefreshItemsFromMaterial(projectId, options, {
-    loadProject,
-    patchItem,
-    touchProject,
-  });
+export function refreshItemsFromMaterial(projectId, { itemIds = [], fields = [] } = {}) {
+  const p = loadProject(projectId);
+  if (!p) return { updated: [], skipped: [] };
+  const refreshFields = resolveRefreshFields(fields);
+  const ids = itemIds.length ? itemIds : p.items.map((i) => i.id);
+  const updated = [];
+  const skipped = [];
+
+  for (const itemId of ids) {
+    const item = p.items.find((i) => i.id === itemId);
+    if (!item?.materialId) {
+      skipped.push({ itemId, reason: "no_material" });
+      continue;
+    }
+    const mat = getMaterialById(item.materialId);
+    if (!mat) {
+      skipped.push({ itemId, reason: "material_missing" });
+      continue;
+    }
+    const matPatch = patchFromMaterial(mat, refreshFields);
+    if (!Object.keys(matPatch).length) {
+      skipped.push({ itemId, reason: "no_fields" });
+      continue;
+    }
+    updated.push(patchItem(projectId, itemId, matPatch));
+  }
+
+  return { updated, skipped };
 }
 
 export function addItem(projectId, item) {
@@ -807,8 +841,10 @@ api.get("/:id/versions", (req, res) => {
 api.post("/:id/items/bulk-patch", (req, res) => {
   const p = loadProject(req.params.id);
   if (!p) return res.status(404).json({ error: "Not found" });
-  const body = parseBulkPatchRequest(req.body);
-  const result = bulkPatchItems(req.params.id, body);
+  const result = bulkPatchItems(req.params.id, {
+    itemIds: req.body?.itemIds || [],
+    patch: req.body?.patch || {},
+  });
   for (const prev of result.before || []) {
     logItemPatch({
       projectId: req.params.id,
@@ -826,8 +862,10 @@ api.post("/:id/items/refresh-from-material", (req, res) => {
   const p = loadProject(req.params.id);
   if (!p) return res.status(404).json({ error: "Not found" });
   const beforeMap = new Map((p.items || []).map((it) => [it.id, it]));
-  const body = parseRefreshRequest(req.body);
-  const result = refreshItemsFromMaterial(req.params.id, body);
+  const result = refreshItemsFromMaterial(req.params.id, {
+    itemIds: req.body?.itemIds || (req.body?.itemId ? [req.body.itemId] : []),
+    fields: req.body?.fields || [],
+  });
   for (const it of result.updated || []) {
     const before = beforeMap.get(it.id);
     if (!before) continue;
@@ -850,11 +888,10 @@ api.post("/:id/items/refresh-from-material", (req, res) => {
 });
 
 api.patch("/:id/items/:itemId", (req, res) => {
-  const itemId = decodeURIComponent(req.params.itemId);
   const p = loadProject(req.params.id);
   if (!p) return res.status(404).json({ error: "Not found" });
-  const before = p.items.find((i) => i.id === itemId);
-  const it = patchItem(req.params.id, itemId, req.body);
+  const before = p.items.find((i) => i.id === req.params.itemId);
+  const it = patchItem(req.params.id, req.params.itemId, req.body);
   if (!it) return res.status(404).json({ error: "Not found" });
   logItemPatch({
     projectId: req.params.id,
