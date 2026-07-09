@@ -1,8 +1,11 @@
-import { lineVisibleToClient, isPurchasableLineType, resolveItemType } from "./itemTypes.js";
+import { lineVisibleToClient, isPurchasableLineType, resolveItemType, isCoolingSpecItem } from "./itemTypes.js";
 import { enrichProjectItemFromMaterial } from "./frameBomProjectItems.js";
 import { structuredClientNote } from "./structuredClientNote.js";
+import { pipeCutsClientNote, normalizePipeCuts } from "./profilePipeCuts.js";
 
 export const NFT_CHANNEL_CLIENT_NOTE = "Используется как NFT-канал в схеме стеллажа.";
+export const CLIENT_PRICE_TBD = "цена уточняется";
+export const CLIENT_PRICE_MISSING = "Без цены";
 
 /** Поля, которые не должны попадать в клиентскую ссылку / PDF / Excel. */
 export const CLIENT_ITEM_TECH_FIELDS = [
@@ -89,4 +92,63 @@ export function buildClientPdfRowLabel(row) {
 export function clientPdfRowHasTechnicalFields(row) {
   const blob = JSON.stringify(row || {});
   return /frame_bom|sourceKey|source_key|drawingId|moduleRackKey/i.test(blob);
+}
+
+export function clientRowHasTechnicalFields(row) {
+  return clientPdfRowHasTechnicalFields(row);
+}
+
+/** Сплит-система без заполненной цены. */
+export function isClientCoolingPriceUnset(row) {
+  const rep = row?.sourceItems?.[0] || row;
+  if (!isCoolingSpecItem(rep)) return false;
+  return !(Number(row?.price) > 0) && !(Number(row?.sumVat) > 0);
+}
+
+/** Есть ли у строки цена за единицу (не путать с бесплатным price=0 в базе без snapshot). */
+export function hasClientUnitPrice(row) {
+  return Number(row?.price) > 0;
+}
+
+/**
+ * Цена за единицу для клиентской выдачи.
+ * @returns {number|string} число или «Без цены» / «цена уточняется»
+ */
+export function formatClientUnitPrice(row) {
+  if (isClientCoolingPriceUnset(row)) return CLIENT_PRICE_TBD;
+  if (!hasClientUnitPrice(row)) return CLIENT_PRICE_MISSING;
+  return Number(row.price);
+}
+
+/**
+ * Сумма строки для клиентской выдачи.
+ * @returns {number|string} округлённая сумма, пустая строка или «цена уточняется»
+ */
+export function formatClientLineTotal(row) {
+  if (isClientCoolingPriceUnset(row)) return CLIENT_PRICE_TBD;
+  if (!hasClientUnitPrice(row)) return "";
+  const sumVat = Number(row.sumVat);
+  if (Number.isFinite(sumVat) && sumVat > 0) return Math.round(sumVat);
+  const qty = Number(row.qty) || 0;
+  const price = Number(row.price) || 0;
+  const vat = Number(row.vatRate) || 0;
+  const net = qty * price;
+  return Math.round(net + net * (vat / 100));
+}
+
+export function formatPipeCutsNote(pipeCuts) {
+  return pipeCutsClientNote(normalizePipeCuts(pipeCuts));
+}
+
+/** Объединить уникальные клиентские примечания из нескольких sourceItems. */
+export function mergeClientItemNotes(sourceItems = []) {
+  const notes = [];
+  const seen = new Set();
+  for (const it of sourceItems) {
+    const n = String(resolveClientItemNote(it) || "").trim();
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    notes.push(n);
+  }
+  return notes.join("; ");
 }

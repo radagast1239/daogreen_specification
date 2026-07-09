@@ -1,9 +1,14 @@
 import * as XLSX from "xlsx";
-import { mergedPurchaseRows, formatQty, groupBy } from "../store/helpers.js";
+import { buildClientPurchaseMergedRows, formatQty, groupBy } from "../store/helpers.js";
 import { lineGross, isBoughtStatus } from "./itemHelpers.js";
 import { rowsForResponsibleRole } from "./responsibleResolve.js";
-import { groupByClientSection } from "../../shared/clientSections.js";
-import { isCoolingSpecItem } from "../../shared/itemTypes.js";
+import { getClientSections, groupByClientSection } from "../../shared/clientSections.js";
+import {
+  CLIENT_PRICE_MISSING,
+  CLIENT_PRICE_TBD,
+  formatClientLineTotal,
+  formatClientUnitPrice,
+} from "../../shared/clientPurchaseRows.js";
 
 const RUB_NUMFMT = '#,##0" ₽"';
 
@@ -66,8 +71,8 @@ const MERGED_HEADERS = [
 
 function mergedDataRow(r, index, purchaseStatuses) {
   const rep = r.sourceItems?.[0];
-  // Сплит-системы: если цена не указана вручную — «цена уточняется», не 0.
-  const priceUnset = isCoolingSpecItem(rep || r) && !(Number(r.price) > 0) && !(Number(r.sumVat) > 0);
+  const unitPrice = formatClientUnitPrice(r);
+  const lineTotal = formatClientLineTotal(r);
   return {
     "№": index + 1,
     Раздел: r.clientSectionLabel || "",
@@ -75,8 +80,8 @@ function mergedDataRow(r, index, purchaseStatuses) {
     Наименование: r.name,
     "Кол-во всего": formatQty(r.qty, r.unit),
     "Ед.": r.unit || "шт.",
-    Цена: priceUnset ? "цена уточняется" : (r.price ?? ""),
-    Сумма: priceUnset ? "цена уточняется" : Math.round(r.sumVat || 0),
+    Цена: unitPrice,
+    Сумма: lineTotal,
     Поставщик: r.supplier || "",
     "Открыть товар": r.link ? "Открыть товар" : "без ссылки",
     _link: r.link || "",
@@ -194,7 +199,7 @@ function instructionSheet() {
     {
       Блок: "Цена уточняется",
       Текст:
-        "В колонках «Цена» и «Сумма» может стоять «цена уточняется» — это не ошибка. Так отмечены климатические позиции и другие строки, где модель или комплектация подбирается вручную.",
+        `В колонках «Цена» и «Сумма» может стоять «${CLIENT_PRICE_TBD}» или «${CLIENT_PRICE_MISSING}» — это не ошибка. Так отмечены позиции без цены в базе или с ручным подбором (часто климат).`,
     },
     {
       Блок: "Если товара нет",
@@ -268,10 +273,16 @@ function categorySummarySheet(items) {
 }
 
 function mergedByCategorySheet(merged, purchaseStatuses) {
+  const order = [...getClientSections().map((s) => s.label), "Уточнить категорию", "Прочее"];
   const sorted = [...merged].sort((a, b) => {
-    const c = (a.clientSectionLabel || "").localeCompare(b.clientSectionLabel || "", "ru");
-    if (c !== 0) return c;
-    return (a.clientSubsection || "").localeCompare(b.clientSubsection || "", "ru");
+    const la = a.clientSectionLabel || "";
+    const lb = b.clientSectionLabel || "";
+    const ia = order.indexOf(la);
+    const ib = order.indexOf(lb);
+    if (ia !== ib) return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+    const sub = (a.clientSubsection || "").localeCompare(b.clientSubsection || "", "ru");
+    if (sub !== 0) return sub;
+    return (a.name || "").localeCompare(b.name || "", "ru");
   });
   return sheetFromMergedRows(sorted, purchaseStatuses);
 }
@@ -282,15 +293,18 @@ function supplierMergedSheet(merged) {
     Позиция: r.name,
     "Кол-во": formatQty(r.qty, r.unit),
     "Ед.": r.unit || "шт.",
-    Сумма: Math.round(r.sumVat || 0),
+    Цена: formatClientUnitPrice(r),
+    Сумма: formatClientLineTotal(r),
     Ссылка: r.link ? "Открыть товар" : "без ссылки",
     _link: r.link || "",
     Раздел: r.clientSectionLabel || "",
+    "Комментарий Daogreen": r.clientNote || "",
   }));
   return sheetFromRowsWithLinks(rows, "Ссылка", "Открыть товар", {
     Поставщик: 18,
     Позиция: 42,
     Раздел: 20,
+    "Комментарий Daogreen": 36,
   });
 }
 
@@ -314,7 +328,7 @@ function noLinkSheet(merged, purchaseStatuses) {
 }
 
 function mergedForRole(items, role) {
-  return rowsForResponsibleRole(mergedPurchaseRows(items), role);
+  return rowsForResponsibleRole(buildClientPurchaseMergedRows(items), role);
 }
 
 function moduleDetailSheet(items, project, purchaseStatuses) {
@@ -361,7 +375,7 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
   const installItems = (items || []).filter(
     (i) => i.itemRole === "installation" || i.category === "Работы и доставка"
   );
-  const merged = mergedPurchaseRows(purchaseItems);
+  const merged = buildClientPurchaseMergedRows(purchaseItems);
   const wb = XLSX.utils.book_new();
 
   const append = (ws, name, filter = false) => {
@@ -386,7 +400,7 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
   }
 
   if (installItems.length) {
-    append(sheetFromMergedRows(mergedPurchaseRows(installItems), purchaseStatuses), "10б Монтаж", true);
+    append(sheetFromMergedRows(buildClientPurchaseMergedRows(installItems), purchaseStatuses), "10б Монтаж", true);
   }
 
   append(moduleDetailSheet(purchaseItems, project, purchaseStatuses), "11 Детализация по модулям");

@@ -6,6 +6,10 @@ import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { itemImageUrl, isPurchaseClosed } from "../../lib/itemHelpers.js";
 import { money, num } from "../../store/helpers.js";
 import { isCoolingSpecItem } from "../../../shared/itemTypes.js";
+import {
+  formatClientLineTotal,
+  formatClientUnitPrice,
+} from "../../../shared/clientPurchaseRows.js";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { patchMergedRow } from "../../lib/clientMergedPatch.js";
 import { DebouncedInput } from "./ClientDebouncedField.jsx";
@@ -52,7 +56,15 @@ export default function ClientMergedItemCard({
 
   const onReplacement = rep && onProposeReplacement ? () => onProposeReplacement(rep) : undefined;
   const coolingSpec = isCoolingSpecItem(rep || row);
-  const priceUnset = !(Number(row.price) > 0);
+  const unitPrice = formatClientUnitPrice(row);
+  const lineTotal = formatClientLineTotal(row);
+  const unitPriceLabel = typeof unitPrice === "number" ? money(unitPrice, currency) : unitPrice;
+  const lineTotalLabel =
+    lineTotal === ""
+      ? ""
+      : typeof lineTotal === "number"
+        ? money(lineTotal, currency)
+        : lineTotal;
 
   return (
     <div className={"card card-item" + (bought ? " card-item--bought" : "") + (compact ? " card-item--compact" : "")}>
@@ -100,24 +112,23 @@ export default function ClientMergedItemCard({
         <div className="muted" style={{ fontSize: compact ? 12 : 12.5, marginTop: 2 }}>
           <span className="num">{num(row.qty)}</span> {row.unit}
           {!compact && (row.vatRate || 0) > 0 && <span> · НДС {row.vatRate}%</span>}
-          {compact && row.price > 0 && (
+          {compact && lineTotalLabel && (
             <span>
               {" "}
-              · <span className="num">{money(row.sumVat, currency)}</span>
+              · <span className="num">{lineTotalLabel}</span>
             </span>
           )}
         </div>
-        {!compact &&
-          (coolingSpec && priceUnset ? (
+        {!compact && (
             <div style={{ fontSize: 12.5, marginTop: 4 }}>
-              Цена: <span className="num">цена уточняется</span>
+              Цена: <span className="num">{unitPriceLabel}</span>
+              {lineTotalLabel ? (
+                <>
+                  /ед · Сумма: <b className="num">{lineTotalLabel}</b>
+                </>
+              ) : null}
             </div>
-          ) : (
-            <div style={{ fontSize: 12.5, marginTop: 4 }}>
-              Цена: <span className="num">{money(row.price, currency)}</span>/ед · Сумма:{" "}
-              <b className="num">{money(row.sumVat, currency)}</b>
-            </div>
-          ))}
+          )}
         {!compact && row.supplier && (
           <div style={{ fontSize: 12.5, marginTop: 4 }}>
             <b>Поставщик:</b> {row.supplier}

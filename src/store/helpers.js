@@ -100,7 +100,7 @@ import {
   mergePipeCutsFromItems,
   pipeCutsClientNote,
 } from "../../shared/profilePipeCuts.js";
-import { resolveClientItemNote } from "../../shared/clientPurchaseRows.js";
+import { mergeClientItemNotes, resolveClientItemNote } from "../../shared/clientPurchaseRows.js";
 
 function resolveMergedSupplier(items) {
   for (const it of items || []) {
@@ -148,10 +148,17 @@ function finalizeMergedRow(row) {
       row.pipeCuts = mergedCuts;
       row.clientNote = pipeCutsClientNote(mergedCuts);
     }
-  } else if (!row.clientNote) {
-    row.clientNote = resolveClientItemNote(rep || {}) || rep?.clientNote || "";
+  } else {
+    const mergedNote = mergeClientItemNotes(row.sourceItems);
+    if (mergedNote) row.clientNote = mergedNote;
+    else if (!row.clientNote) row.clientNote = resolveClientItemNote(rep || {}) || rep?.clientNote || "";
   }
   return row;
+}
+
+/** Склеенные клиентские строки закупки (единая точка для UI / PDF / Excel). */
+export function buildClientPurchaseMergedRows(items) {
+  return mergedPurchaseRows(items || []);
 }
 
 export function mergedPurchaseRows(items) {

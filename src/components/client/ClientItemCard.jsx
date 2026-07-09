@@ -7,6 +7,10 @@ import { itemImageUrl, lineGross, lineVat } from "../../lib/itemHelpers.js";
 import { money, num } from "../../store/helpers.js";
 import { isBoughtStatus } from "../../lib/itemHelpers.js";
 import { isCoolingSpecItem } from "../../../shared/itemTypes.js";
+import {
+  formatClientLineTotal,
+  formatClientUnitPrice,
+} from "../../../shared/clientPurchaseRows.js";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { DebouncedInput } from "./ClientDebouncedField.jsx";
 
@@ -24,7 +28,15 @@ export default function ClientItemCard({
   const gross = lineGross(it);
   const vat = lineVat(it);
   const coolingSpec = isCoolingSpecItem(it);
-  const priceUnset = !(Number(it.price) > 0);
+  const unitPrice = formatClientUnitPrice(it);
+  const lineTotal = formatClientLineTotal(it);
+  const unitPriceLabel = typeof unitPrice === "number" ? money(unitPrice, currency) : unitPrice;
+  const lineTotalLabel =
+    lineTotal === ""
+      ? ""
+      : typeof lineTotal === "number"
+        ? money(lineTotal, currency)
+        : lineTotal;
 
   return (
     <div className={"card card-item" + (bought ? " card-item--bought" : "") + (compact ? " card-item--compact" : "")}>
@@ -52,25 +64,26 @@ export default function ClientItemCard({
         <div className="muted" style={{ fontSize: compact ? 12 : 12.5, marginTop: 2 }}>
           <span className="num">{num(it.qty)}</span> {it.unit}
           {!compact && (it.vatRate || 0) > 0 && <span> · НДС {it.vatRate}%</span>}
-          {compact && it.price > 0 && (
+          {compact && lineTotalLabel && (
             <span>
               {" "}
-              · <span className="num">{money(gross, currency)}</span>
+              · <span className="num">{lineTotalLabel}</span>
             </span>
           )}
         </div>
-        {!compact &&
-          (coolingSpec && priceUnset ? (
+        {!compact && (
             <div style={{ fontSize: 12.5, marginTop: 4 }}>
-              Цена: <span className="num">цена уточняется</span>
+              Цена: <span className="num">{unitPriceLabel}</span>
+              {lineTotalLabel ? (
+                <>
+                  /ед · Сумма: <b className="num">{lineTotalLabel}</b>
+                </>
+              ) : null}
+              {vat > 0 && typeof unitPrice === "number" && (
+                <span className="muted"> (в т.ч. НДС {money(vat, currency)})</span>
+              )}
             </div>
-          ) : (
-            <div style={{ fontSize: 12.5, marginTop: 4 }}>
-              Цена: <span className="num">{money(it.price, currency)}</span>/ед · Сумма:{" "}
-              <b className="num">{money(gross, currency)}</b>
-              {vat > 0 && <span className="muted"> (в т.ч. НДС {money(vat, currency)})</span>}
-            </div>
-          ))}
+          )}
         {!compact && it.supplier && (
           <div style={{ fontSize: 12.5, marginTop: 4 }}>
             <b>Поставщик:</b> {it.supplier}

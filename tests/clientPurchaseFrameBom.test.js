@@ -5,8 +5,12 @@ import { clientPurchaseItems } from "../src/lib/itemHelpers.js";
 import {
   buildClientPdfRowLabel,
   clientPdfRowHasTechnicalFields,
+  CLIENT_PRICE_MISSING,
   enrichClientPurchaseItem,
   filterClientPurchaseItems,
+  formatClientLineTotal,
+  formatClientUnitPrice,
+  mergeClientItemNotes,
   NFT_CHANNEL_CLIENT_NOTE,
   prepareClientPurchaseItem,
   prepareClientPurchaseItems,
@@ -184,7 +188,42 @@ describe("client purchase rows — frame_bom", () => {
       catalogMaterials,
     );
     expect(row.name).toBe("Без материала");
-    expect(Number(row.price) || 0).toBe(0);
+    expect(formatClientUnitPrice(row)).toBe(CLIENT_PRICE_MISSING);
     expect(row.supplier || "").toBe("");
+  });
+
+  it("mergeClientItemNotes preserves unique notes from multiple racks", () => {
+    const notes = mergeClientItemNotes([
+      { clientNote: NFT_CHANNEL_CLIENT_NOTE },
+      { clientNote: "Доп. пояснение для закупки" },
+    ]);
+    expect(notes).toContain("NFT-канал");
+    expect(notes).toContain("Доп. пояснение");
+  });
+
+  it("manual and BOM same materialId stay separate when modules differ", () => {
+    const bom = prepareClientPurchaseItem(
+      buildFrameBomProjectItems().find((i) => i.materialId === "m072"),
+      catalogMaterials,
+    );
+    const manual = prepareClientPurchaseItem(
+      {
+        id: "manual_crab",
+        materialId: "m072",
+        name: "Краб ручной",
+        qty: 2,
+        unit: "шт",
+        supplier: "КрепёжПро",
+        link: "https://example.com/crab",
+        price: 45,
+        visibleToClient: true,
+        itemType: "material",
+        module: "Ручной раздел",
+      },
+      catalogMaterials,
+    );
+    const merged = mergedPurchaseRows([bom, manual]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].qty).toBe(11);
   });
 });

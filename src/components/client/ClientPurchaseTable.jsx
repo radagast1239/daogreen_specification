@@ -3,16 +3,22 @@ import { PURCHASE_STATUSES } from "../../data/modules.js";
 import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { itemImageUrl, isPurchaseClosed } from "../../lib/itemHelpers.js";
 import { money, num } from "../../store/helpers.js";
-import { isCoolingSpecItem } from "../../../shared/itemTypes.js";
+import {
+  CLIENT_PRICE_MISSING,
+  CLIENT_PRICE_TBD,
+  formatClientLineTotal,
+  formatClientUnitPrice,
+} from "../../../shared/clientPurchaseRows.js";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { patchMergedRow } from "../../lib/clientMergedPatch.js";
 
-const PRICE_TBD = "цена уточняется";
+const PRICE_TBD = CLIENT_PRICE_TBD;
+const PRICE_MISSING = CLIENT_PRICE_MISSING;
 
-function clientCoolingPriceUnset(rowOrItem) {
-  const rep = rowOrItem.sourceItems?.[0];
-  if (!isCoolingSpecItem(rep || rowOrItem)) return false;
-  return !(Number(rowOrItem.price) > 0) && !(Number(rowOrItem.sumVat) > 0);
+function clientPriceLabel(rowOrItem, currency, { gross = false } = {}) {
+  const formatted = gross ? formatClientLineTotal(rowOrItem) : formatClientUnitPrice(rowOrItem);
+  if (formatted === PRICE_TBD || formatted === PRICE_MISSING) return formatted;
+  return money(formatted, currency);
 }
 
 function mergedRowStatus(row) {
@@ -34,7 +40,6 @@ function MergedTableRow({ row, currency, patch, patchBulk, bought, onProposeRepl
   const img = !compact || showPhoto ? photoUrl : "";
   const status = mergedRowStatus(row);
   const multi = (row.sourceCount || row.sources?.length || 0) > 1;
-  const priceUnset = clientCoolingPriceUnset(row);
 
   const onStatus = (next) => patchMergedRow(patch, patchBulk, row, { status: next });
 
@@ -88,10 +93,10 @@ function MergedTableRow({ row, currency, patch, patchBulk, bought, onProposeRepl
         <span className="num">{num(row.qty)}</span> {row.unit}
       </td>
       <td data-label="Цена" className="client-purchase-table__num num">
-        {priceUnset ? PRICE_TBD : money(row.price, currency)}
+        {clientPriceLabel(row, currency)}
       </td>
       <td data-label="Сумма" className="client-purchase-table__num client-purchase-table__sum num">
-        <b>{priceUnset ? PRICE_TBD : money(row.sumVat, currency)}</b>
+        <b>{clientPriceLabel(row, currency, { gross: true })}</b>
       </td>
       {!compact && (
         <td data-label="Поставщик" className="client-purchase-table__supplier">
@@ -121,8 +126,6 @@ function ItemTableRow({ it, currency, patch, bought, onProposeReplacement, compa
   const photoUrl = itemImageUrl(it);
   const hasPhoto = !!photoUrl;
   const img = !compact || showPhoto ? photoUrl : "";
-  const gross = Number(it.qty || 0) * Number(it.price || 0);
-  const priceUnset = clientCoolingPriceUnset(it);
 
   return (
     <tr className={bought ? "client-purchase-table__row--bought" : ""}>
@@ -160,10 +163,10 @@ function ItemTableRow({ it, currency, patch, bought, onProposeReplacement, compa
         <span className="num">{num(it.qty)}</span> {it.unit}
       </td>
       <td data-label="Цена" className="client-purchase-table__num num">
-        {priceUnset ? PRICE_TBD : money(it.price, currency)}
+        {clientPriceLabel(it, currency)}
       </td>
       <td data-label="Сумма" className="client-purchase-table__num client-purchase-table__sum num">
-        <b>{priceUnset ? PRICE_TBD : money(gross, currency)}</b>
+        <b>{clientPriceLabel(it, currency, { gross: true })}</b>
       </td>
       {!compact && (
         <td data-label="Поставщик" className="client-purchase-table__supplier">

@@ -1,11 +1,15 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import QRCode from "qrcode";
-import { money, formatQty, mergedPurchaseRows } from "../store/helpers.js";
+import { money, formatQty, buildClientPurchaseMergedRows } from "../store/helpers.js";
 import { lineGross, isBoughtStatus } from "./itemHelpers.js";
 import { rowsForResponsibleRole } from "./responsibleResolve.js";
 import { getClientSectionLabelMap } from "../../shared/clientSections.js";
 import { isCoolingSpecItem } from "../../shared/itemTypes.js";
+import {
+  CLIENT_PRICE_TBD,
+  formatClientLineTotal,
+} from "../../shared/clientPurchaseRows.js";
 import { purchasePriorityLabel } from "../../shared/purchasePriority.js";
 import { generateProjectPdf } from "./pdfExport.js";
 import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdfFontSetup.js";
@@ -72,7 +76,7 @@ function rowPurchaseMeta(row) {
 /** Позиции «что купить в первую очередь» — pure helper для обложки и тестов. */
 export function pickPriorityPurchaseItems(items, maxLines = 7) {
   const purchaseItems = (items || []).filter((i) => i.itemRole !== "installation");
-  const merged = mergedPurchaseRows(purchaseItems);
+  const merged = buildClientPurchaseMergedRows(purchaseItems);
   const picked = [];
   const seen = new Set();
 
@@ -110,7 +114,7 @@ export function pickPriorityPurchaseItems(items, maxLines = 7) {
 /** Данные для титульной страницы PDF — pure helper для тестов. */
 export function buildPdfCoverData(project = {}, items = [], branding = {}, options = {}) {
   const purchaseItems = (items || []).filter((i) => i.itemRole !== "installation");
-  const merged = options.merged || mergedPurchaseRows(purchaseItems);
+  const merged = options.merged || buildClientPurchaseMergedRows(purchaseItems);
   const budget = purchaseItems.reduce((s, i) => s + lineGross(i), 0);
   const priorityLines = pickPriorityPurchaseItems(purchaseItems);
   const parts = [branding.contactPhone, branding.contactEmail, branding.contactTelegram].filter(Boolean);
@@ -227,11 +231,10 @@ async function tableForShort(doc, rows, project, startY, brandRgb) {
 }
 
 export function clientPdfMoneyOrTbd(row, currency) {
-  const rep = row.sourceItems?.[0];
-  const coolingSpec = isCoolingSpecItem(rep || row);
-  const priceUnset = coolingSpec && !(Number(row.price) > 0) && !(Number(row.sumVat) > 0);
-  if (priceUnset) return "цена уточняется";
-  return money(row.sumVat ?? lineGross(row), currency);
+  const total = formatClientLineTotal(row);
+  if (total === CLIENT_PRICE_TBD) return CLIENT_PRICE_TBD;
+  if (total === "") return money(0, currency);
+  return money(total, currency);
 }
 
 function drawTitleBlock(doc, project, branding, brandRgb, subtitle) {
@@ -360,7 +363,7 @@ async function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStat
 }
 
 function mergedForRole(items, role) {
-  return rowsForResponsibleRole(mergedPurchaseRows(items), role);
+  return rowsForResponsibleRole(buildClientPurchaseMergedRows(items), role);
 }
 
 /** Строки без ссылки на товар — «требуют подбора» */
@@ -492,7 +495,7 @@ async function renderClientPurchasePdf(doc, project, items, branding, brandRgb, 
   let y = drawTitleBlock(doc, project, branding, brandRgb, "Закупочный лист");
   y = budgetLines(doc, items, project, y);
   y = purchaseInstruction(doc, y);
-  const merged = mergedPurchaseRows(items);
+  const merged = buildClientPurchaseMergedRows(items);
 
   y = ensureSpace(doc, y, 20);
   doc.setFontSize(11);
@@ -519,7 +522,7 @@ async function renderClientPurchasePdf(doc, project, items, branding, brandRgb, 
 async function renderSupplierPdf(doc, project, items, branding, brandRgb, purchaseStatuses, pdfOpts) {
   let y = drawTitleBlock(doc, project, branding, brandRgb, "Закупка по поставщикам");
   y = budgetLines(doc, items, project, y);
-  const merged = mergedPurchaseRows(items);
+  const merged = buildClientPurchaseMergedRows(items);
   y = ensureSpace(doc, y, 20);
   doc.setFontSize(11);
   doc.text(`По поставщикам · ${merged.length} позиций`, 14, y);
@@ -548,7 +551,7 @@ async function renderFullPdf(doc, project, items, branding, brandRgb, purchaseSt
   y = fullKitWarning(doc, y);
   y = budgetLines(doc, items, project, y);
   y = instructionBlock(doc, y);
-  const merged = mergedPurchaseRows(items);
+  const merged = buildClientPurchaseMergedRows(items);
   y = categorySummaryTable(doc, merged, project, y, brandRgb);
 
   y = ensureSpace(doc, y, 20);
@@ -599,7 +602,7 @@ async function renderFullPdf(doc, project, items, branding, brandRgb, purchaseSt
 async function renderShortPdf(doc, project, items, branding, brandRgb, purchaseStatuses, pdfOpts) {
   let y = drawTitleBlock(doc, project, branding, brandRgb, "Короткий список закупки");
   y = budgetLines(doc, items, project, y);
-  const merged = mergedPurchaseRows(items);
+  const merged = buildClientPurchaseMergedRows(items);
   y = ensureSpace(doc, y, 20);
   doc.setFontSize(11);
   doc.text(`Компактный список · ${merged.length} позиций`, 14, y);
@@ -611,7 +614,7 @@ async function renderShortPdf(doc, project, items, branding, brandRgb, purchaseS
 async function renderMergedPdf(doc, project, items, branding, brandRgb, purchaseStatuses, pdfOpts) {
   let y = drawTitleBlock(doc, project, branding, brandRgb, "Всё к покупке");
   y = budgetLines(doc, items, project, y);
-  const merged = mergedPurchaseRows(items);
+  const merged = buildClientPurchaseMergedRows(items);
   y = ensureSpace(doc, y, 20);
   doc.setFontSize(11);
   doc.text(`Общий список · ${merged.length} позиций`, 14, y);
