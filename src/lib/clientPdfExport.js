@@ -11,6 +11,7 @@ import { generateProjectPdf } from "./pdfExport.js";
 import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdfFontSetup.js";
 import { buildPdfPhotoMap, pdfPhotoTableHooks, PDF_PHOTO_COL_WIDTH_MM } from "./pdfImageHelpers.js";
 import { safePdfText, safePdfPhotoCell } from "./pdfSafeValue.js";
+import { buildClientPdfRowLabel } from "../../shared/clientPurchaseRows.js";
 
 function hexToRgb(hex) {
   const h = (hex || "#116355").replace("#", "");
@@ -269,7 +270,7 @@ function budgetLines(doc, items, project, y) {
 export function clientPdfNameCol(row) {
   const rep = row.sourceItems?.[0];
   const isCooling = isCoolingSpecItem(rep || row);
-  if (!isCooling) return safePdfText(row.name);
+  if (!isCooling) return safePdfText(buildClientPdfRowLabel(row));
 
   // Для климата: собираем характеристики из sourceItems, если они есть.
   // Базовое название всегда "Сплит-система / кондиционер" (без суффиксов комнаты или количества)

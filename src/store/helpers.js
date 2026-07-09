@@ -100,6 +100,7 @@ import {
   mergePipeCutsFromItems,
   pipeCutsClientNote,
 } from "../../shared/profilePipeCuts.js";
+import { resolveClientItemNote } from "../../shared/clientPurchaseRows.js";
 
 function resolveMergedSupplier(items) {
   for (const it of items || []) {
@@ -147,8 +148,8 @@ function finalizeMergedRow(row) {
       row.pipeCuts = mergedCuts;
       row.clientNote = pipeCutsClientNote(mergedCuts);
     }
-  } else if (!row.clientNote && rep?.clientNote) {
-    row.clientNote = rep.clientNote;
+  } else if (!row.clientNote) {
+    row.clientNote = resolveClientItemNote(rep || {}) || rep?.clientNote || "";
   }
   return row;
 }

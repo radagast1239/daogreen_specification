@@ -1,6 +1,8 @@
 import { db } from "../db.js";
 import { uid } from "./buildItems.js";
 import { lineVisibleToClient } from "../../../shared/itemTypes.js";
+import { prepareClientPurchaseItem } from "../../../shared/clientPurchaseRows.js";
+import { listMaterials } from "../routes/materials.js";
 
 const STATUS_LABELS = {
   not_bought: "Не куплено",
@@ -106,16 +108,17 @@ export function listActivity(projectId, { clientOnly = false, limit = 80 } = {})
   return rows.map((r) => ({ ...r, clientVisible: r.clientVisible !== 0 }));
 }
 
-/** Убрать поля, которые клиент не должен видеть */
-export function sanitizeItemForClient(it) {
-  const { internalNote, techNote, materialId, ...safe } = it;
-  return safe;
+/** Убрать техполя и обогатить snapshot материала для клиентской выдачи. */
+export function sanitizeItemForClient(it, materials) {
+  const catalog = materials ?? listMaterials();
+  return prepareClientPurchaseItem(it, catalog);
 }
 
 export function sanitizeProjectForClient(project) {
+  const materials = listMaterials();
   const items = (project.items || [])
     .filter((it) => lineVisibleToClient(it))
-    .map(sanitizeItemForClient);
+    .map((it) => sanitizeItemForClient(it, materials));
   const {
     clientToken,
     selectedModules,
