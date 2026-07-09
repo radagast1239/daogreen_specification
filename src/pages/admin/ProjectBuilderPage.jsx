@@ -130,7 +130,7 @@ export default function ProjectBuilderPage() {
   const [farmSectionLines, setFarmSectionLines] = useState({});
   const [activeFarmSection, setActiveFarmSection] = useState(null);
   const [farmLoaded, setFarmLoaded] = useState(false);
-  const [rooms, setRooms] = useState(defaultRooms);
+  const [rooms, setRooms] = useState(() => defaultRooms());
   const [activeCoolingRoomId, setActiveCoolingRoomId] = useState(null);
 
   useEffect(() => {
