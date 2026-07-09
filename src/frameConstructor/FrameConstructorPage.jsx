@@ -24,6 +24,7 @@ import {
 } from '../../shared/frameDrawingContext.js';
 import { api } from '../lib/api.js';
 import { useToast } from '../components/Toast.jsx';
+import { useStore } from '../store/StoreContext.jsx';
 import {
   requestFrameBomAddConfirmation,
   applyFrameBomProjectAdd,
@@ -41,6 +42,7 @@ const RACK_TYPE_LABELS = {
 export default function FrameConstructorPage() {
   const [searchParams] = useSearchParams();
   const { confirm } = useToast();
+  const { actions } = useStore();
   const drawingContext = useMemo(
     () => parseFrameDrawingSearchParams(searchParams),
     [searchParams],
@@ -119,7 +121,7 @@ export default function FrameConstructorPage() {
         project,
         purchaseDraft,
         drawingContext: { ...drawingContext, projectId: drawingContext.projectId },
-        updateProject: api.updateProject,
+        updateProject: (id, patch) => actions.projectUpdate(id, patch),
         materials,
       });
       if (outcome.skipped) return;

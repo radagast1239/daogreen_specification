@@ -86,7 +86,6 @@ export default function ProjectBuilderPage() {
   const nav = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const savedProjectIdFromUrl = String(searchParams.get("projectId") || "").trim();
-  const editRackFromUrl = String(searchParams.get("editRack") || "").trim();
   const builderUrl = parseBuilderSearchParams(searchParams);
 
   const [step, setStep] = useState(() => {
@@ -160,6 +159,8 @@ export default function ProjectBuilderPage() {
         setFarmLoaded(hydrated.farmLoaded);
         setLoadedProjectId(project.id);
         setLoadedProject(project);
+        // Keep current draft when only editRack changed (return from constructor).
+        // Full reload of projectId still clears draft below via setDraft(null) on first load.
         setDraft(null);
         const stepFromUrl = searchParams.get("step");
         if (!stepFromUrl && hydrated.lastStep && STEPS.some((s) => s.id === hydrated.lastStep)) {
@@ -173,12 +174,30 @@ export default function ProjectBuilderPage() {
         if (!cancelled) setProjectLoading(false);
       });
     return () => { cancelled = true; };
-  }, [savedProjectIdFromUrl, editRackFromUrl, farmSettings, farmCatalogs, stellageCatalogs, actions, error, state.materials]);
+    // editRack must NOT retrigger hydrate — clearing editRack from URL used to
+    // reload the project, wipe draft, and auto-create an empty "Стеллаж 2".
+  }, [savedProjectIdFromUrl, farmSettings, farmCatalogs, stellageCatalogs, actions, error, state.materials]);
 
   useEffect(() => {
     const fromUrl = String(searchParams.get("editRack") || "").trim();
     if (fromUrl) setPendingEditRack(fromUrl);
   }, [searchParams]);
+
+  // After frame constructor saves BOM via store.projectUpdate, keep builder
+  // snapshot in sync so "Из схемы каркаса" / preserveFrameBom see new items.
+  useEffect(() => {
+    if (!loadedProjectId) return;
+    const fromStore = state.projects.find((p) => p.id === loadedProjectId);
+    if (!fromStore) return;
+    setLoadedProject((prev) => {
+      if (!prev) return fromStore;
+      if (prev === fromStore) return prev;
+      if (prev.updatedAt === fromStore.updatedAt && (prev.items?.length || 0) === (fromStore.items?.length || 0)) {
+        return prev;
+      }
+      return fromStore;
+    });
+  }, [state.projects, loadedProjectId]);
 
   useEffect(() => {
     const fromUrl = searchParams.get("step");
@@ -218,8 +237,11 @@ export default function ProjectBuilderPage() {
   }, []);
 
   useEffect(() => {
-    if (step === "stellages" && !draft) {
-      setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 1, stellageCatalogs, stellageModuleMeta));
+    // Auto-create a blank draft only when the project has no racks yet.
+    // Returning from the frame constructor with existing racks must not
+    // invent "Стеллаж 2" and persist it on the next silent save.
+    if (step === "stellages" && !draft && stellages.length === 0) {
+      setDraft(newStellageDraft(state.modules, state.materials, 1, stellageCatalogs, stellageModuleMeta));
     }
   }, [step, draft, state.modules, state.materials, stellages.length, stellageCatalogs, stellageModuleMeta]);
 
@@ -327,6 +349,18 @@ export default function ProjectBuilderPage() {
     }
   };
 
+  const startNewStellageDraft = () => {
+    setDraft(
+      newStellageDraft(
+        state.modules,
+        state.materials,
+        stellages.length + 1,
+        stellageCatalogs,
+        stellageModuleMeta,
+      ),
+    );
+  };
+
   const finishStellage = () => {
     if (!draft?.name?.trim()) {
       error("Укажите название стеллажа в проекте.");
@@ -340,8 +374,10 @@ export default function ProjectBuilderPage() {
       error("У отмеченных позиций укажите количество: колонка «Кол-во» или шт в параметрах насоса/вытяжки.");
       return;
     }
-    setStellages((list) => [...list, { ...draft, items: draft.items.map((ln) => ({ ...ln })) }]);
-    setDraft(newStellageDraft(state.modules, state.materials, stellages.length + 2, stellageCatalogs, stellageModuleMeta));
+    const { editingExisting: _e, ...finished } = draft;
+    setStellages((list) => [...list, { ...finished, items: draft.items.map((ln) => ({ ...ln })) }]);
+    // After finishing a rack, stay on the list — do not auto-open a blank "Стеллаж N+1".
+    setDraft(null);
   };
 
   const openStellageEditor = async (st, { skipConfirm = false } = {}) => {
@@ -370,7 +406,7 @@ export default function ProjectBuilderPage() {
       loadedProject?.items || [],
     );
     setStellages((list) => list.filter((s) => s.id !== st.id));
-    setDraft({ ...st, items: mergedItems.map((ln) => ({ ...ln })) });
+    setDraft({ ...st, items: mergedItems.map((ln) => ({ ...ln })), editingExisting: true });
   };
 
   const editStellage = (id) => {
@@ -489,7 +525,8 @@ export default function ProjectBuilderPage() {
 
   const canFinalize = canCreate;
 
-  const buildProjectPayload = ({ status = PROJECT_STATUS_DRAFT, nextStep = step } = {}) => {
+  const buildProjectPayload = ({ status = PROJECT_STATUS_DRAFT, nextStep = step, draftOverride = null } = {}) => {
+    const draftForSave = draftOverride || draft;
     const farmSections = sections.map((sec) => ({
       sectionId: sec.id,
       sectionName: sec.name,
@@ -501,7 +538,7 @@ export default function ProjectBuilderPage() {
         ...form,
         manualParams: mergeBuilderWizardParams(form.manualParams, { lastStep: nextStep }),
       },
-      stellages: stellagesForProjectSave(stellages, draft),
+      stellages: stellagesForProjectSave(stellages, draftForSave),
       farmSections,
       materials: state.materials,
       rooms,
@@ -509,7 +546,7 @@ export default function ProjectBuilderPage() {
     });
     built.status = status;
     if (loadedProject?.items?.length) {
-      const stellageList = stellagesForProjectSave(stellages, draft);
+      const stellageList = stellagesForProjectSave(stellages, draftForSave);
       built.items = preserveFrameBomProjectItems(built.items, loadedProject.items);
       built.items = mergeFrameBomQtyFromBuilderLines(built.items, stellageList);
     }
@@ -528,13 +565,13 @@ export default function ProjectBuilderPage() {
     window.setTimeout(() => setSaveState("idle"), 2500);
   };
 
-  const persistProject = async ({ status = PROJECT_STATUS_DRAFT, nextStep = step, silent = false } = {}) => {
+  const persistProject = async ({ status = PROJECT_STATUS_DRAFT, nextStep = step, silent = false, draftOverride = null } = {}) => {
     if (!form.name.trim()) {
       throw new Error("Укажите название проекта на шаге «Проект».");
     }
     if (!silent) setDraftSaving(true);
     try {
-      const payload = buildProjectPayload({ status, nextStep });
+      const payload = buildProjectPayload({ status, nextStep, draftOverride });
       if (loadedProjectId) {
         const updated = await actions.projectUpdate(loadedProjectId, payload);
         setLoadedProjectId(updated.id);
@@ -580,6 +617,16 @@ export default function ProjectBuilderPage() {
     nav(buildFrameDrawingLink(ctx));
   };
 
+  const draftOverrideForFrameStellage = (stellage) => {
+    if (!stellage?.id) return null;
+    if (draft?.id === stellage.id) {
+      return { ...draft, editingExisting: true };
+    }
+    // Opening scheme from a list rack while an unrelated empty draft is open —
+    // do not let the empty draft hitch a ride into the save payload.
+    return draft;
+  };
+
   const saveProjectAndOpenFrame = async (stellage, frameCtx = null) => {
     if (frameSchemeSaving) return;
     const validationError = validateStellageForFrameDrawing(stellage);
@@ -593,7 +640,11 @@ export default function ProjectBuilderPage() {
     }
     setFrameSchemeSaving(true);
     try {
-      const project = await persistProject();
+      const draftOverride = draftOverrideForFrameStellage(stellage);
+      if (draftOverride?.id === stellage.id && draft?.id === stellage.id) {
+        setDraft(draftOverride);
+      }
+      const project = await persistProject({ draftOverride });
       openFrameForStellage(project, stellage, frameCtx);
     } catch (e) {
       error(e.message || "Не удалось сохранить проект");
@@ -611,7 +662,11 @@ export default function ProjectBuilderPage() {
     }
     setFrameSchemeSaving(true);
     try {
-      const project = await persistProject();
+      const draftOverride = draftOverrideForFrameStellage(stellage);
+      if (draftOverride?.id === stellage.id && draft?.id === stellage.id) {
+        setDraft(draftOverride);
+      }
+      const project = await persistProject({ draftOverride });
       openFrameForStellage(project, stellage, frameCtx);
     } catch (e) {
       error(e.message || "Не удалось обновить проект");
@@ -756,9 +811,71 @@ export default function ProjectBuilderPage() {
         </div>
       )}
 
-      {step === "stellages" && !draft && (
+      {step === "stellages" && !draft && stellages.length === 0 && (
         <div className="card" style={{ padding: 20 }}>
           <p className="muted" style={{ margin: 0 }}>Загрузка шага «Стеллажи»…</p>
+        </div>
+      )}
+
+      {step === "stellages" && !draft && stellages.length > 0 && (
+        <div>
+          <div className="toolbar" style={{ marginBottom: 14 }}>
+            <button type="button" className="btn" onClick={() => goToStep("basics")}>← Назад</button>
+            <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={() => goToStep("general")}>
+              Ферма целиком →
+            </button>
+          </div>
+
+          <div className="card" style={{ marginBottom: 14, padding: 12, borderColor: 'var(--border)' }}>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {DRAFT_PROJECT_FRAME_DRAWING_SECTION_HINT}
+            </p>
+          </div>
+
+          <div className="card" style={{ marginBottom: 14, padding: 12 }}>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>В проекте ({stellages.length})</div>
+            {stellages.map((st) => (
+              <div key={st.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
+                <div className="row between stellage-list-row" style={{ marginBottom: 8, gap: 10 }}>
+                  <StellagePhotoThumb
+                    url={resolveStellagePhoto(stellageModuleMeta, st.moduleId, st.photoUrl || st.params?.photoUrl)}
+                    size={48}
+                  />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <strong>{st.name}</strong>
+                    {(Number(st.count) || 1) > 1 && (
+                      <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>× {st.count} шт.</span>
+                    )}
+                    <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
+                      {st.moduleName} · {countIncluded(st.items)} поз.
+                      {st.presetId ? " · пресет" : ""}
+                    </span>
+                  </span>
+                  <span className="row" style={{ gap: 6 }}>
+                    <button type="button" className="btn btn-sm btn-primary" onClick={() => editStellage(st.id)}>
+                      Продолжить спецификацию
+                    </button>
+                    <button type="button" className="btn btn-sm" onClick={() => duplicateStellage(st.id)}>Копия</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeStellage(st.id)}>✕</button>
+                  </span>
+                </div>
+                <BuilderStellageFrameDrawingRow
+                  stellage={st}
+                  projectId={loadedProjectId}
+                  projectName={form.name}
+                  onSaveProjectAndOpen={handleFrameDrawingAction}
+                  saving={frameSchemeSaving}
+                  compact
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="toolbar" style={{ marginBottom: 14 }}>
+            <button type="button" className="btn btn-primary" onClick={startNewStellageDraft}>
+              Добавить стеллаж
+            </button>
+          </div>
         </div>
       )}
 

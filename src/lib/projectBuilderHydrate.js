@@ -10,7 +10,13 @@ import { resolveBreakerSpecs } from "../../shared/breakerSpecs.js";
 import { resolveFlowSpecs } from "../../shared/flowSpecs.js";
 import { resolveSplitSpecs } from "../../shared/splitSpecs.js";
 import { resolveItemType } from "../../shared/itemTypes.js";
-import { FRAME_BOM_SOURCE, frameBomItemsForModuleRack, enrichProjectItemFromMaterial, FRAME_BOM_ADMIN_SOURCE_LABEL } from "../../shared/frameBomProjectItems.js";
+import {
+  FRAME_BOM_SOURCE,
+  frameBomItemsForModuleRack,
+  enrichProjectItemFromMaterial,
+  FRAME_BOM_ADMIN_SOURCE_LABEL,
+  isFrameBomLine,
+} from "../../shared/frameBomProjectItems.js";
 import { buildModuleRackKey } from "../../shared/moduleRackIds.js";
 import { builderWizardFromManualParams } from "../../shared/projectLifecycle.js";
 
@@ -328,16 +334,33 @@ export function hydrateBuilderFromProject(project, {
   };
 }
 
+/**
+ * Empty auto-draft must not be persisted as a second rack.
+ * Persist draft when:
+ * - it already exists in the list (in-place edit),
+ * - user checked out an existing rack for editing,
+ * - user selected at least one line / applied a preset.
+ */
+export function shouldPersistStellageDraft(draft, stellages = []) {
+  if (!draft?.name?.trim() || !draft?.id) return false;
+  if ((stellages || []).some((st) => st.id === draft.id)) return true;
+  if (draft.editingExisting) return true;
+  if ((draft.items || []).some((ln) => ln.included)) return true;
+  if (draft.presetId) return true;
+  return false;
+}
+
 export function stellagesForProjectSave(stellages = [], draft = null) {
   const list = stellages.map((st) => ({
     ...st,
     items: (st.items || []).map((ln) => ({ ...ln })),
   }));
-  if (!draft?.name?.trim()) return list;
+  if (!shouldPersistStellageDraft(draft, list)) return list;
   const idx = list.findIndex((st) => st.id === draft.id);
+  const { editingExisting: _editingExisting, ...rest } = draft;
   const snapshot = {
-    ...draft,
-    items: draft.items.map((ln) => ({ ...ln })),
+    ...rest,
+    items: (draft.items || []).map((ln) => ({ ...ln })),
   };
   if (idx >= 0) {
     list[idx] = snapshot;
@@ -360,7 +383,7 @@ export function preserveFrameBomProjectItems(builderItems = [], loadedItems = []
   const ids = new Set((builderItems || []).map((it) => it.id));
   const preserved = (loadedItems || []).filter((it) => {
     if (ids.has(it.id)) return false;
-    return (it.source || it.sourceType) === FRAME_BOM_SOURCE;
+    return isFrameBomLine(it);
   });
   return [...builderItems, ...preserved];
 }

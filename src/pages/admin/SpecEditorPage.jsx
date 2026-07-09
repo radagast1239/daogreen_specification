@@ -26,7 +26,6 @@ import Collapsible from "../../components/Collapsible.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
 import { useToast } from "../../components/Toast.jsx";
 import StellageFrameDrawingsPanel from "../../components/StellageFrameDrawingsPanel.jsx";
-import { buildProjectStellagesReturnPath } from "../../../shared/frameDrawingContext.js";
 import { resolveAdminItemSourceLabel } from "../../../shared/frameBomProjectItems.js";
 import { buildBuilderDraftPath, isDraftProject, resolveBuilderWizardStep } from "../../../shared/projectLifecycle.js";
 import SaveSectionTemplateModal from "../../components/SaveSectionTemplateModal.jsx";
@@ -767,7 +766,6 @@ export default function SpecEditorPage() {
         <div ref={stellagesPanelRef}>
           <StellageFrameDrawingsPanel
             project={project}
-            returnPath={buildProjectStellagesReturnPath(project.id)}
           />
         </div>
         <ProjectDocuments projectId={project.id} />

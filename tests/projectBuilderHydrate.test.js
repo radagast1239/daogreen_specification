@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   stellagesFromProject,
   stellagesForProjectSave,
+  shouldPersistStellageDraft,
   hydrateBuilderFromProject,
   validateStellageForFrameDrawing,
   projectItemToBuilderLine,
@@ -99,7 +100,7 @@ describe('projectBuilderHydrate', () => {
     expect(merged.find((ln) => ln.name === 'Краб')?.included).toBe(false);
   });
 
-  it('includes current draft in save payload list even without selected items', () => {
+  it('does not persist empty auto-draft as a second rack', () => {
     const draft = {
       id: 'st2',
       name: 'Стеллаж 2',
@@ -108,8 +109,30 @@ describe('projectBuilderHydrate', () => {
       items: [{ id: 'ln2', name: 'Краб', included: false, qty: 4 }],
     };
     const merged = stellagesForProjectSave(stellagesFromProject(project), draft);
-    expect(merged).toHaveLength(2);
-    expect(merged[1].id).toBe('st2');
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe('st1');
+  });
+
+  it('persists draft with included lines or editingExisting checkout', () => {
+    const withIncluded = {
+      id: 'st2',
+      name: 'Стеллаж 2',
+      moduleId: 'mod1',
+      items: [{ id: 'ln2', name: 'Краб', included: true, qty: 4 }],
+    };
+    expect(stellagesForProjectSave(stellagesFromProject(project), withIncluded)).toHaveLength(2);
+
+    const editing = {
+      id: 'st1',
+      name: 'Стеллаж 1',
+      moduleId: 'mod1',
+      editingExisting: true,
+      items: [{ id: 'ln1', name: 'Труба', included: false, qty: 1 }],
+    };
+    const mergedEdit = stellagesForProjectSave([], editing);
+    expect(mergedEdit).toHaveLength(1);
+    expect(mergedEdit[0].id).toBe('st1');
+    expect(mergedEdit[0].editingExisting).toBeUndefined();
   });
 
   it('validates stellage before frame drawing without requiring selected items', () => {
@@ -139,6 +162,23 @@ describe('projectBuilderHydrate', () => {
     const stellages = [{ id: 'st1', moduleId: 'mod1', name: 'A' }];
     expect(findStellageByEditRack(stellages, 'st1')?.id).toBe('st1');
     expect(findStellageByEditRack(stellages, 'mod1:st1')?.id).toBe('st1');
+  });
+
+  it('preserveFrameBomProjectItems keeps legacy frame BOM rows without source field', () => {
+    const builderItems = [{ id: 'st1__ln1', name: 'Труба' }];
+    const loadedItems = [
+      ...builderItems,
+      {
+        id: 'it_fbom_legacy',
+        sourceKey: 'frame_bom:d1:mod1:st1:profile_tube_20x20',
+        sourceObjectIds: { moduleRackKey: 'mod1:st1', bomKey: 'profile_tube_20x20' },
+        pipeCuts: [{ lengthMm: 1000, qty: 2 }],
+        name: 'BOM tube',
+      },
+    ];
+    const merged = preserveFrameBomProjectItems(builderItems, loadedItems);
+    expect(merged).toHaveLength(2);
+    expect(merged[1].id).toBe('it_fbom_legacy');
   });
 
   it('preserveFrameBomProjectItems keeps frame_bom lines on builder save', () => {
@@ -464,6 +504,20 @@ describe('projectBuilderHydrate', () => {
     expect(tube?.included).toBe(true);
     expect(tube?.qty).toBe(70);
     expect(crab?.included).toBeFalsy();
+  });
+
+  it('shouldPersistStellageDraft rejects blank auto draft', () => {
+    expect(shouldPersistStellageDraft({
+      id: 'st2',
+      name: 'Стеллаж 2',
+      items: [{ included: false }],
+    }, [{ id: 'st1' }])).toBe(false);
+    expect(shouldPersistStellageDraft({
+      id: 'st2',
+      name: 'Стеллаж 2',
+      editingExisting: true,
+      items: [{ included: false }],
+    }, [])).toBe(true);
   });
 });
 

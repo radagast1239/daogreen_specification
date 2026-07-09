@@ -432,6 +432,25 @@ describe("frameBom source helpers", () => {
 });
 
 describe("isFrameBomLine detection", () => {
+  it("merge creates stable frame BOM markers immediately", () => {
+    const result = mergeFrameBomIntoProjectItems([], [tubeDraft()], baseOpts);
+    expect(result.addedCount).toBe(1);
+    const item = result.items[0];
+    expect(item.source).toBe("frame_bom");
+    expect(item.sourceType).toBe("frame_bom");
+    expect(item.frameBom).toBe(true);
+    expect(item.fromFrameBom).toBe(true);
+    expect(item.isFrameBom).toBe(true);
+    expect(item.bomKey).toBe("profile_tube_20x20");
+    expect(item.moduleRackKey).toBe("rack1");
+    expect(item.drawingId).toBe("d1");
+    expect(item.sourceKey).toContain("frame_bom:");
+    expect(item.sourceObjectIds.bomKey).toBe("profile_tube_20x20");
+    expect(item.sourceObjectIds.moduleRackKey).toBe("rack1");
+    expect(isFrameBomLine(item)).toBe(true);
+    expect(frameBomItemsForModuleRack(result.items, "rack1")).toHaveLength(1);
+  });
+
   it("detects sourceKey prefix without source field", () => {
     expect(
       isFrameBomLine({
