@@ -25,6 +25,7 @@ import PageSkeleton from "../../components/PageSkeleton.jsx";
 import { useToast } from "../../components/Toast.jsx";
 import StellageFrameDrawingsPanel from "../../components/StellageFrameDrawingsPanel.jsx";
 import { buildProjectStellagesReturnPath } from "../../../shared/frameDrawingContext.js";
+import { resolveAdminItemSourceLabel } from "../../../shared/frameBomProjectItems.js";
 import { buildBuilderDraftPath, isDraftProject, resolveBuilderWizardStep } from "../../../shared/projectLifecycle.js";
 import SaveSectionTemplateModal from "../../components/SaveSectionTemplateModal.jsx";
 import { api } from "../../lib/api.js";
@@ -1163,7 +1164,9 @@ function SpecTab({
         const isStellage = isStellageModuleTitle(module, modules);
         const lineGroups = isStellage ? stellageGroups : FARM_LINE_GROUPS;
         const editItem = readOnly ? () => Promise.resolve() : patchItem;
-        const renderItemRow = (it) => (
+        const renderItemRow = (it) => {
+          const frameBomSourceLabel = clientPreview ? "" : resolveAdminItemSourceLabel(it);
+          return (
                   <tr
                     key={it.id}
                     id={`spec-item-${it.id}`}
@@ -1219,6 +1222,11 @@ function SpecTab({
                       {it.source === "planner" && (
                         <div className="chip" style={{ fontSize: 10, marginTop: 4 }}>
                           из плана · {it.sourceType || "object"}
+                        </div>
+                      )}
+                      {frameBomSourceLabel && (
+                        <div className="chip chip--neutral" style={{ fontSize: 10, marginTop: 4 }}>
+                          {frameBomSourceLabel}
                         </div>
                       )}
                       {hasStructuredSpecEditor(it.name) ? (
@@ -1468,7 +1476,8 @@ function SpecTab({
                     </>
                     )}
                   </tr>
-        );
+          );
+        };
         const bodyRows = isStellageModuleTitle(module, modules)
           ? groupItemsByComposition(visibleItems, materials, stellageGroups).flatMap(([gId, gItems]) => [
               gId !== "other" ? (

@@ -174,9 +174,16 @@ describe("frame_bom quality / readiness pipeline", () => {
     expect(entry.issues.some((i) => i.id === "not_client_ready")).toBe(false);
   });
 
-  it("client strip removes technical fields from enriched BOM row", () => {
-    const enriched = enrichItemForPublishCheck(frameBomItem(), catalogMaterial());
-    const client = stripClientTechnicalFields(enriched);
-    expect(JSON.stringify(client)).not.toMatch(/frame_bom|sourceKey|drawingId|moduleRackKey/i);
+  it("admin source label exposes only human text, no sourceKey", () => {
+    const item = frameBomItem();
+    const label = resolveAdminItemSourceLabel(item);
+    expect(label).toBe(FRAME_BOM_ADMIN_SOURCE_LABEL);
+    expect(label).not.toMatch(/frame_bom|sourceKey|drawingId|moduleRackKey/i);
+    expect(JSON.stringify({ label })).not.toMatch(/sourceKey/i);
+  });
+
+  it("ordinary project item has no admin source label", () => {
+    expect(resolveAdminItemSourceLabel({ source: "manual", name: "Болт" })).toBe("");
+    expect(resolveAdminItemSourceLabel({ name: "Болт" })).toBe("");
   });
 });
