@@ -12,6 +12,8 @@ export const FRAME_BOM_ADD_CONFIRM_TITLE =
   "Добавить / обновить BOM этого стеллажа в закупочном листе проекта?";
 export const FRAME_BOM_ADD_BUTTON_HINT =
   "Повторное нажатие заменит BOM только этого стеллажа, ручные позиции проекта не трогаются.";
+export const FRAME_BOM_UPDATE_BOM_HINT =
+  "Обновить BOM — пересоберёт позиции каркаса и уберёт старые дубли этого стеллажа.";
 export const FRAME_BOM_NO_PROJECT_REASON =
   "Добавление в закупку доступно только внутри проекта.";
 export const FRAME_BOM_UNSAVED_DRAWING_WARNING =

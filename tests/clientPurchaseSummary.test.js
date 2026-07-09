@@ -113,6 +113,30 @@ describe("buildClientPurchaseSummary", () => {
     expect(s.frameBomItems).toBe(2);
   });
 
+  it("frameBomItems counts deduped rows only when legacy duplicates exist", () => {
+    const items = [
+      baseItem(),
+      baseItem({
+        id: "old_bolt",
+        materialId: "m073",
+        module: "Стеллаж 1",
+        note: "Из схемы стеллажа",
+        sourceObjectIds: { moduleRackKey: "rack1" },
+      }),
+      baseItem({
+        id: "new_bolt",
+        materialId: "m073",
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        sourceKey: "frame_bom:d1:rack1:bolt_m6",
+        sourceObjectIds: { moduleRackKey: "rack1", bomKey: "bolt_m6" },
+        frameBom: true,
+      }),
+    ];
+    const s = buildClientPurchaseSummary(items);
+    expect(s.frameBomItems).toBe(1);
+  });
+
   it("purchaseClosed counts bought + delivered + have", () => {
     const items = [
       baseItem({ purchaseStatus: PURCHASE_STATUS.BOUGHT }),

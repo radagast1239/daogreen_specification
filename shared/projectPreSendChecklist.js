@@ -10,7 +10,7 @@ import {
 import { matchSpecLineFilter } from "./specLineFilters.js";
 import { isOnReviewItem } from "./projectReadiness.js";
 import { normalizePurchaseStatus, PURCHASE_STATUS } from "./purchaseStatusRules.js";
-import { isFrameBomLine } from "./frameBomProjectItems.js";
+import { dedupedFrameBomLineIds } from "./frameBomProjectItems.js";
 import { getSpecLineSelectionId, normalizeSpecSelectionIds } from "./specLineSelection.js";
 
 /** Реальные проблемы для «Выбрать всё проблемное» / blockers / warnings.
@@ -194,7 +194,7 @@ export function buildProjectPreSendChecklist(items, materials = [], options = {}
       itemIds = readyWithoutIssuesIds;
     } else if (def.key === "frame_bom") {
       itemIds = normalizeSpecSelectionIds(
-        pool.filter((it) => isFrameBomLine(it)).map((it) => getSpecLineSelectionId(it))
+        dedupedFrameBomLineIds(pool).map((id) => id)
       );
     } else if (def.key === "no_link") {
       itemIds = noLinkIds;

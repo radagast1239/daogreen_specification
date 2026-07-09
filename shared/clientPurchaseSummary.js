@@ -16,7 +16,7 @@ import {
   PURCHASE_STATUS,
   isClosedPurchaseStatusId,
 } from "./purchaseStatusRules.js";
-import { isFrameBomLine, FRAME_BOM_ADMIN_SOURCE_LABEL } from "./frameBomProjectItems.js";
+import { isFrameBomLine, FRAME_BOM_ADMIN_SOURCE_LABEL, countDedupedFrameBomItems } from "./frameBomProjectItems.js";
 import { resolveClientSection, getClientSectionLabelMap } from "./clientSections.js";
 import { buildClientPurchaseMergedRows } from "./clientPurchaseMerged.js";
 
@@ -102,7 +102,7 @@ export function buildClientPurchaseSummary(items, materials = []) {
     noPrice: clientItems.filter((it) => !(Number(it.price) > 0)).length,
     noLink: clientItems.filter((it) => !(it.link || "").trim()).length,
     noSupplier: clientItems.filter((it) => !(it.supplier || "").trim()).length,
-    frameBomItems: clientItems.filter((it) => it.frameBom || isFrameBomLine(it)).length,
+    frameBomItems: countDedupedFrameBomItems(pool.filter((it) => isFrameBomLine(it))),
     purchaseTotal,
     purchaseClosed,
     purchaseTotalItems: clientItems.length,

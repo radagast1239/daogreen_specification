@@ -431,4 +431,50 @@ describe("buildProjectPreSendChecklist", () => {
     expect(checklist.noLinkCount).toBe(1);
     expect(checklist.status).toBe("warning");
   });
+
+  it("frame_bom group counts deduped rows only when legacy duplicates exist", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({
+        id: "old_bolt",
+        materialId: "m073",
+        module: "Стеллаж 1",
+        note: "Из схемы стеллажа",
+        sourceObjectIds: { moduleRackKey: "rack1" },
+      }),
+      baseItem({
+        id: "new_bolt",
+        materialId: "m073",
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        sourceKey: "frame_bom:d1:rack1:bolt_m6",
+        sourceObjectIds: { moduleRackKey: "rack1", bomKey: "bolt_m6" },
+        frameBom: true,
+      }),
+    ]);
+    expect(checklist.groups.find((g) => g.key === "frame_bom").count).toBe(1);
+  });
+
+  it("select BOM returns deduped BOM ids when legacy duplicates exist", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({
+        id: "old_bolt",
+        materialId: "m073",
+        module: "Стеллаж 1",
+        note: "Из схемы стеллажа",
+        sourceObjectIds: { moduleRackKey: "rack1" },
+      }),
+      baseItem({
+        id: "new_bolt",
+        materialId: "m073",
+        source: FRAME_BOM_SOURCE,
+        sourceKey: "frame_bom:d1:rack1:bolt_m6",
+        sourceObjectIds: { moduleRackKey: "rack1", bomKey: "bolt_m6" },
+        frameBom: true,
+      }),
+    ]);
+    const ids = selectPreSendGroupIds(checklist, "frame_bom");
+    expect(ids).toHaveLength(1);
+    expect(ids).toContain("new_bolt");
+    expect(ids).not.toContain("old_bolt");
+  });
 });

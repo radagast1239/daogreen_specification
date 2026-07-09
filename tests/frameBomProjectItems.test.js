@@ -10,6 +10,10 @@ import {
   formatFrameBomMissingMaterialsMessage,
   resolveFrameBomItemModuleRackKey,
   sourceKeyMatchesModuleRack,
+  shouldRemoveFrameBomOnMerge,
+  dedupeFrameBomProjectItems,
+  countDedupedFrameBomItems,
+  isExplicitManualProjectItem,
 } from "../shared/frameBomProjectItems.js";
 
 const TUBE_CUTS = [
@@ -70,6 +74,81 @@ function crabGDraft(overrides = {}) {
     unit: "шт",
     qty: 4,
     ...overrides,
+  };
+}
+
+function boltDraft(overrides = {}) {
+  return {
+    key: "bolt_m6",
+    materialId: "m073",
+    name: "Болт М6×20",
+    unit: "шт",
+    qty: 312,
+    ...overrides,
+  };
+}
+
+function legacyBomItem({
+  id,
+  materialId,
+  qty = 1,
+  price = 0,
+  supplier = "поставщик",
+  moduleRackKey = "rack1",
+  rackLabel = "Стеллаж 1",
+  note = "Из схемы стеллажа",
+} = {}) {
+  return {
+    id: id || `legacy_${materialId}`,
+    materialId,
+    name: "Legacy BOM",
+    qty,
+    price,
+    supplier,
+    link: "",
+    module: rackLabel,
+    section: rackLabel,
+    note,
+    clientNote: note,
+    sourceObjectIds: moduleRackKey ? { moduleRackKey } : {},
+  };
+}
+
+function canonicalBomItem({
+  materialId,
+  moduleRackKey = "rack1",
+  drawingId = "d1",
+  bomKey,
+  qty = 312,
+  price = 0.5,
+  supplier = "КрепёжПро",
+  actualPrice,
+  clientComment,
+  visibleToClient = true,
+} = {}) {
+  const key = bomKey || (materialId === "m073" ? "bolt_m6" : materialId === "m072" ? "crab_g" : "profile_tube_20x20");
+  return {
+    id: `it_fbom_${drawingId}_${moduleRackKey}_${key}`,
+    materialId,
+    name: "Canonical BOM",
+    qty,
+    price,
+    supplier,
+    source: "frame_bom",
+    sourceType: "frame_bom",
+    frameBom: true,
+    fromFrameBom: true,
+    isFrameBom: true,
+    bomKey: key,
+    moduleRackKey,
+    sourceKey: `frame_bom:${drawingId}:${moduleRackKey}:${key}`,
+    sourceObjectIds: { moduleRackKey, bomKey: key, frameDrawingId: drawingId },
+    actualPrice,
+    clientComment,
+    visibleToClient,
+    visible: visibleToClient,
+    approved: visibleToClient,
+    module: "Стеллаж 1",
   };
 }
 
@@ -383,6 +462,199 @@ describe("mergeFrameBomIntoProjectItems", () => {
     expect(result.addedCount).toBe(0);
     expect(result.items).toEqual(existing);
   });
+
+  it("merge removes legacy duplicate BOM rows for same rack", () => {
+    const existing = [
+      legacyBomItem({ id: "old_bolt", materialId: "m073", qty: 312 }),
+      canonicalBomItem({ materialId: "m073", qty: 312, price: 0.5 }),
+      legacyBomItem({ id: "old_crab", materialId: "m072", qty: 28 }),
+      canonicalBomItem({ materialId: "m072", bomKey: "crab_g", qty: 28, price: 12 }),
+    ];
+    const result = mergeFrameBomIntoProjectItems(
+      existing,
+      [boltDraft(), crabGDraft({ qty: 28 })],
+      { ...baseOpts, materials: [
+        ...catalogMaterials,
+        { id: "m073", name: "Болт М6×20", unit: "шт", basePrice: 0.5, supplier: "КрепёжПро" },
+      ] },
+    );
+    expect(result.removedCount).toBe(4);
+    expect(result.items.filter((i) => i.materialId === "m073" && isFrameBomLine(i))).toHaveLength(1);
+    expect(result.items.filter((i) => i.materialId === "m072" && isFrameBomLine(i))).toHaveLength(1);
+    expect(result.items.some((i) => i.id === "old_bolt")).toBe(false);
+    expect(result.items.some((i) => i.id === "old_crab")).toBe(false);
+  });
+
+  it("merge keeps manual rows with same materialId but no BOM markers", () => {
+    const existing = [
+      legacyBomItem({ id: "old_bolt", materialId: "m073" }),
+      canonicalBomItem({ materialId: "m073" }),
+      {
+        id: "manual_bolt",
+        materialId: "m073",
+        name: "Болт М6×20",
+        qty: 20,
+        source: "manual",
+        note: "добавлено вручную",
+        module: "Стеллаж 1",
+      },
+    ];
+    const result = mergeFrameBomIntoProjectItems(existing, [boltDraft()], baseOpts);
+    expect(result.items.find((i) => i.id === "manual_bolt")?.qty).toBe(20);
+    expect(result.items.filter((i) => i.materialId === "m073")).toHaveLength(2);
+    expect(isExplicitManualProjectItem(result.items.find((i) => i.id === "manual_bolt"))).toBe(true);
+  });
+
+  it("merge does not remove BOM rows from another rack", () => {
+    const rack2Legacy = legacyBomItem({
+      id: "rack2_bolt",
+      materialId: "m073",
+      moduleRackKey: "rack2",
+      rackLabel: "Стеллаж 2",
+    });
+    rack2Legacy.sourceObjectIds = { moduleRackKey: "rack2" };
+    const existing = [
+      legacyBomItem({ id: "rack1_bolt", materialId: "m073" }),
+      rack2Legacy,
+    ];
+    const result = mergeFrameBomIntoProjectItems(existing, [boltDraft()], baseOpts);
+    expect(result.items.some((i) => i.id === "rack2_bolt")).toBe(true);
+    expect(result.items.some((i) => i.id === "rack1_bolt")).toBe(false);
+  });
+
+  it("merge preserves status/actualPrice/clientComment/visibleToClient from existing current BOM line", () => {
+    const existing = [
+      legacyBomItem({ id: "old_bolt", materialId: "m073" }),
+      {
+        ...canonicalBomItem({ materialId: "m073" }),
+        status: "ordered",
+        purchaseStatus: "ordered",
+        actualPrice: 0.45,
+        clientComment: "уточнить длину",
+        visibleToClient: false,
+        visible: false,
+        approved: false,
+      },
+    ];
+    const result = mergeFrameBomIntoProjectItems(existing, [boltDraft()], baseOpts);
+    const bolt = result.items.find((i) => i.materialId === "m073" && isFrameBomLine(i));
+    expect(bolt.status).toBe("ordered");
+    expect(bolt.actualPrice).toBe(0.45);
+    expect(bolt.clientComment).toBe("уточнить длину");
+    expect(bolt.visibleToClient).toBe(false);
+  });
+
+  it("merge removes old zero-price placeholder BOM when current material-backed BOM exists", () => {
+    const existing = [
+      legacyBomItem({ id: "placeholder", materialId: "m072", qty: 28, price: 0, supplier: "поставщик" }),
+    ];
+    const result = mergeFrameBomIntoProjectItems(
+      existing,
+      [crabGDraft({ qty: 28 })],
+      { ...baseOpts, materials: catalogMaterials },
+    );
+    expect(result.items.filter((i) => i.materialId === "m072")).toHaveLength(1);
+    expect(result.items[0].supplier).toBe("КрепёжПро");
+    expect(result.items[0].price).toBe(45);
+  });
+
+  it("merge handles air duct/NFT BOM duplicates", () => {
+    const existing = [
+      legacyBomItem({
+        id: "old_duct",
+        materialId: "m010",
+        note: "Из схемы стеллажа",
+        rackLabel: "Стеллаж 1",
+      }),
+      frameBomItem({
+        sourceKey: "frame_bom:d1:rack1:nft_duct",
+        materialId: "m010",
+        name: "Воздуховод",
+      }),
+    ];
+    const ductDraft = {
+      key: "nft_duct",
+      materialId: "m010",
+      name: "Воздуховод NFT",
+      unit: "м",
+      qty: 12,
+    };
+    const result = mergeFrameBomIntoProjectItems(existing, [ductDraft], baseOpts);
+    expect(result.items.filter((i) => i.materialId === "m010")).toHaveLength(1);
+    expect(result.items.find((i) => i.materialId === "m010")?.qty).toBe(12);
+  });
+
+  it('merge handles rows with note "Из схемы стеллажа"', () => {
+    const existing = [
+      {
+        id: "note_only",
+        materialId: "m072",
+        qty: 28,
+        price: 0,
+        module: "Стеллаж 1",
+        note: "Из схемы стеллажа",
+      },
+    ];
+    expect(shouldRemoveFrameBomOnMerge(existing[0], "rack1", { rackLabel: "Стеллаж 1" })).toBe(true);
+    const result = mergeFrameBomIntoProjectItems(existing, [crabGDraft({ qty: 28 })], baseOpts);
+    expect(result.items.some((i) => i.id === "note_only")).toBe(false);
+    expect(result.items.filter((i) => i.materialId === "m072")).toHaveLength(1);
+  });
+
+  it("merge handles colon sourceKey ids", () => {
+    const existing = [{
+      id: "frame_bom:d1:mod1:st1:crab_g",
+      sourceKey: "frame_bom:d1:mod1:st1:crab_g",
+      materialId: "m072",
+      qty: 4,
+      note: "Из схемы стеллажа",
+      sourceObjectIds: { moduleRackKey: "mod1:st1" },
+    }];
+    const result = mergeFrameBomIntoProjectItems(
+      existing,
+      [crabGDraft({ qty: 9 })],
+      { ...baseOpts, moduleRackKey: "mod1:st1", drawingId: "d2" },
+    );
+    expect(result.removedCount).toBe(1);
+    expect(result.items.filter((i) => i.source === "frame_bom")).toHaveLength(1);
+    expect(result.items[0].qty).toBe(9);
+  });
+
+  it("repeated merge is idempotent: running twice does not increase item count", () => {
+    const existing = [
+      legacyBomItem({ id: "old_bolt", materialId: "m073" }),
+      canonicalBomItem({ materialId: "m073" }),
+    ];
+    const first = mergeFrameBomIntoProjectItems(existing, [boltDraft()], baseOpts);
+    const second = mergeFrameBomIntoProjectItems(first.items, [boltDraft()], baseOpts);
+    expect(second.items.length).toBe(first.items.length);
+    expect(second.removedCount).toBe(1);
+    expect(second.addedCount).toBe(1);
+  });
+
+  it("update BOM after legacy duplicates results in same item count as clean merge", () => {
+    const dirty = [
+      legacyBomItem({ id: "old_bolt", materialId: "m073" }),
+      canonicalBomItem({ materialId: "m073" }),
+      legacyBomItem({ id: "old_crab", materialId: "m072" }),
+      canonicalBomItem({ materialId: "m072", bomKey: "crab_g" }),
+      { id: "manual_bolt", materialId: "m073", qty: 20, source: "manual", note: "добавлено вручную" },
+    ];
+    const clean = [{ id: "manual_bolt", materialId: "m073", qty: 20, source: "manual", note: "добавлено вручную" }];
+    const dirtyResult = mergeFrameBomIntoProjectItems(
+      dirty,
+      [boltDraft(), crabGDraft({ qty: 28 })],
+      baseOpts,
+    );
+    const cleanResult = mergeFrameBomIntoProjectItems(
+      clean,
+      [boltDraft(), crabGDraft({ qty: 28 })],
+      baseOpts,
+    );
+    expect(dirtyResult.items.length).toBe(cleanResult.items.length);
+    expect(dirtyResult.items.filter((i) => isFrameBomLine(i)).length)
+      .toBe(cleanResult.items.filter((i) => isFrameBomLine(i)).length);
+  });
 });
 
 describe("frameBom source helpers", () => {
@@ -509,5 +781,27 @@ describe("isFrameBomLine detection", () => {
         sourceLabel: "Из схемы каркаса",
       })
     ).toBe(true);
+  });
+});
+
+describe("dedupeFrameBomProjectItems", () => {
+  it("dedupes legacy + canonical rows for same rack/material", () => {
+    const items = [
+      legacyBomItem({ id: "old_bolt", materialId: "m073" }),
+      canonicalBomItem({ materialId: "m073" }),
+      { id: "manual_bolt", materialId: "m073", source: "manual", qty: 20 },
+    ];
+    const deduped = dedupeFrameBomProjectItems(items);
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0].source).toBe("frame_bom");
+    expect(countDedupedFrameBomItems(items)).toBe(1);
+  });
+
+  it("does not dedupe manual rows without BOM markers", () => {
+    const items = [
+      { id: "manual1", materialId: "m073", source: "manual" },
+      { id: "manual2", materialId: "m073", source: "manual" },
+    ];
+    expect(dedupeFrameBomProjectItems(items)).toHaveLength(0);
   });
 });

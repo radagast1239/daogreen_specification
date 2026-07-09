@@ -117,7 +117,198 @@ export function sourceKeyMatchesModuleRack(sourceKey, moduleRackKey) {
 }
 
 /**
- * True when item is frame_bom belonging to the given rack scope (moduleRackKey).
+ * True when item is explicitly manual — must never be removed by BOM merge/cleanup.
+ * @param {object} item
+ */
+export function isExplicitManualProjectItem(item) {
+  if (!item) return false;
+  const source = String(item.source || item.sourceType || item.source_type || "").trim();
+  if (source === "manual") return true;
+  return false;
+}
+
+/**
+ * Resolve bomKey from a saved project item.
+ * @param {object} item
+ */
+export function resolveFrameBomItemBomKey(item) {
+  if (!item) return "";
+  const obj = parseSourceObjectIds(item.sourceObjectIds ?? item.source_object_ids);
+  let bomKey = String(obj.bomKey || item.bomKey || "").trim();
+  if (bomKey) return bomKey;
+  const sk = String(item.sourceKey || item.source_key || "");
+  if (sk.startsWith("frame_bom:")) {
+    const parts = sk.split(":");
+    return parts[parts.length - 1] || "";
+  }
+  const id = String(item.id || "");
+  if (id.startsWith("it_fbom_") || id.startsWith("frame_bom:")) {
+    const parts = id.split(/[:_]/);
+    return parts[parts.length - 1] || "";
+  }
+  return "";
+}
+
+/**
+ * Rank for dedupe / preserve — higher wins.
+ * @param {object} item
+ */
+export function frameBomLineRank(item) {
+  if (!item) return 0;
+  let rank = 0;
+  const source = item.source || item.sourceType || item.source_type || "";
+  if (
+    source === FRAME_BOM_SOURCE ||
+    item.fromFrameBom === true ||
+    item.frameBom === true ||
+    item.isFrameBom === true
+  ) {
+    rank += 100;
+  }
+  if (resolveFrameBomItemBomKey(item)) rank += 50;
+  if (resolveFrameBomItemModuleRackKey(item)) rank += 30;
+  const sk = String(item.sourceKey || item.source_key || "");
+  if (sk.startsWith("frame_bom:")) rank += 15;
+  if (Number(item.price) > 0) rank += 20;
+  if (Number(item.actualPrice) > 0) rank += 10;
+  const supplier = String(item.supplier || "").trim();
+  if (supplier && supplier.toLowerCase() !== "поставщик") rank += 5;
+  if (String(item.link || "").trim()) rank += 5;
+  return rank;
+}
+
+/**
+ * Dedupe key: same rack scope + bomKey/materialId.
+ * @param {object} item
+ */
+export function resolveFrameBomDedupeKey(item) {
+  const rack = resolveFrameBomItemModuleRackKey(item)
+    || (String(item.module || item.section || "").trim()
+      ? `label:${String(item.module || item.section).trim()}`
+      : "")
+    || "norack";
+  const materialId = String(item.materialId || "").trim();
+  if (materialId) return `${rack}::mat:${materialId}`;
+  const bomKey = resolveFrameBomItemBomKey(item);
+  if (bomKey) return `${rack}::${bomKey}`;
+  return `${rack}::id:${String(item.id || "")}`;
+}
+
+/**
+ * True when two BOM lines represent the same rack material cluster (legacy + canonical).
+ * @param {object} a
+ * @param {object} b
+ */
+export function frameBomItemsSameDedupeCluster(a, b) {
+  if (!a || !b) return false;
+  const matA = String(a.materialId || "").trim();
+  const matB = String(b.materialId || "").trim();
+  if (!matA || matA !== matB) return false;
+
+  const rackA = resolveFrameBomItemModuleRackKey(a);
+  const rackB = resolveFrameBomItemModuleRackKey(b);
+  if (rackA && rackB && rackA === rackB) return true;
+
+  const labelA = String(a.module || a.section || "").trim();
+  const labelB = String(b.module || b.section || "").trim();
+  if (labelA && labelB && labelA === labelB) return true;
+  if (rackA && labelB && labelA === labelB) return true;
+  if (rackB && labelA && labelA === labelB) return true;
+
+  return resolveFrameBomDedupeKey(a) === resolveFrameBomDedupeKey(b);
+}
+
+/**
+ * Keep one BOM row per rack+bomKey/materialId — prefer canonical / priced rows.
+ * @param {object[]} items
+ */
+export function dedupeFrameBomProjectItems(items) {
+  const kept = [];
+  for (const item of items || []) {
+    if (!isFrameBomLine(item)) continue;
+    const idx = kept.findIndex((prev) => frameBomItemsSameDedupeCluster(prev, item));
+    if (idx < 0) {
+      kept.push(item);
+    } else if (frameBomLineRank(item) > frameBomLineRank(kept[idx])) {
+      kept[idx] = item;
+    }
+  }
+  return kept;
+}
+
+/**
+ * @param {object[]} items
+ */
+export function countDedupedFrameBomItems(items) {
+  return dedupeFrameBomProjectItems(items).length;
+}
+
+/**
+ * @param {object[]} items
+ */
+export function dedupedFrameBomLineIds(items) {
+  return dedupeFrameBomProjectItems(items)
+    .map((it) => it.id)
+    .filter(Boolean)
+    .map(String);
+}
+
+/**
+ * True when item belongs to rack scope for merge/cleanup.
+ * @param {object} item
+ * @param {string} moduleRackKey
+ * @param {object} [options]
+ */
+export function itemBelongsToRackMergeScope(item, moduleRackKey, options = {}) {
+  const rack = String(moduleRackKey || "").trim();
+  if (!rack || !item) return false;
+
+  const itemRack = resolveFrameBomItemModuleRackKey(item);
+  if (itemRack && itemRack === rack) return true;
+
+  const sk = String(item.sourceKey || item.source_key || "");
+  if (sourceKeyMatchesModuleRack(sk, rack)) return true;
+
+  const obj = parseSourceObjectIds(item.sourceObjectIds ?? item.source_object_ids);
+  const stellageId = String(obj.stellageId || obj.stellage_id || item.stellageId || "").trim();
+  if (stellageId && rack === `stellage:${stellageId}`) return true;
+
+  const optStellageId = String(options.stellageId || "").trim();
+  if (optStellageId && stellageId && stellageId === optStellageId) return true;
+
+  if (rack.startsWith("stellage:")) {
+    const sid = rack.slice("stellage:".length);
+    if (stellageId && stellageId === sid) return true;
+  }
+
+  if (isFrameBomLine(item)) {
+    const rackLabel = String(options.rackLabel || "").trim();
+    if (rackLabel) {
+      const mod = String(item.module || item.section || "").trim();
+      if (mod && mod === rackLabel) return true;
+    }
+    if (sk && (sk.includes(`:${rack}:`) || sk.endsWith(`:${rack}`))) return true;
+  }
+
+  return false;
+}
+
+/**
+ * True when item should be removed during mergeFrameBomIntoProjectItems for a rack.
+ * Uses broad legacy-safe BOM markers + rack scope; never removes explicit manual rows.
+ *
+ * @param {object} item
+ * @param {string} moduleRackKey
+ * @param {object} [options]
+ */
+export function shouldRemoveFrameBomOnMerge(item, moduleRackKey, options = {}) {
+  if (!item || isExplicitManualProjectItem(item)) return false;
+  if (!isFrameBomLine(item)) return false;
+  return itemBelongsToRackMergeScope(item, moduleRackKey, options);
+}
+
+/**
+ * True when item is canonical frame_bom belonging to the given rack scope (moduleRackKey).
  * drawingId is NOT part of the match — same rack replaces all prior BOM versions.
  *
  * @param {object} item
@@ -127,8 +318,6 @@ export function isFrameBomItemForRack(item, moduleRackKey) {
   const rack = String(moduleRackKey || "").trim();
   if (!rack) return false;
 
-  // Rack replace/merge must only touch canonical frame_bom rows.
-  // Broad UI detection (sourceKey-only) must not delete manual lines.
   const source = item?.source || item?.sourceType || item?.source_type || "";
   const isCanonical =
     source === FRAME_BOM_SOURCE ||
@@ -137,17 +326,28 @@ export function isFrameBomItemForRack(item, moduleRackKey) {
     item?.isFrameBom === true;
   if (!isCanonical) return false;
 
-  const itemRack = resolveFrameBomItemModuleRackKey(item);
-  if (itemRack && itemRack === rack) return true;
+  return itemBelongsToRackMergeScope(item, rack);
+}
 
-  const sk = item?.sourceKey || item?.source_key || "";
-  if (sourceKeyMatchesModuleRack(sk, rack)) return true;
-
-  const obj = parseSourceObjectIds(item?.sourceObjectIds ?? item?.source_object_ids);
-  const stellageId = String(obj.stellageId || obj.stellage_id || "").trim();
-  if (stellageId && rack === `stellage:${stellageId}`) return true;
-
-  return false;
+function mergePreservedEntry(map, key, item) {
+  if (!key) return;
+  const status = normalizePurchaseStatus(item);
+  const next = {
+    status,
+    purchaseStatus: status,
+    actualPrice: item.actualPrice,
+    clientComment: item.clientComment,
+    visibleToClient: item.visibleToClient,
+    visible: item.visible,
+    approved: item.approved,
+    clientSection: item.clientSection,
+    clientSubsection: item.clientSubsection,
+    rank: frameBomLineRank(item),
+  };
+  const prev = map.get(key);
+  if (!prev || next.rank >= prev.rank) {
+    map.set(key, next);
+  }
 }
 
 function frameBomItemId({ drawingId, moduleRackKey, bomKey }) {
@@ -453,30 +653,18 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
     }
   }
 
-  const removedBomItems = existing.filter((it) => isFrameBomItemForRack(it, moduleRackKey));
-  const kept = existing.filter((it) => !isFrameBomItemForRack(it, moduleRackKey));
+  const removedBomItems = existing.filter((it) =>
+    shouldRemoveFrameBomOnMerge(it, moduleRackKey, options)
+  );
+  const kept = existing.filter((it) => !shouldRemoveFrameBomOnMerge(it, moduleRackKey, options));
   const removedCount = removedBomItems.length;
 
   const preservedByBomKey = new Map();
+  const preservedByMaterialId = new Map();
   for (const it of removedBomItems) {
-    const obj = parseSourceObjectIds(it.sourceObjectIds ?? it.source_object_ids);
-    let bomKey = String(obj.bomKey || "").trim();
-    if (!bomKey) {
-      const sk = String(it.sourceKey || it.source_key || "");
-      const parts = sk.split(":");
-      bomKey = parts[parts.length - 1] || "";
-    }
-    if (!bomKey) continue;
-    const status = normalizePurchaseStatus(it);
-    preservedByBomKey.set(bomKey, {
-      status,
-      purchaseStatus: status,
-      actualPrice: it.actualPrice,
-      clientComment: it.clientComment,
-      visibleToClient: it.visibleToClient,
-      visible: it.visible,
-      approved: it.approved,
-    });
+    mergePreservedEntry(preservedByBomKey, resolveFrameBomItemBomKey(it), it);
+    const materialId = String(it.materialId || "").trim();
+    if (materialId) mergePreservedEntry(preservedByMaterialId, materialId, it);
   }
 
   const added = [];
@@ -503,7 +691,9 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
 
     const item = frameBomDraftToProjectItem(enrichedLine, options, sourceRackPrefix, sortOrder);
     const bomKey = String(line.key || line.materialId || "").trim();
-    const preserved = preservedByBomKey.get(bomKey);
+    const preserved =
+      preservedByBomKey.get(bomKey)
+      || preservedByMaterialId.get(String(line.materialId || "").trim());
     if (preserved) {
       item.status = preserved.status;
       item.purchaseStatus = preserved.purchaseStatus;
@@ -514,6 +704,8 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
         item.visible = preserved.visible ?? preserved.visibleToClient;
         item.approved = preserved.approved ?? preserved.visibleToClient;
       }
+      if (preserved.clientSection) item.clientSection = preserved.clientSection;
+      if (preserved.clientSubsection) item.clientSubsection = preserved.clientSubsection;
     }
     added.push(item);
     sortOrder += 1;
@@ -533,13 +725,17 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
 }
 
 /**
- * Frame BOM lines already merged into a saved project for one rack.
+ * Frame BOM lines already merged into a saved project for one rack (deduped view).
  *
  * @param {object[]} items
  * @param {string} moduleRackKey
+ * @param {object} [options]
  */
-export function frameBomItemsForModuleRack(items, moduleRackKey) {
+export function frameBomItemsForModuleRack(items, moduleRackKey, options = {}) {
   const rackKey = String(moduleRackKey || "").trim();
   if (!rackKey) return [];
-  return (items || []).filter((it) => isFrameBomItemForRack(it, rackKey));
+  const candidates = (items || []).filter(
+    (it) => isFrameBomLine(it) && itemBelongsToRackMergeScope(it, rackKey, options),
+  );
+  return dedupeFrameBomProjectItems(candidates);
 }

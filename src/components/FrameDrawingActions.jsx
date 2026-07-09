@@ -64,13 +64,18 @@ export default function FrameDrawingActions({
               </a>
               <FrameDrawingLinkButton context={replaceCtx} label="Обновить схему" onNavigate={onNavigate} disabled={navigateDisabled} />
               {context.projectId && (
-                <FrameDrawingLinkButton
-                  context={{ ...openSchemeCtx, constructorTab: 'cutlist' }}
-                  label="Обновить BOM"
-                  className="btn btn-sm btn-outline"
-                  onNavigate={onNavigate}
-                  disabled={navigateDisabled}
-                />
+                <>
+                  <FrameDrawingLinkButton
+                    context={{ ...openSchemeCtx, constructorTab: 'cutlist' }}
+                    label="Обновить BOM"
+                    className="btn btn-sm btn-outline"
+                    onNavigate={onNavigate}
+                    disabled={navigateDisabled}
+                  />
+                  <span className="muted" style={{ fontSize: 10, width: '100%' }}>
+                    Обновить BOM — пересоберёт позиции каркаса и уберёт старые дубли этого стеллажа.
+                  </span>
+                </>
               )}
               <FrameDrawingLinkButton
                 context={newVersionCtx}
