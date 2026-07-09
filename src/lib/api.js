@@ -1,3 +1,8 @@
+import {
+  bulkPatchItemsWithFallback,
+  refreshItemsFromMaterialWithFallback,
+} from "./projectItemApiFallback.js";
+
 const API = (import.meta.env.VITE_API_URL || import.meta.env.BASE_URL || "").replace(/\/$/, "");
 
 const ADMIN_KEY_STORAGE = "daogreen-admin-key";
@@ -117,10 +122,9 @@ export const api = {
   regenerateToken: (id) => request(`/api/projects/${id}/regenerate-token`, { method: "POST" }),
   patchItem: (projectId, itemId, patch) =>
     request(`/api/projects/${projectId}/items/${encodeURIComponent(itemId)}`, { method: "PATCH", body: patch }),
-  refreshItemsFromMaterial: (projectId, body) =>
-    request(`/api/projects/${projectId}/items/refresh-from-material`, { method: "POST", body }),
-  bulkPatchItems: (projectId, body) =>
-    request(`/api/projects/${projectId}/items/bulk-patch`, { method: "POST", body }),
+  refreshItemsFromMaterial: (projectId, body, context) =>
+    refreshItemsFromMaterialWithFallback(request, projectId, body, context),
+  bulkPatchItems: (projectId, body) => bulkPatchItemsWithFallback(request, projectId, body),
   addItem: (projectId, item) => request(`/api/projects/${projectId}/items`, { method: "POST", body: item }),
   deleteItem: (projectId, itemId) =>
     request(`/api/projects/${projectId}/items/${encodeURIComponent(itemId)}`, { method: "DELETE" }),

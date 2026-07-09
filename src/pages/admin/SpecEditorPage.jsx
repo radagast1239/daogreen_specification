@@ -128,7 +128,11 @@ export default function SpecEditorPage() {
     });
     if (!ok) return;
     try {
-      const res = await api.refreshItemsFromMaterial(project.id, { itemIds: ids, fields: ["clientSection"] });
+      const res = await api.refreshItemsFromMaterial(
+        project.id,
+        { itemIds: ids, fields: ["clientSection"] },
+        { items: project.items, materials: state.materials }
+      );
       await actions.loadProject(project.id);
       refreshPublishCheck();
       success(`Обновлено позиций: ${res.updated?.length || 0}`);
@@ -589,10 +593,14 @@ export default function SpecEditorPage() {
               type="button"
               className="btn btn-sm btn-primary"
               onClick={async () => {
-                await api.refreshItemsFromMaterial(project.id, {
-                  itemIds: stalePrices.map((s) => s.itemId),
-                  fields: ["price"],
-                });
+                await api.refreshItemsFromMaterial(
+                  project.id,
+                  {
+                    itemIds: stalePrices.map((s) => s.itemId),
+                    fields: ["price"],
+                  },
+                  { items: project.items, materials: state.materials }
+                );
                 await actions.loadProject(project.id);
                 success("Цены обновлены из базы");
               }}
@@ -927,7 +935,11 @@ function SpecTab({
       return;
     }
     try {
-      const res = await api.refreshItemsFromMaterial(project.id, { itemIds, fields });
+      const res = await api.refreshItemsFromMaterial(
+        project.id,
+        { itemIds, fields },
+        { items: project.items, materials }
+      );
       await actions.loadProject(project.id);
       success(`Обновлено позиций: ${res.updated?.length || 0}`);
     } catch (e) {
