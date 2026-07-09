@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import PhotoGallery from "../PhotoGallery.jsx";
-import { StatusChip } from "../ui.jsx";
+import { Chip } from "../ui.jsx";
 import { PURCHASE_STATUSES } from "../../data/modules.js";
 import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { itemImageUrl, isPurchaseClosed } from "../../lib/itemHelpers.js";
@@ -9,7 +9,9 @@ import { isCoolingSpecItem } from "../../../shared/itemTypes.js";
 import {
   formatClientLineTotal,
   formatClientUnitPrice,
+  resolveClientPurchaseStatusLabel,
 } from "../../../shared/clientPurchaseRows.js";
+import { getPurchaseStatusTone, isPurchaseStatusNeedsAttention } from "../../../shared/purchaseStatusRules.js";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { patchMergedRow } from "../../lib/clientMergedPatch.js";
 import { DebouncedInput } from "./ClientDebouncedField.jsx";
@@ -40,7 +42,6 @@ export default function ClientMergedItemCard({
   compact = false,
 }) {
   const [showPhoto, setShowPhoto] = useState(false);
-  const statuses = purchaseStatuses || PURCHASE_STATUSES;
   const rep = row.sourceItems?.[0];
   const photoUrl = rep ? itemImageUrl(rep) : row.imageUrl;
   const hasPhoto = !!photoUrl;
@@ -93,17 +94,23 @@ export default function ClientMergedItemCard({
             <span className="chip chip--ok chip-dot" style={{ fontSize: 11 }}>
               Готово
             </span>
-          ) : status === "need_help" || status === "replacement_check" ? (
-            <StatusChip status={status} statuses={statuses} />
-          ) : multi ? (
+          ) : (
+            <Chip
+              kind={getPurchaseStatusTone(status)}
+              dot={isPurchaseStatusNeedsAttention(status)}
+            >
+              {resolveClientPurchaseStatusLabel(row)}
+            </Chip>
+          )}
+          {multi && !bought && (
             <span
               className="chip chip--brand chip-dot"
-              style={{ fontSize: 11 }}
+              style={{ fontSize: 11, marginLeft: 6 }}
               title="Одинаковые позиции с разных стеллажей сложены в одну строку"
             >
               ×{row.sourceCount || row.sources?.length}
             </span>
-          ) : null}
+          )}
           </div>
         </div>
         {!compact && rep && materialSpecLabel(rep) && (

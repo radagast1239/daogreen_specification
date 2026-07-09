@@ -18,7 +18,7 @@ import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
 import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
 import { clientLink, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
-import { Progress, Stat, Empty, ClientLinkModal } from "../../components/ui.jsx";
+import { Progress, Stat, Empty, ClientLinkModal, StatusChip } from "../../components/ui.jsx";
 import Breadcrumbs from "../../components/Breadcrumbs.jsx";
 import Collapsible from "../../components/Collapsible.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
@@ -1342,6 +1342,32 @@ function SpecTab({
                         <input className="input-inline" placeholder="url" onBlur={(e) => editItem(it.id, { link: e.target.value })} />
                       )}
                     </td>
+                    <td style={{ minWidth: 120, maxWidth: 150 }}>
+                      {readOnly || clientPreview ? (
+                        <StatusChip status={it.status || "not_bought"} statuses={PURCHASE_STATUSES} />
+                      ) : (
+                        <select
+                          className="input-inline"
+                          value={it.status || "not_bought"}
+                          onChange={(e) =>
+                            editItem(it.id, { status: e.target.value, purchaseStatus: e.target.value })
+                          }
+                        >
+                          {PURCHASE_STATUSES.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {(it.status === "need_help" ||
+                        it.status === "not_fit" ||
+                        it.status === "replacement_check") && (
+                        <div style={{ marginTop: 4 }}>
+                          <StatusChip status={it.status} statuses={PURCHASE_STATUSES} />
+                        </div>
+                      )}
+                    </td>
                     {!clientPreview && (
                     <td style={{ minWidth: 100, maxWidth: 140 }}>
                       <input
@@ -1555,6 +1581,7 @@ function SpecTab({
                   {hasFarmItems && <th style={{ width: 130 }}>Комната</th>}
                   <th className="right">Сумма</th>
                   <th>Ссылка</th>
+                  <th style={{ width: 130 }}>Статус закупки</th>
                   {!clientPreview && <th title="Внутренний комментарий">Заметка</th>}
                   <th title="Комментарий клиента">Клиент</th>
                   {!clientPreview && (

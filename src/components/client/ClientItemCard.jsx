@@ -1,6 +1,6 @@
 import React from "react";
 import PhotoGallery from "../PhotoGallery.jsx";
-import { StatusChip } from "../ui.jsx";
+import { Chip } from "../ui.jsx";
 import { PURCHASE_STATUSES } from "../../data/modules.js";
 import { materialSpecLabel } from "../../lib/materialSpecs.js";
 import { itemImageUrl, lineGross, lineVat } from "../../lib/itemHelpers.js";
@@ -10,7 +10,9 @@ import { isCoolingSpecItem } from "../../../shared/itemTypes.js";
 import {
   formatClientLineTotal,
   formatClientUnitPrice,
+  resolveClientPurchaseStatusLabel,
 } from "../../../shared/clientPurchaseRows.js";
+import { getPurchaseStatusTone, isPurchaseStatusNeedsAttention } from "../../../shared/purchaseStatusRules.js";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { DebouncedInput } from "./ClientDebouncedField.jsx";
 
@@ -23,7 +25,6 @@ export default function ClientItemCard({
   onProposeReplacement,
   compact = false,
 }) {
-  const statuses = purchaseStatuses || PURCHASE_STATUSES;
   const img = !compact ? itemImageUrl(it) : "";
   const gross = lineGross(it);
   const vat = lineVat(it);
@@ -54,9 +55,14 @@ export default function ClientItemCard({
             <span className="chip chip--ok chip-dot" style={{ fontSize: 11 }}>
               Готово
             </span>
-          ) : it.status === "need_help" || it.status === "replacement_check" ? (
-            <StatusChip status={it.status} statuses={statuses} />
-          ) : null}
+          ) : (
+            <Chip
+              kind={getPurchaseStatusTone(it.status)}
+              dot={isPurchaseStatusNeedsAttention(it.status)}
+            >
+              {resolveClientPurchaseStatusLabel(it)}
+            </Chip>
+          )}
         </div>
         {!compact && materialSpecLabel(it) && (
           <div style={{ fontSize: 12, marginTop: 2, color: "var(--brand)" }}>{materialSpecLabel(it)}</div>

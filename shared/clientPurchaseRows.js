@@ -2,6 +2,11 @@ import { lineVisibleToClient, isPurchasableLineType, resolveItemType, isCoolingS
 import { enrichProjectItemFromMaterial } from "./frameBomProjectItems.js";
 import { structuredClientNote } from "./structuredClientNote.js";
 import { pipeCutsClientNote, normalizePipeCuts } from "./profilePipeCuts.js";
+import {
+  formatClientPurchaseStatusLine,
+  getPurchaseStatusLabel,
+  normalizePurchaseStatus,
+} from "./purchaseStatusRules.js";
 
 export const NFT_CHANNEL_CLIENT_NOTE = "Используется как NFT-канал в схеме стеллажа.";
 export const CLIENT_PRICE_TBD = "цена уточняется";
@@ -66,7 +71,14 @@ export function stripClientTechnicalFields(item) {
 }
 
 export function prepareClientPurchaseItem(item, materials = []) {
-  return stripClientTechnicalFields(enrichClientPurchaseItem(item, materials));
+  const base = stripClientTechnicalFields(enrichClientPurchaseItem(item, materials));
+  const status = normalizePurchaseStatus(base);
+  return {
+    ...base,
+    status,
+    purchaseStatus: status,
+    statusLabel: getPurchaseStatusLabel(status),
+  };
 }
 
 export function filterClientPurchaseItems(items) {
@@ -80,13 +92,27 @@ export function prepareClientPurchaseItems(items, materials = []) {
   return filterClientPurchaseItems(items).map((it) => prepareClientPurchaseItem(it, materials));
 }
 
-/** Строка «Наименование» для клиентского PDF (имя + примечание, без техполей). */
+/** Человекочитаемый статус для merged row / Excel / UI. */
+export function resolveClientPurchaseStatusLabel(rowOrItem) {
+  const sum = rowOrItem?.statusSummary;
+  if (sum && typeof sum === "object") {
+    if (sum.mixed && sum.statusSummary) return sum.statusSummary;
+    if (sum.statusLabel) return sum.statusLabel;
+  }
+  return getPurchaseStatusLabel(rowOrItem?.status ?? rowOrItem);
+}
+
+/** Строка «Наименование» для клиентского PDF (имя + примечание + статус, без техполей). */
 export function buildClientPdfRowLabel(row) {
   const rep = row?.sourceItems?.[0] || row;
   const name = String(row?.name || rep?.name || "").trim();
   const note = String(row?.clientNote || resolveClientItemNote(rep) || "").trim();
-  if (!note || name.includes(note)) return name || "—";
-  return [name, note].filter(Boolean).join("\n");
+  const statusLine = formatClientPurchaseStatusLine(row);
+  const parts = [name];
+  if (note && !name.includes(note)) parts.push(note);
+  if (statusLine) parts.push(statusLine);
+  if (!parts.filter(Boolean).length) return "—";
+  return parts.join("\n");
 }
 
 export function clientPdfRowHasTechnicalFields(row) {

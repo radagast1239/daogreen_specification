@@ -7,6 +7,11 @@ import {
   isPurchasableLineType,
   resolveItemType,
 } from "../../shared/itemTypes.js";
+import {
+  buildPurchaseStatusSummary,
+  isClosedPurchaseStatusId,
+  normalizePurchaseStatus,
+} from "../../shared/purchaseStatusRules.js";
 
 const DONE = new Set(DONE_STATUSES);
 
@@ -18,16 +23,16 @@ function num(n) {
 export const RESPONSIBLE_OPTIONS = DEFAULT_RESPONSIBLE_ROLES;
 
 export function isBoughtStatus(status) {
-  return DONE.has(status);
+  return DONE.has(normalizePurchaseStatus(status));
 }
 
 /** Заказано или уже получено — убираем из основного списка закупки */
 export function isClosedPurchaseStatus(status) {
-  return status === "ordered" || isBoughtStatus(status);
+  return isClosedPurchaseStatusId(status);
 }
 
 export function isPurchaseClosed(it) {
-  return isClosedPurchaseStatus(it?.status);
+  return isClosedPurchaseStatus(it?.status ?? it?.purchaseStatus);
 }
 
 export { defaultResponsible };
@@ -107,12 +112,7 @@ export function mergeSourcesLabel(sources = []) {
 }
 
 export function summarizeMergedStatus(sourceItems = []) {
-  if (!sourceItems.length) return { status: "not_bought", mixed: false };
-  const unique = [...new Set(sourceItems.map((i) => i.status))];
-  if (unique.length === 1) return { status: unique[0], mixed: false };
-  if (sourceItems.every((i) => isPurchaseClosed(i))) return { status: sourceItems[0].status, mixed: false };
-  const open = sourceItems.find((i) => !isPurchaseClosed(i));
-  return { status: open?.status || "not_bought", mixed: true };
+  return buildPurchaseStatusSummary(sourceItems);
 }
 
 export function buildMergedSourceText(row) {

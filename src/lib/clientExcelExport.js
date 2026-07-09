@@ -8,6 +8,7 @@ import {
   CLIENT_PRICE_TBD,
   formatClientLineTotal,
   formatClientUnitPrice,
+  resolveClientPurchaseStatusLabel,
 } from "../../shared/clientPurchaseRows.js";
 
 const RUB_NUMFMT = '#,##0" ₽"';
@@ -29,8 +30,12 @@ function triggerDownload(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-function statusLabel(id, purchaseStatuses) {
-  return purchaseStatuses.find((s) => s.id === id)?.label || id || "";
+function statusLabel(rowOrStatus, purchaseStatuses) {
+  if (rowOrStatus && typeof rowOrStatus === "object" && !Array.isArray(rowOrStatus)) {
+    return resolveClientPurchaseStatusLabel(rowOrStatus);
+  }
+  const id = rowOrStatus;
+  return purchaseStatuses.find((s) => s.id === id)?.label || resolveClientPurchaseStatusLabel(id);
 }
 
 function applyRubFormats(ws, headerNames, numericHeaders = ["Цена", "Сумма", "Бюджет", "Куплено", "Осталось"]) {
@@ -62,7 +67,7 @@ const MERGED_HEADERS = [
   "Сумма",
   "Поставщик",
   "Открыть товар",
-  "Статус",
+  "Статус закупки",
   "Факт. цена",
   "Откуда взялось",
   "Комментарий Daogreen",
@@ -85,7 +90,7 @@ function mergedDataRow(r, index, purchaseStatuses) {
     Поставщик: r.supplier || "",
     "Открыть товар": r.link ? "Открыть товар" : "без ссылки",
     _link: r.link || "",
-    Статус: statusLabel(r.status, purchaseStatuses),
+    "Статус закупки": statusLabel(r, purchaseStatuses),
     "Факт. цена": rep?.actualPrice ?? "",
     "Откуда взялось": r.sourceText || "",
     "Комментарий Daogreen": r.clientNote || "",
@@ -322,7 +327,7 @@ function noLinkSheet(merged, purchaseStatuses) {
     Проблема: !(r.link || "").trim()
       ? (!(r.supplier || "").trim() ? "без ссылки и поставщика" : "без ссылки")
       : "без поставщика",
-    Статус: statusLabel(r.status, purchaseStatuses),
+    "Статус закупки": statusLabel(r, purchaseStatuses),
   }));
   return sheetFromRows(out, { Наименование: 42, Проблема: 24, Поставщик: 22, Раздел: 18 });
 }
@@ -345,7 +350,7 @@ function moduleDetailSheet(items, project, purchaseStatuses) {
       Цена: "",
       Сумма: Math.round(list.reduce((s, i) => s + lineGross(i), 0)),
       Поставщик: "",
-      Статус: "",
+      "Статус закупки": "",
     });
     for (const it of list) {
       n += 1;
@@ -358,7 +363,7 @@ function moduleDetailSheet(items, project, purchaseStatuses) {
         Цена: it.price,
         Сумма: Math.round(lineGross(it)),
         Поставщик: it.supplier || "",
-        Статус: statusLabel(it.status, purchaseStatuses),
+        "Статус закупки": statusLabel(it, purchaseStatuses),
         Ссылка: it.link ? "Открыть товар" : "без ссылки",
         _link: it.link || "",
       });

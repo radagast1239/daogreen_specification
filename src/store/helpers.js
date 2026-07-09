@@ -11,6 +11,11 @@ import {
 } from "../lib/itemHelpers.js";
 import { lineVisibleToClient } from "../../shared/itemTypes.js";
 import { resolveClientSection } from "../../shared/clientSections.js";
+import {
+  shouldCountInPurchaseBudget,
+  normalizePurchaseStatus,
+  isPurchaseStatusCompleted,
+} from "../../shared/purchaseStatusRules.js";
 
 import { uid as makeUid } from "../lib/ids.js";
 
@@ -54,12 +59,24 @@ export function projectTotals(project) {
   const budget = budgetNet + vatAmount;
   const visible = clientVisibleItems(project);
   const purchasePool = clientPurchaseItems(project);
-  const done = purchasePool.filter((i) => DONE_STATUSES.includes(i.status));
-  const spent = done.reduce((s, i) => s + factGross(i), 0);
-  const doneCount = done.length;
+  const obligationPool = purchasePool.filter((i) => shouldCountInPurchaseBudget(i));
+  const done = purchasePool.filter((i) => DONE_STATUSES.includes(normalizePurchaseStatus(i)));
+  const spent = done
+    .filter((i) => {
+      const s = normalizePurchaseStatus(i);
+      return s === "bought" || s === "delivered";
+    })
+    .reduce((s, i) => s + factGross(i), 0);
+  const doneCount = purchasePool.filter((i) => isPurchaseStatusCompleted(i)).length;
   const total = purchasePool.length;
   const progress = total ? Math.round((doneCount / total) * 100) : 0;
-  const remaining = Math.max(budget - spent, 0);
+  const openObligationGross = obligationPool
+    .filter((i) => {
+      const s = normalizePurchaseStatus(i);
+      return s !== "bought" && s !== "delivered";
+    })
+    .reduce((s, i) => s + lineGross(i), 0);
+  const remaining = Math.max(openObligationGross - spent, 0);
   const overrun = Math.max(spent - budget, 0);
   let economy = 0;
   for (const i of done) {
@@ -142,6 +159,7 @@ function finalizeMergedRow(row) {
   row.sourceText = buildMergedSourceText(row);
   row.statusSummary = summarizeMergedStatus(row.sourceItems);
   row.status = row.statusSummary.status;
+  row.statusLabel = row.statusSummary.statusLabel;
   if (isProfilePipeName(row.name) && row.sourceItems?.length) {
     const mergedCuts = mergePipeCutsFromItems(row.sourceItems);
     if (mergedCuts.length) {

@@ -1,5 +1,6 @@
 import { FRAME_BOM_MATERIALS } from "./frameBomMaterialMap.js";
 import { normalizePipeCuts, pipeCutsClientNote } from "./profilePipeCuts.js";
+import { normalizePurchaseStatus } from "./purchaseStatusRules.js";
 
 export const FRAME_BOM_SOURCE = "frame_bom";
 export const FRAME_BOM_ADMIN_SOURCE_LABEL = "Из схемы стеллажа";
@@ -398,8 +399,28 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
     }
   }
 
+  const removedBomItems = existing.filter((it) => isFrameBomItemForRack(it, moduleRackKey));
   const kept = existing.filter((it) => !isFrameBomItemForRack(it, moduleRackKey));
-  const removedCount = existing.length - kept.length;
+  const removedCount = removedBomItems.length;
+
+  const preservedByBomKey = new Map();
+  for (const it of removedBomItems) {
+    const obj = parseSourceObjectIds(it.sourceObjectIds ?? it.source_object_ids);
+    let bomKey = String(obj.bomKey || "").trim();
+    if (!bomKey) {
+      const sk = String(it.sourceKey || it.source_key || "");
+      const parts = sk.split(":");
+      bomKey = parts[parts.length - 1] || "";
+    }
+    if (!bomKey) continue;
+    const status = normalizePurchaseStatus(it);
+    preservedByBomKey.set(bomKey, {
+      status,
+      purchaseStatus: status,
+      actualPrice: it.actualPrice,
+      clientComment: it.clientComment,
+    });
+  }
 
   const added = [];
   let sortOrder = kept.length;
@@ -423,7 +444,16 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
       enrichedLine = enriched;
     }
 
-    added.push(frameBomDraftToProjectItem(enrichedLine, options, sourceRackPrefix, sortOrder));
+    const item = frameBomDraftToProjectItem(enrichedLine, options, sourceRackPrefix, sortOrder);
+    const bomKey = String(line.key || line.materialId || "").trim();
+    const preserved = preservedByBomKey.get(bomKey);
+    if (preserved) {
+      item.status = preserved.status;
+      item.purchaseStatus = preserved.purchaseStatus;
+      if (preserved.actualPrice != null) item.actualPrice = preserved.actualPrice;
+      if (preserved.clientComment) item.clientComment = preserved.clientComment;
+    }
+    added.push(item);
     sortOrder += 1;
   }
 

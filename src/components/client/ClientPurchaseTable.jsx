@@ -8,7 +8,10 @@ import {
   CLIENT_PRICE_TBD,
   formatClientLineTotal,
   formatClientUnitPrice,
+  resolveClientPurchaseStatusLabel,
 } from "../../../shared/clientPurchaseRows.js";
+import { getPurchaseStatusTone, isPurchaseStatusNeedsAttention } from "../../../shared/purchaseStatusRules.js";
+import { Chip } from "../ui.jsx";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { patchMergedRow } from "../../lib/clientMergedPatch.js";
 
@@ -98,6 +101,11 @@ function MergedTableRow({ row, currency, patch, patchBulk, bought, onProposeRepl
       <td data-label="Сумма" className="client-purchase-table__num client-purchase-table__sum num">
         <b>{clientPriceLabel(row, currency, { gross: true })}</b>
       </td>
+      <td data-label="Статус закупки" className="client-purchase-table__status">
+        <Chip kind={getPurchaseStatusTone(status)} dot={isPurchaseStatusNeedsAttention(status)}>
+          {resolveClientPurchaseStatusLabel(row)}
+        </Chip>
+      </td>
       {!compact && (
         <td data-label="Поставщик" className="client-purchase-table__supplier">
           {row.supplier || "—"}
@@ -168,6 +176,11 @@ function ItemTableRow({ it, currency, patch, bought, onProposeReplacement, compa
       <td data-label="Сумма" className="client-purchase-table__num client-purchase-table__sum num">
         <b>{clientPriceLabel(it, currency, { gross: true })}</b>
       </td>
+      <td data-label="Статус закупки" className="client-purchase-table__status">
+        <Chip kind={getPurchaseStatusTone(it.status)} dot={isPurchaseStatusNeedsAttention(it.status)}>
+          {resolveClientPurchaseStatusLabel(it)}
+        </Chip>
+      </td>
       {!compact && (
         <td data-label="Поставщик" className="client-purchase-table__supplier">
           {it.supplier || "—"}
@@ -228,6 +241,7 @@ export default function ClientPurchaseTable({
             <th>Кол-во</th>
             <th>Цена</th>
             <th>Сумма</th>
+            <th>Статус закупки</th>
             {!compact && <th className="client-purchase-table__col-supplier">Поставщик</th>}
             <th>Действия</th>
           </tr>

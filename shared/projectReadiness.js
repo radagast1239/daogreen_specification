@@ -11,6 +11,10 @@ import {
 } from "./itemTypes.js";
 import { validateItemsForPublish, ISSUE_LABELS, parsePublishRulesSettings } from "./publishRules.js";
 import { enrichProjectItemFromMaterial } from "./frameBomProjectItems.js";
+import {
+  normalizePurchaseStatus,
+  PURCHASE_STATUS,
+} from "./purchaseStatusRules.js";
 
 export const READINESS_ISSUE_LABELS = {
   ...ISSUE_LABELS,
@@ -21,6 +25,9 @@ export const READINESS_ISSUE_LABELS = {
   zero_price: "Цена = 0",
   on_review: "На проверке",
   problematic: "Проблемная позиция",
+  purchase_status_warn: "Требует внимания по статусу закупки",
+  purchase_not_fit: "Позиция не подходит",
+  purchase_searching: "Позиция в поиске",
 };
 
 /** Критические — блокируют публикацию */
@@ -34,6 +41,7 @@ export const CRITICAL_ISSUES = new Set([
   "no_client_section",
   "no_client_subsection",
   "min_client_items",
+  "purchase_not_fit",
 ]);
 
 /** Предупреждения — публикация возможна (нет ссылки/фото не блокирует публикацию) */
@@ -44,9 +52,11 @@ export const WARNING_ISSUES = new Set([
   "purchase_duplicate",
   "on_review",
   "problematic",
+  "purchase_status_warn",
+  "purchase_searching",
 ]);
 
-const PROBLEMATIC_STATUSES = new Set(["need_help", "not_fit"]);
+const PROBLEMATIC_STATUSES = new Set(["need_help"]);
 const ON_REVIEW_STATUSES = new Set(["replacement_check"]);
 
 function hasPhoto(it) {
@@ -65,11 +75,11 @@ function clientPurchasePool(items) {
 }
 
 export function isOnReviewItem(it) {
-  return !!it?.needsApproval || ON_REVIEW_STATUSES.has(it?.status);
+  return !!it?.needsApproval || ON_REVIEW_STATUSES.has(normalizePurchaseStatus(it));
 }
 
 export function isProblematicItem(it) {
-  return PROBLEMATIC_STATUSES.has(it?.status);
+  return PROBLEMATIC_STATUSES.has(normalizePurchaseStatus(it));
 }
 
 export function filterItemsForViewMode(items, mode = "designer") {
@@ -177,6 +187,13 @@ function extraChecksForItem(it, rules) {
 
   if (isOnReviewItem(it)) problems.push("on_review");
   if (isProblematicItem(it)) problems.push("problematic");
+
+  const ps = normalizePurchaseStatus(it);
+  if (ps === PURCHASE_STATUS.NOT_FIT) {
+    problems.push("purchase_not_fit");
+  } else if (ps === PURCHASE_STATUS.SEARCHING) {
+    problems.push("purchase_searching");
+  }
 
   return problems;
 }
