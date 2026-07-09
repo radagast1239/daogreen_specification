@@ -2,9 +2,15 @@ import { FRAME_BOM_MATERIALS } from "./frameBomMaterialMap.js";
 import { normalizePipeCuts, pipeCutsClientNote } from "./profilePipeCuts.js";
 
 export const FRAME_BOM_SOURCE = "frame_bom";
+export const FRAME_BOM_ADMIN_SOURCE_LABEL = "Из схемы стеллажа";
 
 export function isFrameBomLine(item) {
   return (item?.source || item?.sourceType || item?.source_type) === FRAME_BOM_SOURCE;
+}
+
+/** Админский бейдж источника (без техполей frame_bom/sourceKey). */
+export function resolveAdminItemSourceLabel(item) {
+  return isFrameBomLine(item) ? FRAME_BOM_ADMIN_SOURCE_LABEL : "";
 }
 
 const PROFILE_TUBE_BOM_KEY = "profile_tube_20x20";
@@ -304,6 +310,7 @@ export function frameBomDraftToProjectItem(draft, options, rackPrefix, sortOrder
     comment: clientNote,
     source: FRAME_BOM_SOURCE,
     sourceType: FRAME_BOM_SOURCE,
+    sourceLabel: FRAME_BOM_ADMIN_SOURCE_LABEL,
     sourceKey,
     sourceObjectIds: {
       frameDrawingId: options.drawingId || "",

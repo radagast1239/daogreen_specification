@@ -10,11 +10,11 @@ import { resolveBreakerSpecs } from "../../shared/breakerSpecs.js";
 import { resolveFlowSpecs } from "../../shared/flowSpecs.js";
 import { resolveSplitSpecs } from "../../shared/splitSpecs.js";
 import { resolveItemType } from "../../shared/itemTypes.js";
-import { FRAME_BOM_SOURCE, frameBomItemsForModuleRack, enrichProjectItemFromMaterial } from "../../shared/frameBomProjectItems.js";
+import { FRAME_BOM_SOURCE, frameBomItemsForModuleRack, enrichProjectItemFromMaterial, FRAME_BOM_ADMIN_SOURCE_LABEL } from "../../shared/frameBomProjectItems.js";
 import { buildModuleRackKey } from "../../shared/moduleRackIds.js";
 import { builderWizardFromManualParams } from "../../shared/projectLifecycle.js";
 
-export const FRAME_BOM_SOURCE_LABEL = "Из схемы каркаса";
+export const FRAME_BOM_SOURCE_LABEL = FRAME_BOM_ADMIN_SOURCE_LABEL;
 
 export function frameBomItemsForStellage(project, stellageConfig) {
   const moduleRackKey = buildModuleRackKey({

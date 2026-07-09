@@ -24,4 +24,12 @@ describe("materialBulkActions", () => {
     expect(text).toContain("Будет изменено 5 выбранных материалов.");
     expect(text).toContain("Ответственный = plumber");
   });
+
+  it("bulk payloads never include frame_bom technical keys", () => {
+    const types = ["responsible", "supplier", "clientSection", "showClient", "hideClient", "setReview"];
+    for (const t of types) {
+      const payload = buildBulkPatchPayload(t, "x", "y");
+      expect(JSON.stringify(payload)).not.toMatch(/frame_bom|sourceKey|sourceType/i);
+    }
+  });
 });

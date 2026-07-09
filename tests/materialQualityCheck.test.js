@@ -209,4 +209,17 @@ describe("analyzeMaterialsQuality", () => {
     const issues = collectBaseMaterialIssues(baseMaterial({ name: "Мусорные пакеты 120л" }), new Set());
     expect(issues.some((i) => i.id === "junk_in_name")).toBe(false);
   });
+
+  it("материал из BOM (frame_bom) проверяется как обычный каталожный материал", () => {
+    const bomMat = baseMaterial({
+      id: "m036",
+      name: "Труба профильная 20/20/1,5 мм",
+      clientSection: "stellage",
+      clientSubsection: "Каркас и профиль",
+    });
+    const issues = collectBaseMaterialIssues(bomMat, new Set());
+    expect(issues.some((i) => i.id === "no_price")).toBe(false);
+    expect(issues.some((i) => i.id === "no_supplier")).toBe(false);
+    expect(issues.some((i) => i.id === "no_client_section")).toBe(false);
+  });
 });

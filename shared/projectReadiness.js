@@ -10,6 +10,7 @@ import {
   isCoolingSpecItem,
 } from "./itemTypes.js";
 import { validateItemsForPublish, ISSUE_LABELS, parsePublishRulesSettings } from "./publishRules.js";
+import { enrichProjectItemFromMaterial } from "./frameBomProjectItems.js";
 
 export const READINESS_ISSUE_LABELS = {
   ...ISSUE_LABELS,
@@ -191,9 +192,14 @@ function problemRow(it, issue) {
   };
 }
 
-/** Для проверки публикации: подтянуть клиентские поля из материала, если в позиции пусто */
+/** Для проверки публикации: подтянуть snapshot материала (цена, фото, раздел и т.д.). */
 export function enrichItemForPublishCheck(item, material) {
   if (!item) return item;
+  const materialId = String(item?.materialId || "").trim();
+  if (materialId && material) {
+    return enrichProjectItemFromMaterial(item, [material]);
+  }
+
   const patch = {};
   const matResolved = material ? resolveClientSection(material) : null;
 
