@@ -116,14 +116,14 @@ export const api = {
   getVersions: (id) => request(`/api/projects/${id}/versions`),
   regenerateToken: (id) => request(`/api/projects/${id}/regenerate-token`, { method: "POST" }),
   patchItem: (projectId, itemId, patch) =>
-    request(`/api/projects/${projectId}/items/${itemId}`, { method: "PATCH", body: patch }),
+    request(`/api/projects/${projectId}/items/${encodeURIComponent(itemId)}`, { method: "PATCH", body: patch }),
   refreshItemsFromMaterial: (projectId, body) =>
     request(`/api/projects/${projectId}/items/refresh-from-material`, { method: "POST", body }),
   bulkPatchItems: (projectId, body) =>
     request(`/api/projects/${projectId}/items/bulk-patch`, { method: "POST", body }),
   addItem: (projectId, item) => request(`/api/projects/${projectId}/items`, { method: "POST", body: item }),
   deleteItem: (projectId, itemId) =>
-    request(`/api/projects/${projectId}/items/${itemId}`, { method: "DELETE" }),
+    request(`/api/projects/${projectId}/items/${encodeURIComponent(itemId)}`, { method: "DELETE" }),
 
   getClientProject: (token) =>
     request(`/api/client/p/${encodeURIComponent(token)}`, { admin: false, token }),
@@ -156,7 +156,7 @@ export const api = {
       token,
     }),
   reviewReplacement: (projectId, itemId, body) =>
-    request(`/api/projects/${projectId}/items/${itemId}/replacement-review`, { method: "POST", body }),
+    request(`/api/projects/${projectId}/items/${encodeURIComponent(itemId)}/replacement-review`, { method: "POST", body }),
 
   getClients: () => request("/api/admin/clients"),
   patchClientProfile: (data) => request("/api/admin/clients/profile", { method: "PATCH", body: data }),

@@ -215,10 +215,13 @@ export default function SpecEditorPage() {
   const stats = projectStats(project);
 
   const patchItem = (itemId, patch) =>
-    actions.itemUpdate(project.id, itemId, patch).then(() => {
-      api.getProjectActivity(project.id).then(setActivity).catch(() => {});
-      refreshPublishCheck();
-    });
+    actions
+      .itemUpdate(project.id, itemId, patch)
+      .then(() => {
+        api.getProjectActivity(project.id).then(setActivity).catch(() => {});
+        refreshPublishCheck();
+      })
+      .catch((e) => error(e.message || "Не удалось сохранить позицию"));
 
   const saveRooms = async (rooms) => {
     await actions.projectUpdate(project.id, { rooms });

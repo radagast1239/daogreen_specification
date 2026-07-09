@@ -97,10 +97,10 @@ describe("clientPdfMoneyOrTbd", () => {
 });
 
 describe("clientPdfNameCol", () => {
-  it("возвращает только имя для обычной строки", async () => {
+  it("включает статус закупки для обычной строки", async () => {
     const { clientPdfNameCol } = await import("../src/lib/clientPdfExport.js");
     const row = { name: "Труба", sourceItems: [{ kind: "material" }] };
-    expect(clientPdfNameCol(row)).toBe("Труба");
+    expect(clientPdfNameCol(row)).toBe("Труба Статус: Не куплено");
   });
 
   it("добавляет характеристики для cooling_spec", async () => {
