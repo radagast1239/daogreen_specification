@@ -11,6 +11,7 @@ import { matchSpecLineFilter } from "./specLineFilters.js";
 import { isOnReviewItem } from "./projectReadiness.js";
 import { normalizePurchaseStatus, PURCHASE_STATUS } from "./purchaseStatusRules.js";
 import { isFrameBomLine } from "./frameBomProjectItems.js";
+import { getSpecLineSelectionId, normalizeSpecSelectionIds } from "./specLineSelection.js";
 
 export const PRE_SEND_PROBLEM_GROUP_KEYS = [
   "no_price",
@@ -97,12 +98,20 @@ const GROUP_DEFS = [
     actionHint: "Позиции из схемы каркаса",
   },
   {
-    key: "client_ready",
-    label: "Готово клиенту",
+    key: "client_total",
+    label: "Клиенту всего",
     filterKey: "client_visible",
+    severity: "neutral",
+    selectable: false,
+    actionHint: "Все позиции, которые увидит клиент",
+  },
+  {
+    key: "ready_without_issues",
+    label: "Готово без проблем",
+    filterKey: "",
     severity: "ok",
     selectable: false,
-    actionHint: "Видимые клиенту позиции без блокеров",
+    actionHint: "Клиентские позиции без проблем перед отправкой",
   },
 ];
 
@@ -114,7 +123,11 @@ function purchasablePool(items) {
 }
 
 function idsForFilter(items, filterKey) {
-  return items.filter((it) => matchSpecLineFilter(it, filterKey, "project")).map((it) => it.id);
+  return normalizeSpecSelectionIds(
+    items
+      .filter((it) => matchSpecLineFilter(it, filterKey, "project"))
+      .map((it) => getSpecLineSelectionId(it))
+  );
 }
 
 function isClientReadyItem(it, problemIdSet) {
@@ -162,23 +175,31 @@ export function buildProjectPreSendChecklist(items, materials = [], options = {}
 
   for (const id of blockerIds) warningIds.delete(id);
 
-  const clientReadyIds = pool
-    .filter((it) => isClientReadyItem(it, seenProblem))
-    .map((it) => it.id);
+  const readyWithoutIssuesIds = normalizeSpecSelectionIds(
+    pool.filter((it) => isClientReadyItem(it, seenProblem)).map((it) => getSpecLineSelectionId(it))
+  );
+
+  const clientTotalIds = normalizeSpecSelectionIds(
+    pool.filter((it) => lineVisibleToClient(it)).map((it) => getSpecLineSelectionId(it))
+  );
 
   const groups = GROUP_DEFS.map((def) => {
     let itemIds;
-    if (def.key === "client_ready") {
-      itemIds = clientReadyIds;
+    if (def.key === "client_total") {
+      itemIds = clientTotalIds;
+    } else if (def.key === "ready_without_issues") {
+      itemIds = readyWithoutIssuesIds;
     } else if (def.key === "frame_bom") {
-      itemIds = pool.filter((it) => isFrameBomLine(it)).map((it) => it.id);
+      itemIds = normalizeSpecSelectionIds(
+        pool.filter((it) => isFrameBomLine(it)).map((it) => getSpecLineSelectionId(it))
+      );
     } else {
       itemIds = problemBuckets.get(def.key) || idsForFilter(pool, def.filterKey);
     }
     return {
       key: def.key,
       label: def.label,
-      count: itemIds.length,
+      count: def.key === "client_total" ? clientSummary.totalClientItems : itemIds.length,
       severity: def.severity,
       filterKey: def.filterKey,
       selectable: def.selectable,
@@ -219,6 +240,8 @@ export function buildProjectPreSendChecklist(items, materials = [], options = {}
     allProblemIds,
     readiness: dashboard.readiness,
     clientVisibleCount: clientSummary.totalClientItems,
+    clientTotalCount: clientSummary.totalClientItems,
+    readyWithoutIssuesCount: readyWithoutIssuesIds.length,
     onReviewCount: pool.filter(isOnReviewItem).length,
     needHelpCount: pool.filter(
       (it) => normalizePurchaseStatus(it) === PURCHASE_STATUS.NEED_HELP

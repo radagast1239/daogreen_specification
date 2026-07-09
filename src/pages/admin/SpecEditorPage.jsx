@@ -13,6 +13,7 @@ import { SPECIALIST_MAP, PURCHASE_STATUSES } from "../../data/modules.js";
 import { VAT_RATES, lineGross, lineContributesToSum, RESPONSIBLE_OPTIONS } from "../../lib/itemHelpers.js";
 import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient } from "../../../shared/itemTypes.js";
 import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
+import { buildModuleSelectionFromIds } from "../../../shared/specLineSelection.js";
 import { PROJECT_DASHBOARD_FILTERS, resolveDashboardFilterLabel, buildProjectDashboardSummary } from "../../../shared/projectDashboardSummary.js";
 import { FARM_LINE_GROUPS, farmLineGroupLabel } from "../../../shared/farmLineGroups.js";
 import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
@@ -105,6 +106,7 @@ export default function SpecEditorPage() {
   const [specQuickFilter, setSpecQuickFilter] = useState("");
   const [specSelectedIds, setSpecSelectedIds] = useState([]);
   const clearSpecSelectionRef = useRef(null);
+  const applySpecSelectionRef = useRef(null);
 
   const deliveryPreSend = useMemo(
     () => buildProjectDashboardSummary(project?.items || [], { publishCheck }).preSendMessages,
@@ -627,7 +629,7 @@ export default function SpecEditorPage() {
           activeFilter={specQuickFilter}
           onFilterSelect={handleDashboardFilter}
           selectedItemIds={specSelectedIds}
-          onSelectItems={setSpecSelectedIds}
+          onSelectItems={(ids) => applySpecSelectionRef.current?.(ids)}
           onBulkShowClient={() =>
             bulkDeliveryPatch({ visibleToClient: true, visible: true, approved: true })
           }
@@ -847,6 +849,9 @@ export default function SpecEditorPage() {
               registerClearSelection={(fn) => {
                 clearSpecSelectionRef.current = fn;
               }}
+              registerApplySelection={(fn) => {
+                applySpecSelectionRef.current = fn;
+              }}
             />
           </>
         )}
@@ -975,6 +980,7 @@ function SpecTab({
   onQuickFilterChange,
   onSelectionChange,
   registerClearSelection,
+  registerApplySelection,
 }) {
   const { confirm, success, error } = useToast();
   const { state } = useStore();
@@ -1017,6 +1023,12 @@ function SpecTab({
   useEffect(() => {
     registerClearSelection?.(() => setModuleSelected({}));
   }, [registerClearSelection]);
+
+  useEffect(() => {
+    registerApplySelection?.((ids) => {
+      setModuleSelected(buildModuleSelectionFromIds(project.items, ids));
+    });
+  }, [registerApplySelection, project.items]);
 
   const refreshFromBase = async (itemIds, fields) => {
     if (!itemIds.length) {

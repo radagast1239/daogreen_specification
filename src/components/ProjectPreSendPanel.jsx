@@ -23,7 +23,7 @@ function GroupRow({ group, activeFilter, onFilterSelect, onSelectGroup }) {
       <button
         type="button"
         className={`pre-send__metric pre-send__metric--${tone}${active ? " pre-send__metric--active" : ""}`}
-        disabled={!clickable && group.key !== "client_ready"}
+        disabled={!clickable && group.key !== "client_total"}
         onClick={() => clickable && group.filterKey && onFilterSelect?.(group.filterKey)}
         title={clickable ? "Показать в таблице" : undefined}
       >

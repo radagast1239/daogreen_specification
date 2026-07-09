@@ -8,6 +8,8 @@ import {
   selectAllPreSendProblemIds,
   selectPreSendGroupIds,
 } from "../shared/projectPreSendChecklist.js";
+import { buildClientPurchaseSummary } from "../shared/clientPurchaseSummary.js";
+import { getSpecLineSelectionId } from "../shared/specLineSelection.js";
 
 beforeEach(() => {
   configureClientSections(DEFAULT_CLIENT_SECTIONS);
@@ -104,7 +106,7 @@ describe("buildProjectPreSendChecklist", () => {
     };
     const checklist = buildProjectPreSendChecklist([item], [m034Material]);
     expect(checklist.groups.find((g) => g.key === "hidden_from_client").count).toBe(0);
-    expect(checklist.groups.find((g) => g.key === "client_ready").count).toBe(1);
+    expect(checklist.groups.find((g) => g.key === "ready_without_issues").count).toBe(1);
   });
 
   it("m034 visible override false is hidden", () => {
@@ -217,7 +219,7 @@ describe("buildProjectPreSendChecklist", () => {
       baseItem({ id: "h", visibleToClient: false }),
     ]);
     for (const group of checklist.groups) {
-      if (!group.filterKey || group.key === "client_ready") continue;
+      if (!group.filterKey || group.key === "ready_without_issues") continue;
       for (const id of group.itemIds) {
         const item = group.key === "hidden_from_client"
           ? baseItem({ id, visibleToClient: false })
@@ -252,6 +254,66 @@ describe("buildProjectPreSendChecklist", () => {
     expect(checklist.groups.find((g) => g.key === "no_price").count).toBe(0);
     expect(checklist.groups.find((g) => g.key === "no_link").count).toBe(0);
     expect(checklist.allProblemIds).not.toContain("ex");
-    expect(checklist.groups.find((g) => g.key === "client_ready").count).toBe(1);
+    expect(checklist.groups.find((g) => g.key === "ready_without_issues").count).toBe(1);
+  });
+
+  it("group item ids use canonical spec selection id", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ id: "it_row", materialId: "m001", link: "" }),
+    ]);
+    const ids = selectPreSendGroupIds(checklist, "no_link");
+    expect(ids).toEqual(["it_row"]);
+    expect(ids).not.toContain("m001");
+    expect(getSpecLineSelectionId(baseItem({ id: "it_row", materialId: "m001" }))).toBe("it_row");
+  });
+
+  it("client total count equals clientPurchaseSummary.totalClientItems", () => {
+    const items = [
+      baseItem({ id: "a" }),
+      baseItem({ id: "b", link: "" }),
+      baseItem({ id: "c", visibleToClient: false, visible: false, approved: false }),
+    ];
+    const summary = buildClientPurchaseSummary(items);
+    const checklist = buildProjectPreSendChecklist(items);
+    expect(checklist.groups.find((g) => g.key === "client_total").count).toBe(
+      summary.totalClientItems
+    );
+    expect(checklist.clientTotalCount).toBe(summary.totalClientItems);
+  });
+
+  it("ready without issues is separate from client total", () => {
+    const items = [
+      baseItem({ id: "ok1" }),
+      baseItem({ id: "ok2" }),
+      baseItem({ id: "bad", link: "" }),
+    ];
+    const checklist = buildProjectPreSendChecklist(items);
+    expect(checklist.groups.find((g) => g.key === "client_total").count).toBe(3);
+    expect(checklist.groups.find((g) => g.key === "ready_without_issues").count).toBe(2);
+    expect(checklist.groups.find((g) => g.key === "ready_without_issues").label).toBe(
+      "Готово без проблем"
+    );
+  });
+
+  it("m034 visible override true counted in client total", () => {
+    const item = {
+      id: "it_m034",
+      materialId: "m034",
+      name: m034Material.name,
+      qty: 12,
+      price: 85,
+      supplier: "ВентПро",
+      link: "https://example.com/m034",
+      includedInProject: true,
+      itemType: "material",
+      visibleToClient: true,
+      visible: true,
+      approved: true,
+      clientSection: "trays_channels",
+      clientSubsection: "NFT-каналы",
+    };
+    const checklist = buildProjectPreSendChecklist([item], [m034Material]);
+    expect(checklist.clientTotalCount).toBe(1);
+    expect(checklist.groups.find((g) => g.key === "client_total").count).toBe(1);
   });
 });
