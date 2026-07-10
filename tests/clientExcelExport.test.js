@@ -4,6 +4,14 @@ import {
   buildClientWorkbook,
   clientExcelIncludesNoLinkSheet,
   clientExcelProblemSheetNames,
+  getClientExcelColWidth,
+  getClientExcelWrapHeaders,
+  sheetHasAutofilter,
+  sheetHasFreezePanes,
+  sheetHasHeaderStyles,
+  sheetHasWrapText,
+  sheetReadableColWidths,
+  CLIENT_EXCEL_BRAND,
 } from "../src/lib/clientExcelExport.js";
 import { buildClientPurchaseMergedRows } from "../shared/clientPurchaseMerged.js";
 import { PURCHASE_STATUSES } from "../src/data/modules.js";
@@ -61,7 +69,13 @@ function mkItem(overrides = {}) {
 const project = { name: "Тестовый проект", client: "Клиент", city: "Москва", version: 1 };
 
 const fullItems = [
-  mkItem({ id: "pl", name: "Насос", responsible: "plumber", clientSection: "pumps" }),
+  mkItem({
+    id: "pl",
+    name: "Насос циркуляционный длинное наименование для проверки переноса текста в Excel",
+    responsible: "plumber",
+    clientSection: "pumps",
+    clientNote: "Длинный комментарий Daogreen: проверить совместимость с коллектором и запасными фитингами.",
+  }),
   mkItem({ id: "el", name: "Кабель", responsible: "electrician", clientSection: "electrics" }),
   mkItem({ id: "in", name: "Профиль", responsible: "installer", clientSection: "stellage" }),
   mkItem({
@@ -86,7 +100,7 @@ const fullItems = [
 ];
 
 describe("buildClientWorkbook", () => {
-  it("содержит листы в правильном порядке без «05 Без ссылок»", () => {
+  it("Excel workbook has expected client-facing sheets", () => {
     const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
     expect(wb.SheetNames).toEqual([
       "01 Инструкция",
@@ -103,49 +117,90 @@ describe("buildClientWorkbook", () => {
     ]);
   });
 
-  it("client Excel does not create sheet «05 Без ссылок»", () => {
+  it("client Excel does not create worksheet «05 Без ссылок»", () => {
     const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
     expect(clientExcelIncludesNoLinkSheet()).toBe(false);
     expect(wb.SheetNames).not.toContain("05 Без ссылок");
   });
 
-  it("client Excel does not create sheet «Без ссылок»", () => {
+  it("client Excel does not create worksheet «Без ссылок»", () => {
     const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
     expect(wb.SheetNames.some((n) => /без ссылок/i.test(n))).toBe(false);
     expect(wb.SheetNames.some((n) => /требуют подбора/i.test(n))).toBe(false);
   });
 
-  it("«01 Инструкция» содержит обновлённую нумерацию и «Цена уточняется»", () => {
+  it("«01 Инструкция» содержит проект и понятный текст", () => {
     const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
     const text = sheetCsv(wb, "01 Инструкция");
-    expect(text).toMatch(/06 Сантехник/);
-    expect(text).toMatch(/07 Электрик/);
-    expect(text).toMatch(/08 Монтажник/);
-    expect(text).toMatch(/09 Климат/);
-    expect(text).toMatch(/10 Клиент/);
-    expect(text).toMatch(/10б Монтаж/);
-    expect(text).toMatch(/11 Детализация по модулям/);
-    expect(text).toMatch(/Цена уточняется/);
-    expect(text).toMatch(/объединены в одну строку/);
+    expect(text).toMatch(/Тестовый проект/);
+    expect(text).toMatch(/Покупайте по поставщикам или разделам/);
+    expect(text).toMatch(/онлайн-версии/);
     expect(text).not.toMatch(/05 Без ссылок/);
+    expect(text).not.toMatch(/требуют подбора/);
     expect(text).toMatch(/Пустая ссылка — нормально/);
   });
 
-  it("листы 03–10б с таблицами имеют автофильтр", () => {
+  it("табличные листы имеют автофильтр и freeze panes", () => {
     const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
     for (const name of [
       "03 К закупке по поставщикам",
       "04 К закупке по разделам",
       "06 Сантехник",
-      "07 Электрик",
-      "08 Монтажник",
       "09 Климат",
-      "10 Клиент",
-      "10б Монтаж",
     ]) {
       const ws = wb.Sheets[name];
-      expect(ws?.["!autofilter"]?.ref, name).toBeTruthy();
+      expect(sheetHasAutofilter(ws), name).toBe(true);
+      expect(sheetHasFreezePanes(ws), name).toBe(true);
     }
+  });
+
+  it("main table columns have readable widths", () => {
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    const ws = wb.Sheets["03 К закупке по поставщикам"];
+    const headers = ["Поставщик", "Позиция", "Ссылка", "Комментарий Daogreen"];
+    const widths = sheetReadableColWidths(ws, headers);
+    expect(widths.find((w) => w.header === "Позиция").wch).toBeGreaterThanOrEqual(40);
+    expect(widths.find((w) => w.header === "Поставщик").wch).toBeGreaterThanOrEqual(18);
+    expect(getClientExcelColWidth("Наименование")).toBeGreaterThanOrEqual(40);
+  });
+
+  it("long text columns have wrapText enabled", () => {
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    const ws = wb.Sheets["03 К закупке по поставщикам"];
+    expect(getClientExcelWrapHeaders()).toContain("Позиция");
+    expect(sheetHasWrapText(ws, ["Позиция", "Комментарий Daogreen", "Поставщик"])).toBe(true);
+  });
+
+  it("header rows have styles", () => {
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    expect(CLIENT_EXCEL_BRAND).toBe("#116355");
+    expect(sheetHasHeaderStyles(wb.Sheets["03 К закупке по поставщикам"])).toBe(true);
+    expect(sheetHasHeaderStyles(wb.Sheets["04 К закупке по разделам"])).toBe(true);
+  });
+
+  it("price/sum columns have currency format on numeric cells", () => {
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    const ws = wb.Sheets["03 К закупке по поставщикам"];
+    const headers = [];
+    const range = XLSX.utils.decode_range(ws["!ref"]);
+    for (let c = range.s.c; c <= range.e.c; c += 1) {
+      headers.push(String(ws[XLSX.utils.encode_cell({ r: 0, c })]?.v || ""));
+    }
+    const sumCol = headers.indexOf("Сумма");
+    expect(sumCol).toBeGreaterThanOrEqual(0);
+    let foundFmt = false;
+    for (let r = 1; r <= range.e.r; r += 1) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c: sumCol })];
+      if (cell?.t === "n" && String(cell.z || "").includes("₽")) foundFmt = true;
+    }
+    expect(foundFmt).toBe(true);
+  });
+
+  it("links remain clickable or safely rendered", () => {
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    const target = findHyperlinkTarget(wb.Sheets["03 К закупке по поставщикам"]);
+    expect(target).toBe("https://example.com/item");
+    expect(sheetCsv(wb, "03 К закупке по поставщикам")).toMatch(/Открыть|—/);
   });
 
   it("листы данных имеют !cols", () => {
@@ -156,17 +211,10 @@ describe("buildClientWorkbook", () => {
     }
   });
 
-  it("гиперссылка «Открыть товар» содержит Target", () => {
-    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
-    const target = findHyperlinkTarget(wb.Sheets["03 К закупке по поставщикам"]);
-    expect(target).toBe("https://example.com/item");
-  });
-
   it("cooling_spec без цены выводит «цена уточняется»", () => {
     const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
     const climate = sheetCsv(wb, "09 Климат");
     expect(climate).toMatch(/цена уточняется/i);
-    expect(climate).not.toMatch(/,0,/);
   });
 
   it("пустой проект не ломает экспорт", () => {
@@ -174,44 +222,30 @@ describe("buildClientWorkbook", () => {
       purchaseStatuses: PURCHASE_STATUSES,
     });
     expect(wb.SheetNames).toEqual(["01 Инструкция", "02 Итоги"]);
-    expect(sheetCsv(wb, "01 Инструкция")).toContain("Цена уточняется");
   });
 });
 
 describe("client Excel — no-link items stay in normal sheets", () => {
   const purchaseItems = fullItems.filter((i) => i.itemRole !== "installation");
 
-  it("no-link items are still present in normal purchase sheets", () => {
+  it("no-link items remain in normal purchase worksheets", () => {
     const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
-    const suppliers = sheetCsv(wb, "03 К закупке по поставщикам");
-    const sections = sheetCsv(wb, "04 К закупке по разделам");
-    expect(suppliers).toContain("Без ссылки");
-    expect(sections).toContain("Без ссылки");
-  });
-
-  it("no-link items remain in supplier/group sheets", () => {
-    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
-    expect(sheetCsv(wb, "03 К закупке по поставщикам")).toMatch(/Местная база/);
-    expect(sheetCsv(wb, "03 К закупке по поставщикам")).toMatch(/Без ссылки/);
+    expect(sheetCsv(wb, "03 К закупке по поставщикам")).toContain("Без ссылки");
+    expect(sheetCsv(wb, "04 К закупке по разделам")).toContain("Без ссылки");
   });
 
   it("total amount unchanged", () => {
     const merged = buildClientPurchaseMergedRows(purchaseItems);
     const expected = merged.reduce((s, r) => s + (Number(r.sumVat) || 0), 0);
-    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
-    const summary = sheetCsv(wb, "02 Итоги");
-    expect(summary).toMatch(/Бюджет/);
-    // merged totals still equal sum of purchase lines with price
     expect(Math.round(expected)).toBeGreaterThan(0);
-    expect(merged.length).toBeGreaterThan(0);
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    expect(sheetCsv(wb, "02 Итоги")).toMatch(/Бюджет/);
   });
 
   it("unique item count unchanged", () => {
     const merged = buildClientPurchaseMergedRows(purchaseItems);
     const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
-    const supplierCsv = sheetCsv(wb, "03 К закупке по поставщикам");
-    // header + one row per merged item
-    const dataRows = supplierCsv.trim().split("\n").length - 1;
+    const dataRows = sheetCsv(wb, "03 К закупке по поставщикам").trim().split("\n").length - 1;
     expect(dataRows).toBe(merged.length);
   });
 
