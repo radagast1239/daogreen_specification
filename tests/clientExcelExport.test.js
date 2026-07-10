@@ -9,9 +9,14 @@ import {
   sheetHasAutofilter,
   sheetHasFreezePanes,
   sheetHasHeaderStyles,
+  sheetHasRowHeights,
   sheetHasWrapText,
   sheetReadableColWidths,
+  softWrapClientExcelText,
+  writeClientWorkbookArray,
+  xlsxBufferHasPersistedWrapText,
   CLIENT_EXCEL_BRAND,
+  CLIENT_EXCEL_COL_WIDTHS,
 } from "../src/lib/clientExcelExport.js";
 import { buildClientPurchaseMergedRows } from "../shared/clientPurchaseMerged.js";
 import { PURCHASE_STATUSES } from "../src/data/modules.js";
@@ -171,6 +176,46 @@ describe("buildClientWorkbook", () => {
     expect(sheetHasWrapText(ws, ["Позиция", "Комментарий Daogreen", "Поставщик"])).toBe(true);
   });
 
+  it("supplier/comment/link/status cells have wrapText true", () => {
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    const ws = wb.Sheets["03 К закупке по поставщикам"];
+    expect(sheetHasWrapText(ws, ["Поставщик", "Комментарий Daogreen", "Ссылка", "Раздел"])).toBe(true);
+    const ws4 = wb.Sheets["04 К закупке по разделам"];
+    expect(sheetHasWrapText(ws4, ["Наименование", "Статус закупки", "Поставщик"])).toBe(true);
+  });
+
+  it("row heights are set for data rows (min 36)", () => {
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    expect(sheetHasRowHeights(wb.Sheets["03 К закупке по поставщикам"])).toBe(true);
+    expect(sheetHasRowHeights(wb.Sheets["04 К закупке по разделам"])).toBe(true);
+    const rows = wb.Sheets["03 К закупке по поставщикам"]["!rows"];
+    expect(rows[0].hpt).toBeGreaterThanOrEqual(24);
+    expect(rows[1].hpt).toBeGreaterThanOrEqual(36);
+  });
+
+  it("CLIENT_EXCEL_COL_WIDTHS unchanged (hotfix preserves widths)", () => {
+    expect(CLIENT_EXCEL_COL_WIDTHS["Наименование"]).toBe(44);
+    expect(CLIENT_EXCEL_COL_WIDTHS["Позиция"]).toBe(44);
+    expect(CLIENT_EXCEL_COL_WIDTHS["Поставщик"]).toBe(22);
+    expect(CLIENT_EXCEL_COL_WIDTHS["Комментарий Daogreen"]).toBe(36);
+    expect(CLIENT_EXCEL_COL_WIDTHS["Ссылка"]).toBe(14);
+    expect(CLIENT_EXCEL_COL_WIDTHS["Раздел"]).toBe(20);
+    expect(getClientExcelColWidth("Наименование")).toBe(44);
+  });
+
+  it("softWrap inserts newlines for long text but not URLs", () => {
+    const long =
+      "Насос циркуляционный длинное наименование для проверки переноса текста в Excel и ещё длиннее";
+    const wrapped = softWrapClientExcelText(long, 30);
+    expect(wrapped).toContain("\n");
+    expect(softWrapClientExcelText("https://example.com/very/long/path/item", 20)).not.toContain("\n");
+  });
+
+  it("written xlsx persists wrapText in styles.xml (SheetJS CE patch)", () => {
+    const buf = writeClientWorkbookArray(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    expect(xlsxBufferHasPersistedWrapText(buf)).toBe(true);
+  });
+
   it("header rows have styles", () => {
     const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
     expect(CLIENT_EXCEL_BRAND).toBe("#116355");
@@ -245,7 +290,9 @@ describe("client Excel — no-link items stay in normal sheets", () => {
   it("unique item count unchanged", () => {
     const merged = buildClientPurchaseMergedRows(purchaseItems);
     const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
-    const dataRows = sheetCsv(wb, "03 К закупке по поставщикам").trim().split("\n").length - 1;
+    const ws = wb.Sheets["03 К закупке по поставщикам"];
+    const range = XLSX.utils.decode_range(ws["!ref"]);
+    const dataRows = range.e.r - range.s.r; // без заголовка
     expect(dataRows).toBe(merged.length);
   });
 

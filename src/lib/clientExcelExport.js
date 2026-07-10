@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { unzipSync, zipSync, strToU8, strFromU8 } from "fflate";
 import { buildClientPurchaseMergedRows, formatQty, groupBy } from "../store/helpers.js";
 import { lineGross, isBoughtStatus } from "./itemHelpers.js";
 import { rowsForResponsibleRole } from "./responsibleResolve.js";
@@ -69,6 +70,22 @@ export const CLIENT_EXCEL_WRAP_HEADERS = [
   "Значение",
 ];
 
+/**
+ * Soft `\n` только для реально длинных полей.
+ * Короткие ярлыки (Раздел/Статус) не режем — Excel wrapText справится.
+ */
+export const CLIENT_EXCEL_SOFT_WRAP_HEADERS = [
+  "Наименование",
+  "Позиция",
+  "Описание",
+  "Комментарий Daogreen",
+  "Комментарий клиента",
+  "Откуда взялось",
+  "Поставщик",
+  "Текст",
+  "Значение",
+];
+
 const HEADER_FILL = { patternType: "solid", fgColor: { rgb: CLIENT_EXCEL_BRAND_RGB } };
 const HEADER_FONT = { bold: true, color: { rgb: "FFFFFF" }, name: "Calibri", sz: 11 };
 const BODY_FONT = { name: "Calibri", sz: 10 };
@@ -125,6 +142,60 @@ export function sheetHasWrapText(ws, headerNames = []) {
     }
   }
   return false;
+}
+
+export function sheetHasRowHeights(ws) {
+  const rows = ws?.["!rows"];
+  if (!Array.isArray(rows) || rows.length < 2) return false;
+  return rows.slice(1).every((r) => Number(r?.hpt) >= 36);
+}
+
+/**
+ * Мягкий перенос длинного текста (fallback для SheetJS CE).
+ * URL не трогаем. Числа не трогаем.
+ */
+export function softWrapClientExcelText(text, widthChars = 40) {
+  const raw = text == null ? "" : String(text);
+  if (!raw) return raw;
+  if (typeof text === "number") return text;
+  const width = Math.max(8, Number(widthChars) || 40);
+  const trimmed = raw.trim();
+  if (/^https?:\/\//i.test(trimmed) || /^mailto:/i.test(trimmed)) return raw;
+  // Не режем короткие ярлыки — только заметно длиннее колонки.
+  if (raw.length <= width + 4) return raw;
+  if (raw.includes("\n")) return raw;
+
+  const parts = [];
+  let line = "";
+  const tokens = raw.split(/(\s+)/);
+  for (const token of tokens) {
+    if (!token) continue;
+    if (token.length > width && !/\s/.test(token)) {
+      if (line) {
+        parts.push(line);
+        line = "";
+      }
+      // длинный токен без пробелов — режем по ширине, но не URL
+      for (let i = 0; i < token.length; i += width) {
+        parts.push(token.slice(i, i + width));
+      }
+      continue;
+    }
+    if ((line + token).length > width && line.trim()) {
+      parts.push(line.replace(/\s+$/g, ""));
+      line = token.replace(/^\s+/g, "");
+    } else {
+      line += token;
+    }
+  }
+  if (line) parts.push(line.replace(/\s+$/g, ""));
+  // Доп. разрывы после . ; если строка всё ещё длинная
+  return parts
+    .map((p) => {
+      if (p.length <= width * 1.4) return p;
+      return p.replace(/([.;])\s+/g, "$1\n");
+    })
+    .join("\n");
 }
 
 export function sheetReadableColWidths(ws, headerNames) {
@@ -195,13 +266,16 @@ function estimateRowHeight(values, headers) {
     const text = String(values[i] ?? "");
     if (!text) continue;
     const width = getClientExcelColWidth(h) || 14;
-    const lines = Math.ceil(text.length / Math.max(width, 8));
+    const explicit = text.split("\n").length;
+    const byWidth = Math.ceil(text.replace(/\n/g, "").length / Math.max(width, 8));
+    const lines = Math.max(explicit, byWidth);
     maxLines = Math.max(maxLines, Math.min(lines, 6));
   }
-  if (maxLines <= 1) return 22;
-  if (maxLines === 2) return 36;
-  if (maxLines === 3) return 50;
-  return Math.min(28 + maxLines * 12, 80);
+  // Минимум 36pt, чтобы перенос был виден; длинные — до 80.
+  if (maxLines <= 1) return 36;
+  if (maxLines === 2) return 48;
+  if (maxLines === 3) return 60;
+  return Math.min(36 + maxLines * 8, 80);
 }
 
 function applyColWidths(ws, headers, overrides = {}) {
@@ -211,7 +285,7 @@ function applyColWidths(ws, headers, overrides = {}) {
 }
 
 function applyRowHeights(ws, headers, bodyRows) {
-  const rows = [{ hpt: 24 }]; // header
+  const rows = [{ hpt: 28 }]; // header
   for (const row of bodyRows) {
     const values = headers.map((h) => row[h] ?? "");
     rows.push({ hpt: estimateRowHeight(values, headers) });
@@ -219,11 +293,50 @@ function applyRowHeights(ws, headers, bodyRows) {
   ws["!rows"] = rows;
 }
 
+function applySoftWrapToCells(ws, headers, wrapSet) {
+  if (!ws?.["!ref"]) return;
+  const softSet = new Set(CLIENT_EXCEL_SOFT_WRAP_HEADERS);
+  const range = XLSX.utils.decode_range(ws["!ref"]);
+  for (let r = range.s.r + 1; r <= range.e.r; r += 1) {
+    for (let c = range.s.c; c <= range.e.c; c += 1) {
+      const header = headers[c] || "";
+      if (!softSet.has(header)) continue;
+      if (wrapSet.size && !wrapSet.has(header)) continue;
+      const ref = XLSX.utils.encode_cell({ r, c });
+      const cell = ws[ref];
+      if (!cell || cell.t === "n" || typeof cell.v === "number") continue;
+      if (cell.v == null || cell.v === "") continue;
+      const width = getClientExcelColWidth(header);
+      const next = softWrapClientExcelText(cell.v, width);
+      if (next !== cell.v) {
+        cell.v = next;
+        cell.t = "s";
+        cell.w = undefined;
+      }
+    }
+  }
+}
+
 function applyPresentation(ws, headers, bodyRows, { filter = false, freeze = true, wrapHeaders = CLIENT_EXCEL_WRAP_HEADERS } = {}) {
   if (!ws?.["!ref"]) return ws;
   const wrapSet = new Set(wrapHeaders);
   const numericAlign = new Set(["№", "Кол-во", "Кол-во всего", "Кол", "Цена", "Сумма", "Факт. цена", "Ед.", "Ед"]);
   const range = XLSX.utils.decode_range(ws["!ref"]);
+
+  // Soft-wrap до оценки высоты строк (SheetJS CE не пишет wrapText в файл).
+  applySoftWrapToCells(ws, headers, wrapSet);
+
+  // Синхронизируем bodyRows с soft-wrap, чтобы !rows считались по фактическому тексту.
+  const syncedRows = bodyRows.map((row, idx) => {
+    const next = { ...row };
+    for (let c = 0; c < headers.length; c += 1) {
+      const h = headers[c];
+      if (!wrapSet.has(h)) continue;
+      const ref = XLSX.utils.encode_cell({ r: range.s.r + 1 + idx, c });
+      if (ws[ref]?.v != null) next[h] = ws[ref].v;
+    }
+    return next;
+  });
 
   for (let c = range.s.c; c <= range.e.c; c += 1) {
     const ref = XLSX.utils.encode_cell({ r: range.s.r, c });
@@ -239,14 +352,17 @@ function applyPresentation(ws, headers, bodyRows, { filter = false, freeze = tru
       const ref = XLSX.utils.encode_cell({ r, c });
       const cell = ws[ref];
       if (!cell) continue;
-      const wrap = wrapSet.has(header);
+      const isNum = numericAlign.has(header) || cell.t === "n" || typeof cell.v === "number";
       const align = numericAlign.has(header) ? "center" : "left";
+      // Текст — всегда wrap; числа — wrap только если колонка в wrap-списке (обычно нет).
+      const wrap = !isNum || wrapSet.has(header);
       cell.s = bodyStyle({ wrap, align, alt });
+      if (wrap) cell.s.alignment.wrapText = true;
     }
   }
 
   applyColWidths(ws, headers);
-  applyRowHeights(ws, headers, bodyRows);
+  applyRowHeights(ws, headers, syncedRows);
   if (freeze) withFreezeHeader(ws);
   if (filter) withAutofilter(ws);
 
@@ -648,13 +764,68 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
   return wb;
 }
 
-export function downloadClientWorkbook(project, items, options = {}) {
+/** SheetJS CE не пишет wrapText в xlsx — добавляем alignment в cellXfs OOXML. */
+export function injectWrapTextIntoStylesXml(stylesXml) {
+  return String(stylesXml).replace(/<cellXfs([^>]*)>([\s\S]*?)<\/cellXfs>/, (_full, attrs, inner) => {
+    const patched = inner.replace(/<xf\b([^>]*?)(\/>|>([\s\S]*?)<\/xf>)/g, (m, xfAttrs, endOrBody, body) => {
+      if (/wrapText\s*=\s*"1"/.test(m)) return m;
+      const withAlignFlag = /\bapplyAlignment\s*=/.test(xfAttrs)
+        ? xfAttrs.replace(/\bapplyAlignment\s*=\s*"[^"]*"/, 'applyAlignment="1"')
+        : `${xfAttrs} applyAlignment="1"`;
+      if (endOrBody === "/>") {
+        return `<xf${withAlignFlag}><alignment wrapText="1" vertical="top"/></xf>`;
+      }
+      if (/<alignment\b/.test(body || "")) {
+        const nextBody = body.replace(/<alignment\b([^>]*?)(\/>|>)/, (_a, aAttrs, aEnd) => {
+          let attrs2 = aAttrs;
+          if (!/\bwrapText\s*=/.test(attrs2)) attrs2 += ' wrapText="1"';
+          if (!/\bvertical\s*=/.test(attrs2)) attrs2 += ' vertical="top"';
+          return aEnd === "/>" ? `<alignment${attrs2}/>` : `<alignment${attrs2}>`;
+        });
+        return `<xf${withAlignFlag}>${nextBody}</xf>`;
+      }
+      return `<xf${withAlignFlag}><alignment wrapText="1" vertical="top"/>${body || ""}</xf>`;
+    });
+    return `<cellXfs${attrs}>${patched}</cellXfs>`;
+  });
+}
+
+export function xlsxBufferHasPersistedWrapText(buf) {
+  try {
+    const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    const files = unzipSync(u8);
+    const styles = files["xl/styles.xml"];
+    if (!styles) return false;
+    return /wrapText\s*=\s*"1"/.test(strFromU8(styles));
+  } catch {
+    return false;
+  }
+}
+
+/** Пропатчить готовый xlsx: wrapText в styles.xml (browser + node). */
+export function patchClientExcelXlsxArray(arrayBuf) {
+  const u8 = arrayBuf instanceof Uint8Array ? arrayBuf : new Uint8Array(arrayBuf);
+  const files = unzipSync(u8);
+  const stylesPath = "xl/styles.xml";
+  if (files[stylesPath]) {
+    const xml = strFromU8(files[stylesPath]);
+    files[stylesPath] = strToU8(injectWrapTextIntoStylesXml(xml));
+  }
+  return zipSync(files, { level: 6 });
+}
+
+/** Собрать ArrayBuffer клиентского Excel с persistent wrapText. */
+export function writeClientWorkbookArray(project, items, options = {}) {
   const wb = buildClientWorkbook(project, items, options);
+  const raw = XLSX.write(wb, { bookType: "xlsx", type: "array", cellStyles: true });
+  return patchClientExcelXlsxArray(raw);
+}
+
+export function downloadClientWorkbook(project, items, options = {}) {
   const projectRef = project || { name: "проект", version: 1 };
   const safeName = (projectRef.name || "проект").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
   const ver = projectRef.version > 1 ? `_v${projectRef.version}` : "";
-  // cellStyles: true — на случай сборки со style-capable fork; CE может игнорировать цвета.
-  const out = XLSX.write(wb, { bookType: "xlsx", type: "array", cellStyles: true });
+  const out = writeClientWorkbookArray(project, items, options);
   triggerDownload(
     new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
     `Daogreen_Закупочный_лист_${safeName}${ver}.xlsx`
