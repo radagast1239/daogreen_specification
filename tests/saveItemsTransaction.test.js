@@ -12,6 +12,7 @@ let db;
 let initDb;
 let saveItems;
 let loadProjectItems;
+let patchItem;
 
 function seedMaterial(id = "mat1") {
   db.prepare(`
@@ -57,6 +58,7 @@ beforeAll(async () => {
   initDb = dbMod.initDb;
   loadProjectItems = dbMod.loadProjectItems;
   saveItems = projectsMod.saveItems;
+  patchItem = projectsMod.patchItem;
   initDb();
 });
 
@@ -138,6 +140,26 @@ describe("saveItems transactional replace", () => {
         allowLegacyMissingMaterialId: true,
       }),
     ).not.toThrow();
+  });
+
+  it("legacy row readable; patchItem allowed without full items replace", () => {
+    saveItems("p1", [item("legacy", null, { itemType: "material", name: "Legacy" })]);
+    patchItem("p1", "legacy", { clientComment: "note" });
+    const rows = loadProjectItems("p1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].clientComment).toBe("note");
+  });
+
+  it("full replacement with new material row without materialId rejected", () => {
+    saveItems("p1", [item("keep1", "mat1")]);
+    expect(() =>
+      saveItems(
+        "p1",
+        [item("keep1", "mat1"), item("bad", null, { itemType: "material" })],
+        { allowLegacyMissingMaterialId: false },
+      ),
+    ).toThrow();
+    expect(loadProjectItems("p1")).toHaveLength(1);
   });
 
   it("legacy rows remain readable after bulk save with allowLegacy", () => {

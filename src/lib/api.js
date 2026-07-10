@@ -31,6 +31,7 @@ async function request(path, { method = "GET", body, admin = true, token } = {})
   if (!res.ok) {
     const err = new Error(data.error || `HTTP ${res.status}`);
     err.status = res.status;
+    if (data.code) err.code = data.code;
     if (data.problems) err.problems = data.problems;
     throw err;
   }

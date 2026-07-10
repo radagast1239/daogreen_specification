@@ -72,6 +72,7 @@ import DuplicateProjectModal from "../../components/DuplicateProjectModal.jsx";
 import ClientSchemesEditor from "../../components/ClientSchemesEditor.jsx";
 import { filterItemsForViewMode } from "../../../shared/projectReadiness.js";
 import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
+import { clientLinkActiveState } from "../../../shared/clientProjectLoadState.js";
 import { copyToClipboard } from "../../lib/copyText.js";
 import {
   compositionGroupLabel,
@@ -723,6 +724,23 @@ export default function SpecEditorPage() {
           onResetLink={regenerateLink}
           onInternalExcel={exportSpec}
         />
+
+        {(() => {
+          const linkState = clientLinkActiveState(project);
+          if (!linkState.needsPublishBeforeClientLink) return null;
+          return (
+            <div className="card" style={{ marginBottom: 16, borderColor: "var(--warn)" }}>
+              <strong>Клиентская ссылка пока неактивна</strong>
+              <p className="muted" style={{ margin: "8px 0 12px" }}>
+                Токен клиента создан, но опубликованная версия отсутствует. Клиент увидит сообщение
+                «Проект пока не опубликован», пока вы не опубликуете версию.
+              </p>
+              <button type="button" className="btn primary" onClick={() => setPrePublishOpen(true)}>
+                Опубликовать версию
+              </button>
+            </div>
+          );
+        })()}
 
         {project.publishedRelease && project.hasUnpublishedChanges && (
           <div className="card" style={{ marginBottom: 16, borderColor: "var(--warn)", background: "var(--warn-bg, rgba(255, 193, 7, 0.08))" }}>

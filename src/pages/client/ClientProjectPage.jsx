@@ -30,6 +30,11 @@ import { STELLAGE_GROUPS } from "../../../shared/stellageComposition.js";
 import { clientPurchaseDashboard } from "../../../shared/clientPurchaseStats.js";
 import { groupClientFrameDocuments } from "../../../shared/frameDrawingTargets.js";
 import { api } from "../../lib/api.js";
+import {
+  classifyClientProjectLoadError,
+  clientProjectLoadMessage,
+  CLIENT_LOAD_ERROR,
+} from "../../../shared/clientProjectLoadState.js";
 
 function clientPageStyle(branding) {
   const brand = branding.brandColor || "#116355";
@@ -98,8 +103,11 @@ export default function ClientProjectPage() {
         setData(fresh);
       })
       .catch((e) => {
-        if (e.status === 410) setErr("expired");
-        else setErr(e.message || "notfound");
+        const kind = classifyClientProjectLoadError(e);
+        if (kind === CLIENT_LOAD_ERROR.EXPIRED) setErr("expired");
+        else if (kind === CLIENT_LOAD_ERROR.NOT_PUBLISHED) setErr("not_published");
+        else if (kind === CLIENT_LOAD_ERROR.NOT_FOUND) setErr("notfound");
+        else setErr("network");
       })
       .finally(() => setLoading(false));
   }, [token, actions]);
@@ -112,17 +120,38 @@ export default function ClientProjectPage() {
     );
   }
 
-  if (err === "expired")
+  if (err === "expired") {
+    const msg = clientProjectLoadMessage(CLIENT_LOAD_ERROR.EXPIRED);
     return (
       <div className="client-wrap" style={{ paddingTop: 60 }}>
-        <Empty title="Ссылка устарела" hint="Попросите Daogreen прислать новую ссылку на проект." />
+        <Empty title={msg.title} hint={msg.hint} />
       </div>
     );
+  }
+
+  if (err === "not_published") {
+    const msg = clientProjectLoadMessage(CLIENT_LOAD_ERROR.NOT_PUBLISHED);
+    return (
+      <div className="client-wrap" style={{ paddingTop: 60 }}>
+        <Empty title={msg.title} hint={msg.hint} />
+      </div>
+    );
+  }
+
+  if (err === "notfound" || err === "network") {
+    const kind = err === "notfound" ? CLIENT_LOAD_ERROR.NOT_FOUND : CLIENT_LOAD_ERROR.NETWORK;
+    const msg = clientProjectLoadMessage(kind);
+    return (
+      <div className="client-wrap" style={{ paddingTop: 60 }}>
+        <Empty title={msg.title} hint={msg.hint} />
+      </div>
+    );
+  }
 
   if (err)
     return (
       <div className="client-wrap" style={{ paddingTop: 60 }}>
-        <Empty title="Проект не найден" hint="Проверьте ссылку — она должна начинаться с /spec/client/p/… (например http://62.233.35.206/spec/client/p/…)." />
+        <Empty title="Не удалось загрузить проект" hint="Попробуйте обновить страницу позже." />
       </div>
     );
 
