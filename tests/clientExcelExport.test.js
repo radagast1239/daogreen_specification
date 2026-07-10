@@ -17,6 +17,9 @@ import {
   xlsxBufferHasPersistedWrapText,
   CLIENT_EXCEL_BRAND,
   CLIENT_EXCEL_COL_WIDTHS,
+  CLIENT_EXCEL_BODY_FONT_SIZE,
+  CLIENT_EXCEL_HEADER_FONT_SIZE,
+  CLIENT_EXCEL_BOLD_HEADERS,
 } from "../src/lib/clientExcelExport.js";
 import { buildClientPurchaseMergedRows } from "../shared/clientPurchaseMerged.js";
 import { PURCHASE_STATUSES } from "../src/data/modules.js";
@@ -193,14 +196,35 @@ describe("buildClientWorkbook", () => {
     expect(rows[1].hpt).toBeGreaterThanOrEqual(36);
   });
 
-  it("CLIENT_EXCEL_COL_WIDTHS unchanged (hotfix preserves widths)", () => {
+  it("CLIENT_EXCEL style matches reference (comment width, fonts +1, bold names, brand header)", () => {
     expect(CLIENT_EXCEL_COL_WIDTHS["Наименование"]).toBe(44);
     expect(CLIENT_EXCEL_COL_WIDTHS["Позиция"]).toBe(44);
     expect(CLIENT_EXCEL_COL_WIDTHS["Поставщик"]).toBe(22);
-    expect(CLIENT_EXCEL_COL_WIDTHS["Комментарий Daogreen"]).toBe(36);
-    expect(CLIENT_EXCEL_COL_WIDTHS["Ссылка"]).toBe(14);
+    expect(CLIENT_EXCEL_COL_WIDTHS["Комментарий Daogreen"]).toBe(55);
+    expect(CLIENT_EXCEL_COL_WIDTHS["Ссылка"]).toBe(10);
     expect(CLIENT_EXCEL_COL_WIDTHS["Раздел"]).toBe(20);
-    expect(getClientExcelColWidth("Наименование")).toBe(44);
+    expect(CLIENT_EXCEL_BODY_FONT_SIZE).toBe(11);
+    expect(CLIENT_EXCEL_HEADER_FONT_SIZE).toBe(12);
+    expect(CLIENT_EXCEL_BOLD_HEADERS).toContain("Позиция");
+    expect(CLIENT_EXCEL_BRAND).toBe("#116355");
+    expect(getClientExcelColWidth("Комментарий Daogreen")).toBe(55);
+  });
+
+  it("name/position body cells are bold in workbook model", () => {
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    const ws = wb.Sheets["03 К закупке по поставщикам"];
+    const range = XLSX.utils.decode_range(ws["!ref"]);
+    const headers = [];
+    for (let c = range.s.c; c <= range.e.c; c += 1) {
+      headers.push(String(ws[XLSX.utils.encode_cell({ r: 0, c })]?.v || ""));
+    }
+    const posCol = headers.indexOf("Позиция");
+    expect(posCol).toBeGreaterThanOrEqual(0);
+    const cell = ws[XLSX.utils.encode_cell({ r: 1, c: posCol })];
+    expect(cell?.s?.font?.bold).toBe(true);
+    expect(cell?.s?.font?.sz).toBe(11);
+    expect(ws.A1?.s?.font?.sz).toBe(12);
+    expect(ws.A1?.s?.fill?.fgColor?.rgb).toBe("116355");
   });
 
   it("softWrap inserts newlines for long text but not URLs", () => {

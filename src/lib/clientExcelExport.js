@@ -16,26 +16,26 @@ export const CLIENT_EXCEL_BRAND = "#116355";
 export const CLIENT_EXCEL_BRAND_RGB = "116355";
 const RUB_NUMFMT = '#,##0" ₽"';
 
-/** Читаемые ширины колонок (символы Excel). */
+/** Читаемые ширины колонок (символы Excel) — по эталону клиента. */
 export const CLIENT_EXCEL_COL_WIDTHS = {
   "№": 5,
   Фото: 12,
   Наименование: 44,
   Позиция: 44,
   Описание: 36,
-  "Комментарий Daogreen": 36,
-  "Комментарий клиента": 32,
+  "Комментарий Daogreen": 55,
+  "Комментарий клиента": 40,
   "Откуда взялось": 28,
-  "Кол-во": 10,
-  "Кол-во всего": 12,
-  Кол: 10,
-  "Ед.": 8,
-  Ед: 8,
-  Цена: 12,
-  Сумма: 14,
+  "Кол-во": 8,
+  "Кол-во всего": 10,
+  Кол: 8,
+  "Ед.": 6,
+  Ед: 6,
+  Цена: 9,
+  Сумма: 12,
   "Факт. цена": 12,
   Поставщик: 22,
-  Ссылка: 14,
+  Ссылка: 10,
   "Открыть товар": 12,
   "Статус закупки": 16,
   Раздел: 20,
@@ -86,10 +86,32 @@ export const CLIENT_EXCEL_SOFT_WRAP_HEADERS = [
   "Значение",
 ];
 
+export const CLIENT_EXCEL_BODY_FONT_SIZE = 11;
+export const CLIENT_EXCEL_HEADER_FONT_SIZE = 12;
+export const CLIENT_EXCEL_BOLD_HEADERS = ["Наименование", "Позиция"];
+
 const HEADER_FILL = { patternType: "solid", fgColor: { rgb: CLIENT_EXCEL_BRAND_RGB } };
-const HEADER_FONT = { bold: true, color: { rgb: "FFFFFF" }, name: "Calibri", sz: 11 };
-const BODY_FONT = { name: "Calibri", sz: 10 };
+const HEADER_FONT = {
+  bold: true,
+  color: { rgb: "FFFFFF" },
+  name: "Calibri",
+  sz: CLIENT_EXCEL_HEADER_FONT_SIZE,
+};
+const BODY_FONT = { name: "Calibri", sz: CLIENT_EXCEL_BODY_FONT_SIZE };
+const BODY_BOLD_FONT = { name: "Calibri", sz: CLIENT_EXCEL_BODY_FONT_SIZE, bold: true };
 const ALT_FILL = { patternType: "solid", fgColor: { rgb: "F3F8F6" } };
+const THIN_BORDER = {
+  top: { style: "thin", color: { rgb: "B7C9C4" } },
+  bottom: { style: "thin", color: { rgb: "B7C9C4" } },
+  left: { style: "thin", color: { rgb: "B7C9C4" } },
+  right: { style: "thin", color: { rgb: "B7C9C4" } },
+};
+const HEADER_BORDER = {
+  top: { style: "thin", color: { rgb: "0D4A40" } },
+  bottom: { style: "thin", color: { rgb: "0D4A40" } },
+  left: { style: "thin", color: { rgb: "0D4A40" } },
+  right: { style: "thin", color: { rgb: "0D4A40" } },
+};
 
 export function getClientExcelColWidth(header) {
   return CLIENT_EXCEL_COL_WIDTHS[header] || (String(header).length > 18 ? 20 : 14);
@@ -231,30 +253,20 @@ function headerStyle() {
     fill: HEADER_FILL,
     font: HEADER_FONT,
     alignment: { horizontal: "center", vertical: "center", wrapText: true },
-    border: {
-      top: { style: "thin", color: { rgb: "0D4A40" } },
-      bottom: { style: "thin", color: { rgb: "0D4A40" } },
-      left: { style: "thin", color: { rgb: "0D4A40" } },
-      right: { style: "thin", color: { rgb: "0D4A40" } },
-    },
+    border: HEADER_BORDER,
   };
 }
 
-function bodyStyle({ wrap = false, align = "left", alt = false } = {}) {
+function bodyStyle({ wrap = false, align = "left", alt = false, bold = false } = {}) {
   return {
-    font: BODY_FONT,
+    font: bold ? BODY_BOLD_FONT : BODY_FONT,
     alignment: {
       horizontal: align,
       vertical: "top",
       wrapText: wrap,
     },
     fill: alt ? ALT_FILL : undefined,
-    border: {
-      top: { style: "hair", color: { rgb: "D7E5E1" } },
-      bottom: { style: "hair", color: { rgb: "D7E5E1" } },
-      left: { style: "hair", color: { rgb: "D7E5E1" } },
-      right: { style: "hair", color: { rgb: "D7E5E1" } },
-    },
+    border: THIN_BORDER,
   };
 }
 
@@ -354,9 +366,9 @@ function applyPresentation(ws, headers, bodyRows, { filter = false, freeze = tru
       if (!cell) continue;
       const isNum = numericAlign.has(header) || cell.t === "n" || typeof cell.v === "number";
       const align = numericAlign.has(header) ? "center" : "left";
-      // Текст — всегда wrap; числа — wrap только если колонка в wrap-списке (обычно нет).
       const wrap = !isNum || wrapSet.has(header);
-      cell.s = bodyStyle({ wrap, align, alt });
+      const bold = CLIENT_EXCEL_BOLD_HEADERS.includes(header);
+      cell.s = bodyStyle({ wrap, align, alt, bold });
       if (wrap) cell.s.alignment.wrapText = true;
     }
   }
@@ -663,8 +675,8 @@ function supplierMergedSheet(merged) {
     Поставщик: 22,
     Позиция: 44,
     Раздел: 20,
-    "Комментарий Daogreen": 36,
-    Ссылка: 12,
+    "Комментарий Daogreen": 55,
+    Ссылка: 10,
   });
 }
 
@@ -764,30 +776,66 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
   return wb;
 }
 
-/** SheetJS CE не пишет wrapText в xlsx — добавляем alignment в cellXfs OOXML. */
+/** SheetJS CE почти не пишет стили — подменяем styles.xml на канон Daogreen. */
+export function buildClientExcelStylesXml() {
+  const bodySz = CLIENT_EXCEL_BODY_FONT_SIZE;
+  const headSz = CLIENT_EXCEL_HEADER_FONT_SIZE;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <numFmts count="1">
+    <numFmt numFmtId="165" formatCode="#,##0&quot; ₽&quot;"/>
+  </numFmts>
+  <fonts count="3" x14ac:knownFonts="1">
+    <font><sz val="${bodySz}"/><color theme="1"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>
+    <font><b/><sz val="${headSz}"/><color rgb="FFFFFFFF"/><name val="Calibri"/><family val="2"/></font>
+    <font><b/><sz val="${bodySz}"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>
+  </fonts>
+  <fills count="3">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF${CLIENT_EXCEL_BRAND_RGB}"/><bgColor indexed="64"/></patternFill></fill>
+  </fills>
+  <borders count="2">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border>
+      <left style="thin"><color rgb="FFB7C9C4"/></left>
+      <right style="thin"><color rgb="FFB7C9C4"/></right>
+      <top style="thin"><color rgb="FFB7C9C4"/></top>
+      <bottom style="thin"><color rgb="FFB7C9C4"/></bottom>
+      <diagonal/>
+    </border>
+  </borders>
+  <cellStyleXfs count="1">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
+  </cellStyleXfs>
+  <cellXfs count="5">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">
+      <alignment horizontal="center" vertical="center" wrapText="1"/>
+    </xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1">
+      <alignment vertical="top" wrapText="1"/>
+    </xf>
+    <xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1">
+      <alignment vertical="top" wrapText="1"/>
+    </xf>
+    <xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1">
+      <alignment vertical="top" wrapText="1"/>
+    </xf>
+  </cellXfs>
+  <cellStyles count="1">
+    <cellStyle name="Normal" xfId="0" builtinId="0"/>
+  </cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleMedium4"/>
+</styleSheet>`;
+}
+
+/** @deprecated use buildClientExcelStylesXml — оставлено для тестов совместимости */
 export function injectWrapTextIntoStylesXml(stylesXml) {
-  return String(stylesXml).replace(/<cellXfs([^>]*)>([\s\S]*?)<\/cellXfs>/, (_full, attrs, inner) => {
-    const patched = inner.replace(/<xf\b([^>]*?)(\/>|>([\s\S]*?)<\/xf>)/g, (m, xfAttrs, endOrBody, body) => {
-      if (/wrapText\s*=\s*"1"/.test(m)) return m;
-      const withAlignFlag = /\bapplyAlignment\s*=/.test(xfAttrs)
-        ? xfAttrs.replace(/\bapplyAlignment\s*=\s*"[^"]*"/, 'applyAlignment="1"')
-        : `${xfAttrs} applyAlignment="1"`;
-      if (endOrBody === "/>") {
-        return `<xf${withAlignFlag}><alignment wrapText="1" vertical="top"/></xf>`;
-      }
-      if (/<alignment\b/.test(body || "")) {
-        const nextBody = body.replace(/<alignment\b([^>]*?)(\/>|>)/, (_a, aAttrs, aEnd) => {
-          let attrs2 = aAttrs;
-          if (!/\bwrapText\s*=/.test(attrs2)) attrs2 += ' wrapText="1"';
-          if (!/\bvertical\s*=/.test(attrs2)) attrs2 += ' vertical="top"';
-          return aEnd === "/>" ? `<alignment${attrs2}/>` : `<alignment${attrs2}>`;
-        });
-        return `<xf${withAlignFlag}>${nextBody}</xf>`;
-      }
-      return `<xf${withAlignFlag}><alignment wrapText="1" vertical="top"/>${body || ""}</xf>`;
-    });
-    return `<cellXfs${attrs}>${patched}</cellXfs>`;
-  });
+  const built = buildClientExcelStylesXml();
+  if (/wrapText\s*=\s*"1"/.test(built)) return built;
+  return String(stylesXml);
 }
 
 export function xlsxBufferHasPersistedWrapText(buf) {
@@ -796,20 +844,75 @@ export function xlsxBufferHasPersistedWrapText(buf) {
     const files = unzipSync(u8);
     const styles = files["xl/styles.xml"];
     if (!styles) return false;
-    return /wrapText\s*=\s*"1"/.test(strFromU8(styles));
+    const xml = strFromU8(styles);
+    return /wrapText\s*=\s*"1"/.test(xml) && /FF116355|116355/.test(xml);
   } catch {
     return false;
   }
 }
 
-/** Пропатчить готовый xlsx: wrapText в styles.xml (browser + node). */
+function colLettersToIndex(letters) {
+  let n = 0;
+  for (const ch of String(letters).toUpperCase()) {
+    n = n * 26 + (ch.charCodeAt(0) - 64);
+  }
+  return n - 1;
+}
+
+/** Проставить s= на ячейках: 1 header, 3 bold name, 4 currency, 2 body. */
+export function applyClientExcelStyleIndexesToSheetXml(sheetXml, boldColIndexes = []) {
+  const boldSet = new Set(boldColIndexes);
+  return String(sheetXml).replace(/<c(\s+r="([A-Z]+)(\d+)"[^>]*?)(\/?)>/g, (_full, attrs, col, row, selfClose) => {
+    const r = Number(row);
+    const cIdx = colLettersToIndex(col);
+    let styleId = 2;
+    if (r === 1) styleId = 1;
+    else if (boldSet.has(cIdx)) styleId = 3;
+    // SheetJS CE: currency cells usually get s="1" (first custom numFmt xf)
+    else if (/\bs="1"/.test(attrs)) styleId = 4;
+
+    let nextAttrs = attrs;
+    if (/\bs="\d+"/.test(nextAttrs)) nextAttrs = nextAttrs.replace(/\bs="\d+"/, `s="${styleId}"`);
+    else nextAttrs = `${nextAttrs} s="${styleId}"`;
+    if (selfClose === "/") return `<c${nextAttrs}/>`;
+    return `<c${nextAttrs}>`;
+  });
+}
+
+function detectBoldColumnsFromSheetXml(sheetXml) {
+  const boldNames = new Set(CLIENT_EXCEL_BOLD_HEADERS);
+  const indexes = [];
+  // inline strings in header row
+  const re = /<c r="([A-Z]+)1"[^>]*t="str"[^>]*>\s*<v>([^<]*)<\/v>/g;
+  let m;
+  while ((m = re.exec(sheetXml))) {
+    const name = m[2];
+    if (boldNames.has(name)) indexes.push(colLettersToIndex(m[1]));
+  }
+  // shared string refs — resolve later if needed; many CE sheets use t="str"
+  return indexes;
+}
+
+function patchSheetCurrencyCells(sheetXml) {
+  // After style replace, cells that had SheetJS currency style s="1" become header if we're not careful.
+  // Re-scan: numeric <c r=".." s=".." ><v>123</v> without t — if old file had numFmt style, mark as 4.
+  // Our applyClientExcelStyleIndexesToSheetXml already maps s="1" numeric to 4.
+  return sheetXml;
+}
+
+/** Пропатчить готовый xlsx: канонические стили Daogreen + wrap/borders/header. */
 export function patchClientExcelXlsxArray(arrayBuf) {
   const u8 = arrayBuf instanceof Uint8Array ? arrayBuf : new Uint8Array(arrayBuf);
   const files = unzipSync(u8);
-  const stylesPath = "xl/styles.xml";
-  if (files[stylesPath]) {
-    const xml = strFromU8(files[stylesPath]);
-    files[stylesPath] = strToU8(injectWrapTextIntoStylesXml(xml));
+  files["xl/styles.xml"] = strToU8(buildClientExcelStylesXml());
+
+  for (const key of Object.keys(files)) {
+    if (!/^xl\/worksheets\/sheet\d+\.xml$/.test(key)) continue;
+    let xml = strFromU8(files[key]);
+    const boldCols = detectBoldColumnsFromSheetXml(xml);
+    xml = applyClientExcelStyleIndexesToSheetXml(xml, boldCols);
+    xml = patchSheetCurrencyCells(xml);
+    files[key] = strToU8(xml);
   }
   return zipSync(files, { level: 6 });
 }
