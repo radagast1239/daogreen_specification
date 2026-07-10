@@ -1,6 +1,7 @@
 import {
   mergeFrameBomIntoProjectItems,
   buildFrameBomRepairPlan,
+  buildLegacyFrameBomDedupePlan,
   frameBomItemsForModuleRack,
   findMissingFrameBomMaterials,
   formatFrameBomMissingMaterialsMessage,
@@ -244,6 +245,65 @@ export async function deleteProjectItemsByIds(projectId, itemIds, deleteItem) {
 /**
  * @param {{
  *   project: { items?: object[], id?: string },
+ *   drawingContext: object,
+ *   deleteItem: (projectId: string, itemId: string) => Promise<void>,
+ *   updateProject: (projectId: string, patch: object) => Promise<object>,
+ *   loadProject?: (projectId: string) => Promise<object>,
+ * }} params
+ */
+export async function applyFrameBomLegacyDedupeRepair({
+  project,
+  drawingContext,
+  deleteItem,
+  updateProject,
+  loadProject = null,
+}) {
+  const projectId = drawingContext?.projectId || project?.id;
+  if (!projectId || !project?.items) {
+    return { skipped: true };
+  }
+
+  const plan = buildLegacyFrameBomDedupePlan(
+    project.items,
+    buildFrameBomMergeOptions(drawingContext, null),
+  );
+
+  if (plan.blocked) {
+    const err = new Error(plan.blockedReason || "BOM не обновлён.");
+    err.plan = plan;
+    throw err;
+  }
+
+  const deleteResult = await deleteProjectItemsByIds(projectId, plan.removeItemIds, deleteItem);
+  if (deleteResult.errors.length) {
+    const err = new Error(
+      `Не удалось удалить ${deleteResult.errors.length} legacy-позиций BOM.`,
+    );
+    err.deleteErrors = deleteResult.errors;
+    throw err;
+  }
+
+  const updated = await updateProject(projectId, { items: plan.cleanedItems });
+  const reloaded = loadProject ? await loadProject(projectId) : updated;
+
+  return {
+    plan,
+    updated: reloaded,
+    deleteResult,
+    summary: {
+      title: FRAME_BOM_REFRESH_SUCCESS_TITLE,
+      removedCount: plan.removeItemIds.length,
+      addedCount: 0,
+      upsertCount: 0,
+      deletedIds: deleteResult.deleted,
+      mode: "legacy_dedupe",
+    },
+  };
+}
+
+/**
+ * @param {{
+ *   project: { items?: object[], id?: string },
  *   purchaseDraft: object[],
  *   drawingContext: object,
  *   materials?: object[]|null,
@@ -330,8 +390,41 @@ export async function executeFrameBomRefreshFromDrawing({
   if (!projectId || !project?.items) {
     return { cancelled: false, skipped: true };
   }
+
+  const ctx = {
+    ...drawingContext,
+    projectId,
+    drawingId: drawing?.id || drawingContext.drawingId || "",
+  };
+
   if (!drawing?.frameConfig) {
-    throw new Error("В сохранённой схеме нет конфигурации каркаса.");
+    const dedupePreview = buildLegacyFrameBomDedupePlan(
+      project.items,
+      buildFrameBomMergeOptions(ctx, null),
+    );
+    if (dedupePreview.blocked) {
+      throw new Error(dedupePreview.blockedReason || "Не найдена схема для пересборки BOM.");
+    }
+    if (confirm) {
+      const ok = await confirm({
+        title: FRAME_BOM_REFRESH_CONFIRM_TITLE,
+        message: buildFrameBomRefreshConfirmMessage({
+          removeCount: dedupePreview.removeItemIds.length,
+          upsertCount: 0,
+        }),
+        confirmLabel: "Обновить BOM",
+        cancelLabel: "Отмена",
+      });
+      if (!ok) return { cancelled: true };
+    }
+    const outcome = await applyFrameBomLegacyDedupeRepair({
+      project,
+      drawingContext: ctx,
+      deleteItem,
+      updateProject,
+      loadProject,
+    });
+    return { cancelled: false, ...outcome };
   }
 
   const purchaseDraft = buildFramePurchaseDraftFromFrameConfig(drawing.frameConfig);
@@ -339,12 +432,6 @@ export async function executeFrameBomRefreshFromDrawing({
   if (!visible.length) {
     throw new Error("По сохранённой схеме не удалось рассчитать BOM.");
   }
-
-  const ctx = {
-    ...drawingContext,
-    projectId,
-    drawingId: drawing.id || drawingContext.drawingId || "",
-  };
 
   const evalResult = evaluateFrameBomAddToProject({
     projectId,

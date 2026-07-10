@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import FrameDrawingActions from './FrameDrawingActions.jsx';
 import { drawingsForProjectStellage } from '../../shared/frameDrawingTargets.js';
 import { buildSavedProjectFrameDrawingContext } from '../../shared/frameDrawingContext.js';
+import { canRefreshFrameBom } from '../../shared/frameDrawingActionsModel.js';
 import { useStore } from '../store/StoreContext.jsx';
 import { useToast } from './Toast.jsx';
 import { executeFrameBomRefreshFromDrawing } from '../frameConstructor/frameBomAddToProject.js';
@@ -15,7 +16,11 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
   const [refreshBusyRack, setRefreshBusyRack] = useState('');
   const { actions, state } = useStore();
   const { confirm, success, error } = useToast();
-  const materials = state.reference?.materials || null;
+  const materials = state.materials || [];
+
+  useEffect(() => {
+    actions.ensureMaterials?.().catch(() => {});
+  }, [actions]);
 
   useEffect(() => {
     if (!project?.id) {
@@ -52,27 +57,36 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
   }, [project?.id, project?.stellageConfigs]);
 
   const handleRefreshBom = async ({ context, drawing }) => {
-    if (!project?.id || !drawing?.id) return;
+    if (!project?.id) return;
     const rackKey = context.moduleRackKey || context.rackId || context.stellageId || '';
     setRefreshBusyRack(rackKey);
     try {
-      let drawingRow = drawing;
-      if (!drawingRow?.frameConfig) {
-        drawingRow = await api.getFrameDrawing(drawing.id);
+      let drawingRow = drawing || null;
+      if (drawingRow?.id && !drawingRow?.frameConfig) {
+        try {
+          drawingRow = await api.getFrameDrawing(drawing.id);
+        } catch {
+          /* legacy dedupe may still work without frameConfig */
+        }
       }
+
+      const catalog = materials?.length ? materials : await actions.ensureMaterials();
       const outcome = await executeFrameBomRefreshFromDrawing({
         project,
         drawing: drawingRow,
         drawingContext: context,
-        materials,
+        materials: catalog,
         confirm,
         deleteItem: actions.itemDelete.bind(actions),
         updateProject: actions.projectUpdate.bind(actions),
         loadProject: actions.loadProject.bind(actions),
       });
       if (outcome.cancelled || outcome.skipped) return;
+      const removed = outcome.summary?.removedCount ?? 0;
       success(
-        `${outcome.summary?.title || 'BOM обновлён'} Удалено legacy: ${outcome.summary?.removedCount ?? 0}.`,
+        removed > 0
+          ? `BOM обновлён, старые дубли убраны: ${removed}.`
+          : (outcome.summary?.title || 'BOM обновлён.'),
       );
     } catch (err) {
       error(err?.message || 'Не удалось обновить BOM.');
@@ -100,8 +114,19 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
             const ctx = {
               ...baseCtx,
               returnTo: returnPath || baseCtx.returnTo,
+              rackLabel: st.name || baseCtx.rackLabel || '',
             };
             const moduleRackKey = ctx.moduleRackKey || st.id;
+            const latestDrawing = rackDrawings[0] || null;
+            const refreshState = canRefreshFrameBom({
+              drawing: latestDrawing,
+              drawings: rackDrawings,
+              projectItems: project?.items || [],
+              context: latestDrawing
+                ? { ...ctx, drawingId: latestDrawing.id }
+                : ctx,
+              hasRefreshHandler: true,
+            });
             return (
               <li key={st.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
                 <div style={{ marginBottom: 6 }}>
@@ -116,9 +141,15 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
                   drawings={rackDrawings}
                   presetDrawing={presetDrawing}
                   onRefreshBom={handleRefreshBom}
+                  canRefreshBom={refreshState.enabled}
                   refreshBomBusy={refreshBusyRack === moduleRackKey}
-                  refreshBomDisabled={!materials?.length}
+                  refreshBomDisabled={!refreshState.enabled}
                 />
+                {!refreshState.enabled && refreshState.reason && latestDrawing && (
+                  <p className="muted" style={{ fontSize: 10, margin: '4px 0 0' }}>
+                    {refreshState.reason}
+                  </p>
+                )}
               </li>
             );
           })}

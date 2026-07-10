@@ -33,6 +33,7 @@ export default function FrameDrawingActions({
   onRefreshBom = null,
   refreshBomBusy = false,
   refreshBomDisabled = false,
+  canRefreshBom: canRefreshBomProp = null,
 }) {
   const [showOlder, setShowOlder] = useState(false);
   const latest = drawings[0] || null;
@@ -48,7 +49,10 @@ export default function FrameDrawingActions({
     ? { ...context, drawingId: latest.id }
     : baseCtx;
 
-  const canRefreshBom = Boolean(context.projectId && latest && onRefreshBom);
+  const canRefreshBom =
+    canRefreshBomProp != null
+      ? Boolean(canRefreshBomProp)
+      : Boolean(context.projectId && latest && onRefreshBom);
 
   return (
     <div className={compact ? '' : 'frame-drawing-actions'}>
@@ -86,21 +90,6 @@ export default function FrameDrawingActions({
                 onNavigate={onNavigate}
                 disabled={navigateDisabled}
               />
-              {canRefreshBom && (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline"
-                    disabled={refreshBomBusy || refreshBomDisabled || navigateDisabled}
-                    onClick={() => onRefreshBom({ context: openSchemeCtx, drawing: latest })}
-                  >
-                    {refreshBomBusy ? 'Обновление…' : FRAME_BOM_REFRESH_BUTTON_LABEL}
-                  </button>
-                  <span className="muted" style={{ fontSize: 10, width: '100%' }}>
-                    {FRAME_BOM_UPDATE_BOM_HINT}
-                  </span>
-                </>
-              )}
               <FrameDrawingLinkButton
                 context={newVersionCtx}
                 label="Новая версия"
@@ -108,6 +97,26 @@ export default function FrameDrawingActions({
                 onNavigate={onNavigate}
                 disabled={navigateDisabled}
               />
+            </>
+          )}
+          {canRefreshBom && onRefreshBom && (
+            <>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline"
+                disabled={refreshBomBusy || refreshBomDisabled || navigateDisabled}
+                onClick={() =>
+                  onRefreshBom({
+                    context: latest ? openSchemeCtx : baseCtx,
+                    drawing: latest,
+                  })
+                }
+              >
+                {refreshBomBusy ? 'Обновляю…' : FRAME_BOM_REFRESH_BUTTON_LABEL}
+              </button>
+              <span className="muted" style={{ fontSize: 10, width: '100%' }}>
+                {FRAME_BOM_UPDATE_BOM_HINT}
+              </span>
             </>
           )}
         </span>

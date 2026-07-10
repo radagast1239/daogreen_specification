@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   applyFrameBomRefreshRepair,
+  applyFrameBomLegacyDedupeRepair,
   deleteProjectItemsByIds,
   executeFrameBomRefreshFromDrawing,
 } from "../src/frameConstructor/frameBomAddToProject.js";
@@ -156,5 +157,90 @@ describe("executeFrameBomRefreshFromDrawing", () => {
     expect(deleteItem).toHaveBeenCalled();
     expect(updateProject).toHaveBeenCalled();
     vi.restoreAllMocks();
+  });
+
+  it("direct repair works when drawing missing but canonical+legacy rows exist", async () => {
+    const ductProject = {
+      id: "p1",
+      items: [
+        {
+          id: "st_mrdwu5kzthoor__ln_duct",
+          materialId: "m010",
+          module: "Стеллаж 1",
+          price: 0,
+          clientNote: "Из схемы стеллажа",
+        },
+        {
+          id: "it_fbom_d1_mod_protochka:st_mrdwu5kzthoor_duct",
+          materialId: "m010",
+          module: "Стеллаж 1",
+          price: 500,
+          supplier: "S",
+          clientNote: "Из схемы стеллажа",
+          source: "frame_bom",
+          sourceObjectIds: { moduleRackKey: "mod_protochka:st_mrdwu5kzthoor", bomKey: "duct" },
+        },
+      ],
+    };
+    const deleteItem = vi.fn().mockResolvedValue(undefined);
+    const updateProject = vi.fn().mockResolvedValue({ id: "p1", items: [] });
+    const confirm = vi.fn().mockResolvedValue(true);
+
+    const outcome = await executeFrameBomRefreshFromDrawing({
+      project: ductProject,
+      drawing: null,
+      drawingContext,
+      materials,
+      confirm,
+      deleteItem,
+      updateProject,
+      loadProject: vi.fn().mockResolvedValue({ id: "p1", items: [] }),
+    });
+
+    expect(outcome.cancelled).toBe(false);
+    expect(deleteItem).toHaveBeenCalled();
+    expect(deleteItem.mock.calls.some((c) => c[1] === "st_mrdwu5kzthoor__ln_duct")).toBe(true);
+    expect(updateProject).toHaveBeenCalled();
+  });
+});
+
+describe("applyFrameBomLegacyDedupeRepair", () => {
+  it("DELETE called for legacy duct ids and project refresh after repair", async () => {
+    const project = {
+      id: "p1",
+      items: [
+        {
+          id: "st_mrdwu5kzthoor__ln_conn",
+          materialId: "m012",
+          module: "Стеллаж 1",
+          price: 0,
+          clientNote: "Из схемы стеллажа",
+        },
+        {
+          id: "it_fbom_x",
+          materialId: "m012",
+          module: "Стеллаж 1",
+          price: 40,
+          supplier: "S",
+          source: "frame_bom",
+          sourceObjectIds: { moduleRackKey: "mod_protochka:st_mrdwu5kzthoor", bomKey: "conn" },
+        },
+      ],
+    };
+    const deleteItem = vi.fn().mockResolvedValue(undefined);
+    const updateProject = vi.fn().mockResolvedValue({ id: "p1", items: [] });
+    const loadProject = vi.fn().mockResolvedValue({ id: "p1", items: [] });
+
+    const outcome = await applyFrameBomLegacyDedupeRepair({
+      project,
+      drawingContext,
+      deleteItem,
+      updateProject,
+      loadProject,
+    });
+
+    expect(deleteItem.mock.calls.some((c) => c[1] === "st_mrdwu5kzthoor__ln_conn")).toBe(true);
+    expect(loadProject).toHaveBeenCalledWith("p1");
+    expect(outcome.summary.removedCount).toBeGreaterThan(0);
   });
 });

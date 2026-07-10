@@ -17,6 +17,9 @@ import {
   buildFrameBomRepairPlan,
   isBuilderSyncedFrameBomLine,
   resolveBuilderPrefixedStellageId,
+  buildLegacyFrameBomDedupePlan,
+  hasLegacyFrameBomRowsForRack,
+  rackFrameBomScopeItems,
 } from "../shared/frameBomProjectItems.js";
 
 const TUBE_CUTS = [
@@ -955,5 +958,94 @@ describe("buildFrameBomRepairPlan / builder legacy ids", () => {
     );
     expect(rackBom.filter((i) => i.materialId === "m073")).toHaveLength(1);
     expect(rackBom.filter((i) => i.materialId === "m003")).toHaveLength(1);
+  });
+});
+
+describe("legacy duct/channel dedupe repair", () => {
+  const rackOpts = {
+    moduleRackKey: "mod_protochka:st_mrdwu5kzthoor",
+    stellageId: "st_mrdwu5kzthoor",
+    rackLabel: "Стеллаж 1",
+  };
+
+  function ductLegacy(idSuffix, materialId = "m010", overrides = {}) {
+    return {
+      id: `st_mrdwu5kzthoor__ln_${idSuffix}`,
+      materialId,
+      module: "Стеллаж 1",
+      qty: 4,
+      price: 0,
+      supplier: "",
+      clientNote: "Из схемы стеллажа",
+      ...overrides,
+    };
+  }
+
+  function ductCanonical(materialId = "m010", bomKey = "duct_55x110") {
+    return {
+      id: `it_fbom_fd_mod_protochka:st_mrdwu5kzthoor_${bomKey}`,
+      materialId,
+      module: "Стеллаж 1",
+      qty: 4,
+      price: 890,
+      supplier: "Лемана про",
+      clientNote: "Из схемы стеллажа",
+      source: "frame_bom",
+      sourceObjectIds: {
+        moduleRackKey: "mod_protochka:st_mrdwu5kzthoor",
+        bomKey,
+      },
+    };
+  }
+
+  it("detects legacy duct duplicate rows for rack", () => {
+    const items = [ductLegacy("duct"), ductCanonical()];
+    expect(hasLegacyFrameBomRowsForRack(items, rackOpts)).toBe(true);
+    expect(rackFrameBomScopeItems(items, rackOpts)).toHaveLength(2);
+  });
+
+  it("repair removes legacy duct duplicate m010", () => {
+    const plan = buildLegacyFrameBomDedupePlan([ductLegacy("duct"), ductCanonical()], rackOpts);
+    expect(plan.removeItemIds).toContain("st_mrdwu5kzthoor__ln_duct");
+    expect(plan.cleanedItems.filter((i) => i.materialId === "m010")).toHaveLength(1);
+    expect(plan.cleanedItems[0].price).toBe(890);
+  });
+
+  it("repair removes legacy elbow duplicate", () => {
+    const plan = buildLegacyFrameBomDedupePlan(
+      [ductLegacy("elbow", "m011"), ductCanonical("m011", "elbow_55x110")],
+      rackOpts,
+    );
+    expect(plan.removeItemIds.some((id) => id.includes("elbow"))).toBe(true);
+    expect(plan.cleanedItems.filter((i) => i.materialId === "m011")).toHaveLength(1);
+  });
+
+  it("repair removes legacy connector duplicate", () => {
+    const plan = buildLegacyFrameBomDedupePlan(
+      [ductLegacy("conn", "m012"), ductCanonical("m012", "duct_connector")],
+      rackOpts,
+    );
+    expect(plan.removeItemIds.some((id) => id.includes("conn"))).toBe(true);
+    expect(plan.cleanedItems.filter((i) => i.materialId === "m012")).toHaveLength(1);
+  });
+
+  it("repair keeps canonical priced row and manual row", () => {
+    const manual = { id: "manual_duct", materialId: "m010", qty: 2, source: "manual" };
+    const plan = buildLegacyFrameBomDedupePlan(
+      [ductLegacy("duct"), ductCanonical(), manual],
+      rackOpts,
+    );
+    expect(plan.cleanedItems.some((i) => i.id === "manual_duct")).toBe(true);
+    expect(plan.cleanedItems.filter((i) => i.materialId === "m010" && i.source !== "manual")).toHaveLength(1);
+  });
+
+  it("repeated legacy dedupe repair is idempotent", () => {
+    const first = buildLegacyFrameBomDedupePlan(
+      [ductLegacy("duct"), ductCanonical()],
+      rackOpts,
+    );
+    const second = buildLegacyFrameBomDedupePlan(first.cleanedItems, rackOpts);
+    expect(second.removeItemIds).toHaveLength(0);
+    expect(second.blocked).toBe(true);
   });
 });

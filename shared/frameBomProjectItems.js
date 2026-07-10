@@ -854,3 +854,138 @@ export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = 
     },
   };
 }
+
+/**
+ * Frame/BOM lines in rack merge scope (canonical + legacy markers).
+ *
+ * @param {object[]} items
+ * @param {object} [options]
+ */
+export function rackFrameBomScopeItems(items, options = {}) {
+  const moduleRackKey = String(options.moduleRackKey || "").trim();
+  if (!moduleRackKey) return [];
+  return (items || []).filter((it) => {
+    if (isExplicitManualProjectItem(it)) return false;
+    if (!isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it)) return false;
+    return itemBelongsToRackMergeScope(it, moduleRackKey, options);
+  });
+}
+
+/**
+ * @param {object[]} items
+ * @param {object} [options]
+ */
+export function hasFrameBomRowsForRack(items, options = {}) {
+  return rackFrameBomScopeItems(items, options).length > 0;
+}
+
+/**
+ * @param {object[]} items
+ * @param {object} [options]
+ */
+export function hasLegacyFrameBomRowsForRack(items, options = {}) {
+  const inScope = rackFrameBomScopeItems(items, options);
+  if (inScope.some((it) => isBuilderSyncedFrameBomLine(it))) return true;
+
+  for (let i = 0; i < inScope.length; i += 1) {
+    for (let j = i + 1; j < inScope.length; j += 1) {
+      if (frameBomItemsSameDedupeCluster(inScope[i], inScope[j])) return true;
+    }
+  }
+
+  return inScope.some((it) => {
+    if (isBuilderSyncedFrameBomLine(it)) return true;
+    const price = Number(it.price) || 0;
+    const supplier = String(it.supplier || "").trim();
+    const note = String(it.note || it.clientNote || "");
+    const looksLegacy =
+      price <= 0
+      && (!supplier || supplier.toLowerCase() === "поставщик")
+      && /из схемы (?:каркаса|стеллажа)/i.test(note);
+    if (!looksLegacy) return false;
+    return inScope.some(
+      (other) =>
+        other.id !== it.id
+        && frameBomItemsSameDedupeCluster(other, it)
+        && frameBomLineRank(other) > frameBomLineRank(it),
+    );
+  });
+}
+
+/**
+ * @param {object[]} items
+ * @param {object} [options]
+ */
+export function hasRepairableFrameBomForRack(items, options = {}) {
+  return hasLegacyFrameBomRowsForRack(items, options) || hasFrameBomRowsForRack(items, options);
+}
+
+/**
+ * Dedupe-only repair when full BOM rebuild is unavailable.
+ *
+ * @param {object[]} existingItems
+ * @param {object} [options]
+ */
+export function buildLegacyFrameBomDedupePlan(existingItems, options = {}) {
+  const existing = Array.isArray(existingItems) ? existingItems : [];
+  const moduleRackKey = String(options.moduleRackKey || "").trim();
+  if (!moduleRackKey) {
+    return {
+      blocked: true,
+      blockedReason: "Нет привязки к стеллажу (moduleRackKey).",
+      cleanedItems: [...existing],
+      removeItemIds: [],
+      upsertItems: [],
+      preservedItems: existing.filter(
+        (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
+      ),
+      warnings: [],
+      debug: { mode: "legacy_dedupe" },
+    };
+  }
+
+  const inScope = rackFrameBomScopeItems(existing, options);
+  const winners = dedupeFrameBomProjectItems(inScope);
+  const winnerIds = new Set(winners.map((it) => String(it.id || "")).filter(Boolean));
+  const removeItemIds = inScope
+    .filter((it) => {
+      const id = String(it.id || "");
+      return id && !winnerIds.has(id);
+    })
+    .map((it) => it.id);
+
+  if (!removeItemIds.length) {
+    return {
+      blocked: true,
+      blockedReason: "Нечего обновлять — дубли BOM для этого стеллажа не найдены.",
+      cleanedItems: [...existing],
+      removeItemIds: [],
+      upsertItems: [],
+      preservedItems: existing.filter(
+        (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
+      ),
+      warnings: [],
+      debug: { mode: "legacy_dedupe", inScopeCount: inScope.length },
+    };
+  }
+
+  const removeSet = new Set(removeItemIds.map(String));
+  const cleanedItems = existing.filter((it) => !removeSet.has(String(it.id || "")));
+
+  return {
+    blocked: false,
+    blockedReason: "",
+    cleanedItems,
+    removeItemIds: [...new Set(removeItemIds)],
+    upsertItems: [],
+    preservedItems: cleanedItems.filter(
+      (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
+    ),
+    warnings: [],
+    debug: {
+      mode: "legacy_dedupe",
+      inScopeCount: inScope.length,
+      removedCount: removeItemIds.length,
+    },
+  };
+}
