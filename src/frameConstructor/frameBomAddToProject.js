@@ -2,6 +2,7 @@ import {
   mergeFrameBomIntoProjectItems,
   buildFrameBomRepairPlan,
   buildLegacyFrameBomDedupePlan,
+  buildResidualFrameBomTwinRepairPlan,
   frameBomItemsForModuleRack,
   findMissingFrameBomMaterials,
   formatFrameBomMissingMaterialsMessage,
@@ -297,6 +298,55 @@ export async function applyFrameBomLegacyDedupeRepair({
       upsertCount: 0,
       deletedIds: deleteResult.deleted,
       mode: "legacy_dedupe",
+    },
+  };
+}
+
+/**
+ * Project-wide residual twin cleanup (st__it_fbom / st__ln vs canonical it_fbom).
+ * Does not require drawingContext / purchaseDraft.
+ */
+export async function applyResidualFrameBomTwinRepair({
+  project,
+  deleteItem,
+  updateProject,
+  loadProject = null,
+}) {
+  const projectId = project?.id;
+  if (!projectId || !project?.items) {
+    return { skipped: true };
+  }
+
+  const plan = buildResidualFrameBomTwinRepairPlan(project.items);
+  if (plan.blocked) {
+    const err = new Error(plan.blockedReason || "Дубли BOM не найдены.");
+    err.plan = plan;
+    throw err;
+  }
+
+  const deleteResult = await deleteProjectItemsByIds(projectId, plan.removeItemIds, deleteItem);
+  if (deleteResult.errors.length) {
+    const err = new Error(
+      `Не удалось удалить ${deleteResult.errors.length} дублей BOM.`,
+    );
+    err.deleteErrors = deleteResult.errors;
+    throw err;
+  }
+
+  const updated = await updateProject(projectId, { items: plan.cleanedItems });
+  const reloaded = loadProject ? await loadProject(projectId) : updated;
+
+  return {
+    plan,
+    updated: reloaded,
+    deleteResult,
+    summary: {
+      title: "Удалены дубли BOM каркаса.",
+      removedCount: plan.removeItemIds.length,
+      addedCount: 0,
+      upsertCount: 0,
+      deletedIds: deleteResult.deleted,
+      mode: "residual_twins",
     },
   };
 }

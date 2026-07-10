@@ -13,7 +13,7 @@ import {
   buildFrameDrawingLink,
   buildBuilderFrameDrawingContext,
 } from "../../../shared/frameDrawingContext.js";
-import { frameBomItemsForModuleRack } from "../../../shared/frameBomProjectItems.js";
+import { frameBomItemsForModuleRack, stripResidualFrameBomTwins } from "../../../shared/frameBomProjectItems.js";
 import { buildModuleRackKey } from "../../../shared/moduleRackIds.js";
 import {
   PROJECT_STATUS_ACTIVE,
@@ -514,8 +514,9 @@ export default function ProjectBuilderPage() {
       materials: state.materials,
       rooms,
       stellageModuleMeta,
+      existingItems: loadedProject?.items || [],
     }).items;
-  }, [form, stellages, farmSectionLines, sections, state.materials, rooms, stellageModuleMeta]);
+  }, [form, stellages, farmSectionLines, sections, state.materials, rooms, stellageModuleMeta, loadedProject?.items]);
 
   const roomsCoolingRecKw = useMemo(
     () => enrichRooms(rooms).reduce((sum, r) => sum + (Number(r.recommendedCoolingKw) || 0), 0),
@@ -602,11 +603,13 @@ export default function ProjectBuilderPage() {
       materials: state.materials,
       rooms,
       stellageModuleMeta,
+      existingItems: loadedProject?.items || [],
     });
     built.status = status;
     if (loadedProject?.items?.length) {
       const stellageList = stellagesForProjectSave(stellagesResolved, draftResolved);
       built.items = preserveFrameBomProjectItems(built.items, loadedProject.items);
+      built.items = stripResidualFrameBomTwins(built.items);
       built.items = mergeFrameBomQtyFromBuilderLines(built.items, stellageList);
     }
     return built;

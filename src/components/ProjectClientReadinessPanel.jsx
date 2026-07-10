@@ -18,6 +18,10 @@ import {
   buildClientReadinessSummaryMetrics,
   shouldShowSelectedActionBar,
 } from "../../shared/projectWorkspaceUi.js";
+import {
+  countResidualFrameBomTwins,
+  buildResidualFrameBomTwinRepairPlan,
+} from "../../shared/frameBomProjectItems.js";
 import ProjectSelectedActionBar from "./ProjectSelectedActionBar.jsx";
 
 const PREVIEW_LIMIT = 20;
@@ -70,6 +74,8 @@ export default function ProjectClientReadinessPanel({
   onBulkHideClient,
   onBulkRefreshPrice,
   onClearSelection,
+  onRepairBomTwins,
+  bomTwinRepairBusy = false,
 }) {
   const [tab, setTab] = useState(CLIENT_READINESS_DEFAULT_TAB);
   const [showAllPreview, setShowAllPreview] = useState(false);
@@ -78,6 +84,12 @@ export default function ProjectClientReadinessPanel({
   const clientSummary = useMemo(
     () => buildClientPurchaseSummary(items, materials),
     [items, materials]
+  );
+
+  const residualTwinCount = useMemo(() => countResidualFrameBomTwins(items), [items]);
+  const residualTwinPlan = useMemo(
+    () => (residualTwinCount > 0 ? buildResidualFrameBomTwinRepairPlan(items, { quiet: true }) : null),
+    [items, residualTwinCount]
   );
 
   const checklist = useMemo(
@@ -200,7 +212,7 @@ export default function ProjectClientReadinessPanel({
 
       {tab === "problems" ? (
         <div className="client-readiness__problems" style={{ marginTop: 10 }}>
-          {!problemGroups.some((g) => g.count > 0) ? (
+          {!problemGroups.some((g) => g.count > 0) && residualTwinCount === 0 ? (
             <p className="muted" style={{ fontSize: 13, margin: 0 }}>Реальных проблем нет.</p>
           ) : (
             <ul className="client-readiness__problem-list">
@@ -216,6 +228,30 @@ export default function ProjectClientReadinessPanel({
                   </button>
                 </li>
               ))}
+              {residualTwinCount > 0 ? (
+                <li>
+                  <div className="row wrap" style={{ gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 13 }}>
+                      Найдено безопасных дублей BOM: <strong className="num">{residualTwinCount}</strong>
+                      {residualTwinPlan?.skippedAmbiguousGroups?.length ? (
+                        <span className="muted">
+                          {" "}· похожих без канона: {residualTwinPlan.skippedAmbiguousGroups.length}
+                        </span>
+                      ) : null}
+                    </span>
+                    {onRepairBomTwins ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        disabled={bomTwinRepairBusy}
+                        onClick={() => onRepairBomTwins()}
+                      >
+                        Убрать дубли
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              ) : null}
             </ul>
           )}
         </div>

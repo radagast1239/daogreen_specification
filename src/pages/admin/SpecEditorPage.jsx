@@ -1,4 +1,5 @@
 import { resolveAdminItemSourceLabel } from "../../../shared/frameBomProjectItems.js";
+import { applyResidualFrameBomTwinRepair } from "../../frameConstructor/frameBomAddToProject.js";
 import { buildBuilderDraftPath, isDraftProject, resolveBuilderWizardStep } from "../../../shared/projectLifecycle.js";
 import SaveSectionTemplateModal from "../../components/SaveSectionTemplateModal.jsx";
 import { api } from "../../lib/api.js";
@@ -448,6 +449,32 @@ export default function SpecEditorPage() {
     }
   };
 
+  const [bomTwinRepairBusy, setBomTwinRepairBusy] = useState(false);
+  const handleRepairBomTwins = async () => {
+    if (!project?.id || bomTwinRepairBusy) return;
+    const ok = await confirm({
+      title: "Убрать дубли BOM?",
+      message:
+        "Будут удалены только безопасные дубли каркаса (builder twin при наличии канонического BOM). Позиции полива и ручные строки не трогаются.",
+      confirmLabel: "Убрать дубли",
+    });
+    if (!ok) return;
+    setBomTwinRepairBusy(true);
+    try {
+      const outcome = await applyResidualFrameBomTwinRepair({
+        project,
+        deleteItem: (projectId, itemId) => actions.itemDelete(projectId, itemId),
+        updateProject: (projectId, patch) => actions.projectUpdate(projectId, patch),
+        loadProject: (projectId) => actions.loadProject(projectId),
+      });
+      success(`Удалено дублей: ${outcome.summary?.removedCount || 0}`);
+    } catch (e) {
+      error(e.message || "Не удалось убрать дубли BOM");
+    } finally {
+      setBomTwinRepairBusy(false);
+    }
+  };
+
   const prepareClientNotice = () => {
     setTab("spec");
     setPrePublishOpen(true);
@@ -638,6 +665,8 @@ export default function SpecEditorPage() {
           onBulkHideClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(false))}
           onBulkRefreshPrice={bulkDeliveryRefreshPrice}
           onClearSelection={() => clearSpecSelectionRef.current?.()}
+          onRepairBomTwins={handleRepairBomTwins}
+          bomTwinRepairBusy={bomTwinRepairBusy}
         />
 
         <div className="print-header">

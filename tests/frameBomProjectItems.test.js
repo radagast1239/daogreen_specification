@@ -20,6 +20,10 @@ import {
   buildLegacyFrameBomDedupePlan,
   hasLegacyFrameBomRowsForRack,
   rackFrameBomScopeItems,
+  buildResidualFrameBomTwinRepairPlan,
+  stripResidualFrameBomTwins,
+  countResidualFrameBomTwins,
+  isCanonicalFrameBomLine,
 } from "../shared/frameBomProjectItems.js";
 
 const TUBE_CUTS = [
@@ -1047,5 +1051,149 @@ describe("legacy duct/channel dedupe repair", () => {
     const second = buildLegacyFrameBomDedupePlan(first.cleanedItems, rackOpts);
     expect(second.removeItemIds).toHaveLength(0);
     expect(second.blocked).toBe(true);
+  });
+});
+
+describe("buildResidualFrameBomTwinRepairPlan (project-wide A+B)", () => {
+  function canonBolt() {
+    return {
+      id: "it_fbom_CVKWuQfs4UCv_mod_protochka:st_mrdwu5kzthoor_bolt_m6x20",
+      materialId: "m073",
+      name: "Болт М6×20",
+      module: "Стеллаж 1",
+      section: "Стеллаж 1",
+      qty: 312,
+      price: 0.5,
+      supplier: "Лемана про",
+      source: "frame_bom",
+      sourceKey: "frame_bom:fd:mod_protochka:st_mrdwu5kzthoor:bolt_m6x20",
+      sourceObjectIds: {
+        moduleRackKey: "mod_protochka:st_mrdwu5kzthoor",
+        bomKey: "bolt_m6x20",
+      },
+    };
+  }
+
+  it("removes exact prefixed st__it_fbom twin (pattern A)", () => {
+    const canon = canonBolt();
+    const twin = {
+      id: `st_mrdwu5kzthoor__${canon.id}`,
+      materialId: "m073",
+      name: "Болт М6×20",
+      module: "Стеллаж 1",
+      section: "Стеллаж 1",
+      qty: 312,
+      price: 0.5,
+      supplier: "Лемана про",
+    };
+    expect(isBuilderSyncedFrameBomLine(twin)).toBe(true);
+    expect(isCanonicalFrameBomLine(canon)).toBe(true);
+    const plan = buildResidualFrameBomTwinRepairPlan([twin, canon]);
+    expect(plan.blocked).toBe(false);
+    expect(plan.removeItemIds).toEqual([twin.id]);
+    expect(plan.cleanedItems.map((i) => i.id)).toEqual([canon.id]);
+  });
+
+  it("removes catalog st__ln twin when canonical BOM exists (pattern B)", () => {
+    const canon = canonBolt();
+    const twin = {
+      id: "st_mrdwu5kzthoor__ln_legacy_bolt",
+      materialId: "m073",
+      name: "Болт М6×20",
+      module: "Стеллаж 1",
+      section: "Стеллаж 1",
+      qty: 228,
+      price: 0.5,
+      supplier: "Лемана про",
+    };
+    const plan = buildResidualFrameBomTwinRepairPlan([twin, canon]);
+    expect(plan.removeItemIds).toContain(twin.id);
+    expect(plan.cleanedItems.some((i) => i.id === canon.id)).toBe(true);
+  });
+
+  it("does not remove PP farm-section rows with same materialId", () => {
+    const a = {
+      id: "ln_pp_a",
+      materialId: "m110",
+      name: "Труба ПП д25",
+      section: "Полив/дренаж — подтопление, основное отделение",
+      qty: 19,
+    };
+    const b = {
+      id: "ln_pp_b",
+      materialId: "m110",
+      name: "Труба ПП д25",
+      section: "Полив/дренаж — рассадное отделение подтопление",
+      qty: 19,
+    };
+    const plan = buildResidualFrameBomTwinRepairPlan([a, b]);
+    expect(plan.removeItemIds).toHaveLength(0);
+    expect(plan.cleanedItems).toHaveLength(2);
+  });
+
+  it("preserves manual same-material row", () => {
+    const canon = canonBolt();
+    const twin = {
+      id: "st_mrdwu5kzthoor__ln_legacy_bolt",
+      materialId: "m073",
+      section: "Стеллаж 1",
+      qty: 10,
+    };
+    const manual = { id: "manual_bolt", materialId: "m073", qty: 5, source: "manual" };
+    const plan = buildResidualFrameBomTwinRepairPlan([twin, canon, manual]);
+    expect(plan.removeItemIds).toContain(twin.id);
+    expect(plan.removeItemIds).not.toContain("manual_bolt");
+    expect(plan.cleanedItems.some((i) => i.id === "manual_bolt")).toBe(true);
+  });
+
+  it("preserves user fields on canonical after strip", () => {
+    const canon = {
+      ...canonBolt(),
+      status: "ordered",
+      actualPrice: 0.4,
+      visibleToClient: false,
+      clientComment: "keep me",
+    };
+    const twin = {
+      id: "st_mrdwu5kzthoor__ln_legacy_bolt",
+      materialId: "m073",
+      section: "Стеллаж 1",
+      qty: 10,
+    };
+    const cleaned = stripResidualFrameBomTwins([twin, canon]);
+    const kept = cleaned.find((i) => i.id === canon.id);
+    expect(kept.status).toBe("ordered");
+    expect(kept.actualPrice).toBe(0.4);
+    expect(kept.visibleToClient).toBe(false);
+    expect(kept.clientComment).toBe("keep me");
+  });
+
+  it("repeated residual repair is idempotent", () => {
+    const dirty = [
+      canonBolt(),
+      {
+        id: "st_mrdwu5kzthoor__ln_legacy_bolt",
+        materialId: "m073",
+        section: "Стеллаж 1",
+        qty: 10,
+      },
+    ];
+    const first = buildResidualFrameBomTwinRepairPlan(dirty);
+    const second = buildResidualFrameBomTwinRepairPlan(first.cleanedItems);
+    expect(first.removeItemIds).toHaveLength(1);
+    expect(second.removeItemIds).toHaveLength(0);
+    expect(countResidualFrameBomTwins(first.cleanedItems)).toBe(0);
+  });
+
+  it("skips twin without canonical as ambiguous", () => {
+    const twinOnly = {
+      id: "st_mrdwu5kzthoor__ln_orphan",
+      materialId: "m073",
+      section: "Стеллаж 1",
+      qty: 10,
+    };
+    const plan = buildResidualFrameBomTwinRepairPlan([twinOnly]);
+    expect(plan.removeItemIds).toHaveLength(0);
+    expect(plan.skippedAmbiguousGroups.length).toBe(1);
   });
 });

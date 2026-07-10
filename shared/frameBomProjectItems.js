@@ -989,3 +989,137 @@ export function buildLegacyFrameBomDedupePlan(existingItems, options = {}) {
     },
   };
 }
+
+/**
+ * Canonical frame_bom row (not builder-prefixed twin).
+ * @param {object} item
+ */
+export function isCanonicalFrameBomLine(item) {
+  return isFrameBomLine(item) && !isBuilderSyncedFrameBomLine(item);
+}
+
+/**
+ * True when twin id is st_<rack>__it_fbom_... and a matching canonical it_fbom id exists.
+ * @param {object} twin
+ * @param {object[]} existing
+ */
+function twinPrefixedExactCanonicalId(twin, existing = []) {
+  const id = String(twin?.id || "");
+  const sep = id.indexOf("__");
+  if (sep < 0) return "";
+  const suffix = id.slice(sep + 2);
+  if (!suffix.startsWith("it_fbom_")) return "";
+  const hit = (existing || []).find((it) => String(it?.id || "") === suffix);
+  return hit ? suffix : "";
+}
+
+/**
+ * Project-wide residual twin cleanup (no purchaseDraft / moduleRackKey required).
+ * Removes only builder-synced twins when a canonical frame_bom row exists in the same cluster.
+ * Does NOT touch PP/farm-section rows or manual rows.
+ *
+ * Patterns:
+ * - A: st_<rack>__it_fbom_* + it_fbom_*
+ * - B: st_<rack>__ln_* catalog + it_fbom_* (same material/section/rack)
+ *
+ * @param {object[]} existingItems
+ * @param {object} [options]
+ */
+export function buildResidualFrameBomTwinRepairPlan(existingItems = [], options = {}) {
+  const existing = Array.isArray(existingItems) ? existingItems : [];
+  const canons = existing.filter(
+    (it) => isCanonicalFrameBomLine(it) && !isExplicitManualProjectItem(it),
+  );
+  const twins = existing.filter(
+    (it) => isBuilderSyncedFrameBomLine(it) && !isExplicitManualProjectItem(it),
+  );
+
+  const removeItemIds = [];
+  const duplicateGroups = [];
+  const skippedAmbiguousGroups = [];
+
+  for (const twin of twins) {
+    const exactCanonId = twinPrefixedExactCanonicalId(twin, existing);
+    const clusterCanons = canons.filter((c) => frameBomItemsSameDedupeCluster(c, twin));
+    if (exactCanonId || clusterCanons.length) {
+      removeItemIds.push(twin.id);
+      duplicateGroups.push({
+        kind: exactCanonId ? "exact_prefixed" : "legacy_catalog",
+        twinId: twin.id,
+        materialId: twin.materialId || "",
+        keptIds: exactCanonId
+          ? [exactCanonId]
+          : clusterCanons.map((c) => c.id).filter(Boolean),
+      });
+      continue;
+    }
+    skippedAmbiguousGroups.push({
+      twinId: twin.id,
+      materialId: twin.materialId || "",
+      reason: "no_canonical_bom_cluster",
+    });
+  }
+
+  const removeSet = new Set(removeItemIds.map(String));
+  const cleanedItems = existing.filter((it) => !removeSet.has(String(it.id || "")));
+
+  if (!removeItemIds.length) {
+    return {
+      blocked: true,
+      blockedReason: options.quiet
+        ? ""
+        : "Безопасных дублей BOM (builder twin) не найдено.",
+      cleanedItems: [...existing],
+      removeItemIds: [],
+      keptItemIds: canons.map((c) => c.id).filter(Boolean),
+      upsertItems: [],
+      mergedUpdates: [],
+      duplicateGroups: [],
+      skippedAmbiguousGroups,
+      preservedItems: existing.filter(
+        (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
+      ),
+      warnings: [],
+      debug: { mode: "residual_twins", twinCount: twins.length },
+    };
+  }
+
+  return {
+    blocked: false,
+    blockedReason: "",
+    cleanedItems,
+    removeItemIds: [...new Set(removeItemIds)],
+    keptItemIds: canons.map((c) => c.id).filter(Boolean),
+    upsertItems: [],
+    mergedUpdates: [],
+    duplicateGroups,
+    skippedAmbiguousGroups,
+    preservedItems: cleanedItems.filter(
+      (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
+    ),
+    warnings: [],
+    debug: {
+      mode: "residual_twins",
+      twinCount: twins.length,
+      removedCount: removeItemIds.length,
+    },
+  };
+}
+
+/**
+ * Drop builder-synced twins when canonical BOM already present (write-path guard).
+ * @param {object[]} items
+ */
+export function stripResidualFrameBomTwins(items = []) {
+  const plan = buildResidualFrameBomTwinRepairPlan(items, { quiet: true });
+  return plan.removeItemIds.length ? plan.cleanedItems : [...(items || [])];
+}
+
+/**
+ * Count safe residual twins (for UI badge).
+ * @param {object[]} items
+ */
+export function countResidualFrameBomTwins(items = []) {
+  const plan = buildResidualFrameBomTwinRepairPlan(items, { quiet: true });
+  return plan.removeItemIds.length;
+}
