@@ -26,11 +26,10 @@ loadPublishRulesConfig();
 
 const { runSeedIfEmpty } = await import("./seed.js");
 runSeedIfEmpty();
-if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
-  startDbBackupLoop(dbPath);
-} else {
-  startLocalBackupLoop(dbPath);
-}
+const stopBackupLoop =
+  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY
+    ? startDbBackupLoop(dbPath)
+    : startLocalBackupLoop(dbPath);
 
 const { default: materialsApi } = await import("./routes/materialsApi.js");
 const { default: projectsApi, clientRouter } = await import("./routes/projects.js");
@@ -116,8 +115,34 @@ app.use((err, _req, res, _next) => {
   res.status(err.status || 500).json({ error: message });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Daogreen Spec API → http://localhost:${PORT}`);
   const keyHint = process.env.ADMIN_KEY || "(multi-key mode)";
   console.log(`Admin key: ${typeof keyHint === "string" && keyHint.length > 8 ? `${keyHint.slice(0, 8)}…` : keyHint}`);
+});
+
+async function gracefulShutdown(signal) {
+  console.log(`Graceful shutdown: ${signal}`);
+  try {
+    if (typeof stopBackupLoop === "function") {
+      await stopBackupLoop();
+    }
+  } catch (err) {
+    console.warn("Backup loop shutdown:", err.message);
+  }
+  server.close((err) => {
+    if (err) console.warn("HTTP close:", err.message);
+    process.exit(err ? 1 : 0);
+  });
+  setTimeout(() => {
+    console.warn("Forced exit after graceful shutdown timeout");
+    process.exit(1);
+  }, 12000).unref();
+}
+
+process.once("SIGTERM", () => {
+  gracefulShutdown("SIGTERM");
+});
+process.once("SIGINT", () => {
+  gracefulShutdown("SIGINT");
 });
