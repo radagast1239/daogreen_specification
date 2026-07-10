@@ -366,9 +366,42 @@ function mergedForRole(items, role) {
   return rowsForResponsibleRole(buildClientPurchaseMergedRows(items), role);
 }
 
-/** Строки без ссылки на товар — «требуют подбора» */
+/** Строки без ссылки (helper для фильтров/тестов; отдельной PDF-секцией не выводятся). */
 export function rowsWithoutLink(rows) {
   return (rows || []).filter((r) => !(r.link || "").trim());
+}
+
+/** Инструкции закупочного PDF — без отдельного блока «без ссылок». */
+export function getClientPurchasePdfInstructionLines() {
+  return [
+    "Покупайте по поставщикам. После оплаты отмечайте статус в онлайн-версии.",
+    "Актуальные ссылки и статусы доступны в онлайн-версии.",
+  ];
+}
+
+/** Закупочный PDF больше не дублирует no_link отдельной секцией. */
+export function clientPurchasePdfIncludesNoLinkSection() {
+  return false;
+}
+
+/**
+ * Структура закупочного PDF: поставщики + сводка.
+ * no_link позиции остаются только внутри обычных групп поставщиков.
+ */
+export function buildClientPurchasePdfOutline(mergedRows) {
+  const merged = mergedRows || [];
+  const supplierGroups = groupRowsBySupplier(merged);
+  const noLinkInSuppliers = supplierGroups.flatMap((g) => rowsWithoutLink(g.rows));
+  const totalSum = merged.reduce((s, r) => s + (Number(r.sumVat) || 0), 0);
+  return {
+    uniqueCount: merged.length,
+    totalSum,
+    supplierGroups,
+    noLinkCount: rowsWithoutLink(merged).length,
+    noLinkInSupplierGroups: noLinkInSuppliers,
+    includeNoLinkSection: clientPurchasePdfIncludesNoLinkSection(),
+    instructionLines: getClientPurchasePdfInstructionLines(),
+  };
 }
 
 /** Группировка строк по поставщику (без поставщика — отдельным ключом) */
@@ -467,11 +500,7 @@ function categorySummaryTable(doc, merged, project, y, brandRgb) {
 function purchaseInstruction(doc, y) {
   doc.setFontSize(9);
   doc.setTextColor(80, 80, 80);
-  const lines = [
-    "Покупайте по поставщикам. После оплаты отмечайте статус в онлайн-версии.",
-    "Позиции без ссылок требуют подбора — они собраны отдельным блоком.",
-  ];
-  for (const line of lines) {
+  for (const line of getClientPurchasePdfInstructionLines()) {
     doc.text(line, 14, y);
     y += 5;
   }
@@ -490,7 +519,7 @@ async function supplierBlocks(doc, rows, project, y, brandRgb, purchaseStatuses,
   return y;
 }
 
-/** «Закупочный PDF для клиента»: итоги + по поставщикам + без ссылок + по разделам. Без специалистов. */
+/** «Закупочный PDF для клиента»: итоги + по поставщикам + сводка по разделам. Без специалистов. */
 async function renderClientPurchasePdf(doc, project, items, branding, brandRgb, purchaseStatuses, pdfOpts) {
   let y = drawTitleBlock(doc, project, branding, brandRgb, "Закупочный лист");
   y = budgetLines(doc, items, project, y);
@@ -503,14 +532,7 @@ async function renderClientPurchasePdf(doc, project, items, branding, brandRgb, 
   y += 6;
   y = await supplierBlocks(doc, merged, project, y, brandRgb, purchaseStatuses, pdfOpts);
 
-  const noLink = rowsWithoutLink(merged);
-  if (noLink.length) {
-    y = ensureSpace(doc, y, 30);
-    doc.setFontSize(11);
-    doc.text(`Позиции без ссылок / требуют подбора · ${noLink.length}`, 14, y);
-    y += 4;
-    y = await tableForMerged(doc, noLink, project, y, brandRgb, purchaseStatuses, true, pdfOpts);
-  }
+  // no_link позиции остаются только в обычных блоках поставщиков — без отдельной секции-дубля.
 
   // Раздел — только сводка (раздел / кол-во / сумма / готовность), без повтора товарных строк.
   // Полная детализация по разделам — в «Полном техническом комплекте», Excel и онлайн-версии.
