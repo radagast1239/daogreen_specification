@@ -59,6 +59,21 @@ import {
 } from "../../../shared/projectItemClone.js";
 import { compareProjectItems } from "../../../shared/projectCompare.js";
 import { buildImportPreview } from "../../../shared/importFromProject.js";
+import {
+  buildPublishedReleaseMeta,
+  isPublishWorkflowStatus,
+  parsePublishedRelease,
+} from "../../../shared/projectPublishedRelease.js";
+import { validateProjectItemsForSave, validateSingleProjectItem } from "../services/projectItemValidation.js";
+import {
+  buildClientProjectFromRelease,
+  buildReleaseSnapshotJson,
+  getProjectReleaseInfo,
+  loadLatestVersionRow,
+  loadPublishedSnapshotItems,
+  loadVersionRow,
+  shouldPublishOnStatusChange,
+} from "../services/publishedReleaseService.js";
 
 const router = Router();
 
@@ -208,12 +223,24 @@ function itemToParams(it, projectId) {
   };
 }
 
-function saveItems(projectId, items) {
-  const run = db.transaction((pid, list) => {
-    db.prepare("DELETE FROM project_items WHERE project_id = ?").run(pid);
-    for (const it of list) INSERT_ITEM.run(itemToParams(it, pid));
+export function saveItems(projectId, items, options = {}) {
+  validateProjectItemsForSave(items, {
+    allowLegacyMissingMaterialId: options.allowLegacyMissingMaterialId !== false,
   });
-  run(projectId, items);
+  const list = Array.isArray(items) ? items : [];
+  const run = db.transaction((pid, rows) => {
+    db.prepare("DELETE FROM project_items WHERE project_id = ?").run(pid);
+    let inserted = 0;
+    for (const it of rows) {
+      INSERT_ITEM.run(itemToParams(it, pid));
+      inserted += 1;
+    }
+    if (inserted !== rows.length) {
+      throw new Error(`Item insert count mismatch: expected ${rows.length}, got ${inserted}`);
+    }
+  });
+  run(projectId, list);
+  touchProject(projectId);
 }
 
 export function saveItemsAppend(projectId, items) {
@@ -305,10 +332,24 @@ export function createProject(body) {
 export function updateProject(id, patch) {
   const cur = loadProject(id);
   if (!cur) return null;
-  const merged = { ...cur, ...patch, id };
+
+  if (patch.items) {
+    saveItems(id, patch.items);
+  }
+
+  const base = patch.items ? loadProject(id) : cur;
+  let manualParams = { ...(base.manualParams || {}), ...(patch.manualParams || {}) };
+
+  if (patch.status != null && patch.status !== base.status && isPublishWorkflowStatus(patch.status)) {
+    const pub = publishReleaseIfNeeded(id, { ...base, manualParams }, patch.status);
+    if (pub.publishedRelease) {
+      manualParams = { ...manualParams, publishedRelease: pub.publishedRelease };
+    }
+  }
+
+  const merged = { ...base, ...patch, id, manualParams };
   const row = projectUpdateRow(merged);
   UPDATE_PROJECT.run(row);
-  if (patch.items) saveItems(id, patch.items);
   return loadProject(id);
 }
 
@@ -478,11 +519,9 @@ export function approveAll(id) {
   return loadProject(id);
 }
 
-export function createVersion(id, createdBy = "admin", { force = false } = {}) {
-  const p = loadProject(id);
-  if (!p) return null;
+function createVersionRecord(projectId, project, { force = false, createdBy = "admin" } = {}) {
   if (!force) {
-    const check = validateProjectForPublish(id);
+    const check = validateProjectForPublish(projectId);
     if (check.status === "blocked") {
       const err = new Error("Publish validation failed");
       err.code = "PUBLISH_VALIDATION";
@@ -492,30 +531,80 @@ export function createVersion(id, createdBy = "admin", { force = false } = {}) {
   }
   const prev = db
     .prepare("SELECT * FROM spec_versions WHERE project_id = ? ORDER BY version_number DESC LIMIT 1")
-    .get(id);
-  const prevSnapshot = prev ? JSON.parse(prev.snapshot) : [];
-  const summary = compareVersions(prevSnapshot, p.items);
-  const versionNumber = (prev?.version_number || p.version || 0) + 1;
+    .get(projectId);
+  const prevItems = prev ? releaseSnapshotItemsFromRow(prev) : [];
+  const summary = compareVersions(prevItems, project.items || []);
+  const versionNumber = (prev?.version_number || project.version || 0) + 1;
+  const snapshotJson = buildReleaseSnapshotJson(project);
 
   const versionId = uid("v");
   db.prepare(`
     INSERT INTO spec_versions (id, project_id, version_number, created_by, summary, snapshot)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(versionId, id, versionNumber, createdBy, JSON.stringify(summary), JSON.stringify(p.items));
+  `).run(versionId, projectId, versionNumber, createdBy, JSON.stringify(summary), snapshotJson);
 
   db.prepare("UPDATE projects SET version = ?, updated_at = datetime('now') WHERE id = ?").run(
     versionNumber,
-    id
+    projectId,
   );
 
   return {
     id: versionId,
-    projectId: id,
+    projectId,
     versionNumber,
     summary,
     createdAt: new Date().toISOString(),
     createdBy,
   };
+}
+
+function releaseSnapshotItemsFromRow(row) {
+  try {
+    const raw = JSON.parse(row?.snapshot || "[]");
+    if (Array.isArray(raw)) return raw;
+    if (raw && Array.isArray(raw.items)) return raw.items;
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function publishReleaseIfNeeded(projectId, project, targetStatus) {
+  const existing = parsePublishedRelease(project?.manualParams);
+  if (existing && !shouldPublishOnStatusChange(project, targetStatus)) {
+    return { publishedRelease: existing, version: null, skipped: true };
+  }
+  const version = createVersionRecord(projectId, project, { force: false });
+  return {
+    publishedRelease: buildPublishedReleaseMeta(version, targetStatus),
+    version,
+    skipped: false,
+  };
+}
+
+function persistPublishedRelease(projectId, publishedRelease) {
+  const row = db.prepare("SELECT manual_params FROM projects WHERE id = ?").get(projectId);
+  if (!row) return;
+  let mp = {};
+  try {
+    mp = JSON.parse(row.manual_params || "{}");
+  } catch {
+    mp = {};
+  }
+  mp.publishedRelease = publishedRelease;
+  db.prepare("UPDATE projects SET manual_params = ?, updated_at = datetime('now') WHERE id = ?").run(
+    JSON.stringify(mp),
+    projectId,
+  );
+}
+
+export function createVersion(id, createdBy = "admin", { force = false } = {}) {
+  const p = loadProject(id);
+  if (!p) return null;
+  const version = createVersionRecord(id, p, { force, createdBy });
+  const publishedRelease = buildPublishedReleaseMeta(version, p.status);
+  persistPublishedRelease(id, publishedRelease);
+  return version;
 }
 
 export function listVersions(id) {
@@ -601,7 +690,9 @@ export function refreshItemsFromMaterial(projectId, { itemIds = [], fields = [] 
 
 export function addItem(projectId, item) {
   const it = { ...item, id: item.id || uid("it") };
+  validateSingleProjectItem(it, { allowLegacyMissingMaterialId: false });
   INSERT_ITEM.run(itemToParams(it, projectId));
+  touchProject(projectId);
   return it;
 }
 
@@ -733,7 +824,11 @@ api.get("/section-templates/list", (_req, res) => {
 api.get("/:id", (req, res) => {
   const p = loadProject(req.params.id);
   if (!p) return res.status(404).json({ error: "Not found" });
-  res.json(p);
+  const releaseInfo = getProjectReleaseInfo(p);
+  res.json({
+    ...p,
+    ...releaseInfo,
+  });
 });
 
 api.post("/", (req, res) => {
@@ -745,9 +840,19 @@ api.post("/", (req, res) => {
 });
 
 api.patch("/:id", (req, res) => {
-  const p = updateProject(req.params.id, req.body);
-  if (!p) return res.status(404).json({ error: "Not found" });
-  res.json(p);
+  try {
+    const p = updateProject(req.params.id, req.body);
+    if (!p) return res.status(404).json({ error: "Not found" });
+    res.json({ ...p, ...getProjectReleaseInfo(p) });
+  } catch (e) {
+    if (e.code === "PUBLISH_VALIDATION") {
+      return res.status(422).json({ error: e.message, problems: e.problems, code: e.code });
+    }
+    if (e.code === "ITEM_VALIDATION") {
+      return res.status(400).json({ error: e.message, details: e.details, code: e.code });
+    }
+    return res.status(400).json({ error: e.message });
+  }
 });
 
 api.delete("/:id", (req, res) => {
@@ -838,6 +943,17 @@ api.get("/:id/versions", (req, res) => {
   res.json(listVersions(req.params.id));
 });
 
+api.get("/:id/versions/:versionId", (req, res) => {
+  const ver = loadVersionRow(req.params.id, req.params.versionId);
+  if (!ver) return res.status(404).json({ error: "Not found" });
+  const snapshotItems = releaseSnapshotItemsFromRow({ snapshot: ver.snapshot });
+  res.json({
+    ...ver,
+    snapshotItems,
+    itemCount: snapshotItems.length,
+  });
+});
+
 api.post("/:id/items/bulk-patch", (req, res) => {
   const p = loadProject(req.params.id);
   if (!p) return res.status(404).json({ error: "Not found" });
@@ -913,8 +1029,15 @@ api.get("/:id/activity", (req, res) => {
 });
 
 api.post("/:id/items", (req, res) => {
-  const it = addItem(req.params.id, req.body);
-  res.status(201).json(it);
+  try {
+    const it = addItem(req.params.id, req.body);
+    res.status(201).json(it);
+  } catch (e) {
+    if (e.code === "ITEM_VALIDATION") {
+      return res.status(400).json({ error: e.message, details: e.details, code: e.code });
+    }
+    return res.status(400).json({ error: e.message });
+  }
 });
 
 api.delete("/:id/items/:itemId", (req, res) => {
@@ -988,17 +1111,37 @@ function serveClientProject(req, res) {
   if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
     return res.status(410).json({ error: "Link expired" });
   }
+
+  const release = parsePublishedRelease(p.manualParams);
+  if (!release) {
+    return res.status(403).json({
+      error: "Project not published for client",
+      code: "NOT_PUBLISHED",
+    });
+  }
+
+  const snapshotItems = loadPublishedSnapshotItems(p);
+  if (!snapshotItems.length) {
+    return res.status(403).json({
+      error: "Published release snapshot missing",
+      code: "PUBLISHED_SNAPSHOT_MISSING",
+    });
+  }
+
+  const clientProject = buildClientProjectFromRelease(p, snapshotItems, { overlayLive: true });
   const versions = listVersions(p.id);
+  const versionInfo = versions.find((v) => v.id === release.versionId) || versions[0] || null;
   const documents = getClientProjectDocuments(p.id);
   const activity = listActivity(p.id, { clientOnly: true });
+
   res.json({
-    project: sanitizeProjectForClient(p),
-    versionInfo: versions[0] || null,
+    project: clientProject,
+    versionInfo,
+    publishedRelease: release,
     branding: loadBrandingSettings(),
     purchaseStatuses: clientPurchaseStatuses(),
     documents,
     activity,
-    catalog: clientCatalogForProject(p),
   });
 }
 
@@ -1015,16 +1158,22 @@ function validateClientStatus(status) {
   return valid.has(status);
 }
 
+function clientSnapshotItem(project, itemId) {
+  const items = loadPublishedSnapshotItems(project);
+  return items.find((i) => i.id === itemId) || null;
+}
+
 function patchClientItem(req, res) {
   const p = loadProjectByToken(req.clientToken);
   if (!p) return res.status(404).json({ error: "Not found" });
   if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
     return res.status(410).json({ error: "Link expired" });
   }
-  const before = p.items.find((i) => i.id === req.params.itemId);
-  if (!before || !lineVisibleToClient(before)) {
+  const snapBefore = clientSnapshotItem(p, req.params.itemId);
+  if (!snapBefore || !lineVisibleToClient(snapBefore)) {
     return res.status(403).json({ error: "Item not available" });
   }
+  const before = p.items.find((i) => i.id === req.params.itemId) || snapBefore;
   const patch = clientPatchAllowed(req.body);
   if (patch.status !== undefined && !validateClientStatus(patch.status)) {
     return res.status(400).json({ error: "Invalid status" });
@@ -1063,8 +1212,8 @@ function bulkPatchClientItems(req, res) {
     return res.status(400).json({ error: "Invalid status" });
   }
   const visibleIds = itemIds.filter((id) => {
-    const it = p.items.find((i) => i.id === id);
-    return it && lineVisibleToClient(it);
+    const snap = clientSnapshotItem(p, id);
+    return snap && lineVisibleToClient(snap);
   });
   if (!visibleIds.length) return res.status(403).json({ error: "No items available" });
   const result = bulkPatchItems(p.id, { itemIds: visibleIds, patch });
@@ -1098,7 +1247,7 @@ function proposeClientReplacement(req, res) {
   if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
     return res.status(410).json({ error: "Link expired" });
   }
-  const before = p.items.find((i) => i.id === req.params.itemId);
+  const before = p.items.find((i) => i.id === req.params.itemId) || clientSnapshotItem(p, req.params.itemId);
   if (!before || !lineVisibleToClient(before)) {
     return res.status(403).json({ error: "Item not available" });
   }

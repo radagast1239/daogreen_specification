@@ -412,14 +412,20 @@ export default function SpecEditorPage() {
 
   const exportClientPdf = async () => {
     try {
-      const visibleItems = filterItemsForViewMode(project.items, "client");
+      const pool = project.publishedRelease && project.publishedSnapshotItems?.length
+        ? project.publishedSnapshotItems
+        : project.items;
+      const visibleItems = filterItemsForViewMode(pool, "client");
       if (!visibleItems.length) {
         error("Нет позиций для клиента");
         return;
       }
+      const exportProject = project.publishedRelease
+        ? { ...project, items: pool, version: project.publishedRelease.versionNumber }
+        : project;
       const { generateClientPurchasePdf } = await import("../../lib/clientPdfExport.js");
       await generateClientPurchasePdf({
-        project,
+        project: exportProject,
         items: visibleItems,
         branding: { companyName },
         purchaseStatuses: PURCHASE_STATUSES,
@@ -434,16 +440,22 @@ export default function SpecEditorPage() {
 
   const exportClientExcel = async () => {
     try {
-      const visibleItems = filterItemsForViewMode(project.items, "client");
+      const pool = project.publishedRelease && project.publishedSnapshotItems?.length
+        ? project.publishedSnapshotItems
+        : project.items;
+      const visibleItems = filterItemsForViewMode(pool, "client");
       if (!visibleItems.length) {
         error("Нет позиций для клиента");
         return;
       }
+      const exportProject = project.publishedRelease
+        ? { ...project, items: pool, version: project.publishedRelease.versionNumber }
+        : project;
       const { downloadClientWorkbook } = await import("../../lib/clientExcelExport.js");
-      downloadClientWorkbook(project, visibleItems, {
+      downloadClientWorkbook(exportProject, visibleItems, {
         purchaseStatuses: PURCHASE_STATUSES,
         branding: { companyName },
-        versionInfo: project.version > 0 ? { versionNumber: project.version } : null,
+        versionInfo: exportProject.version > 0 ? { versionNumber: exportProject.version } : null,
       });
     } catch (e) {
       error(e.message || "Ошибка Excel");
@@ -711,6 +723,19 @@ export default function SpecEditorPage() {
           onResetLink={regenerateLink}
           onInternalExcel={exportSpec}
         />
+
+        {project.publishedRelease && project.hasUnpublishedChanges && (
+          <div className="card" style={{ marginBottom: 16, borderColor: "var(--warn)", background: "var(--warn-bg, rgba(255, 193, 7, 0.08))" }}>
+            <strong>Есть неопубликованные изменения</strong>
+            <p className="muted" style={{ margin: "8px 0 12px" }}>
+              Клиент видит опубликованную версию {project.publishedRelease.versionNumber}.
+              Рабочая спецификация изменилась — опубликуйте новую версию перед отправкой.
+            </p>
+            <button type="button" className="btn primary" onClick={() => setPrePublishOpen(true)}>
+              Опубликовать новую версию
+            </button>
+          </div>
+        )}
 
         <ProjectClientReadinessPanel
           items={project.items || []}

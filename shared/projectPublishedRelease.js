@@ -1,0 +1,160 @@
+/** Published client release — pure helpers (frontend + backend). */
+
+import { lineVisibleToClient } from "./itemTypes.js";
+import { projectItemMatchKey } from "./projectItemKey.js";
+
+/** Workflow statuses that require / imply a published client release. */
+export const PUBLISH_WORKFLOW_STATUSES = new Set([
+  "ready_to_send",
+  "sent_to_client",
+  "client_buying",
+  "purchase_complete",
+]);
+
+export function isPublishWorkflowStatus(status) {
+  return PUBLISH_WORKFLOW_STATUSES.has(String(status || "").trim());
+}
+
+export function parsePublishedRelease(manualParams = {}) {
+  const raw = manualParams?.publishedRelease;
+  if (!raw || typeof raw !== "object") return null;
+  const versionId = String(raw.versionId || "").trim();
+  const versionNumber = Number(raw.versionNumber) || 0;
+  if (!versionId || !versionNumber) return null;
+  return {
+    versionId,
+    versionNumber,
+    publishedAt: raw.publishedAt || "",
+    workflowStatus: raw.workflowStatus || "",
+  };
+}
+
+/** Build publishedRelease object stored in manual_params. */
+export function buildPublishedReleaseMeta(versionRow, workflowStatus = "") {
+  return {
+    versionId: versionRow.id,
+    versionNumber: versionRow.versionNumber,
+    publishedAt: versionRow.createdAt || new Date().toISOString(),
+    workflowStatus: workflowStatus || "",
+  };
+}
+
+/**
+ * Full release snapshot payload stored in spec_versions.snapshot.
+ * Backward compatible: legacy rows may be a bare items[] array.
+ */
+export function buildReleaseSnapshotPayload(project, items = project?.items || []) {
+  const list = Array.isArray(items) ? items : [];
+  return {
+    schema: "release_v1",
+    publishedAt: new Date().toISOString(),
+    projectMeta: {
+      id: project?.id || "",
+      name: project?.name || "",
+      client: project?.client || "",
+      city: project?.city || "",
+      currency: project?.currency || "₽",
+      vat: !!project?.vat,
+      versionNumber: Number(project?.version) || 0,
+    },
+    items: list.map((it) => ({ ...it })),
+  };
+}
+
+export function parseReleaseSnapshot(raw) {
+  if (!raw) return { items: [], projectMeta: null, schema: null };
+  if (Array.isArray(raw)) {
+    return { items: raw, projectMeta: null, schema: "legacy_items_array" };
+  }
+  if (typeof raw === "object" && Array.isArray(raw.items)) {
+    return {
+      items: raw.items,
+      projectMeta: raw.projectMeta || null,
+      schema: raw.schema || "release_v1",
+      publishedAt: raw.publishedAt || "",
+    };
+  }
+  return { items: [], projectMeta: null, schema: null };
+}
+
+export function releaseSnapshotItems(rawSnapshot) {
+  const parsed = typeof rawSnapshot === "string"
+    ? parseReleaseSnapshot(JSON.parse(rawSnapshot || "[]"))
+    : parseReleaseSnapshot(rawSnapshot);
+  return parsed.items || [];
+}
+
+/** Client-visible pool from frozen snapshot — no catalog enrich. */
+export function clientItemsFromReleaseSnapshot(items = []) {
+  return (items || []).filter((it) => lineVisibleToClient(it));
+}
+
+/**
+ * Overlay live purchase fields onto published snapshot (status, actualPrice, clientComment).
+ * Catalog/commercial fields stay from snapshot.
+ */
+export function mergeLivePurchaseOverlay(snapshotItems = [], liveItems = []) {
+  const liveById = new Map((liveItems || []).map((it) => [it.id, it]));
+  return (snapshotItems || []).map((snap) => {
+    const live = liveById.get(snap.id);
+    if (!live) return { ...snap };
+    return {
+      ...snap,
+      status: live.status ?? snap.status,
+      actualPrice: live.actualPrice ?? snap.actualPrice,
+      clientComment: live.clientComment ?? snap.clientComment,
+    };
+  });
+}
+
+const CHANGE_KEYS = ["qty", "price", "actualPrice", "name", "supplier", "link", "visibleToClient"];
+
+function itemChanged(a, b) {
+  for (const k of CHANGE_KEYS) {
+    const va = a?.[k];
+    const vb = b?.[k];
+    if (k === "price" || k === "actualPrice" || k === "qty") {
+      if ((Number(va) || 0) !== (Number(vb) || 0)) return true;
+    } else if (String(va ?? "").trim() !== String(vb ?? "").trim()) return true;
+  }
+  return false;
+}
+
+/**
+ * Detect unpublished changes vs published snapshot (working draft vs release).
+ */
+export function detectUnpublishedChanges(workingItems = [], publishedItems = []) {
+  const pubMap = new Map((publishedItems || []).map((it) => [it.id, it]));
+  const workMap = new Map((workingItems || []).map((it) => [it.id, it]));
+  let changedCount = 0;
+  let addedCount = 0;
+  let removedCount = 0;
+
+  for (const [id, w] of workMap) {
+    const p = pubMap.get(id);
+    if (!p) {
+      if (lineVisibleToClient(w)) addedCount++;
+      continue;
+    }
+    if (itemChanged(w, p)) changedCount++;
+  }
+  for (const [id, p] of pubMap) {
+    if (!workMap.has(id) && lineVisibleToClient(p)) removedCount++;
+  }
+
+  return {
+    hasChanges: changedCount > 0 || addedCount > 0 || removedCount > 0,
+    changedCount,
+    addedCount,
+    removedCount,
+  };
+}
+
+/** Compare working items fingerprint for duplicate publish skip. */
+export function workingItemsPublishFingerprint(items = []) {
+  return (items || [])
+    .filter((it) => lineVisibleToClient(it))
+    .map((it) => `${it.id}|${projectItemMatchKey(it)}|${Number(it.qty) || 0}|${Number(it.price) || 0}|${Number(it.actualPrice) || 0}`)
+    .sort()
+    .join("\n");
+}
