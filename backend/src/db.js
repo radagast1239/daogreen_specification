@@ -39,7 +39,7 @@ export const db = new Proxy(
       if (prop === "transaction") {
         return (fn) => {
           return (...args) => {
-            d.exec("BEGIN");
+            d.exec("BEGIN IMMEDIATE");
             try {
               const result = fn(...args);
               d.exec("COMMIT");
