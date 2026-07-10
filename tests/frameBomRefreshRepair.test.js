@@ -32,6 +32,7 @@ const project = {
       qty: 312,
       price: 0,
       supplier: "",
+      clientNote: "Из схемы стеллажа",
     },
     {
       id: "it_fbom_d1_mod_protochka:st_mrdwu5kzthoor_bolt_m6x20",
@@ -131,6 +132,23 @@ describe("applyFrameBomRefreshRepair", () => {
     expect(reloaded.items.some((i) => i.id === "st_mrdwu5kzthoor__ln_legacy")).toBe(false);
     expect(reloaded.items.filter((i) => i.materialId === "m073" && i.source !== "manual")).toHaveLength(1);
     expect(reloaded.items.some((i) => i.id === "manual1")).toBe(true);
+  });
+
+  it("does not call delete/update when repair plan is blocked", async () => {
+    const deleteItem = vi.fn();
+    const updateProject = vi.fn();
+    await expect(
+      applyFrameBomRefreshRepair({
+        project,
+        purchaseDraft: [{ key: "bolt_m6x20", materialId: "missing_mat_xyz", name: "X", unit: "шт", qty: 1 }],
+        drawingContext,
+        materials,
+        deleteItem,
+        updateProject,
+      }),
+    ).rejects.toThrow();
+    expect(deleteItem).not.toHaveBeenCalled();
+    expect(updateProject).not.toHaveBeenCalled();
   });
 });
 

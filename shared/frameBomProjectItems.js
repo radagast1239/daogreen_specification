@@ -346,7 +346,7 @@ export function isCanonicalFrameBomItem(item) {
 
 /**
  * Proven residual twin of a canonical frame BOM row (patterns A/B only).
- * Bare st_*__ln_* without a matching canonical twin is NOT a twin.
+ * Bare st_*__ln_* without proven frame lineage is NOT a twin — even with same materialId.
  *
  * @param {object} item
  * @param {object[]} [canonicalItems]
@@ -364,25 +364,53 @@ export function isProvenLegacyFrameBomTwin(item, canonicalItems = []) {
   // A: st_<rack>__it_fbom_* with exact canonical id suffix
   if (twinPrefixedExactCanonicalId(item, canons)) return true;
 
-  // B: same material + rack/section cluster
-  if (canons.some((c) => frameBomItemsSameDedupeCluster(c, item))) return true;
+  // B: only with proven legacy frame lineage + same material/rack cluster.
+  // Forbidden: materialId + stellageId / bare st__ln alone.
+  if (!hasProvenLegacyFrameLineage(item)) return false;
+  return canons.some((c) => frameBomItemsSameDedupeCluster(c, item));
+}
 
-  // B2: same materialId + builder stellage id belongs to canonical moduleRackKey
-  // (legacy builder rows often lack module/section/sourceObjectIds)
-  const mid = String(item.materialId || "").trim();
-  const builderStId = resolveBuilderPrefixedStellageId(item);
-  if (!mid || !builderStId) return false;
+/**
+ * Unambiguous markers that a builder-prefixed row is an old frame BOM twin,
+ * not an ordinary rack/catalog/manual line.
+ * @param {object} item
+ */
+export function hasProvenLegacyFrameLineage(item) {
+  if (!item || isExplicitManualProjectItem(item)) return false;
 
-  return canons.some((c) => {
-    if (String(c.materialId || "").trim() !== mid) return false;
-    const rack = resolveFrameBomItemModuleRackKey(c);
-    if (!rack) return false;
-    if (rack === `stellage:${builderStId}`) return true;
-    if (rack === builderStId) return true;
-    if (rack.includes(`:${builderStId}`) || rack.endsWith(`:${builderStId}`)) return true;
-    if (rack.includes(builderStId)) return true;
-    return false;
-  });
+  const id = String(item.id || "");
+  // Prefixed canonical frame id is itself lineage (pattern A candidate)
+  if (/__it_fbom_/.test(id)) return true;
+
+  const source = String(item.source || item.sourceType || item.source_type || "").trim();
+  if (source === FRAME_BOM_SOURCE) return true;
+
+  if (
+    item.fromFrameBom === true
+    || item.frameBom === true
+    || item.isFrameBom === true
+  ) {
+    return true;
+  }
+
+  const sourceKey = String(item.sourceKey || item.source_key || "");
+  if (sourceKey.startsWith("frame_bom:")) return true;
+
+  const obj = parseSourceObjectIds(item.sourceObjectIds ?? item.source_object_ids);
+  if (String(obj.bomKey || item.bomKey || "").trim()) return true;
+
+  const sourceLabel = String(item.sourceLabel || item.source_label || "");
+  if (
+    sourceLabel === FRAME_BOM_ADMIN_SOURCE_LABEL
+    || /из схемы (?:каркаса|стеллажа)/i.test(sourceLabel)
+  ) {
+    return true;
+  }
+
+  const note = String(item.note || item.clientNote || "");
+  if (/из схемы (?:каркаса|стеллажа)/i.test(note)) return true;
+
+  return false;
 }
 
 /**

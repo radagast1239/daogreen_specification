@@ -254,3 +254,33 @@ describe("residual twin: plumbing st__ln with different materialId is preserved"
     expect(plan.cleanedItems.some((it) => it.id === canon.id)).toBe(true);
   });
 });
+
+describe("B2 safety: same-material ordinary rack line is preserved", () => {
+  it("refresh keeps ordinary st__ln with same materialId as canonical frame BOM", () => {
+    const canon = canonicalFrameItem(FRAME_BOM_KEYS[2], 2); // m073 bolt
+    const ordinarySameMat = {
+      id: `${RACK_ID}__ln_extra_bolt_stock`,
+      materialId: "m073",
+      name: "Болт М6 запас",
+      qty: 40,
+      price: 0.5,
+      supplier: "PlumbShop",
+      clientComment: "отдельный запас",
+      module: SECTION,
+      section: SECTION,
+      status: "not_bought",
+    };
+    const items = [canon, ordinarySameMat];
+    const plan = buildFrameBomRepairPlan(items, purchaseDraftFromFrame(), {
+      ...rackOpts,
+      materials,
+    });
+    expect(plan.blocked).toBe(false);
+    expect(plan.cleanedItems.some((it) => it.id === ordinarySameMat.id)).toBe(true);
+    expect(plan.removeItemIds).not.toContain(ordinarySameMat.id);
+    const bolts = plan.cleanedItems.filter((it) => it.materialId === "m073");
+    expect(bolts.length).toBeGreaterThanOrEqual(2);
+    expect(bolts.some((it) => it.id === ordinarySameMat.id)).toBe(true);
+    expect(bolts.some((it) => String(it.id).startsWith("it_fbom_"))).toBe(true);
+  });
+});

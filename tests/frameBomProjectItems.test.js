@@ -858,6 +858,7 @@ describe("buildFrameBomRepairPlan / builder legacy ids", () => {
       qty: 312,
       price: 0,
       supplier: "",
+      clientNote: "Из схемы стеллажа",
       ...overrides,
     };
   }
@@ -1094,7 +1095,7 @@ describe("buildResidualFrameBomTwinRepairPlan (project-wide A+B)", () => {
     expect(plan.cleanedItems.map((i) => i.id)).toEqual([canon.id]);
   });
 
-  it("removes catalog st__ln twin when canonical BOM exists (pattern B)", () => {
+  it("removes catalog st__ln twin when canonical BOM exists (pattern B with lineage)", () => {
     const canon = canonBolt();
     const twin = {
       id: "st_mrdwu5kzthoor__ln_legacy_bolt",
@@ -1105,10 +1106,31 @@ describe("buildResidualFrameBomTwinRepairPlan (project-wide A+B)", () => {
       qty: 228,
       price: 0.5,
       supplier: "Лемана про",
+      clientNote: "Из схемы стеллажа",
     };
     const plan = buildResidualFrameBomTwinRepairPlan([twin, canon]);
     expect(plan.removeItemIds).toContain(twin.id);
     expect(plan.cleanedItems.some((i) => i.id === canon.id)).toBe(true);
+  });
+
+  it("preserves ordinary same-material st__ln without frame lineage (B2 safety)", () => {
+    const canon = canonBolt();
+    const ordinary = {
+      id: "st_mrdwu5kzthoor__ln_extra_bolt_stock",
+      materialId: "m073",
+      name: "Болт М6×20 запас",
+      module: "Стеллаж 1",
+      section: "Стеллаж 1",
+      qty: 50,
+      price: 0.5,
+      supplier: "Лемана про",
+      clientComment: "отдельный запас",
+    };
+    const plan = buildResidualFrameBomTwinRepairPlan([ordinary, canon]);
+    expect(plan.removeItemIds).not.toContain(ordinary.id);
+    expect(plan.cleanedItems.some((i) => i.id === ordinary.id)).toBe(true);
+    expect(plan.cleanedItems.some((i) => i.id === canon.id)).toBe(true);
+    expect(plan.skippedAmbiguousGroups.some((g) => g.twinId === ordinary.id)).toBe(true);
   });
 
   it("does not remove PP farm-section rows with same materialId", () => {
@@ -1131,13 +1153,14 @@ describe("buildResidualFrameBomTwinRepairPlan (project-wide A+B)", () => {
     expect(plan.cleanedItems).toHaveLength(2);
   });
 
-  it("preserves manual same-material row", () => {
+  it("preserves manual same-material row even with lineage twin present", () => {
     const canon = canonBolt();
     const twin = {
       id: "st_mrdwu5kzthoor__ln_legacy_bolt",
       materialId: "m073",
       section: "Стеллаж 1",
       qty: 10,
+      clientNote: "Из схемы стеллажа",
     };
     const manual = { id: "manual_bolt", materialId: "m073", qty: 5, source: "manual" };
     const plan = buildResidualFrameBomTwinRepairPlan([twin, canon, manual]);
@@ -1159,6 +1182,7 @@ describe("buildResidualFrameBomTwinRepairPlan (project-wide A+B)", () => {
       materialId: "m073",
       section: "Стеллаж 1",
       qty: 10,
+      clientNote: "Из схемы стеллажа",
     };
     const cleaned = stripResidualFrameBomTwins([twin, canon]);
     const kept = cleaned.find((i) => i.id === canon.id);
@@ -1176,6 +1200,7 @@ describe("buildResidualFrameBomTwinRepairPlan (project-wide A+B)", () => {
         materialId: "m073",
         section: "Стеллаж 1",
         qty: 10,
+        clientNote: "Из схемы стеллажа",
       },
     ];
     const first = buildResidualFrameBomTwinRepairPlan(dirty);
