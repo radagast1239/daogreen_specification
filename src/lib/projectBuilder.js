@@ -5,6 +5,7 @@ import { groupLabel, materialCompositionGroup } from "../../shared/stellageCompo
 import { projectStellageLinesFromCatalog, stellageModulePhoto, resolveStellagePhoto } from "./stellageCatalogConfig.js";
 import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
 import { blankLine, lineFromMaterial, applyMaterialCatalogFields } from "./specLineCore.js";
+import { copyCatalogSnapshotFromMaterial } from "../../shared/materialCatalogSnapshot.js";
 import { resolvePipeCuts, normalizePipeCuts } from "../../shared/profilePipeCuts.js";
 import { resolveBreakerSpecs, normalizeBreakerSpecs } from "../../shared/breakerSpecs.js";
 import {
@@ -25,9 +26,6 @@ import { isSplitSystemName } from "../../shared/splitSpecs.js";
 import { buildAcLineFromRoom, AC_ITEM_SECTION } from "../../shared/roomAcSpec.js";
 import {
   FRAME_BOM_SOURCE,
-  isCanonicalFrameBomLine,
-  isExplicitManualProjectItem,
-  resolveFrameBomItemModuleRackKey,
 } from "../../shared/frameBomProjectItems.js";
 
 export { blankLine, lineFromMaterial, applyMaterialCatalogFields };
@@ -196,7 +194,9 @@ export function buildProjectFromBuilder({
   let order = 0;
 
   const pushLine = (line, section, opts = {}) => {
-    const fromCatalog = applyMaterialCatalogFields(line, materials);
+    const fromCatalog = line.materialId
+      ? copyCatalogSnapshotFromMaterial(line, materials)
+      : applyMaterialCatalogFields(line, materials, { isNewLine: true });
     const hydrated = hydrateLinePhoto(fromCatalog, materials);
     items.push(lineToProjectItem(hydrated, section, order++, opts));
   };
@@ -221,23 +221,8 @@ export function buildProjectFromBuilder({
         group: groupLabel(ln.subcategory),
       })),
     });
-    const bomMaterialIdsForRack = new Set(
-      (existingItems || [])
-        .filter(
-          (it) =>
-            isCanonicalFrameBomLine(it)
-            && !isExplicitManualProjectItem(it)
-            && (String(it.id || "").includes(st.id)
-              || resolveFrameBomItemModuleRackKey(it).includes(st.id)
-              || (it.section || it.module) === section),
-        )
-        .map((it) => String(it.materialId || "").trim())
-        .filter(Boolean),
-    );
     for (const line of activeLines(syncFastenersFromCrabs(st.items, materials))) {
       if ((line.source || line.sourceType) === FRAME_BOM_SOURCE) continue;
-      const mid = String(line.materialId || "").trim();
-      if (mid && bomMaterialIdsForRack.has(mid)) continue;
       const baseQty = resolveBuilderLineQty(line);
       if (baseQty <= 0) continue;
       pushLine(

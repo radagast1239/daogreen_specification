@@ -14,6 +14,7 @@ import {
   buildBuilderFrameDrawingContext,
 } from "../../../shared/frameDrawingContext.js";
 import { frameBomItemsForModuleRack, stripResidualFrameBomTwins } from "../../../shared/frameBomProjectItems.js";
+import { buildProjectItemsAfterBuilderSave } from "../../../shared/buildProjectItemsAfterBuilderSave.js";
 import { buildModuleRackKey } from "../../../shared/moduleRackIds.js";
 import {
   PROJECT_STATUS_ACTIVE,
@@ -641,7 +642,22 @@ export default function ProjectBuilderPage() {
     built.status = status;
     if (loadedProject?.items?.length) {
       const stellageList = stellagesForProjectSave(stellagesResolved, draftResolved);
-      built.items = preserveFrameBomProjectItems(built.items, loadedProject.items);
+      const farmSectionNames = new Set(farmSections.map((s) => s.sectionName).filter(Boolean));
+      const activeStellageIds = new Set(stellageList.map((st) => st.id).filter(Boolean));
+      const mergeResult = buildProjectItemsAfterBuilderSave({
+        existingItems: loadedProject.items,
+        generatedBuilderItems: built.items,
+        builderContext: { farmSectionNames, activeStellageIds },
+        materials: state.materials,
+      });
+      if (mergeResult.blocked) {
+        const err = new Error(
+          mergeResult.invariantErrors.join("; ") || "Сохранение заблокировано: потеря позиций спецификации",
+        );
+        err.code = "BUILDER_MERGE_BLOCKED";
+        throw err;
+      }
+      built.items = preserveFrameBomProjectItems(mergeResult.items, loadedProject.items);
       built.items = stripResidualFrameBomTwins(built.items);
       built.items = mergeFrameBomQtyFromBuilderLines(built.items, stellageList);
     }
