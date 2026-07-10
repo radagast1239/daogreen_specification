@@ -88,7 +88,7 @@ function mergedDataRow(r, index, purchaseStatuses) {
     Цена: unitPrice,
     Сумма: lineTotal,
     Поставщик: r.supplier || "",
-    "Открыть товар": r.link ? "Открыть товар" : "без ссылки",
+    "Открыть товар": r.link ? "Открыть товар" : "—",
     _link: r.link || "",
     "Статус закупки": statusLabel(r, purchaseStatuses),
     "Факт. цена": rep?.actualPrice ?? "",
@@ -182,7 +182,8 @@ function instructionSheet() {
     },
     {
       Блок: "Как пользоваться",
-      Текст: "Лист «05 Без ссылок» — позиции без ссылки или поставщика, их нужно подобрать вместе с Daogreen.",
+      Текст:
+        "Позиции без ссылки на товар остаются в обычных листах закупки. Пустая ссылка — нормально (телефон, завод, местная база), отдельный лист для них не нужен.",
     },
     {
       Блок: "Как пользоваться",
@@ -300,7 +301,7 @@ function supplierMergedSheet(merged) {
     "Ед.": r.unit || "шт.",
     Цена: formatClientUnitPrice(r),
     Сумма: formatClientLineTotal(r),
-    Ссылка: r.link ? "Открыть товар" : "без ссылки",
+    Ссылка: r.link ? "Открыть товар" : "—",
     _link: r.link || "",
     Раздел: r.clientSectionLabel || "",
     "Комментарий Daogreen": r.clientNote || "",
@@ -313,23 +314,14 @@ function supplierMergedSheet(merged) {
   });
 }
 
-/** Лист «Без ссылок / требует подбора»: строки без ссылки или без поставщика */
-function noLinkSheet(merged, purchaseStatuses) {
-  const rows = merged.filter((r) => !(r.link || "").trim() || !(r.supplier || "").trim());
-  if (!rows.length) return null;
-  const out = rows.map((r, i) => ({
-    "№": i + 1,
-    Наименование: r.name,
-    "Кол-во": formatQty(r.qty, r.unit),
-    "Ед.": r.unit || "шт.",
-    Раздел: r.clientSectionLabel || "",
-    Поставщик: r.supplier || "— нет поставщика —",
-    Проблема: !(r.link || "").trim()
-      ? (!(r.supplier || "").trim() ? "без ссылки и поставщика" : "без ссылки")
-      : "без поставщика",
-    "Статус закупки": statusLabel(r, purchaseStatuses),
-  }));
-  return sheetFromRows(out, { Наименование: 42, Проблема: 24, Поставщик: 22, Раздел: 18 });
+/** Отдельный Excel-лист no_link больше не создаём (как в PDF). */
+export function clientExcelIncludesNoLinkSheet() {
+  return false;
+}
+
+/** Имена листов, которые считаются «проблемными» / blocker — no_link сюда не входит. */
+export function clientExcelProblemSheetNames() {
+  return [];
 }
 
 function mergedForRole(items, role) {
@@ -364,7 +356,7 @@ function moduleDetailSheet(items, project, purchaseStatuses) {
         Сумма: Math.round(lineGross(it)),
         Поставщик: it.supplier || "",
         "Статус закупки": statusLabel(it, purchaseStatuses),
-        Ссылка: it.link ? "Открыть товар" : "без ссылки",
+        Ссылка: it.link ? "Открыть товар" : "—",
         _link: it.link || "",
       });
     }
@@ -391,7 +383,7 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
   append(summarySheet(project, purchaseItems, branding, purchaseStatuses), "02 Итоги");
   append(supplierMergedSheet(merged), "03 К закупке по поставщикам", true);
   append(mergedByCategorySheet(merged, purchaseStatuses), "04 К закупке по разделам", true);
-  append(noLinkSheet(merged, purchaseStatuses), "05 Без ссылок", true);
+  // no_link позиции остаются только в обычных листах 03/04/… — отдельный «05 Без ссылок» не создаём.
 
   for (const [sheetName, role] of [
     ["06 Сантехник", "plumber"],

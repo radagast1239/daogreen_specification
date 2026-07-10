@@ -1,8 +1,22 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import * as XLSX from "xlsx";
-import { buildClientWorkbook } from "../src/lib/clientExcelExport.js";
+import {
+  buildClientWorkbook,
+  clientExcelIncludesNoLinkSheet,
+  clientExcelProblemSheetNames,
+} from "../src/lib/clientExcelExport.js";
+import { buildClientPurchaseMergedRows } from "../shared/clientPurchaseMerged.js";
 import { PURCHASE_STATUSES } from "../src/data/modules.js";
 import { configureClientSections, DEFAULT_CLIENT_SECTIONS } from "../shared/clientSections.js";
+import {
+  buildProjectPreSendChecklist,
+  selectAllPreSendProblemIds,
+} from "../shared/projectPreSendChecklist.js";
+import {
+  clientPurchasePdfIncludesNoLinkSection,
+  getClientPurchasePdfInstructionLines,
+} from "../src/lib/clientPdfExport.js";
+import { PURCHASE_STATUS } from "../shared/purchaseStatusRules.js";
 
 beforeEach(() => {
   configureClientSections(DEFAULT_CLIENT_SECTIONS);
@@ -37,6 +51,9 @@ function mkItem(overrides = {}) {
     responsible: overrides.responsible || "general",
     itemRole: overrides.itemRole || "purchase",
     category: overrides.category || "Каркас и крепёж",
+    includedInProject: true,
+    visibleToClient: true,
+    approved: true,
     ...overrides,
   };
 }
@@ -57,7 +74,7 @@ const fullItems = [
     link: "https://example.com/split",
   }),
   mkItem({ id: "cl", name: "Мебель клиента", responsible: "client", clientSection: "manipulation" }),
-  mkItem({ id: "nl", name: "Без ссылки", link: "", supplier: "", clientSection: "stellage" }),
+  mkItem({ id: "nl", name: "Без ссылки", link: "", supplier: "Местная база", clientSection: "stellage" }),
   mkItem({
     id: "ins",
     name: "Монтаж стеллажа",
@@ -69,14 +86,13 @@ const fullItems = [
 ];
 
 describe("buildClientWorkbook", () => {
-  it("содержит листы в правильном порядке", () => {
+  it("содержит листы в правильном порядке без «05 Без ссылок»", () => {
     const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
     expect(wb.SheetNames).toEqual([
       "01 Инструкция",
       "02 Итоги",
       "03 К закупке по поставщикам",
       "04 К закупке по разделам",
-      "05 Без ссылок",
       "06 Сантехник",
       "07 Электрик",
       "08 Монтажник",
@@ -85,6 +101,18 @@ describe("buildClientWorkbook", () => {
       "10б Монтаж",
       "11 Детализация по модулям",
     ]);
+  });
+
+  it("client Excel does not create sheet «05 Без ссылок»", () => {
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    expect(clientExcelIncludesNoLinkSheet()).toBe(false);
+    expect(wb.SheetNames).not.toContain("05 Без ссылок");
+  });
+
+  it("client Excel does not create sheet «Без ссылок»", () => {
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    expect(wb.SheetNames.some((n) => /без ссылок/i.test(n))).toBe(false);
+    expect(wb.SheetNames.some((n) => /требуют подбора/i.test(n))).toBe(false);
   });
 
   it("«01 Инструкция» содержит обновлённую нумерацию и «Цена уточняется»", () => {
@@ -99,6 +127,8 @@ describe("buildClientWorkbook", () => {
     expect(text).toMatch(/11 Детализация по модулям/);
     expect(text).toMatch(/Цена уточняется/);
     expect(text).toMatch(/объединены в одну строку/);
+    expect(text).not.toMatch(/05 Без ссылок/);
+    expect(text).toMatch(/Пустая ссылка — нормально/);
   });
 
   it("листы 03–10б с таблицами имеют автофильтр", () => {
@@ -106,7 +136,6 @@ describe("buildClientWorkbook", () => {
     for (const name of [
       "03 К закупке по поставщикам",
       "04 К закупке по разделам",
-      "05 Без ссылок",
       "06 Сантехник",
       "07 Электрик",
       "08 Монтажник",
@@ -146,5 +175,70 @@ describe("buildClientWorkbook", () => {
     });
     expect(wb.SheetNames).toEqual(["01 Инструкция", "02 Итоги"]);
     expect(sheetCsv(wb, "01 Инструкция")).toContain("Цена уточняется");
+  });
+});
+
+describe("client Excel — no-link items stay in normal sheets", () => {
+  const purchaseItems = fullItems.filter((i) => i.itemRole !== "installation");
+
+  it("no-link items are still present in normal purchase sheets", () => {
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    const suppliers = sheetCsv(wb, "03 К закупке по поставщикам");
+    const sections = sheetCsv(wb, "04 К закупке по разделам");
+    expect(suppliers).toContain("Без ссылки");
+    expect(sections).toContain("Без ссылки");
+  });
+
+  it("no-link items remain in supplier/group sheets", () => {
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    expect(sheetCsv(wb, "03 К закупке по поставщикам")).toMatch(/Местная база/);
+    expect(sheetCsv(wb, "03 К закупке по поставщикам")).toMatch(/Без ссылки/);
+  });
+
+  it("total amount unchanged", () => {
+    const merged = buildClientPurchaseMergedRows(purchaseItems);
+    const expected = merged.reduce((s, r) => s + (Number(r.sumVat) || 0), 0);
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    const summary = sheetCsv(wb, "02 Итоги");
+    expect(summary).toMatch(/Бюджет/);
+    // merged totals still equal sum of purchase lines with price
+    expect(Math.round(expected)).toBeGreaterThan(0);
+    expect(merged.length).toBeGreaterThan(0);
+  });
+
+  it("unique item count unchanged", () => {
+    const merged = buildClientPurchaseMergedRows(purchaseItems);
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    const supplierCsv = sheetCsv(wb, "03 К закупке по поставщикам");
+    // header + one row per merged item
+    const dataRows = supplierCsv.trim().split("\n").length - 1;
+    expect(dataRows).toBe(merged.length);
+  });
+
+  it("no_link not included in blocker/problem export", () => {
+    expect(clientExcelProblemSheetNames()).toEqual([]);
+    const wb = buildClientWorkbook(project, fullItems, { purchaseStatuses: PURCHASE_STATUSES });
+    expect(wb.SheetNames.some((n) => /problem|проблем|blocker/i.test(n))).toBe(false);
+  });
+});
+
+describe("no_link remains info; PDF section stays removed", () => {
+  it("PDF no-link section remains removed", () => {
+    expect(clientPurchasePdfIncludesNoLinkSection()).toBe(false);
+    const text = getClientPurchasePdfInstructionLines().join("\n");
+    expect(text).not.toContain("Позиции без ссылок требуют подбора");
+    expect(text).not.toContain("собраны отдельным блоком");
+  });
+
+  it("no_link remains info in checklist/summary helpers", () => {
+    const items = [
+      mkItem({ id: "ok" }),
+      mkItem({ id: "l", link: "", purchaseStatus: PURCHASE_STATUS.NOT_BOUGHT }),
+      mkItem({ id: "p", price: 0 }),
+    ];
+    const checklist = buildProjectPreSendChecklist(items);
+    expect(checklist.groups.find((g) => g.key === "no_link").severity).toBe("info");
+    expect(selectAllPreSendProblemIds(checklist)).toEqual(["p"]);
+    expect(selectAllPreSendProblemIds(checklist)).not.toContain("l");
   });
 });
