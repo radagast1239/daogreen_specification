@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
@@ -23,6 +23,18 @@ import {
   mergeBuilderWizardParams,
   parseBuilderSearchParams,
 } from "../../../shared/projectLifecycle.js";
+import {
+  PROJECT_KIND,
+  PROJECT_KIND_OPTIONS,
+  suggestProjectName,
+  canSubmitNewProject,
+  validateNewProjectForm,
+  createProjectSubmitGuard,
+  shouldUpdateDraftOnStepChange,
+  getProjectKindLabel,
+  resolveProjectKind,
+} from "../../../shared/projectCreation.js";
+import { getProjectStatusLabel } from "../../../shared/projectStatus.js";
 import {
   findStellageByEditRack,
   hydrateBuilderFromProject,
@@ -63,7 +75,7 @@ import RoomsEditor from "../../components/RoomsEditor.jsx";
 import FloorPlanField from "../../components/FloorPlanField.jsx";
 import FloorPlanPin from "../../components/FloorPlanPin.jsx";
 import { COOLING_FARM_DEFAULTS, computeCoolingFarm } from "../../lib/coolingFarmCalc.js";
-import { defaultRooms, newRoom } from "../../lib/roomHelpers.js";
+import { newRoom } from "../../lib/roomHelpers.js";
 import {
   applyAndSelectNextRoom,
   applyCoolingCalcToRoom,
@@ -88,6 +100,10 @@ export default function ProjectBuilderPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const savedProjectIdFromUrl = String(searchParams.get("projectId") || "").trim();
   const builderUrl = parseBuilderSearchParams(searchParams);
+  const createGuardRef = useRef(null);
+  if (!createGuardRef.current) createGuardRef.current = createProjectSubmitGuard();
+  const draftGuardRef = useRef(null);
+  if (!draftGuardRef.current) draftGuardRef.current = createProjectSubmitGuard();
 
   const [step, setStep] = useState(() => {
     const fromUrl = searchParams.get("step");
@@ -110,6 +126,7 @@ export default function ProjectBuilderPage() {
   const [farmSettings, setFarmSettings] = useState(null);
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [nameTouched, setNameTouched] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -122,7 +139,7 @@ export default function ProjectBuilderPage() {
     currency: "₽",
     vat: false,
     comment: "",
-    manualParams: { ...DEFAULT_MANUAL_PARAMS },
+    manualParams: { ...DEFAULT_MANUAL_PARAMS, projectKind: PROJECT_KIND.CLIENT },
   });
 
   const [stellages, setStellages] = useState([]);
@@ -130,7 +147,8 @@ export default function ProjectBuilderPage() {
   const [farmSectionLines, setFarmSectionLines] = useState({});
   const [activeFarmSection, setActiveFarmSection] = useState(null);
   const [farmLoaded, setFarmLoaded] = useState(false);
-  const [rooms, setRooms] = useState(() => defaultRooms());
+  // New /new: empty rooms. Hydrate from project when projectId is present.
+  const [rooms, setRooms] = useState([]);
   const [activeCoolingRoomId, setActiveCoolingRoomId] = useState(null);
 
   useEffect(() => {
@@ -154,6 +172,7 @@ export default function ProjectBuilderPage() {
           materials: state.materials,
         });
         setForm(hydrated.form);
+        setNameTouched(true);
         setStellages(hydrated.stellages);
         setRooms(hydrated.rooms);
         setFarmSectionLines(hydrated.farmSectionLines);
@@ -222,8 +241,24 @@ export default function ProjectBuilderPage() {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setManual = (k, v) =>
     setForm((f) => ({ ...f, manualParams: { ...(f.manualParams || {}), [k]: v } }));
+  const setBasicsField = (key, value) => {
+    setForm((f) => {
+      const next = { ...f, [key]: value };
+      if ((key === "client" || key === "city") && !nameTouched) {
+        next.name = suggestProjectName({
+          client: key === "client" ? value : f.client,
+          city: key === "city" ? value : f.city,
+        });
+      }
+      return next;
+    });
+    if (key === "name") setNameTouched(true);
+  };
   const floorPlanUrl = form.manualParams?.floorPlanUrl || "";
   const showFloorPlanPin = (step === "general" || step === "cooling" || step === "consumables" || step === "review") && !!floorPlanUrl;
+  const basicsErrors = useMemo(() => validateNewProjectForm(form), [form]);
+  const canGoNextFromBasics = canSubmitNewProject(form);
+  const projectKind = resolveProjectKind({ manualParams: form.manualParams }) || PROJECT_KIND.CLIENT;
 
   useEffect(() => {
     Promise.all([api.getPresets(), api.getSettings(), api.getSuppliers()]).then(([p, s, sup]) => {
@@ -315,7 +350,8 @@ export default function ProjectBuilderPage() {
       }
     }
     setStep(next);
-    if (form.name.trim()) {
+    // Never create on step change — only update an already-saved draft.
+    if (shouldUpdateDraftOnStepChange(loadedProjectId) && form.name.trim()) {
       saveDraftSilently(next, { draftOverride: draftForSave, stellagesOverride: stellagesForSave }).catch(() => {});
     }
   };
@@ -566,10 +602,7 @@ export default function ProjectBuilderPage() {
     setRooms(rooms.map((r) => (r.id === id ? clearRoomCooling(r) : r)));
   };
 
-  const canCreate =
-    form.name.trim() &&
-    (stellages.length > 0 || farmHasItems || isMeaningfulRackDraft(draft));
-
+  const canCreate = canSubmitNewProject(form);
   const canFinalize = canCreate;
 
   const buildProjectPayload = ({
@@ -589,7 +622,14 @@ export default function ProjectBuilderPage() {
     const built = buildProjectFromBuilder({
       form: {
         ...form,
-        manualParams: mergeBuilderWizardParams(form.manualParams, { lastStep: nextStep }),
+        manualParams: mergeBuilderWizardParams(
+          {
+            ...(form.manualParams || {}),
+            projectKind: resolveProjectKind({ manualParams: form.manualParams }) || PROJECT_KIND.CLIENT,
+            ...(status === PROJECT_STATUS_ACTIVE ? { showCreateOnboarding: true } : {}),
+          },
+          { lastStep: nextStep }
+        ),
       },
       stellages: stellagesForProjectSave(stellagesResolved, draftResolved),
       farmSections,
@@ -627,8 +667,8 @@ export default function ProjectBuilderPage() {
     draftOverride,
     stellagesOverride,
   } = {}) => {
-    if (!form.name.trim()) {
-      throw new Error("Укажите название проекта на шаге «Проект».");
+    if (!canSubmitNewProject(form)) {
+      throw new Error("Укажите название и клиента на шаге «Проект».");
     }
     if (!silent) setDraftSaving(true);
     try {
@@ -641,7 +681,14 @@ export default function ProjectBuilderPage() {
         if (!silent) markSaved();
         return updated;
       }
-      const created = await actions.projectCreate(payload);
+      const guard = status === PROJECT_STATUS_ACTIVE ? createGuardRef.current : draftGuardRef.current;
+      const outcome = await guard.run(async () => actions.projectCreate(payload));
+      if (outcome.skipped) {
+        // Parallel create: prefer already-set id from the winning call.
+        if (loadedProjectId && loadedProject) return loadedProject;
+        return null;
+      }
+      const created = outcome.result;
       setLoadedProjectId(created.id);
       setLoadedProject(created);
       syncBuilderProjectUrl(created.id, nextStep);
@@ -653,7 +700,7 @@ export default function ProjectBuilderPage() {
   };
 
   const saveDraftSilently = async (nextStep = step, overrides = {}) => {
-    if (!form.name.trim()) return null;
+    if (!loadedProjectId || !canSubmitNewProject(form)) return null;
     return persistProject({
       status: PROJECT_STATUS_DRAFT,
       nextStep,
@@ -663,8 +710,15 @@ export default function ProjectBuilderPage() {
   };
 
   const saveDraft = async () => {
+    if (draftSaving || draftGuardRef.current.busy) return;
+    if (!canSubmitNewProject(form)) {
+      error("Укажите название и клиента на шаге «Проект».");
+      setStep("basics");
+      return;
+    }
     try {
-      await persistProject({ status: PROJECT_STATUS_DRAFT, silent: false });
+      const project = await persistProject({ status: PROJECT_STATUS_DRAFT, silent: false });
+      if (!project) return;
       success("Черновик сохранён");
     } catch (e) {
       error(e.message || "Не удалось сохранить черновик");
@@ -709,8 +763,8 @@ export default function ProjectBuilderPage() {
       error(validationError);
       return;
     }
-    if (!form.name.trim()) {
-      error("Укажите название проекта на шаге «Проект».");
+    if (!form.name.trim() || !String(form.client || "").trim()) {
+      error("Укажите название и клиента на шаге «Проект».");
       return;
     }
     setFrameSchemeSaving(true);
@@ -720,6 +774,7 @@ export default function ProjectBuilderPage() {
         setDraft(draftOverride);
       }
       const project = await persistProject({ draftOverride });
+      if (!project) return;
       openFrameForStellage(project, stellage, frameCtx);
     } catch (e) {
       error(e.message || "Не удалось сохранить проект");
@@ -742,6 +797,7 @@ export default function ProjectBuilderPage() {
         setDraft(draftOverride);
       }
       const project = await persistProject({ draftOverride });
+      if (!project) return;
       openFrameForStellage(project, stellage, frameCtx);
     } catch (e) {
       error(e.message || "Не удалось обновить проект");
@@ -783,13 +839,48 @@ export default function ProjectBuilderPage() {
     return frameBomItemsForModuleRack(loadedProject.items, moduleRackKey);
   }, [draft, loadedProject]);
 
+  const reviewTotalSum = useMemo(() => {
+    let sum = 0;
+    for (const st of stellages) {
+      for (const ln of activeLines(st.items || [])) {
+        sum += (Number(ln.price) || 0) * (Number(ln.qty) || 0) * Math.max(1, Number(st.count) || 1);
+      }
+    }
+    for (const lines of Object.values(farmSectionLines)) {
+      for (const ln of activeLines(lines || [])) {
+        sum += (Number(ln.price) || 0) * (Number(ln.qty) || 0);
+      }
+    }
+    return Math.round(sum * 100) / 100;
+  }, [stellages, farmSectionLines]);
+
   const finalizeProject = async () => {
-    if (!canFinalize) return;
+    if (!canFinalize || saving || createGuardRef.current.busy) return;
+    if (!canSubmitNewProject(form)) {
+      error("Укажите название и клиента на шаге «Проект».");
+      setStep("basics");
+      return;
+    }
     setSaving(true);
     try {
-      const project = await persistProject({ status: PROJECT_STATUS_ACTIVE, nextStep: "review", silent: true });
+      const project = await persistProject({
+        status: PROJECT_STATUS_ACTIVE,
+        nextStep: "review",
+        silent: true,
+      });
+      if (!project) return;
+      // Ensure onboarding flag for SpecEditor
+      if (project?.id && project?.manualParams?.showCreateOnboarding !== true) {
+        try {
+          await actions.projectUpdate(project.id, {
+            manualParams: { ...(project.manualParams || {}), showCreateOnboarding: true },
+          });
+        } catch {
+          /* non-fatal */
+        }
+      }
       success("Проект создан");
-      nav(`/project/${project.id}`);
+      nav(`/project/${project.id}?created=1`, { replace: true });
     } catch (e) {
       error(e.message || "Ошибка создания проекта");
     } finally {
@@ -817,7 +908,7 @@ export default function ProjectBuilderPage() {
             <button
               type="button"
               className="btn btn-sm"
-              disabled={!form.name.trim() || draftSaving}
+              disabled={!canGoNextFromBasics || draftSaving}
               onClick={saveDraft}
             >
               {draftSaving ? "Сохранение…" : "Сохранить черновик"}
@@ -852,16 +943,49 @@ export default function ProjectBuilderPage() {
           <h3 style={{ marginTop: 0 }}>Данные проекта</h3>
           <div className="form-grid">
             <label>
-              Название *
-              <input value={form.name} onChange={(e) => set("name", e.target.value)} />
+              Название проекта *
+              <input
+                value={form.name}
+                onChange={(e) => setBasicsField("name", e.target.value)}
+                placeholder="Вертикальная ферма — Клиент — Город"
+              />
+              {basicsErrors.name ? (
+                <span className="muted" style={{ color: "var(--danger)", fontSize: 12 }}>{basicsErrors.name}</span>
+              ) : null}
             </label>
             <label>
-              Клиент
-              <input value={form.client} onChange={(e) => set("client", e.target.value)} />
+              Клиент / компания *
+              <input
+                value={form.client}
+                onChange={(e) => setBasicsField("client", e.target.value)}
+                placeholder="ООО Пример"
+              />
+              {basicsErrors.client ? (
+                <span className="muted" style={{ color: "var(--danger)", fontSize: 12 }}>{basicsErrors.client}</span>
+              ) : null}
             </label>
             <label>
               Город
-              <input value={form.city} onChange={(e) => set("city", e.target.value)} />
+              <input value={form.city} onChange={(e) => setBasicsField("city", e.target.value)} />
+            </label>
+            <label>
+              Ответственный
+              <input
+                value={form.manualParams?.responsible || ""}
+                onChange={(e) => setManual("responsible", e.target.value)}
+                placeholder="Имя"
+              />
+            </label>
+            <label>
+              Тип проекта
+              <select
+                value={projectKind}
+                onChange={(e) => setManual("projectKind", e.target.value)}
+              >
+                {PROJECT_KIND_OPTIONS.map((o) => (
+                  <option key={o.id} value={o.id}>{o.label}</option>
+                ))}
+              </select>
             </label>
             <label>
               Тип фермы
@@ -872,16 +996,29 @@ export default function ProjectBuilderPage() {
               </select>
             </label>
             <label>
-              Площадь, м²
+              Общая площадь, м²
               <input type="number" value={form.area} onChange={(e) => set("area", e.target.value)} />
+            </label>
+            <label>
+              Посевная площадь, м²
+              <input type="number" value={form.sowingArea} onChange={(e) => set("sowingArea", e.target.value)} />
             </label>
             <label>
               Высота, м
               <input type="number" value={form.height} onChange={(e) => set("height", e.target.value)} />
             </label>
             <label className="full">
-              Комментарий
+              Описание
               <textarea rows={2} value={form.comment} onChange={(e) => set("comment", e.target.value)} />
+            </label>
+            <label className="full">
+              Внутренний комментарий
+              <textarea
+                rows={2}
+                value={form.manualParams?.notes || ""}
+                onChange={(e) => setManual("notes", e.target.value)}
+                placeholder="Только для команды, не для клиента"
+              />
             </label>
           </div>
 
@@ -890,7 +1027,12 @@ export default function ProjectBuilderPage() {
           <FloorPlanField value={floorPlanUrl} onChange={(url) => setManual("floorPlanUrl", url)} />
 
           <div className="toolbar" style={{ marginTop: 16 }}>
-            <button type="button" className="btn btn-primary" disabled={!form.name.trim()} onClick={() => goToStep("stellages")}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!canGoNextFromBasics}
+              onClick={() => goToStep("stellages")}
+            >
               Далее: стеллажи →
             </button>
           </div>
@@ -1177,6 +1319,9 @@ export default function ProjectBuilderPage() {
 
       {step === "general" && sections.length > 0 && (
         <div>
+          <p className="muted" style={{ fontSize: 13, margin: "0 0 12px" }}>
+            Общая закупка по разделам фермы — отмечайте позиции здесь (не отдельный стартовый сценарий).
+          </p>
           <FloorPlanField value={floorPlanUrl} onChange={(url) => setManual("floorPlanUrl", url)} />
 
           {rooms.length > 0 && (
@@ -1346,7 +1491,11 @@ export default function ProjectBuilderPage() {
         <div className="card" style={{ padding: 20 }}>
           <h3 style={{ marginTop: 0 }}>Итого</h3>
           <ul style={{ fontSize: 14, lineHeight: 1.9 }}>
-            <li><strong>{form.name}</strong>{form.client ? ` · ${form.client}` : ""}</li>
+            <li>Название: <strong>{form.name || "—"}</strong></li>
+            <li>Клиент: <strong>{form.client || "—"}</strong></li>
+            <li>Город: <strong>{form.city || "—"}</strong></li>
+            <li>Тип фермы: <strong>{form.type || "—"}</strong></li>
+            <li>Тип проекта: <strong>{getProjectKindLabel(projectKind)}</strong></li>
             <li>
               Стеллажей:{" "}
               <strong>
@@ -1359,11 +1508,38 @@ export default function ProjectBuilderPage() {
                 </span>
               )}
             </li>
+            <li>
+              Общая закупка (ферма целиком):{" "}
+              <strong>
+                {sections.reduce((n, sec) => n + activeLines(farmSectionLines[sec.id] || []).length, 0)}
+              </strong>{" "}
+              поз.
+            </li>
             {sections.map((sec) => (
-              <li key={sec.id}>
+              <li key={sec.id} style={{ marginLeft: 12, fontSize: 13 }}>
                 {sec.name}: <strong>{activeLines(farmSectionLines[sec.id] || []).length}</strong> поз.
               </li>
             ))}
+            <li>
+              Расходные материалы:{" "}
+              <strong>
+                {form.manualParams?.consumablesCartUrl ? "ссылка указана" : "не указаны"}
+              </strong>
+            </li>
+            <li>
+              Итоговая сумма (оценка):{" "}
+              <strong>
+                {reviewTotalSum.toLocaleString("ru-RU")} {form.currency || "₽"}
+              </strong>
+            </li>
+            <li>
+              Статус:{" "}
+              <strong>
+                {loadedProject
+                  ? getProjectStatusLabel(loadedProject.status) || (isDraftProject(loadedProject) ? "В настройке" : "Черновик")
+                  : "Ещё не создан (локальный черновик)"}
+              </strong>
+            </li>
             <li>Комнат: <strong>{rooms.length}</strong>
               {rooms.length > 0 && (
                 <span className="muted" style={{ fontSize: 12 }}>
@@ -1392,18 +1568,18 @@ export default function ProjectBuilderPage() {
           </ul>
           {!canFinalize && (
             <p style={{ color: "var(--danger)", fontSize: 13 }}>
-              Нужно название проекта и хотя бы один стеллаж или раздел фермы.
+              Нужны название проекта и клиент.
             </p>
           )}
           {canFinalize && !farmHasItems && stellages.every((s) => activeLines(s.items).length === 0) && (
             <p className="muted" style={{ fontSize: 13 }}>
-              Закупка пока пустая — это нормально для черновика. Можно завершить настройку и дополнить позиции позже в штабе проекта.
+              Закупка пока пустая — это нормально. Можно создать проект с readiness EMPTY и дополнить позиции позже.
             </p>
           )}
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button type="button" className="btn" onClick={() => goToStep("consumables")}>← Назад</button>
             <button type="button" className="btn btn-primary" disabled={!canFinalize || saving} onClick={finalizeProject}>
-              {saving ? "Создание…" : "Завершить настройку и создать проект"}
+              {saving ? "Создание…" : "Создать проект"}
             </button>
           </div>
         </div>

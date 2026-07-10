@@ -1,3 +1,7 @@
+/**
+ * @deprecated Unrouted. Primary create flow is ProjectBuilderPage (/new).
+ * Kept only to avoid risky delete; do not re-wire into App.
+ */
 import React, { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore } from "../store/StoreContext.jsx";

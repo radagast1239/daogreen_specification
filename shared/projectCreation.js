@@ -141,18 +141,29 @@ export function canSubmitNewProject(formState = {}) {
   return Object.keys(validateNewProjectForm(formState)).length === 0;
 }
 
-/** Post-create navigation path (relative). */
+/**
+ * Post-create navigation path (relative).
+ * Unified UX: always SpecEditor. Optional focus=general for purchase deep-link.
+ * CREATE_SCENARIO.BUILDER no longer opens a second create flow.
+ */
 export function resolveCreateProjectRedirect(project, scenario) {
   const id = project?.id;
   if (!id) return "/";
   const sc = scenario || project?.manualParams?.createScenario || CREATE_SCENARIO.EMPTY;
-  if (sc === CREATE_SCENARIO.BUILDER) {
-    return `/new?projectId=${encodeURIComponent(id)}&step=stellages&mode=edit`;
-  }
   if (sc === CREATE_SCENARIO.GENERAL_PURCHASE) {
     return `/project/${encodeURIComponent(id)}?created=1&focus=general`;
   }
   return `/project/${encodeURIComponent(id)}?created=1`;
+}
+
+/** Step change must never create a new project (local state only until draft/final save). */
+export function shouldCreateProjectOnStepChange() {
+  return false;
+}
+
+/** Persist on step change only when a draft already exists in DB. */
+export function shouldUpdateDraftOnStepChange(loadedProjectId) {
+  return Boolean(String(loadedProjectId || "").trim());
 }
 
 export function shouldShowCreateOnboarding(project, searchParams) {

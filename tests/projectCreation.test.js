@@ -11,10 +11,14 @@ import {
   createProjectSubmitGuard,
   resolveProjectKind,
   getProjectKindBadge,
+  shouldCreateProjectOnStepChange,
+  shouldUpdateDraftOnStepChange,
 } from "../shared/projectCreation.js";
 import { PROJECT_STATUS, buildProjectSendReadiness } from "../shared/projectStatus.js";
 import { buildProjectPreSendChecklist } from "../shared/projectPreSendChecklist.js";
 import { hydrateBuilderFromProject } from "../src/lib/projectBuilderHydrate.js";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 describe("projectCreation payload", () => {
   it("normalizes strings and numbers", () => {
@@ -143,7 +147,7 @@ describe("projectCreation wizard / submit guard", () => {
     expect(again.result.id).toBe("p-ok");
   });
 
-  it("redirect routes by scenario", () => {
+  it("redirect routes to SpecEditor (unified create flow)", () => {
     const project = { id: "p9", manualParams: {} };
     expect(resolveCreateProjectRedirect(project, CREATE_SCENARIO.EMPTY)).toBe(
       "/project/p9?created=1"
@@ -151,9 +155,16 @@ describe("projectCreation wizard / submit guard", () => {
     expect(resolveCreateProjectRedirect(project, CREATE_SCENARIO.GENERAL_PURCHASE)).toBe(
       "/project/p9?created=1&focus=general"
     );
-    expect(resolveCreateProjectRedirect(project, CREATE_SCENARIO.BUILDER)).toContain(
-      "/new?projectId=p9"
+    expect(resolveCreateProjectRedirect(project, CREATE_SCENARIO.BUILDER)).toBe(
+      "/project/p9?created=1"
     );
+  });
+
+  it("step change never creates; update only when draft id exists", () => {
+    expect(shouldCreateProjectOnStepChange()).toBe(false);
+    expect(shouldUpdateDraftOnStepChange("")).toBe(false);
+    expect(shouldUpdateDraftOnStepChange(null)).toBe(false);
+    expect(shouldUpdateDraftOnStepChange("p1")).toBe(true);
   });
 
   it("onboarding flag from created query or manualParams", () => {
@@ -230,5 +241,45 @@ describe("projectCreation hydrate empty structure", () => {
     });
     expect(hydrated.rooms).toEqual([]);
     expect(hydrated.stellages).toEqual([]);
+  });
+});
+
+describe("unified six-step project builder route", () => {
+  const root = resolve(process.cwd());
+  const appSrc = readFileSync(resolve(root, "src/App.jsx"), "utf8");
+  const builderSrc = readFileSync(resolve(root, "src/pages/admin/ProjectBuilderPage.jsx"), "utf8");
+
+  it("/new opens ProjectBuilderPage only (no CreateProjectWizard fork)", () => {
+    expect(appSrc).toContain('path="/new"');
+    expect(appSrc).toContain("ProjectBuilderPage");
+    expect(appSrc).not.toContain("CreateProjectWizardPage");
+    expect(appSrc).not.toContain("NewProjectEntry");
+  });
+
+  it("six-step wizard labels present; no three-scenario start UI", () => {
+    expect(builderSrc).toContain('label: "1. Проект"');
+    expect(builderSrc).toContain('label: "2. Стеллажи"');
+    expect(builderSrc).toContain('label: "3. Ферма целиком"');
+    expect(builderSrc).toContain('label: "4. Расчёт охлаждения"');
+    expect(builderSrc).toContain('label: "5. Расходные материалы"');
+    expect(builderSrc).toContain('label: "6. Создание"');
+    expect(builderSrc).not.toContain("Начальная структура");
+    expect(builderSrc).not.toContain("Пустой проект");
+    expect(builderSrc).not.toContain("Перейти к проектировщику");
+    expect(builderSrc).toContain("Общая закупка");
+  });
+
+  it("new builder starts with empty rooms and no auto rack create", () => {
+    expect(builderSrc).toMatch(/useState\(\[\]\)/);
+    expect(builderSrc).toContain("Do not auto-create empty rack drafts");
+    expect(builderSrc).toContain("shouldUpdateDraftOnStepChange");
+    expect(builderSrc).toContain("createProjectSubmitGuard");
+  });
+
+  it("draft/final require name+client; finalize goes to SpecEditor with created=1", () => {
+    expect(builderSrc).toContain("canSubmitNewProject");
+    expect(builderSrc).toContain("?created=1");
+    expect(builderSrc).toContain("Сохранить черновик");
+    expect(builderSrc).toContain("Создать проект");
   });
 });
