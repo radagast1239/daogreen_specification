@@ -470,21 +470,145 @@ describe('projectBuilderHydrate', () => {
   });
 
   it('mergeFrameBomQtyFromBuilderLines applies editor qty to preserved project items', () => {
+    const rackKey = 'mod1:st1';
     const preserved = preserveFrameBomProjectItems(
       [{ id: 'st1__ln1', name: 'Труба' }],
-      [{ id: 'fb_bolt', source: FRAME_BOM_SOURCE, materialId: 'm073', qty: 312 }],
+      [{
+        id: 'fb_bolt',
+        source: FRAME_BOM_SOURCE,
+        materialId: 'm073',
+        moduleRackKey: rackKey,
+        qty: 312,
+      }],
     );
     const stellages = [{
       id: 'st1',
+      moduleId: 'mod1',
       items: [{
         materialId: 'm073',
         qty: 400,
         source: FRAME_BOM_SOURCE,
         sourceType: FRAME_BOM_SOURCE,
+        moduleRackKey: rackKey,
       }],
     }];
     const merged = mergeFrameBomQtyFromBuilderLines(preserved, stellages);
     expect(merged.find((it) => it.materialId === 'm073')?.qty).toBe(400);
+  });
+
+  it('mergeFrameBomQtyFromBuilderLines scopes qty by rack, not materialId only', () => {
+    const st1Key = 'mod1:st1';
+    const st2Key = 'mod1:st2';
+    const items = [
+      {
+        id: 'fb_st1',
+        materialId: 'm073',
+        moduleRackKey: st1Key,
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        qty: 10,
+        pipeCuts: ['1000', '2000'],
+      },
+      {
+        id: 'fb_st2',
+        materialId: 'm073',
+        moduleRackKey: st2Key,
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        qty: 22,
+        pipeCuts: ['3000', '4000'],
+      },
+    ];
+    const stellages = [
+      {
+        id: 'st1',
+        moduleId: 'mod1',
+        items: [{
+          materialId: 'm073',
+          moduleRackKey: st1Key,
+          source: FRAME_BOM_SOURCE,
+          sourceType: FRAME_BOM_SOURCE,
+          qty: 99,
+          pipeCuts: ['1000', '2000'],
+        }],
+      },
+      {
+        id: 'st2',
+        moduleId: 'mod1',
+        items: [{
+          materialId: 'm073',
+          moduleRackKey: st2Key,
+          source: FRAME_BOM_SOURCE,
+          sourceType: FRAME_BOM_SOURCE,
+          qty: 55,
+          pipeCuts: ['3000', '4000'],
+        }],
+      },
+    ];
+    const merged = mergeFrameBomQtyFromBuilderLines(items, stellages);
+    const st1 = merged.find((it) => it.id === 'fb_st1');
+    const st2 = merged.find((it) => it.id === 'fb_st2');
+    expect(st1?.qty).toBe(99);
+    expect(st1?.pipeCuts).toEqual(['1000', '2000']);
+    expect(st2?.qty).toBe(55);
+    expect(st2?.pipeCuts).toEqual(['3000', '4000']);
+  });
+
+  it('mergeFrameBomQtyFromBuilderLines fail-closed when rack lineage missing', () => {
+    const items = [{
+      id: 'fb_amb',
+      materialId: 'm073',
+      source: FRAME_BOM_SOURCE,
+      sourceType: FRAME_BOM_SOURCE,
+      qty: 10,
+      pipeCuts: ['1000'],
+    }];
+    const stellages = [{
+      items: [{
+        materialId: 'm073',
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        qty: 999,
+        pipeCuts: ['9999'],
+      }],
+    }];
+    const merged = mergeFrameBomQtyFromBuilderLines(items, stellages);
+    expect(merged[0].qty).toBe(10);
+    expect(merged[0].pipeCuts).toEqual(['1000']);
+  });
+
+  it('mergeFrameBomQtyFromBuilderLines keeps ordinary line when same materialId in frame BOM', () => {
+    const rackKey = 'mod1:st1';
+    const items = [
+      {
+        id: 'fb_pipe',
+        materialId: 'm073',
+        moduleRackKey: rackKey,
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        qty: 10,
+      },
+      {
+        id: 'ord_pipe',
+        materialId: 'm073',
+        source: 'builder',
+        qty: 3,
+      },
+    ];
+    const stellages = [{
+      id: 'st1',
+      moduleId: 'mod1',
+      items: [{
+        materialId: 'm073',
+        moduleRackKey: rackKey,
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        qty: 44,
+      }],
+    }];
+    const merged = mergeFrameBomQtyFromBuilderLines(items, stellages);
+    expect(merged.find((it) => it.id === 'fb_pipe')?.qty).toBe(44);
+    expect(merged.find((it) => it.id === 'ord_pipe')?.qty).toBe(3);
   });
 
   it('frameBomProjectItemToBuilderLine sets defaultQty equal to BOM qty', () => {

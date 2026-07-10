@@ -18,6 +18,7 @@ import {
   enrichProjectItemFromMaterial,
   FRAME_BOM_ADMIN_SOURCE_LABEL,
   isFrameBomLine,
+  resolveFrameBomDedupeKey,
 } from "../../shared/frameBomProjectItems.js";
 import { buildModuleRackKey } from "../../shared/moduleRackIds.js";
 import { builderWizardFromManualParams } from "../../shared/projectLifecycle.js";
@@ -497,22 +498,46 @@ export function restoreMissingNonFrameRackItems(existingItems = [], builderItems
 }
 
 /**
+ * Composite rack+BOM identity for frame_bom qty merge (never materialId-only).
+ * @param {object} line
+ * @param {object} [stellage]
+ */
+function frameBomBuilderLineDedupeKey(line, stellage) {
+  const moduleRackKey = String(
+    line?.moduleRackKey
+      || buildModuleRackKey({ moduleId: stellage?.moduleId, rackId: stellage?.id })
+      || (stellage?.id ? `stellage:${stellage.id}` : ""),
+  ).trim();
+  if (!moduleRackKey) return "";
+  return resolveFrameBomDedupeKey({
+    ...line,
+    moduleRackKey,
+    source: FRAME_BOM_SOURCE,
+    sourceType: FRAME_BOM_SOURCE,
+  });
+}
+
+/**
  * Apply editor qty/pipeCuts from frame_bom builder lines back onto preserved project items.
  * @param {object[]} projectItems
  * @param {object[]} stellages
  */
 export function mergeFrameBomQtyFromBuilderLines(projectItems = [], stellages = []) {
-  const editorByMaterial = new Map();
+  const editorByKey = new Map();
   for (const st of stellages || []) {
     for (const ln of st.items || []) {
       if ((ln.source || ln.sourceType) !== FRAME_BOM_SOURCE) continue;
-      if (ln.materialId) editorByMaterial.set(ln.materialId, ln);
+      const key = frameBomBuilderLineDedupeKey(ln, st);
+      if (!key) continue;
+      editorByKey.set(key, ln);
     }
   }
-  if (!editorByMaterial.size) return projectItems;
+  if (!editorByKey.size) return projectItems;
   return (projectItems || []).map((it) => {
     if ((it.source || it.sourceType) !== FRAME_BOM_SOURCE) return it;
-    const editor = it.materialId && editorByMaterial.get(it.materialId);
+    const key = resolveFrameBomDedupeKey(it);
+    if (!key) return it;
+    const editor = editorByKey.get(key);
     if (!editor) return it;
     const qty = Number(editor.qty);
     const next = { ...it };

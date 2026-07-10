@@ -98,6 +98,8 @@ export function resolveFrameBomItemModuleRackKey(item) {
   const obj = parseSourceObjectIds(item.sourceObjectIds ?? item.source_object_ids);
   const fromObj = String(obj.moduleRackKey || obj.module_rack_key || "").trim();
   if (fromObj) return fromObj;
+  const top = String(item.moduleRackKey || item.module_rack_key || "").trim();
+  if (top) return top;
   const rackKey = String(item.sourceRackKey || item.source_rack_key || "").trim();
   if (rackKey) return rackKey;
   const stellageId = String(obj.stellageId || obj.stellage_id || "").trim();
