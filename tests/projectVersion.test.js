@@ -6,6 +6,7 @@ import {
   buildReleaseSnapshotPayload,
   detectUnpublishedChanges,
   parseReleaseSnapshot,
+  parsePublishedRelease,
   releaseSnapshotItems,
 } from "../shared/projectPublishedRelease.js";
 import { buildProjectParityReport } from "../shared/projectParity.js";
@@ -70,11 +71,11 @@ function clientItem(id, materialId, overrides = {}) {
   };
 }
 
-function seedProject(id = "proj1", { items = [], manualParams = {}, status = "active" } = {}) {
+function seedProject(id = "proj1", { items = [], manualParams = {}, status = "active", projectVersion = 0 } = {}) {
   db.prepare(`
     INSERT INTO projects (id, name, client_token, status, manual_params, currency, vat, version)
-    VALUES (?, 'Test project', ?, ?, ?, '₽', 1, 0)
-  `).run(id, `token-${id}`, status, JSON.stringify(manualParams));
+    VALUES (?, 'Test project', ?, ?, ?, '₽', 1, ?)
+  `).run(id, `token-${id}`, status, JSON.stringify(manualParams), projectVersion);
   if (items.length) saveItems(id, items);
 }
 
@@ -263,6 +264,68 @@ describe("published release snapshot", () => {
     createVersion("p1", "admin", { force: true });
     const loaded = loadProject("p1");
     expect(shouldPublishOnStatusChange(loaded, "sent_to_client")).toBe(false);
+  });
+});
+
+describe("published release version numbering", () => {
+  it("first release is v1 when projects.version=1 and spec_versions empty (production-like)", () => {
+    seedProject("p1", {
+      projectVersion: 1,
+      items: [clientItem("it1", "mat1")],
+    });
+    expect(db.prepare("SELECT COUNT(*) c FROM spec_versions WHERE project_id = 'p1'").get().c).toBe(0);
+    const version = createVersion("p1", "admin", { force: true });
+    expect(version.versionNumber).toBe(1);
+    const row = db.prepare("SELECT version_number FROM spec_versions WHERE project_id = 'p1'").get();
+    expect(row.version_number).toBe(1);
+    const after = loadProject("p1");
+    expect(after.manualParams.publishedRelease.versionNumber).toBe(1);
+  });
+
+  it("first release is v1 when projects.version=7 and spec_versions empty", () => {
+    seedProject("p1", {
+      projectVersion: 7,
+      items: [clientItem("it1", "mat1")],
+    });
+    const version = createVersion("p1", "admin", { force: true });
+    expect(version.versionNumber).toBe(1);
+    expect(db.prepare("SELECT version_number FROM spec_versions WHERE project_id = 'p1'").get().version_number).toBe(1);
+  });
+
+  it("next release after existing v1 is v2", () => {
+    seedProject("p1", { items: [clientItem("it1", "mat1", { qty: 1 })] });
+    createVersion("p1", "admin", { force: true });
+    saveItems("p1", [clientItem("it1", "mat1", { qty: 3 })]);
+    const v2 = createVersion("p1", "admin", { force: true });
+    expect(v2.versionNumber).toBe(2);
+  });
+
+  it("next release after existing v1 and v2 is v3", () => {
+    seedProject("p1", { items: [clientItem("it1", "mat1")] });
+    createVersion("p1", "admin", { force: true });
+    createVersion("p1", "admin", { force: true });
+    const v3 = createVersion("p1", "admin", { force: true });
+    expect(v3.versionNumber).toBe(3);
+    expect(listVersions("p1")).toHaveLength(3);
+  });
+
+  it("projects.version row field does not drive spec_versions numbering", () => {
+    seedProject("p1", {
+      projectVersion: 99,
+      items: [clientItem("it1", "mat1")],
+    });
+    db.prepare("UPDATE projects SET version = ? WHERE id = ?").run(99, "p1");
+    const version = createVersion("p1", "admin", { force: true });
+    expect(version.versionNumber).toBe(1);
+    expect(db.prepare("SELECT version_number FROM spec_versions WHERE id = ?").get(version.id).version_number).toBe(1);
+  });
+
+  it("does not create spec_versions or publishedRelease when publish validation fails", () => {
+    seedProject("p1", { projectVersion: 1, items: [clientItem("it1", "mat1")] });
+    db.prepare("DELETE FROM materials WHERE id = 'mat1'").run();
+    expect(() => createVersion("p1", "admin", { force: false })).toThrow();
+    expect(db.prepare("SELECT COUNT(*) c FROM spec_versions WHERE project_id = 'p1'").get().c).toBe(0);
+    expect(parsePublishedRelease(loadProject("p1").manualParams)).toBeNull();
   });
 });
 

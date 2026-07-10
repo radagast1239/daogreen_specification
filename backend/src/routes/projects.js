@@ -534,7 +534,7 @@ function createVersionRecord(projectId, project, { force = false, createdBy = "a
     .get(projectId);
   const prevItems = prev ? releaseSnapshotItemsFromRow(prev) : [];
   const summary = compareVersions(prevItems, project.items || []);
-  const versionNumber = (prev?.version_number || project.version || 0) + 1;
+  const versionNumber = prev ? Number(prev.version_number) + 1 : 1;
   const snapshotJson = buildReleaseSnapshotJson(project);
 
   const versionId = uid("v");

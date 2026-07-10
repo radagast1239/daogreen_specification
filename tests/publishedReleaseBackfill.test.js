@@ -114,11 +114,11 @@ function clientItem(id) {
   };
 }
 
-function seedProject(id, { token = "tok1", items = null, manualParams = {} } = {}) {
+function seedProject(id, { token = "tok1", items = null, manualParams = {}, projectVersion = 0 } = {}) {
   db.prepare(`
     INSERT INTO projects (id, name, client_token, status, manual_params, version)
-    VALUES (?, 'Proj', ?, 'active', ?, 0)
-  `).run(id, token, JSON.stringify(manualParams));
+    VALUES (?, 'Proj', ?, 'active', ?, ?)
+  `).run(id, token, JSON.stringify(manualParams), projectVersion);
   const list = items || [clientItem("it1")];
   db.prepare(`
     INSERT INTO project_items (id, project_id, material_id, name, unit, module, section, qty, price, visible, approved, enabled, visible_to_client, included_in_project, item_type, status, actual_price, client_comment, sort_order)
@@ -211,6 +211,31 @@ describe("publishedReleaseBackfill service", () => {
     const result = runPublishedReleaseBackfill({ projectIds: ["p2"], dryRun: false });
     expect(result.reports[0].applied.action).toBe(BACKFILL_ACTION.CREATE_V1);
     expect(result.reports[0].after.publishedReleaseValid).toBe(true);
+    expect(result.reports[0].after.publishedRelease.versionNumber).toBe(1);
+    expect(db.prepare("SELECT version_number FROM spec_versions WHERE project_id = 'p2'").get().version_number).toBe(1);
+  });
+
+  it("create v1 when no versions and projects.version=1 (production-like)", () => {
+    seedProject("p_prod", { projectVersion: 1 });
+    const result = runPublishedReleaseBackfill({ projectIds: ["p_prod"], dryRun: false });
+    expect(result.reports[0].applied.action).toBe(BACKFILL_ACTION.CREATE_V1);
+    expect(result.reports[0].after.publishedRelease.versionNumber).toBe(1);
+    expect(db.prepare("SELECT COUNT(*) c FROM spec_versions WHERE project_id = 'p_prod'").get().c).toBe(1);
+    expect(db.prepare("SELECT version_number FROM spec_versions WHERE project_id = 'p_prod'").get().version_number).toBe(1);
+    expect(verifyAllClientProjects().ok).toBe(true);
+  });
+
+  it("backfill idempotent after first v1 with projects.version=1", () => {
+    seedProject("p_idem", { projectVersion: 1, token: "secret" });
+    const first = runPublishedReleaseBackfill({ projectIds: ["p_idem"], dryRun: false });
+    const versionId = first.reports[0].after.publishedRelease.versionId;
+    const snapHash = first.reports[0].after.snapshotHash;
+    const second = runPublishedReleaseBackfill({ projectIds: ["p_idem"], dryRun: false });
+    expect(db.prepare("SELECT COUNT(*) c FROM spec_versions WHERE project_id = 'p_idem'").get().c).toBe(1);
+    expect(second.reports[0].plan.action).toBe(BACKFILL_ACTION.NOOP);
+    expect(second.reports[0].after.publishedRelease.versionId).toBe(versionId);
+    expect(second.reports[0].after.snapshotHash).toBe(snapHash);
+    expect(db.prepare("SELECT client_token FROM projects WHERE id = 'p_idem'").get().client_token).toBe("secret");
   });
 
   it("repeated apply idempotent when already published", async () => {
