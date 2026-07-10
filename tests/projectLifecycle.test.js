@@ -19,6 +19,8 @@ describe('projectLifecycle', () => {
     expect(isActiveProject({ status: PROJECT_STATUS_ACTIVE })).toBe(true);
     expect(isActiveProject({ status: PROJECT_STATUS_DRAFT })).toBe(false);
     expect(isActiveProject({ status: 'archived' })).toBe(false);
+    expect(isActiveProject({ status: 'in_progress' })).toBe(true);
+    expect(isActiveProject({ status: 'ready_to_send' })).toBe(true);
   });
 
   it('builds draft wizard URLs', () => {

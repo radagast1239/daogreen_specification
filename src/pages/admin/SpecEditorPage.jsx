@@ -49,6 +49,15 @@ import ActivityFeed from "../../components/ActivityFeed.jsx";
 import PublishChecklist, { PublishGateModal } from "../../components/PublishChecklist.jsx";
 import ProjectHqBar from "../../components/ProjectHqBar.jsx";
 import ProjectClientReadinessPanel from "../../components/ProjectClientReadinessPanel.jsx";
+import {
+  buildProjectSendReadiness,
+  buildReadyToSendConfirmText,
+  projectStatusNeedsConfirm,
+  resolveProjectStatusForSave,
+  shouldConfirmReadyToSend,
+  getProjectStatusLabel,
+} from "../../../shared/projectStatus.js";
+import { buildProjectPreSendChecklist } from "../../../shared/projectPreSendChecklist.js";
 import ProjectCoolingSummary from "../../components/ProjectCoolingSummary.jsx";
 import SpecQuickFilters from "../../components/SpecQuickFilters.jsx";
 import PrePublishCheckModal from "../../components/PrePublishCheckModal.jsx";
@@ -104,6 +113,7 @@ export default function SpecEditorPage() {
   const [activeCoolingRoomId, setActiveCoolingRoomId] = useState(null);
   const [specQuickFilter, setSpecQuickFilter] = useState("");
   const [specSelectedIds, setSpecSelectedIds] = useState([]);
+  const [statusSaving, setStatusSaving] = useState(false);
   const clearSpecSelectionRef = useRef(null);
   const applySpecSelectionRef = useRef(null);
 
@@ -400,6 +410,44 @@ export default function SpecEditorPage() {
     }
   };
 
+  const handleProjectStatusChange = async (nextRaw) => {
+    if (!project?.id) return;
+    const next = resolveProjectStatusForSave(nextRaw);
+    if (next === project.status) return;
+
+    const checklist = buildProjectPreSendChecklist(project.items || [], state.materials, {
+      publishCheck,
+    });
+    const readiness = buildProjectSendReadiness(checklist);
+
+    if (shouldConfirmReadyToSend(next, readiness)) {
+      const ok = await confirm({
+        title: "Готов к отправке",
+        message: buildReadyToSendConfirmText(readiness),
+        confirmLabel: "Всё равно отметить готовым",
+        cancelLabel: "Вернуться к исправлению",
+      });
+      if (!ok) return;
+    } else if (projectStatusNeedsConfirm(next)) {
+      const ok = await confirm({
+        title: getProjectStatusLabel(next),
+        message: `Отметить проект как «${getProjectStatusLabel(next)}»?`,
+        confirmLabel: "Да",
+      });
+      if (!ok) return;
+    }
+
+    setStatusSaving(true);
+    try {
+      await actions.projectUpdate(project.id, { status: next });
+      success(`Статус: ${getProjectStatusLabel(next)}`);
+    } catch (e) {
+      error(e.message || "Не удалось сохранить статус");
+    } finally {
+      setStatusSaving(false);
+    }
+  };
+
   const prepareClientNotice = () => {
     setTab("spec");
     setPrePublishOpen(true);
@@ -554,6 +602,7 @@ export default function SpecEditorPage() {
         <ProjectHqBar
           project={project}
           items={project.items || []}
+          materials={state.materials}
           publishCheck={publishCheck}
           publishCheckLoading={publishCheckLoading}
           clientUrl={url}
@@ -565,6 +614,8 @@ export default function SpecEditorPage() {
           onExportPdf={exportClientPdf}
           onExportExcel={exportClientExcel}
           onFilterSelect={handleDashboardFilter}
+          onProjectStatusChange={handleProjectStatusChange}
+          statusSaving={statusSaving}
           onOpenPlan={() => nav(`/project/${project.id}/plan`)}
           onImportFromPast={() => setImportOpen(true)}
           onCompare={() => setCompareOpen(true)}

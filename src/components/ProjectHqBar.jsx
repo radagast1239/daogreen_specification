@@ -1,15 +1,15 @@
 import React, { useMemo, useState } from "react";
 import { money } from "../store/helpers.js";
 import { buildHqMetrics } from "../lib/projectHqStats.js";
-import {
-  buildProjectDashboardSummary,
-  shortPublishHeadline,
-} from "../../shared/projectDashboardSummary.js";
 import { buildClientPurchaseSummary } from "../../shared/clientPurchaseSummary.js";
+import { buildProjectPreSendChecklist } from "../../shared/projectPreSendChecklist.js";
+import { buildProjectSendReadiness } from "../../shared/projectStatus.js";
 import {
   PROJECT_HEADER_MORE_ACTIONS,
   PROJECT_HEADER_PRIMARY_ACTIONS,
 } from "../../shared/projectWorkspaceUi.js";
+import ProjectStatusControl from "./ProjectStatusControl.jsx";
+import ProjectReadinessBadge from "./ProjectReadinessBadge.jsx";
 
 function formatUpdatedAt(iso) {
   if (!iso) return "—";
@@ -26,9 +26,19 @@ function formatUpdatedAt(iso) {
   }
 }
 
+function formatDateOnly(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleDateString("ru-RU");
+  } catch {
+    return "—";
+  }
+}
+
 export default function ProjectHqBar({
   project,
   items,
+  materials = [],
   publishCheck,
   publishCheckLoading,
   clientUrl,
@@ -40,6 +50,8 @@ export default function ProjectHqBar({
   onExportPdf,
   onExportExcel,
   onFilterSelect,
+  onProjectStatusChange,
+  statusSaving = false,
   onOpenPlan,
   onImportFromPast,
   onCompare,
@@ -57,32 +69,20 @@ export default function ProjectHqBar({
     [project, items, publishCheck]
   );
 
-  const summary = useMemo(
-    () => buildProjectDashboardSummary(items, { publishCheck }),
-    [items, publishCheck]
-  );
-
   const purchaseSummary = useMemo(
-    () => buildClientPurchaseSummary(items),
-    [items]
+    () => buildClientPurchaseSummary(items, materials),
+    [items, materials]
   );
 
-  const preSendTone =
-    summary.readiness.status === "ok"
-      ? "ok"
-      : summary.readiness.status === "warnings"
-        ? "warn"
-        : "bad";
+  const checklist = useMemo(
+    () => buildProjectPreSendChecklist(items, materials, { publishCheck }),
+    [items, materials, publishCheck]
+  );
 
-  const headBadge = shortPublishHeadline(summary.readiness.status, {
-    blockers: summary.readiness.blockers,
-    warnings: summary.readiness.warnings,
-  });
+  const readiness = useMemo(() => buildProjectSendReadiness(checklist), [checklist]);
 
   const purchase = metrics.purchaseProgress;
-  const purchaseValue = purchase?.show
-    ? purchase.headline
-    : "Не начата";
+  const purchaseValue = purchase?.show ? purchase.headline : "Не начата";
   const purchaseDetail = purchase?.show ? purchase.detail : "клиент ещё не отмечал";
 
   const handlePublishCheck = () => {
@@ -113,16 +113,32 @@ export default function ProjectHqBar({
         <div className="project-hq__compact-meta">
           <div className="project-hq__compact-title-row">
             <strong className="project-hq__title">{project?.name || "Проект"}</strong>
-            <span className={`chip chip--${preSendTone === "ok" ? "ok" : preSendTone === "warn" ? "amber" : "danger"}`}>
-              {headBadge}
-            </span>
-            {publishCheckLoading ? <span className="muted" style={{ fontSize: 11 }}>обновление…</span> : null}
+            {publishCheckLoading ? (
+              <span className="muted" style={{ fontSize: 11 }}>
+                обновление…
+              </span>
+            ) : null}
           </div>
+
           <div className="project-hq__compact-facts muted">
-            <span>Клиент: <b>{project?.client || "—"}</b></span>
-            <span>Тип: <b>{project?.type || "—"}</b></span>
-            <span>Статус: <b>{headBadge}</b></span>
-            <span>Версия: <b>{metrics.versionLabel}</b></span>
+            <span>
+              Клиент: <b>{project?.client || "—"}</b>
+            </span>
+            <span>
+              Город: <b>{project?.city || "—"}</b>
+            </span>
+            <span>
+              Тип: <b>{project?.type || "—"}</b>
+            </span>
+            <span>
+              Версия: <b>{metrics.versionLabel}</b>
+            </span>
+            <span>
+              Создан: <b>{formatDateOnly(project?.createdAt || project?.created_at)}</b>
+            </span>
+            <span>
+              Обновлено: <b>{formatUpdatedAt(project?.updatedAt || project?.updated_at)}</b>
+            </span>
             <span>
               Итог закупки:{" "}
               <b className="num">
@@ -130,10 +146,31 @@ export default function ProjectHqBar({
               </b>
             </span>
             <span>
-              Прогресс закупки: <b>{purchaseValue}</b>
-              {purchaseDetail ? <span className="project-hq__compact-sub"> · {purchaseDetail}</span> : null}
+              Клиентских позиций: <b className="num">{purchaseSummary.totalClientItems || 0}</b>
             </span>
-            <span>Обновлено: <b>{formatUpdatedAt(project?.updatedAt || project?.updated_at)}</b></span>
+            <span>
+              Прогресс закупки: <b>{purchaseValue}</b>
+              {purchaseDetail ? (
+                <span className="project-hq__compact-sub"> · {purchaseDetail}</span>
+              ) : null}
+            </span>
+          </div>
+
+          <div
+            className="project-hq__status-row"
+            style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-start", marginTop: 10 }}
+          >
+            <ProjectStatusControl
+              status={project?.status}
+              disabled={statusSaving || !onProjectStatusChange}
+              onChange={onProjectStatusChange}
+            />
+            <div>
+              <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+                Готовность выдачи
+              </div>
+              <ProjectReadinessBadge readiness={readiness} onFilterSelect={onFilterSelect} />
+            </div>
           </div>
         </div>
 

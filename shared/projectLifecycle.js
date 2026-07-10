@@ -1,5 +1,7 @@
 /** Project lifecycle: draft wizard vs active HQ project */
 
+import { isProjectStatusActiveLifecycle } from "./projectStatus.js";
+
 export const PROJECT_STATUS_DRAFT = 'draft';
 export const PROJECT_STATUS_ACTIVE = 'active';
 export const PROJECT_STATUS_ARCHIVED = 'archived';
@@ -9,8 +11,7 @@ export function isDraftProject(project) {
 }
 
 export function isActiveProject(project) {
-  const status = String(project?.status || PROJECT_STATUS_ACTIVE);
-  return status !== PROJECT_STATUS_DRAFT && status !== PROJECT_STATUS_ARCHIVED;
+  return isProjectStatusActiveLifecycle(project?.status);
 }
 
 export function builderWizardFromManualParams(manualParams = {}) {

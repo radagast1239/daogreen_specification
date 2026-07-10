@@ -7,7 +7,6 @@ import { api } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { Progress, Empty, ClientLinkModal } from "../../components/ui.jsx";
 import { useToast } from "../../components/Toast.jsx";
-import { CLIENT_STATUSES, clientStatusMeta } from "../../data/clientStatuses.js";
 import { getPinnedIds, isPinned, sortWithPinned, togglePinned } from "../../lib/pinnedProjects.js";
 import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
 import HomeDashboard from "../../components/HomeDashboard.jsx";
@@ -20,9 +19,29 @@ import {
   projectOpenPath,
   resolveBuilderWizardStep,
 } from "../../../shared/projectLifecycle.js";
+import {
+  getProjectStatusLabel,
+  projectMatchesStatusFilter,
+} from "../../../shared/projectStatus.js";
+import ProjectListFilters from "../../components/ProjectListFilters.jsx";
 
 function clientKey(name) {
   return (name || "Без имени").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function formatUpdatedShort(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "—";
+  }
 }
 
 export default function ProjectsPage({ variant = "active" } = {}) {
@@ -39,13 +58,12 @@ export default function ProjectsPage({ variant = "active" } = {}) {
   const [linkModal, setLinkModal] = useState(null);
   const [dupSource, setDupSource] = useState(null);
   const [pinned, setPinned] = useState(getPinnedIds);
-  const [clientMap, setClientMap] = useState({});
   const [companyName, setCompanyName] = useState("Daogreen");
   const [linkTemplate, setLinkTemplate] = useState("");
 
   const [q, setQ] = useState("");
   const [clientF, setClientF] = useState("");
-  const [statusF, setStatusF] = useState("");
+  const [projectStatusF, setProjectStatusF] = useState("all");
   const [dateF, setDateF] = useState("");
   const [problemsOnly, setProblemsOnly] = useState(false);
   const [matCount, setMatCount] = useState(null);
@@ -59,11 +77,6 @@ export default function ProjectsPage({ variant = "active" } = {}) {
   }, [actions]);
 
   useEffect(() => {
-    api.getClients().then((list) => {
-      const map = {};
-      for (const c of list) map[c.key] = c;
-      setClientMap(map);
-    });
     api.getSettings().then((s) => {
       setCompanyName(s.companyName || "Daogreen");
       setLinkTemplate(parsePublishRulesSettings(s).clientLinkTemplate);
@@ -94,10 +107,7 @@ export default function ProjectsPage({ variant = "active" } = {}) {
         if (!hay.includes(ql)) return false;
       }
       if (clientF && clientKey(p.client) !== clientF) return false;
-      if (statusF) {
-        const st = clientMap[clientKey(p.client)]?.status || "new";
-        if (st !== statusF) return false;
-      }
+      if (!isInProgress && !projectMatchesStatusFilter(p, projectStatusF)) return false;
       if (problemsOnly && !problemIds.has(String(p.id))) return false;
       if (dateF && p.updatedAt) {
         const t = new Date(p.updatedAt).getTime();
@@ -108,7 +118,7 @@ export default function ProjectsPage({ variant = "active" } = {}) {
       return true;
     });
     return sortWithPinned(list, pinned);
-  }, [visibleProjects, q, clientF, statusF, dateF, problemsOnly, clientMap, problemIds, pinned]);
+  }, [visibleProjects, q, clientF, projectStatusF, dateF, problemsOnly, problemIds, pinned, isInProgress]);
 
   const onPin = (id) => setPinned(togglePinned(id));
 
@@ -174,6 +184,12 @@ export default function ProjectsPage({ variant = "active" } = {}) {
       <div className="content">
         {!isInProgress && <HomeDashboard dash={dash} />}
 
+        {!isInProgress && (
+          <div style={{ marginBottom: 12 }}>
+            <ProjectListFilters value={projectStatusF} onChange={setProjectStatusF} />
+          </div>
+        )}
+
         <div className="project-filters no-print">
           <input placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 200 }} />
           <select value={clientF} onChange={(e) => setClientF(e.target.value)} style={{ width: "auto" }}>
@@ -181,14 +197,6 @@ export default function ProjectsPage({ variant = "active" } = {}) {
             {clients.map(([k, name]) => (
               <option key={k} value={k}>
                 {name}
-              </option>
-            ))}
-          </select>
-          <select value={statusF} onChange={(e) => setStatusF(e.target.value)} style={{ width: "auto" }}>
-            <option value="">Все статусы</option>
-            {CLIENT_STATUSES.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
               </option>
             ))}
           </select>
@@ -224,9 +232,16 @@ export default function ProjectsPage({ variant = "active" } = {}) {
               const t = p.totals || projectTotals(p);
               const link = !isInProgress && p.clientToken ? clientLink(p.clientToken) : "";
               const pinnedOn = isPinned(p.id);
-              const cStatus = clientStatusMeta(clientMap[clientKey(p.client)]?.status);
               const openPath = projectOpenPath(p);
               const lifecycleBadge = projectLifecycleBadge(p);
+              const projectStatusLabel = getProjectStatusLabel(p.status);
+              const hasItems = Array.isArray(p.items) && p.items.length > 0;
+              // List payload usually has no items — don't invent blockers.
+              const readinessLabel = hasItems
+                ? null
+                : problemIds.has(String(p.id))
+                  ? "Есть проблемы"
+                  : null;
               return (
                 <div key={p.id} className="card" style={{ padding: 18 }}>
                   <div className="between">
@@ -247,8 +262,13 @@ export default function ProjectsPage({ variant = "active" } = {}) {
                           </span>
                         )}
                         {!isInProgress && (
-                          <span className={`chip chip--${cStatus.chip}`} style={{ fontSize: 10 }}>
-                            {cStatus.label}
+                          <span className="chip chip--brand" style={{ fontSize: 10 }}>
+                            {projectStatusLabel}
+                          </span>
+                        )}
+                        {!isInProgress && readinessLabel && (
+                          <span className="chip chip--amber" style={{ fontSize: 10 }}>
+                            {readinessLabel}
                           </span>
                         )}
                       </div>
@@ -266,6 +286,12 @@ export default function ProjectsPage({ variant = "active" } = {}) {
                           </span>
                         )}
                       </div>
+                      {!isInProgress && (
+                        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                          Обновлено: {formatUpdatedShort(p.updatedAt || p.updated_at)}
+                          {p.itemCount != null ? ` · позиций: ${p.itemCount}` : ""}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -273,7 +299,7 @@ export default function ProjectsPage({ variant = "active" } = {}) {
                     <>
                       <div className="between" style={{ marginTop: 14, marginBottom: 6 }}>
                         <span className="muted" style={{ fontSize: 12 }}>
-                          Закуплено
+                          Прогресс закупки
                         </span>
                         <span className="num" style={{ fontWeight: 700 }}>
                           {t.progress}%
@@ -283,7 +309,7 @@ export default function ProjectsPage({ variant = "active" } = {}) {
 
                       <div className="stat-grid" style={{ marginTop: 14 }}>
                         <div>
-                          <div className="eyebrow">Бюджет</div>
+                          <div className="eyebrow">Итог</div>
                           <div className="num" style={{ fontWeight: 700 }}>
                             {money(t.budget, p.currency)}
                           </div>
@@ -299,7 +325,7 @@ export default function ProjectsPage({ variant = "active" } = {}) {
                   )}
 
                   <div className="row wrap" style={{ marginTop: 16, gap: 6 }}>
-                    <Link className={`btn btn-sm${isInProgress ? " btn-primary" : ""}`} to={openPath}>
+                    <Link className={`btn btn-sm${isInProgress ? " btn-primary" : " btn-primary"}`} to={openPath}>
                       {projectOpenLabel(p)}
                     </Link>
                     {link && (
