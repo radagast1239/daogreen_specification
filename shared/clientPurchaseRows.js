@@ -7,6 +7,7 @@ import {
   getPurchaseStatusLabel,
   normalizePurchaseStatus,
 } from "./purchaseStatusRules.js";
+import { purchaseMergeKey as computePurchaseMergeKey } from "./purchaseMerge.js";
 
 export const NFT_CHANNEL_CLIENT_NOTE = "Используется как NFT-канал в схеме стеллажа.";
 export const CLIENT_PRICE_TBD = "цена уточняется";
@@ -24,6 +25,7 @@ export const CLIENT_ITEM_TECH_FIELDS = [
   "internalNote",
   "techNote",
   "materialId",
+  "purchaseMergeKey",
   "drawingId",
   "moduleRackKey",
   "sourceRackKey",
@@ -72,10 +74,13 @@ export function stripClientTechnicalFields(item) {
 
 export function prepareClientPurchaseItem(item, materials = []) {
   const frameBom = isFrameBomLine(item);
-  const base = stripClientTechnicalFields(enrichClientPurchaseItem(item, materials));
+  const enriched = enrichClientPurchaseItem(item, materials);
+  const mergeKey = computePurchaseMergeKey(enriched);
+  const base = stripClientTechnicalFields(enriched);
   const status = normalizePurchaseStatus(base);
   return {
     ...base,
+    purchaseMergeKey: mergeKey,
     frameBom,
     status,
     purchaseStatus: status,
