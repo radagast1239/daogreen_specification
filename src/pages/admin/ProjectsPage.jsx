@@ -23,6 +23,10 @@ import {
   getProjectStatusLabel,
   projectMatchesStatusFilter,
 } from "../../../shared/projectStatus.js";
+import {
+  getProjectKindBadge,
+  resolveProjectKind,
+} from "../../../shared/projectCreation.js";
 import ProjectListFilters from "../../components/ProjectListFilters.jsx";
 
 function clientKey(name) {
@@ -177,7 +181,7 @@ export default function ProjectsPage({ variant = "active" } = {}) {
         sub={`${visibleProjects.length} ${isInProgress ? "черновик(ов)" : "проект(ов)"}${matCount != null ? ` · база: ${matCount} материалов` : ""}`}
         actions={
           <button className="btn btn-primary" onClick={() => nav("/new")}>
-            ＋ Новый проект
+            Создать проект
           </button>
         }
       />
@@ -235,13 +239,16 @@ export default function ProjectsPage({ variant = "active" } = {}) {
               const openPath = projectOpenPath(p);
               const lifecycleBadge = projectLifecycleBadge(p);
               const projectStatusLabel = getProjectStatusLabel(p.status);
-              const hasItems = Array.isArray(p.items) && p.items.length > 0;
-              // List payload usually has no items — don't invent blockers.
-              const readinessLabel = hasItems
-                ? null
-                : problemIds.has(String(p.id))
-                  ? "Есть проблемы"
-                  : null;
+              const kindBadge = getProjectKindBadge(resolveProjectKind(p));
+              const itemCount = Array.isArray(p.items)
+                ? p.items.length
+                : Number(p.itemCount) || 0;
+              const readinessLabel =
+                itemCount === 0
+                  ? "Проект ещё не заполнен"
+                  : problemIds.has(String(p.id))
+                    ? "Есть проблемы"
+                    : null;
               return (
                 <div key={p.id} className="card" style={{ padding: 18 }}>
                   <div className="between">
@@ -261,13 +268,21 @@ export default function ProjectsPage({ variant = "active" } = {}) {
                             {lifecycleBadge}
                           </span>
                         )}
+                        {!isInProgress && kindBadge ? (
+                          <span className="chip chip--neutral" style={{ fontSize: 10 }}>
+                            {kindBadge}
+                          </span>
+                        ) : null}
                         {!isInProgress && (
                           <span className="chip chip--brand" style={{ fontSize: 10 }}>
                             {projectStatusLabel}
                           </span>
                         )}
                         {!isInProgress && readinessLabel && (
-                          <span className="chip chip--amber" style={{ fontSize: 10 }}>
+                          <span
+                            className={`chip ${itemCount === 0 ? "chip--neutral" : "chip--amber"}`}
+                            style={{ fontSize: 10 }}
+                          >
                             {readinessLabel}
                           </span>
                         )}

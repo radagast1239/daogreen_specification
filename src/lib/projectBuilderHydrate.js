@@ -319,7 +319,8 @@ export function hydrateBuilderFromProject(project, {
 } = {}) {
   const form = builderFormFromProject(project);
   const stellages = stellagesFromProject(project, { stellageCatalogs, materials });
-  const rooms = Array.isArray(project?.rooms) && project.rooms.length ? project.rooms : defaultRooms;
+  // Explicit empty rooms[] must stay empty (guided create). Only missing rooms → defaults.
+  const rooms = Array.isArray(project?.rooms) ? project.rooms : defaultRooms();
   const farmSectionLines = farmSectionLinesFromProject(project, sections, farmCatalogs, materials);
   const farmLoaded = sections.length > 0
     && Object.values(farmSectionLines).some((lines) => (lines || []).some((ln) => ln.included));

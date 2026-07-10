@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from "react";
-import { Routes, Route, Navigate, useParams } from "react-router-dom";
+import { Routes, Route, Navigate, useParams, useSearchParams } from "react-router-dom";
 import Layout from "./components/Layout.jsx";
 import AdminGuard from "./components/AdminGuard.jsx";
 import { ClientAccessDenied, ClientScope } from "./components/ClientGuard.jsx";
@@ -9,6 +9,7 @@ import LoginPage from "./pages/admin/LoginPage.jsx";
 const ProjectsPage = lazy(() => import("./pages/admin/ProjectsPage.jsx"));
 const ProjectsInProgressPage = lazy(() => import("./pages/admin/ProjectsInProgressPage.jsx"));
 const ProjectBuilderPage = lazy(() => import("./pages/admin/ProjectBuilderPage.jsx"));
+const CreateProjectWizardPage = lazy(() => import("./components/CreateProjectWizardPage.jsx"));
 const SpecEditorPage = lazy(() => import("./pages/admin/SpecEditorPage.jsx"));
 const MaterialsPage = lazy(() => import("./pages/admin/MaterialsPage.jsx"));
 const MaterialsQualityPage = lazy(() => import("./pages/admin/MaterialsQualityPage.jsx"));
@@ -45,6 +46,23 @@ function FallbackRoute() {
   return <ClientAccessDenied />;
 }
 
+/** /new without projectId → guided wizard; with projectId → existing builder. */
+function NewProjectEntry() {
+  const [sp] = useSearchParams();
+  if (sp.get("projectId")) {
+    return (
+      <Lazy>
+        <ProjectBuilderPage />
+      </Lazy>
+    );
+  }
+  return (
+    <Lazy>
+      <CreateProjectWizardPage />
+    </Lazy>
+  );
+}
+
 export default function App() {
   return (
     <Routes>
@@ -77,7 +95,7 @@ export default function App() {
           <Route path="/archive" element={<Lazy><ArchivePage /></Lazy>} />
           <Route path="/reports" element={<Lazy><ReportsPage /></Lazy>} />
           <Route path="/settings" element={<Lazy><SettingsPage /></Lazy>} />
-          <Route path="/new" element={<Lazy><ProjectBuilderPage /></Lazy>} />
+          <Route path="/new" element={<NewProjectEntry />} />
           <Route path="/new/template" element={<Navigate to="/new" replace />} />
           <Route path="/project/:id" element={<Lazy><SpecEditorPage /></Lazy>} />
           <Route path="/project/:id/plan" element={<Lazy><PlanPage /></Lazy>} />

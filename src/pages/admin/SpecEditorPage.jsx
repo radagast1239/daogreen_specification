@@ -50,6 +50,7 @@ import ActivityFeed from "../../components/ActivityFeed.jsx";
 import PublishChecklist, { PublishGateModal } from "../../components/PublishChecklist.jsx";
 import ProjectHqBar from "../../components/ProjectHqBar.jsx";
 import ProjectClientReadinessPanel from "../../components/ProjectClientReadinessPanel.jsx";
+import CreateProjectOnboarding from "../../components/CreateProjectOnboarding.jsx";
 import {
   buildProjectSendReadiness,
   buildReadyToSendConfirmText,
@@ -59,6 +60,7 @@ import {
   getProjectStatusLabel,
 } from "../../../shared/projectStatus.js";
 import { buildProjectPreSendChecklist } from "../../../shared/projectPreSendChecklist.js";
+import { shouldShowCreateOnboarding } from "../../../shared/projectCreation.js";
 import ProjectCoolingSummary from "../../components/ProjectCoolingSummary.jsx";
 import SpecQuickFilters from "../../components/SpecQuickFilters.jsx";
 import PrePublishCheckModal from "../../components/PrePublishCheckModal.jsx";
@@ -89,6 +91,7 @@ export default function SpecEditorPage() {
   const [searchParams] = useSearchParams();
   const highlightItemId = searchParams.get("item");
   const sectionParam = searchParams.get("section");
+  const focusParam = searchParams.get("focus");
   const stellagesPanelRef = useRef(null);
   const { state, actions } = useStore();
   const { confirm, success, error } = useToast();
@@ -115,6 +118,7 @@ export default function SpecEditorPage() {
   const [specQuickFilter, setSpecQuickFilter] = useState("");
   const [specSelectedIds, setSpecSelectedIds] = useState([]);
   const [statusSaving, setStatusSaving] = useState(false);
+  const [createOnboardingDismissed, setCreateOnboardingDismissed] = useState(false);
   const clearSpecSelectionRef = useRef(null);
   const applySpecSelectionRef = useRef(null);
 
@@ -195,6 +199,10 @@ export default function SpecEditorPage() {
     }, 120);
     return () => window.clearTimeout(timer);
   }, [sectionParam, project?.id]);
+
+  useEffect(() => {
+    if (focusParam === "general") setTab("merged");
+  }, [focusParam]);
 
   useEffect(() => {
     api.listSectionTemplates().then(setSectionTemplates).catch(() => setSectionTemplates([]));
@@ -408,6 +416,23 @@ export default function SpecEditorPage() {
       });
     } catch (e) {
       error(e.message || "Ошибка Excel");
+    }
+  };
+
+  const showCreateOnboarding =
+    !createOnboardingDismissed &&
+    shouldShowCreateOnboarding(project, searchParams) &&
+    !(project?.items || []).length;
+
+  const dismissCreateOnboarding = async () => {
+    setCreateOnboardingDismissed(true);
+    if (!project?.id) return;
+    try {
+      await actions.projectUpdate(project.id, {
+        manualParams: { ...(project.manualParams || {}), showCreateOnboarding: false },
+      });
+    } catch {
+      /* banner already closed locally */
     }
   };
 
@@ -626,6 +651,10 @@ export default function SpecEditorPage() {
       />
 
       <div className="content">
+        <CreateProjectOnboarding
+          visible={showCreateOnboarding}
+          onDismiss={dismissCreateOnboarding}
+        />
         <ProjectHqBar
           project={project}
           items={project.items || []}

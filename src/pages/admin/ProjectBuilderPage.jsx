@@ -237,14 +237,7 @@ export default function ProjectBuilderPage() {
     });
   }, []);
 
-  useEffect(() => {
-    // Auto-create a blank draft only when the project has no racks yet.
-    // Returning from the frame constructor with existing racks must not
-    // invent "Стеллаж 2" and persist it on the next silent save.
-    if (step === "stellages" && !draft && stellages.length === 0) {
-      setDraft(newStellageDraft(state.modules, state.materials, 1, stellageCatalogs, stellageModuleMeta));
-    }
-  }, [step, draft, state.modules, state.materials, stellages.length, stellageCatalogs, stellageModuleMeta]);
+  // Do not auto-create empty rack drafts — user starts a stellage explicitly.
 
   useEffect(() => {
     if (step === "general" && !farmLoaded && sections.length) {
@@ -905,8 +898,21 @@ export default function ProjectBuilderPage() {
       )}
 
       {step === "stellages" && !draft && stellages.length === 0 && (
-        <div className="card" style={{ padding: 20 }}>
-          <p className="muted" style={{ margin: 0 }}>Загрузка шага «Стеллажи»…</p>
+        <div>
+          <div className="toolbar" style={{ marginBottom: 14 }}>
+            <button type="button" className="btn" onClick={() => goToStep("basics")}>← Назад</button>
+            <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={() => goToStep("general")}>
+              Ферма целиком →
+            </button>
+          </div>
+          <div className="card" style={{ padding: 20 }}>
+            <p className="muted" style={{ marginTop: 0 }}>
+              В проекте пока нет стеллажей. Добавьте первый стеллаж или перейдите к разделам фермы.
+            </p>
+            <button type="button" className="btn btn-primary" onClick={startNewStellageDraft}>
+              ＋ Добавить стеллаж
+            </button>
+          </div>
         </div>
       )}
 

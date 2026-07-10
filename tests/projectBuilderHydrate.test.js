@@ -186,6 +186,17 @@ describe('projectBuilderHydrate', () => {
     expect(hydrated.stellages[0].name).toBe('Стеллаж 1');
   });
 
+  it('keeps explicit empty rooms array (no default rooms invent)', () => {
+    const hydrated = hydrateBuilderFromProject({
+      ...project,
+      rooms: [],
+      stellageConfigs: [],
+      items: [],
+    });
+    expect(hydrated.rooms).toEqual([]);
+    expect(hydrated.stellages).toEqual([]);
+  });
+
   it('projectItemToBuilderLine divides qty by stellage count', () => {
     const line = projectItemToBuilderLine({ id: 'st1__ln1', name: 'A', qty: 6 }, { stCount: 3 });
     expect(line.qty).toBe(2);

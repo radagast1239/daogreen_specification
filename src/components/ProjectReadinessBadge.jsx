@@ -9,15 +9,17 @@ export default function ProjectReadinessBadge({
   compact = false,
 }) {
   if (!readiness) return null;
+  const empty = readiness.status === "empty" || readiness.isEmpty;
   const ok = readiness.status === "ok";
-  const tone = ok ? "ok" : "danger";
+  const tone = empty ? "neutral" : ok ? "ok" : "danger";
+  const chipTone = empty ? "neutral" : ok ? "ok" : "danger";
 
   return (
     <div className={`project-readiness-badge project-readiness-badge--${tone}`}>
-      <span className={`chip chip--${ok ? "ok" : "danger"}`}>
+      <span className={`chip chip--${chipTone}`}>
         {compact ? readiness.shortTitle : readiness.title}
       </span>
-      {!ok && readiness.detailLines?.length > 0 ? (
+      {!ok && !empty && readiness.detailLines?.length > 0 ? (
         <div className="project-readiness-badge__counts">
           {readiness.detailLines.map((line) => {
             const clickable = !!onFilterSelect && !!line.filterKey;

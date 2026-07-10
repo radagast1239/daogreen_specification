@@ -90,6 +90,15 @@ describe("projectStatus model", () => {
     expect(selectAllPreSendProblemIds(checklist)).not.toContain("l");
   });
 
+  it("empty project is NOT_STARTED / empty readiness, not ready to send", () => {
+    const checklist = buildProjectPreSendChecklist([]);
+    const readiness = buildProjectSendReadiness(checklist);
+    expect(readiness.status).toBe("empty");
+    expect(readiness.title).toBe("Проект ещё не заполнен");
+    expect(readiness.isReady).toBe(false);
+    expect(readiness.isBlocker).toBe(false);
+  });
+
   it("critical issue counts match checklist groups", () => {
     const items = [
       mkItem({ id: "p", price: 0 }),

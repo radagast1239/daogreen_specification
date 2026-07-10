@@ -127,8 +127,31 @@ export function projectStatusNeedsConfirm(statusId) {
 
 /**
  * @param {object} checklist — результат buildProjectPreSendChecklist
+ * @param {object} [options]
+ * @param {object[]} [options.items] — для EMPTY, если checklist без clientTotalCount
  */
-export function buildProjectSendReadiness(checklist) {
+export function buildProjectSendReadiness(checklist, options = {}) {
+  const clientTotalCount = Number(
+    checklist?.clientTotalCount ?? checklist?.clientVisibleCount ?? 0
+  );
+
+  // Empty / not started: no client-facing positions to send.
+  if (clientTotalCount === 0) {
+    return {
+      status: "empty",
+      tone: "neutral",
+      title: "Проект ещё не заполнен",
+      shortTitle: "Не заполнен",
+      criticalCount: 0,
+      countsByKey: Object.fromEntries(PROJECT_SEND_CRITICAL_KEYS.map((k) => [k, 0])),
+      detailLines: [],
+      noLinkCount: Number(checklist?.noLinkCount) || 0,
+      isEmpty: true,
+      isReady: false,
+      isBlocker: false,
+    };
+  }
+
   const groups = Array.isArray(checklist?.groups) ? checklist.groups : [];
   const byKey = Object.fromEntries(groups.map((g) => [g.key, g]));
   const countsByKey = {};
@@ -163,6 +186,9 @@ export function buildProjectSendReadiness(checklist) {
     countsByKey,
     detailLines,
     noLinkCount,
+    isEmpty: false,
+    isReady: ok,
+    isBlocker: !ok,
   };
 }
 
