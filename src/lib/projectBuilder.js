@@ -4,7 +4,7 @@ import { hydrateLinePhoto } from "./photoHelpers.js";
 import { groupLabel, materialCompositionGroup } from "../../shared/stellageComposition.js";
 import { projectStellageLinesFromCatalog, stellageModulePhoto, resolveStellagePhoto } from "./stellageCatalogConfig.js";
 import { syncFastenersFromCrabs } from "../../shared/fastenerRules.js";
-import { blankLine, lineFromMaterial } from "./specLineCore.js";
+import { blankLine, lineFromMaterial, applyMaterialCatalogFields } from "./specLineCore.js";
 import { resolvePipeCuts, normalizePipeCuts } from "../../shared/profilePipeCuts.js";
 import { resolveBreakerSpecs, normalizeBreakerSpecs } from "../../shared/breakerSpecs.js";
 import {
@@ -30,7 +30,7 @@ import {
   resolveFrameBomItemModuleRackKey,
 } from "../../shared/frameBomProjectItems.js";
 
-export { blankLine, lineFromMaterial };
+export { blankLine, lineFromMaterial, applyMaterialCatalogFields };
 
 export function lineToMaterialPayload(line, moduleName = "", farmSectionId = "") {
   const mods = moduleName ? normalizeMaterialModules([moduleName]) : [];
@@ -196,7 +196,8 @@ export function buildProjectFromBuilder({
   let order = 0;
 
   const pushLine = (line, section, opts = {}) => {
-    const hydrated = hydrateLinePhoto(line, materials);
+    const fromCatalog = applyMaterialCatalogFields(line, materials);
+    const hydrated = hydrateLinePhoto(fromCatalog, materials);
     items.push(lineToProjectItem(hydrated, section, order++, opts));
   };
 

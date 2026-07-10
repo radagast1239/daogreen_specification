@@ -10,6 +10,7 @@ import { resolveBreakerSpecs } from "../../shared/breakerSpecs.js";
 import { resolveFlowSpecs } from "../../shared/flowSpecs.js";
 import { resolveSplitSpecs } from "../../shared/splitSpecs.js";
 import { resolveItemType } from "../../shared/itemTypes.js";
+import { applyMaterialCatalogFields } from "./specLineCore.js";
 import {
   FRAME_BOM_SOURCE,
   frameBomItemsForModuleRack,
@@ -63,6 +64,14 @@ function applyFrameBomOverlayToCatalogLine(catalogLine, bomLine) {
     ...catalogLine,
     ...bomLine,
     id: catalogLine.id,
+    // Keep catalog commercial fields if BOM snapshot left them empty
+    supplier: bomLine.supplier || catalogLine.supplier || "",
+    link: bomLine.link || catalogLine.link || "",
+    linkAlt: bomLine.linkAlt || catalogLine.linkAlt || "",
+    name: bomLine.name || catalogLine.name || "",
+    unit: bomLine.unit || catalogLine.unit || "шт.",
+    category: bomLine.category || catalogLine.category || "Прочее",
+    price: Number(bomLine.price) > 0 ? Number(bomLine.price) : Number(catalogLine.price) || 0,
     included: true,
     qty: bomQty,
     defaultQty: bomQty,
@@ -84,7 +93,10 @@ function overlayFrameBomOnLines(lines, frameBomItems, { stCount = 1, materials =
     if (!bom) return ln;
     usedBomIds.add(bom.id);
     const bomLine = frameBomProjectItemToBuilderLine(bom, { materials });
-    return applyFrameBomOverlayToCatalogLine(ln, bomLine);
+    const overlaid = applyFrameBomOverlayToCatalogLine(ln, bomLine);
+    return materials?.length
+      ? applyMaterialCatalogFields(overlaid, materials)
+      : overlaid;
   });
   const usedMaterialIds = new Set(merged.map((ln) => ln.materialId).filter(Boolean));
   for (const bom of frameBomItems) {
@@ -109,7 +121,9 @@ export function mergeStellageEditorLines({
   const lines = catalogLines.length
     ? applySavedItemsToCatalogLines(catalogLines, manualItems, { stCount })
     : manualItems.map((it) => projectItemToBuilderLine(it, { stCount }));
-  return overlayFrameBomOnLines(lines, frameBomItems, { stCount, materials });
+  const merged = overlayFrameBomOnLines(lines, frameBomItems, { stCount, materials });
+  if (!materials?.length) return merged;
+  return merged.map((ln) => applyMaterialCatalogFields(ln, materials));
 }
 
 export function parseBuilderLineIdFromProjectItem(itemId, instanceId = "") {

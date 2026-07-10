@@ -172,6 +172,13 @@ export default function FramePdfButton({
     setError('');
     setCombinedResult(null);
     try {
+      let catalog = materials;
+      if (!catalog?.length) {
+        catalog = await api.getMaterials();
+      }
+      if (!catalog?.length) {
+        throw new Error('Не удалось загрузить базу материалов для BOM.');
+      }
       const outcome = await executeFrameSavePdfAndBom({
         confirm,
         savePdf: () => performSavePdf(isReplaceMode),
@@ -179,7 +186,7 @@ export default function FramePdfButton({
         purchaseDraft,
         drawingContext: { ...drawingContext, projectId: drawingContext.projectId },
         updateProject: (id, patch) => actions.projectUpdate(id, patch),
-        materials,
+        materials: catalog,
       });
       if (outcome.cancelled) return;
       if (outcome.skipped) return;

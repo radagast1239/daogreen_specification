@@ -117,12 +117,20 @@ export default function FrameConstructorPage() {
       if (!ok) return;
 
       setBomAddSaving(true);
+      let catalog = materials;
+      if (!catalog?.length) {
+        catalog = await api.getMaterials();
+        setMaterials(catalog);
+      }
+      if (!catalog?.length) {
+        throw new Error("Не удалось загрузить базу материалов для BOM.");
+      }
       const outcome = await applyFrameBomProjectAdd({
         project,
         purchaseDraft,
         drawingContext: { ...drawingContext, projectId: drawingContext.projectId },
         updateProject: (id, patch) => actions.projectUpdate(id, patch),
-        materials,
+        materials: catalog,
       });
       if (outcome.skipped) return;
       setProject(outcome.updated);

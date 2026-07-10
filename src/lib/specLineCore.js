@@ -9,8 +9,8 @@ import { resolveFlowSpecs, normalizeFlowSpecs } from "../../shared/flowSpecs.js"
 import { resolveSplitSpecs, normalizeSplitSpecs } from "../../shared/splitSpecs.js";
 import { resolveItemType } from "../../shared/itemTypes.js";
 
-/** Поля, которые при привязке к materialId берутся из базы, если в шаблоне пусто */
-const MATERIAL_SYNC_KEYS = [
+/** Поля материала, которые всегда берутся из базы при materialId */
+export const MATERIAL_CATALOG_FIELD_KEYS = [
   "name",
   "unit",
   "category",
@@ -31,6 +31,9 @@ const MATERIAL_SYNC_KEYS = [
   "coolingBtu",
   "exhaustM3",
 ];
+
+/** @deprecated use MATERIAL_CATALOG_FIELD_KEYS — kept for fill-if-empty merge in lineFromMaterial */
+const MATERIAL_SYNC_KEYS = MATERIAL_CATALOG_FIELD_KEYS;
 
 function isEmptyCatalogOverride(v) {
   if (v === null || v === undefined) return true;
@@ -119,6 +122,59 @@ export function lineFromMaterial(mat, overrides = {}) {
     exhaustM3: Number(mat.exhaustM3) || 0,
   };
   return blankLine(mergeMaterialWithCatalogOverrides(fromMat, overrides));
+}
+
+/**
+ * Для строки с materialId всегда подтянуть каталожные поля из базы материалов.
+ * Сохраняет qty/included/id/source/pipeCuts/roomId/responsible и прочие проектные поля.
+ */
+export function applyMaterialCatalogFields(line, materials = []) {
+  if (!line) return line;
+  const materialId = String(line.materialId || "").trim();
+  if (!materialId || !materials?.length) return line;
+  const mat = materials.find((m) => (m.id || m.materialId) === materialId);
+  if (!mat) return line;
+  const img = mat.imageUrl || mat.photoUrl || "";
+  const next = {
+    ...line,
+    materialId: mat.id || materialId,
+    name: mat.name,
+    unit: mat.unit || line.unit || "шт.",
+    category: mat.category || line.category || "Прочее",
+    supplier: mat.supplier || "",
+    link: mat.link || "",
+    linkAlt: mat.linkAlt || "",
+    imageUrl: img || line.imageUrl || "",
+    photoUrl: img || line.photoUrl || "",
+    price: Number(mat.basePrice) || 0,
+    vatRate: [0, 5, 20].includes(Number(mat.vatRate)) ? Number(mat.vatRate) : Number(line.vatRate) || 0,
+    clientSection: mat.clientSection || "",
+    clientSubsection: mat.clientSubsection || "",
+    purchaseKey: mat.purchaseKey || "",
+    itemType: resolveItemType({ itemType: mat.itemType || line.itemType }),
+    techNote: mat.techNote || "",
+    clientNote: mat.clientNote || mat.comment || "",
+    coolingKw: Number(mat.coolingKw) || 0,
+    coolingBtu: Number(mat.coolingBtu) || 0,
+    exhaustM3: Number(mat.exhaustM3) || 0,
+  };
+  // subcategory: keep composition group from line if set, else from material
+  if (!String(line.subcategory || line.farmGroup || "").trim()) {
+    next.subcategory = mat.subcategory || materialCompositionGroup(mat) || "";
+  }
+  if (!Array.isArray(line.pipeCuts) || !line.pipeCuts.length) {
+    next.pipeCuts = resolvePipeCuts(mat);
+  }
+  if (!Array.isArray(line.breakerSpecs) || !line.breakerSpecs.length) {
+    next.breakerSpecs = resolveBreakerSpecs(mat);
+  }
+  if (!Array.isArray(line.flowSpecs) || !line.flowSpecs.length) {
+    next.flowSpecs = resolveFlowSpecs(mat);
+  }
+  if (!Array.isArray(line.splitSpecs) || !line.splitSpecs.length) {
+    next.splitSpecs = resolveSplitSpecs(mat);
+  }
+  return next;
 }
 
 /** Строка каталога/пресета → полная строка редактора (данные только из базы материалов) */

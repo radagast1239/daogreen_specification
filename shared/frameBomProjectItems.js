@@ -653,17 +653,22 @@ export function enrichProjectItemFromMaterial(item, materials = []) {
     ...base,
     name: base.name,
     qty: Number(item.qty) || 0,
-    unit: item.unit || base.unit,
+    unit: base.unit || item.unit || "шт.",
     pipeCuts: pipeCuts.length ? pipeCuts : item.pipeCuts,
     techNote: item.techNote || base.techNote,
     clientNote: bomClientNote || base.clientNote,
     comment: bomClientNote || item.comment || base.clientNote,
-    price: Number(item.price) > 0 ? Number(item.price) : base.price,
-    supplier: item.supplier || base.supplier,
-    link: item.link || base.link,
-    linkAlt: item.linkAlt || base.linkAlt,
-    imageUrl: item.imageUrl || item.photoUrl || base.imageUrl,
-    photoUrl: item.photoUrl || item.imageUrl || base.photoUrl,
+    // Material catalog is source of truth for commercial fields
+    price: Number(base.price) || 0,
+    supplier: base.supplier || "",
+    link: base.link || "",
+    linkAlt: base.linkAlt || "",
+    imageUrl: base.imageUrl || item.imageUrl || item.photoUrl || "",
+    photoUrl: base.photoUrl || item.photoUrl || item.imageUrl || "",
+    category: base.category || item.category || "Прочее",
+    clientSection: base.clientSection || "",
+    clientSubsection: base.clientSubsection || "",
+    purchaseKey: base.purchaseKey || "",
   };
 }
 
@@ -863,13 +868,17 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
     }
 
     let enrichedLine = line;
-    if (materials) {
+    if (materials?.length) {
       const { enriched, missing } = enrichFrameBomDraftWithMaterials(line, materials);
       if (!enriched) {
         warnings.push(`Материал не найден в базе: ${missing}`);
         continue;
       }
       enrichedLine = enriched;
+    } else {
+      warnings.push(
+        `Нет каталога материалов — позиция ${line.key || line.materialId || line.name || "?"} сохранена без данных из базы`
+      );
     }
 
     const item = frameBomDraftToProjectItem(enrichedLine, options, sourceRackPrefix, sortOrder);
