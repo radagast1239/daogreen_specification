@@ -7,6 +7,12 @@
  */
 import fs from "fs";
 import path from "path";
+import {
+  createAndVerifySqliteBackup,
+  createBackupScheduler,
+  rotateBackups,
+  verifySqliteBackup,
+} from "./sqliteBackup.js";
 
 const BUCKET = process.env.DB_BACKUP_BUCKET || "daogreen-db";
 const REMOTE_FILE = "daogreen.db";
@@ -14,6 +20,8 @@ const LOCAL_BACKUP_DIR =
   process.env.LOCAL_BACKUP_DIR ||
   (process.platform === "win32" ? null : "/opt/backups/daogreen");
 const LOCAL_BACKUP_KEEP_DAYS = Number(process.env.LOCAL_BACKUP_KEEP_DAYS) || 14;
+const LOCAL_BACKUP_TIMEOUT_MS = Number(process.env.LOCAL_BACKUP_TIMEOUT_MS) || 120_000;
+const SHUTDOWN_BACKUP_WAIT_MS = Number(process.env.SHUTDOWN_BACKUP_WAIT_MS) || 8000;
 
 function supabaseCfg() {
   const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
@@ -26,66 +34,79 @@ export function hasLocalBackupDir() {
   if (!LOCAL_BACKUP_DIR) return false;
   try {
     if (!fs.existsSync(LOCAL_BACKUP_DIR)) return false;
-    return fs.readdirSync(LOCAL_BACKUP_DIR).some((f) => f.endsWith(".db"));
+    return fs.readdirSync(LOCAL_BACKUP_DIR).some((f) => f.endsWith(".db") && !f.endsWith(".tmp"));
   } catch {
     return false;
   }
 }
 
-function pruneLocalBackups() {
-  if (!LOCAL_BACKUP_DIR || !fs.existsSync(LOCAL_BACKUP_DIR)) return;
-  const cutoff = Date.now() - LOCAL_BACKUP_KEEP_DAYS * 86400000;
-  for (const f of fs.readdirSync(LOCAL_BACKUP_DIR)) {
-    const p = path.join(LOCAL_BACKUP_DIR, f);
-    try {
-      if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p);
-    } catch {
-      /* ignore */
-    }
-  }
+function buildLocalBackupPath() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return path.join(LOCAL_BACKUP_DIR, `daogreen_${stamp}.db`);
 }
 
+export function createLocalBackup(localPath, options = {}) {
+  if (!LOCAL_BACKUP_DIR) {
+    return { ok: false, reason: "LOCAL_BACKUP_DIR not configured" };
+  }
+  if (!localPath || !fs.existsSync(localPath)) {
+    return { ok: false, reason: "source DB missing" };
+  }
+
+  const dest = options.targetPath || buildLocalBackupPath();
+  const started = Date.now();
+  const result = createAndVerifySqliteBackup(localPath, dest, {
+    timeoutMs: options.timeoutMs ?? LOCAL_BACKUP_TIMEOUT_MS,
+    expectCounts: options.expectCounts,
+  });
+
+  const finalize = (payload) => {
+    rotateBackups(LOCAL_BACKUP_DIR, LOCAL_BACKUP_KEEP_DAYS);
+    const log = {
+      ok: true,
+      path: dest,
+      size: payload.size,
+      durationMs: Date.now() - started,
+      counts: payload.verification.counts,
+    };
+    console.log(`DB backup: ${JSON.stringify(log)}`);
+    return log;
+  };
+
+  if (result instanceof Promise) {
+    return result.then(finalize);
+  }
+  return finalize(result);
+}
+
+/** @deprecated use createLocalBackup */
 export function copyLocalBackup(localPath) {
-  if (!LOCAL_BACKUP_DIR || !fs.existsSync(localPath)) return false;
-  fs.mkdirSync(LOCAL_BACKUP_DIR, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const dest = path.join(LOCAL_BACKUP_DIR, `daogreen_${stamp}.db`);
-  fs.copyFileSync(localPath, dest);
-  pruneLocalBackups();
-  console.log(`DB backup: локальная копия ${dest}`);
-  return true;
+  const result = createLocalBackup(localPath);
+  if (result instanceof Promise) {
+    return result.then((payload) => payload.ok).catch(() => false);
+  }
+  return result.ok;
 }
 
 export function startLocalBackupLoop(localPath, intervalMs = 60 * 60 * 1000) {
   if (!LOCAL_BACKUP_DIR) {
     console.log("DB backup: LOCAL_BACKUP_DIR не задан — только основной файл БД");
-    return () => {};
+    return async () => {};
   }
-  let busy = false;
-  const tick = () => {
-    if (busy) return;
-    busy = true;
-    try {
-      copyLocalBackup(localPath);
-    } catch (e) {
-      console.warn("Local DB backup:", e.message);
-    } finally {
-      busy = false;
-    }
+
+  const scheduler = createBackupScheduler({
+    intervalMs,
+    runBackup: () => createLocalBackup(localPath),
+  });
+
+  const shutdown = async () => {
+    await scheduler.shutdown({ waitMs: SHUTDOWN_BACKUP_WAIT_MS });
   };
-  tick();
-  const id = setInterval(tick, intervalMs);
-  const onStop = () => {
-    clearInterval(id);
-    try {
-      copyLocalBackup(localPath);
-    } catch {
-      /* ignore */
-    }
-  };
-  process.on("SIGTERM", onStop);
-  process.on("SIGINT", onStop);
-  return onStop;
+
+  scheduler.start();
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
+  return shutdown;
 }
 
 export function backupStatus() {
@@ -150,67 +171,69 @@ export async function downloadDb(localPath) {
 export async function uploadDb(localPath) {
   const cfg = supabaseCfg();
   if (!cfg || !fs.existsSync(localPath)) return false;
-  const body = fs.readFileSync(localPath);
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const archivePath = `backups/daogreen-${stamp}.db`;
 
-  async function put(pathname) {
-    let res = await storage(pathname, {
-      method: "POST",
-      body,
-      contentType: "application/x-sqlite3",
-    });
-    if (!res.ok) {
-      res = await storage(pathname, {
-        method: "PUT",
+  const tmpPath = path.join(path.dirname(localPath), `.upload-${Date.now()}.db`);
+  try {
+    createAndVerifySqliteBackup(localPath, tmpPath, { timeoutMs: LOCAL_BACKUP_TIMEOUT_MS });
+    const body = fs.readFileSync(tmpPath);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const archivePath = `backups/daogreen-${stamp}.db`;
+
+    async function put(pathname) {
+      let res = await storage(pathname, {
+        method: "POST",
         body,
         contentType: "application/x-sqlite3",
       });
+      if (!res.ok) {
+        res = await storage(pathname, {
+          method: "PUT",
+          body,
+          contentType: "application/x-sqlite3",
+        });
+      }
+      return res.ok;
     }
-    return res.ok;
-  }
 
-  const archived = await put(archivePath);
-  const latest = await put(REMOTE_FILE);
-  if (!latest) {
-    console.warn("DB backup upload failed for latest copy");
-    return false;
+    const archived = await put(archivePath);
+    const latest = await put(REMOTE_FILE);
+    if (!latest) {
+      console.warn("DB backup upload failed for latest copy");
+      return false;
+    }
+    console.log(
+      `DB backup: сохранено ${body.length} байт в Supabase` +
+        (archived ? ` (+ архив ${archivePath})` : "")
+    );
+    return true;
+  } finally {
+    try {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    } catch {
+      /* ignore */
+    }
   }
-  console.log(
-    `DB backup: сохранено ${body.length} байт в Supabase` +
-      (archived ? ` (+ архив ${archivePath})` : "")
-  );
-  return true;
 }
 
 export function startDbBackupLoop(localPath, intervalMs = 60_000) {
   if (!supabaseCfg()) {
     console.log("DB backup: Supabase не настроен — данные только локально (на Render Free сбросятся при редеплое)");
-    return () => {};
+    return async () => {};
   }
 
-  let busy = false;
-  const tick = async () => {
-    if (busy) return;
-    busy = true;
-    try {
-      await uploadDb(localPath);
-    } catch (e) {
-      console.warn("DB backup:", e.message);
-    } finally {
-      busy = false;
-    }
+  const scheduler = createBackupScheduler({
+    intervalMs,
+    runBackup: () => uploadDb(localPath),
+  });
+
+  const shutdown = async () => {
+    await scheduler.shutdown({ waitMs: SHUTDOWN_BACKUP_WAIT_MS });
   };
 
-  const id = setInterval(tick, intervalMs);
-  const onStop = async () => {
-    clearInterval(id);
-    await uploadDb(localPath);
-  };
-  process.on("SIGTERM", onStop);
-  process.on("SIGINT", onStop);
-
-  return onStop;
+  scheduler.start();
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
+  return shutdown;
 }
 
 export async function initRemoteDb(localPath) {
@@ -218,3 +241,5 @@ export async function initRemoteDb(localPath) {
   await ensureBucket();
   await downloadDb(localPath);
 }
+
+export { createAndVerifySqliteBackup as createSqliteBackup, verifySqliteBackup, rotateBackups, createBackupScheduler };
