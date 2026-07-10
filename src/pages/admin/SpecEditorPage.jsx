@@ -1,31 +1,3 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, Link, useSearchParams, useNavigate } from "react-router-dom";
-import { useStore } from "../../store/StoreContext.jsx";
-import {
-  projectTotals,
-  projectStats,
-  groupBy,
-  mergedPurchaseList,
-  money,
-  num,
-} from "../../store/helpers.js";
-import { SPECIALIST_MAP, PURCHASE_STATUSES } from "../../data/modules.js";
-import { VAT_RATES, lineGross, lineContributesToSum, RESPONSIBLE_OPTIONS } from "../../lib/itemHelpers.js";
-import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient, buildClientVisibilityPatch } from "../../../shared/itemTypes.js";
-import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
-import { buildModuleSelectionFromIds } from "../../../shared/specLineSelection.js";
-import { PROJECT_DASHBOARD_FILTERS, resolveDashboardFilterLabel, buildProjectDashboardSummary } from "../../../shared/projectDashboardSummary.js";
-import { FARM_LINE_GROUPS, farmLineGroupLabel } from "../../../shared/farmLineGroups.js";
-import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
-import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
-import { clientLink, photoSrc } from "../../lib/api.js";
-import { PageHeader } from "../../components/Layout.jsx";
-import { Progress, Stat, Empty, ClientLinkModal, StatusChip } from "../../components/ui.jsx";
-import Breadcrumbs from "../../components/Breadcrumbs.jsx";
-import Collapsible from "../../components/Collapsible.jsx";
-import PageSkeleton from "../../components/PageSkeleton.jsx";
-import { useToast } from "../../components/Toast.jsx";
-import StellageFrameDrawingsPanel from "../../components/StellageFrameDrawingsPanel.jsx";
 import { resolveAdminItemSourceLabel } from "../../../shared/frameBomProjectItems.js";
 import { buildBuilderDraftPath, isDraftProject, resolveBuilderWizardStep } from "../../../shared/projectLifecycle.js";
 import SaveSectionTemplateModal from "../../components/SaveSectionTemplateModal.jsx";
@@ -42,7 +14,33 @@ import {
   applyCoolingCalcToRoom,
   clearRoomCooling,
 } from "../../../shared/roomCoolingWorkflow.js";
-import RoomCoolingSummary from "../../components/RoomCoolingSummary.jsx";
+import { SPECIALIST_MAP, PURCHASE_STATUSES } from "../../data/modules.js";
+import { VAT_RATES, lineGross, lineContributesToSum, RESPONSIBLE_OPTIONS } from "../../lib/itemHelpers.js";
+import {
+  projectTotals,
+  projectStats,
+  groupBy,
+  mergedPurchaseList,
+  money,
+  num,
+} from "../../store/helpers.js";
+import { useStore } from "../../store/StoreContext.jsx";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, Link, useSearchParams, useNavigate } from "react-router-dom";
+import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
+import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient, buildClientVisibilityPatch } from "../../../shared/itemTypes.js";
+import { buildModuleSelectionFromIds } from "../../../shared/specLineSelection.js";
+import { FARM_LINE_GROUPS, farmLineGroupLabel } from "../../../shared/farmLineGroups.js";
+import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
+import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
+import { clientLink, photoSrc } from "../../lib/api.js";
+import { PageHeader } from "../../components/Layout.jsx";
+import { Progress, Stat, Empty, ClientLinkModal, StatusChip } from "../../components/ui.jsx";
+import Breadcrumbs from "../../components/Breadcrumbs.jsx";
+import Collapsible from "../../components/Collapsible.jsx";
+import PageSkeleton from "../../components/PageSkeleton.jsx";
+import { useToast } from "../../components/Toast.jsx";
+import StellageFrameDrawingsPanel from "../../components/StellageFrameDrawingsPanel.jsx";
 import RoomCoolingEditor from "../../components/RoomCoolingEditor.jsx";
 import { syncRoomAcSpecItems } from "../../../shared/roomAcSync.js";
 import ReplacementReviewModal from "../../components/ReplacementReviewModal.jsx";
@@ -50,8 +48,9 @@ import { findStaleProjectPrices } from "../../../shared/staleProjectPrices.js";
 import ActivityFeed from "../../components/ActivityFeed.jsx";
 import PublishChecklist, { PublishGateModal } from "../../components/PublishChecklist.jsx";
 import ProjectHqBar from "../../components/ProjectHqBar.jsx";
-import ClientDeliveryPanel from "../../components/ClientDeliveryPanel.jsx";
-import ProjectPreSendPanel from "../../components/ProjectPreSendPanel.jsx";
+import ProjectClientReadinessPanel from "../../components/ProjectClientReadinessPanel.jsx";
+import ProjectCoolingSummary from "../../components/ProjectCoolingSummary.jsx";
+import SpecQuickFilters from "../../components/SpecQuickFilters.jsx";
 import PrePublishCheckModal from "../../components/PrePublishCheckModal.jsx";
 import ImportFromProjectModal from "../../components/ImportFromProjectModal.jsx";
 import CompareProjectsModal from "../../components/CompareProjectsModal.jsx";
@@ -66,6 +65,7 @@ import {
   isStellageModuleTitle,
   STELLAGE_GROUPS,
 } from "../../../shared/stellageComposition.js";
+
 const TAB_LABELS = {
   spec: "Спецификация",
   merged: "Общий список",
@@ -106,11 +106,6 @@ export default function SpecEditorPage() {
   const [specSelectedIds, setSpecSelectedIds] = useState([]);
   const clearSpecSelectionRef = useRef(null);
   const applySpecSelectionRef = useRef(null);
-
-  const deliveryPreSend = useMemo(
-    () => buildProjectDashboardSummary(project?.items || [], { publishCheck }).preSendMessages,
-    [project?.items, publishCheck]
-  );
 
   const stalePrices = useMemo(
     () => findStaleProjectPrices(project?.items || [], state.materials),
@@ -553,37 +548,6 @@ export default function SpecEditorPage() {
         sub={`${project.client || "—"}${project.city ? " · " + project.city : ""}${
           project.area ? " · " + project.area + " м²" : ""
         } · ${project.type}`}
-        actions={
-          <>
-            <Link className="btn" to={`/project/${project.id}/plan`}>▦ План</Link>
-            <button className="btn" onClick={exportSpec} title="Внутренний Excel (все поля)">Excel ↓</button>
-            <button className="btn" onClick={() => setImportOpen(true)}>Из прошлого</button>
-            <button className="btn" onClick={() => setCompareOpen(true)}>Сравнить</button>
-            <details style={{ position: "relative" }}>
-              <summary className="btn btn-ghost" style={{ cursor: "pointer" }}>Ещё ▾</summary>
-              <div
-                className="card"
-                style={{
-                  position: "absolute",
-                  right: 0,
-                  top: "100%",
-                  marginTop: 4,
-                  padding: 8,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                  zIndex: 100,
-                  minWidth: 200,
-                }}
-              >
-                <button className="btn btn-sm" onClick={() => setDupOpen(true)}>На основе прошлого</button>
-                <button className="btn btn-sm" onClick={approveAll}>Показать всё клиенту</button>
-                <button className="btn btn-sm" disabled={!url} onClick={requestClientLink}>QR / Шаблон ссылки</button>
-                <button className="btn btn-sm btn-ghost" onClick={regenerateLink}>↻ Сбросить ссылку</button>
-              </div>
-            </details>
-          </>
-        }
       />
 
       <div className="content">
@@ -600,32 +564,20 @@ export default function SpecEditorPage() {
           onCopyClientLink={copyClientLink}
           onExportPdf={exportClientPdf}
           onExportExcel={exportClientExcel}
-          onPrepareClient={prepareClientNotice}
           onFilterSelect={handleDashboardFilter}
-          activeFilter={specQuickFilter}
+          onOpenPlan={() => nav(`/project/${project.id}/plan`)}
+          onImportFromPast={() => setImportOpen(true)}
+          onCompare={() => setCompareOpen(true)}
+          onDuplicate={() => setDupOpen(true)}
+          onApproveAll={approveAll}
+          onResetLink={regenerateLink}
+          onInternalExcel={exportSpec}
         />
 
-        <ClientDeliveryPanel
+        <ProjectClientReadinessPanel
           items={project.items || []}
           materials={state.materials}
           currency={project.currency}
-          activeFilter={specQuickFilter}
-          onFilterSelect={handleDashboardFilter}
-          selectedItemIds={specSelectedIds}
-          onBulkShowClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(true))}
-          onBulkHideClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(false))}
-          onBulkRefreshPrice={bulkDeliveryRefreshPrice}
-          onClearSelection={() => clearSpecSelectionRef.current?.()}
-          onExportPdf={exportClientPdf}
-          onExportExcel={exportClientExcel}
-          onOpenClientLink={() => url && window.open(url, "_blank", "noopener,noreferrer")}
-          onCopyClientLink={copyClientLink}
-          preSendMessages={deliveryPreSend}
-        />
-
-        <ProjectPreSendPanel
-          items={project.items || []}
-          materials={state.materials}
           publishCheck={publishCheck}
           activeFilter={specQuickFilter}
           onFilterSelect={handleDashboardFilter}
@@ -770,11 +722,11 @@ export default function SpecEditorPage() {
         </div>
         <ProjectDocuments projectId={project.id} />
 
-        <Collapsible title="История: клиент и Daogreen" subtitle={`${activity.length} записей`} defaultOpen={activity.length > 0}>
+        <Collapsible title="История: клиент и Daogreen" subtitle={`${activity.length} записей`} defaultOpen={false}>
           <ActivityFeed activity={activity} title="" />
         </Collapsible>
 
-        <Collapsible title="Сводка и прогресс" subtitle={`${stats.total} позиций`} defaultOpen>
+        <Collapsible title="Сводка и прогресс" subtitle={`${stats.total} позиций`} defaultOpen={false}>
         <div className="stat-grid" style={{ marginBottom: 0 }}>
           <Stat k="Без НДС" v={money(totals.budgetNet, project.currency)} />
           <Stat k="НДС" v={money(totals.vatAmount, project.currency)} />
@@ -827,7 +779,10 @@ export default function SpecEditorPage() {
 
         {tab === "spec" && (
           <>
-            <RoomCoolingSummary project={project} />
+            <ProjectCoolingSummary
+              project={project}
+              onOpenCalc={() => setTab("calc")}
+            />
             <SpecTab
               project={project}
               patchItem={patchItem}
@@ -842,6 +797,10 @@ export default function SpecEditorPage() {
               quickFilter={specQuickFilter}
               onQuickFilterChange={setSpecQuickFilter}
               onSelectionChange={setSpecSelectedIds}
+              publishCheck={publishCheck}
+              onBulkShowClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(true))}
+              onBulkHideClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(false))}
+              onBulkRefreshPrice={bulkDeliveryRefreshPrice}
               registerClearSelection={(fn) => {
                 clearSpecSelectionRef.current = fn;
               }}
@@ -975,6 +934,10 @@ function SpecTab({
   quickFilter = "",
   onQuickFilterChange,
   onSelectionChange,
+  publishCheck,
+  onBulkShowClient,
+  onBulkHideClient,
+  onBulkRefreshPrice,
   registerClearSelection,
   registerApplySelection,
 }) {
@@ -1219,61 +1182,23 @@ function SpecTab({
         />
       </Collapsible>
 
-      <div className="spec-quick-filters no-print">
-        {quickFilter ? (
-          <div className="spec-active-filter">
-            <span className="chip chip--brand spec-active-filter__chip">
-              Показаны: <strong>{resolveDashboardFilterLabel(quickFilter)}</strong>
-            </span>
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={() => onQuickFilterChange?.("")}
-            >
-              Сбросить фильтр
-            </button>
-          </div>
-        ) : null}
-        <span className="muted" style={{ fontSize: 12 }}>Быстрый фильтр:</span>
-        {PROJECT_DASHBOARD_FILTERS.map(({ id, label }) => (
-          <button
-            key={id || "all"}
-            type="button"
-            className={`btn btn-sm${quickFilter === id ? " btn-primary" : ""}`}
-            onClick={() => onQuickFilterChange?.(id)}
-          >
-            {label}
-          </button>
-        ))}
-        <button
-          type="button"
-          className="btn btn-sm btn-primary"
-          onClick={() => syncClientSections(selectedItemIds)}
-          title="Раздел и подраздел для клиентской закупки из справочника материалов"
-        >
-          Клиент. разделы из базы
-          {selectedItemIds.length > 0 ? ` (${selectedItemIds.length})` : ""}
-        </button>
-        {selectedItemIds.length > 0 && (
-          <span className="spec-refresh-toolbar">
-            <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
-              Выбрано: {selectedItemIds.length}
-            </span>
-            {REFRESH_ACTIONS.map(([field, label]) => (
-              <button
-                key={field}
-                type="button"
-                className="btn btn-sm"
-                onClick={() =>
-                  refreshFromBase(selectedItemIds, field === "all" ? ["all"] : [field])
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </span>
-        )}
-      </div>
+      <SpecQuickFilters
+        items={project.items || []}
+        materials={materials}
+        publishCheck={publishCheck}
+        quickFilter={quickFilter}
+        onQuickFilterChange={onQuickFilterChange}
+        selectedItemIds={selectedItemIds}
+        onSelectItems={(ids) => {
+          const next = buildModuleSelectionFromIds(project.items || [], ids);
+          setModuleSelected(next);
+        }}
+        onBulkShowClient={onBulkShowClient}
+        onBulkHideClient={onBulkHideClient}
+        onBulkRefreshPrice={onBulkRefreshPrice}
+        onClearSelection={() => setModuleSelected({})}
+        syncClientSections={syncClientSections}
+      />
       </>
       )}
 

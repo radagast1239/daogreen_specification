@@ -98,10 +98,10 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
   if (!stellages.length) return null;
 
   return (
-    <div className="card" id="stellages-panel" style={{ padding: 14, marginBottom: 12 }}>
-      <h3 style={{ marginTop: 0, fontSize: 15 }}>Схемы каркасов</h3>
-      <p className="muted" style={{ fontSize: 12, margin: '0 0 10px' }}>
-        PDF-схемы из конструктора каркасов. «Обновить BOM» пересобирает закупку по сохранённой схеме без открытия конструктора.
+    <div className="card" id="stellages-panel" style={{ padding: 12, marginBottom: 10 }}>
+      <h3 style={{ marginTop: 0, fontSize: 14, marginBottom: 6 }}>Схемы каркасов</h3>
+      <p className="muted" style={{ fontSize: 11, margin: '0 0 8px' }}>
+        «Обновить BOM» — в меню «Ещё», без открытия конструктора.
       </p>
       {loading ? (
         <p className="muted" style={{ fontSize: 13 }}>Загрузка…</p>
@@ -140,6 +140,7 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
                   context={ctx}
                   drawings={rackDrawings}
                   presetDrawing={presetDrawing}
+                  projectItems={project?.items || []}
                   onRefreshBom={handleRefreshBom}
                   canRefreshBom={refreshState.enabled}
                   refreshBomBusy={refreshBusyRack === moduleRackKey}

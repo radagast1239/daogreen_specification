@@ -1,70 +1,29 @@
-import React, { useMemo } from "react";
-import { buildHqMetrics, coolingSubLabel } from "../lib/projectHqStats.js";
+import React, { useMemo, useState } from "react";
+import { money } from "../store/helpers.js";
+import { buildHqMetrics } from "../lib/projectHqStats.js";
 import {
   buildProjectDashboardSummary,
-  metricTone,
   shortPublishHeadline,
 } from "../../shared/projectDashboardSummary.js";
+import { buildClientPurchaseSummary } from "../../shared/clientPurchaseSummary.js";
+import {
+  PROJECT_HEADER_MORE_ACTIONS,
+  PROJECT_HEADER_PRIMARY_ACTIONS,
+} from "../../shared/projectWorkspaceUi.js";
 
-function toneClass(tone) {
-  if (tone === "ok") return "project-hq__kpi--ok";
-  if (tone === "warn") return "project-hq__kpi--warn";
-  if (tone === "bad") return "project-hq__kpi--bad";
-  return "project-hq__kpi--neutral";
-}
-
-function metricClass(tone) {
-  if (tone === "ok") return "project-hq__metric--ok";
-  if (tone === "warn") return "project-hq__metric--warn";
-  if (tone === "bad") return "project-hq__metric--bad";
-  return "project-hq__metric--neutral";
-}
-
-function Kpi({ title, value, sub, tone = "neutral" }) {
-  return (
-    <div className={`project-hq__kpi card ${toneClass(tone)}`}>
-      <div className="project-hq__kpi-value num">{value}</div>
-      <div className="project-hq__kpi-title">{title}</div>
-      {sub ? (
-        <div className="project-hq__kpi-sub muted">{sub}</div>
-      ) : null}
-    </div>
-  );
-}
-
-function MetricChip({ label, value, tone, filter, activeFilter, onFilterSelect }) {
-  const canReset = filter === "" && !!activeFilter;
-  const canFilter = !!filter && value > 0;
-  const clickable = !!onFilterSelect && (canReset || canFilter);
-  const active = filter ? activeFilter === filter : !activeFilter;
-  return (
-    <button
-      type="button"
-      className={`project-hq__metric ${metricClass(tone)}${active ? " project-hq__metric--active" : ""}`}
-      disabled={!clickable}
-      onClick={() => clickable && onFilterSelect(filter)}
-      title={clickable ? "Показать в таблице" : undefined}
-    >
-      <span className="project-hq__metric-value num">{value}</span>
-      <span className="project-hq__metric-label">{label}</span>
-    </button>
-  );
-}
-
-function PreSendItem({ msg, onFilterSelect }) {
-  const clickable = !!msg.filter && !!onFilterSelect;
-  return (
-    <li>
-      <button
-        type="button"
-        className={`project-hq__presend-item project-hq__presend-item--${msg.severity}${clickable ? " project-hq__presend-item--clickable" : ""}`}
-        onClick={() => clickable && onFilterSelect(msg.filter)}
-      >
-        <span>{msg.text}</span>
-        {clickable ? <span className="project-hq__presend-goto">Показать →</span> : null}
-      </button>
-    </li>
-  );
+function formatUpdatedAt(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "—";
+  }
 }
 
 export default function ProjectHqBar({
@@ -80,12 +39,19 @@ export default function ProjectHqBar({
   onCopyClientLink,
   onExportPdf,
   onExportExcel,
-  onPrepareClient,
   onFilterSelect,
-  activeFilter = "",
+  onOpenPlan,
+  onImportFromPast,
+  onCompare,
+  onDuplicate,
+  onApproveAll,
+  onResetLink,
+  onInternalExcel,
   pdfDisabled = false,
   excelDisabled = false,
 }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+
   const metrics = useMemo(
     () => buildHqMetrics({ project, items, publishCheck }),
     [project, items, publishCheck]
@@ -96,24 +62,10 @@ export default function ProjectHqBar({
     [items, publishCheck]
   );
 
-  const publishTone =
-    metrics.publishStatus === "ok"
-      ? "ok"
-      : metrics.publishStatus === "warnings"
-        ? "warn"
-        : "bad";
-
-  const coolingTone = metrics.coolingSummary.status === "ok" ? "ok" : "warn";
-
-  const linkTone =
-    metrics.linkStatus.status === "active"
-      ? "ok"
-      : metrics.linkStatus.status === "expired"
-        ? "bad"
-        : "neutral";
-
-  const readinessTone =
-    summary.readiness.score >= 90 ? "ok" : summary.readiness.score >= 70 ? "warn" : "bad";
+  const purchaseSummary = useMemo(
+    () => buildClientPurchaseSummary(items),
+    [items]
+  );
 
   const preSendTone =
     summary.readiness.status === "ok"
@@ -127,6 +79,12 @@ export default function ProjectHqBar({
     warnings: summary.readiness.warnings,
   });
 
+  const purchase = metrics.purchaseProgress;
+  const purchaseValue = purchase?.show
+    ? purchase.headline
+    : "Не начата";
+  const purchaseDetail = purchase?.show ? purchase.detail : "клиент ещё не отмечал";
+
   const handlePublishCheck = () => {
     if (onOpenPrePublish) {
       if (onRefreshPublishCheck) onRefreshPublishCheck().then(() => onOpenPrePublish());
@@ -136,184 +94,99 @@ export default function ProjectHqBar({
     onRefreshPublishCheck?.();
   };
 
-  const dashboardMetrics = [
-    { label: "Всего", value: summary.totalItems, tone: "neutral", filter: "" },
-    { label: "Клиенту", value: summary.clientVisibleItems, tone: "ok", filter: "client_visible" },
-    { label: "Без цены", value: summary.noPrice, tone: metricTone(summary.noPrice), filter: "no_price" },
-    { label: "Без фото", value: summary.noPhoto, tone: metricTone(summary.noPhoto), filter: "no_photo" },
-    { label: "Без ссылки", value: summary.noLink, tone: metricTone(summary.noLink), filter: "no_link" },
-    { label: "Без поставщика", value: summary.noSupplier, tone: metricTone(summary.noSupplier), filter: "no_supplier" },
-    { label: "Нужна помощь", value: summary.needHelp, tone: metricTone(summary.needHelp), filter: "need_help" },
-    {
-      label: "Замена на проверке",
-      value: summary.replacementCheck,
-      tone: metricTone(summary.replacementCheck),
-      filter: "replacement_check",
-    },
-    { label: "Не подходит", value: summary.notFit, tone: metricTone(summary.notFit, { badFrom: 1 }), filter: "not_fit" },
-    { label: "Из схемы стеллажа", value: summary.bomItems, tone: "neutral", filter: "frame_bom" },
-  ];
+  const moreHandlers = {
+    plan: onOpenPlan,
+    import: onImportFromPast,
+    compare: onCompare,
+    readiness: handlePublishCheck,
+    problems: () => onFilterSelect?.("problems"),
+    duplicate: onDuplicate,
+    approve_all: onApproveAll,
+    qr_link: onOpenClientLink,
+    reset_link: onResetLink,
+    internal_excel: onInternalExcel,
+  };
 
   return (
-    <section className="project-hq card no-print" aria-label="Штаб проекта">
-      <div className="project-hq__head between wrap" style={{ gap: 10 }}>
-        <div>
-          <strong className="project-hq__title">Штаб проекта</strong>
-          <p className="muted project-hq__subtitle">
-            Готовность к отправке клиенту
-            {publishCheckLoading ? " · обновление…" : ""}
-          </p>
+    <section className="project-hq project-hq--compact card no-print" aria-label="Проект">
+      <div className="project-hq__compact-row">
+        <div className="project-hq__compact-meta">
+          <div className="project-hq__compact-title-row">
+            <strong className="project-hq__title">{project?.name || "Проект"}</strong>
+            <span className={`chip chip--${preSendTone === "ok" ? "ok" : preSendTone === "warn" ? "amber" : "danger"}`}>
+              {headBadge}
+            </span>
+            {publishCheckLoading ? <span className="muted" style={{ fontSize: 11 }}>обновление…</span> : null}
+          </div>
+          <div className="project-hq__compact-facts muted">
+            <span>Клиент: <b>{project?.client || "—"}</b></span>
+            <span>Тип: <b>{project?.type || "—"}</b></span>
+            <span>Статус: <b>{headBadge}</b></span>
+            <span>Версия: <b>{metrics.versionLabel}</b></span>
+            <span>
+              Итог закупки:{" "}
+              <b className="num">
+                {money(purchaseSummary.purchaseTotal || 0, project?.currency || "₽")}
+              </b>
+            </span>
+            <span>
+              Прогресс закупки: <b>{purchaseValue}</b>
+              {purchaseDetail ? <span className="project-hq__compact-sub"> · {purchaseDetail}</span> : null}
+            </span>
+            <span>Обновлено: <b>{formatUpdatedAt(project?.updatedAt || project?.updated_at)}</b></span>
+          </div>
         </div>
-        <div className={`chip chip--${preSendTone === "ok" ? "ok" : preSendTone === "warn" ? "amber" : "danger"}`}>
-          {headBadge}
-        </div>
-      </div>
 
-      <div className="project-hq__section">
-        <div className="project-hq__section-title">Готовность проекта</div>
-        <div className="project-hq__metrics">
-          {dashboardMetrics.map((m) => (
-            <MetricChip
-              key={m.label}
-              label={m.label}
-              value={m.value}
-              tone={m.tone}
-              filter={m.filter}
-              activeFilter={activeFilter}
-              onFilterSelect={onFilterSelect}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className={`project-hq__presend project-hq__presend--${preSendTone}`}>
-        <div className="project-hq__section-title">Перед отправкой клиенту</div>
-        {summary.readiness.ready ? (
-          <p className="project-hq__presend-ok muted" style={{ fontSize: 13, margin: "6px 0 0" }}>
-            Готово — можно отправить ссылку, PDF или Excel.
-          </p>
-        ) : (
-          <ul className="project-hq__presend-list">
-            {summary.preSendMessages.map((msg) => (
-              <PreSendItem key={msg.key} msg={msg} onFilterSelect={onFilterSelect} />
-            ))}
-          </ul>
-        )}
-        {summary.readiness.blockers > 0 && (
-          <p className="muted" style={{ fontSize: 12, margin: "8px 0 0" }}>
-            Блокеров: <span className="num">{summary.readiness.blockers}</span>
-            {summary.readiness.warnings > 0 ? (
-              <>
-                {" "}
-                · предупреждений: <span className="num">{summary.readiness.warnings}</span>
-              </>
-            ) : null}
-          </p>
-        )}
-      </div>
-
-      <div className="project-hq__grid">
-        <Kpi
-          title="готовность"
-          value={publishCheckLoading && !publishCheck ? "…" : `${summary.readiness.score}%`}
-          sub="клиентская выдача"
-          tone={readinessTone}
-        />
-        <Kpi
-          title="публикация"
-          value={metrics.publishStatusLabel}
-          sub={
-            metrics.publishProblemsCount > 0
-              ? `${metrics.criticalCount} крит. · ${metrics.warningsCount} предупр.`
-              : "без замечаний"
-          }
-          tone={publishTone}
-        />
-        <Kpi
-          title="охлаждение"
-          value={metrics.coolingSummary.label}
-          sub={coolingSubLabel(metrics.coolingSummary)}
-          tone={coolingTone}
-        />
-        <Kpi
-          title="замены"
-          value={metrics.replacementsCount > 0 ? `${metrics.replacementsCount} на проверке` : "Нет"}
-          sub="клиентские замены"
-          tone={metrics.replacementsCount > 0 ? "warn" : "ok"}
-        />
-        <Kpi
-          title="ссылка"
-          value={metrics.linkStatus.label}
-          sub={metrics.linkStatus.expiresAt ? `до ${new Date(metrics.linkStatus.expiresAt).toLocaleDateString("ru-RU")}` : "клиентский доступ"}
-          tone={linkTone}
-        />
-        <Kpi title="версия" value={metrics.versionLabel} sub="опубликованный снимок" tone="neutral" />
-        {metrics.purchaseProgress.show ? (
-          <Kpi
-            title={metrics.purchaseProgress.title}
-            value={metrics.purchaseProgress.headline}
-            sub={metrics.purchaseProgress.detail}
-            tone="neutral"
-          />
-        ) : (
-          <Kpi title="закупка" value="Не начата" sub="клиент ещё не отмечал" tone="neutral" />
-        )}
-      </div>
-
-      <div className="project-hq__actions row wrap">
-        <button type="button" className="btn btn-sm btn-primary" onClick={handlePublishCheck}>
-          Проверить готовность
-        </button>
-        <button
-          type="button"
-          className="btn btn-sm"
-          disabled={!clientUrl}
-          onClick={onOpenClientPreview}
-        >
-          Открыть клиентскую ссылку
-        </button>
-        <button
-          type="button"
-          className="btn btn-sm"
-          disabled={!clientUrl}
-          onClick={onCopyClientLink || onOpenClientLink}
-        >
-          Скопировать ссылку
-        </button>
-        <button
-          type="button"
-          className="btn btn-sm"
-          disabled={pdfDisabled}
-          onClick={onExportPdf}
-        >
-          Скачать PDF
-        </button>
-        <button
-          type="button"
-          className="btn btn-sm"
-          disabled={excelDisabled}
-          onClick={onExportExcel}
-        >
-          Скачать Excel
-        </button>
-        {summary.preSendMessages.length > 0 && onFilterSelect ? (
+        <div className="project-hq__compact-actions">
           <button
             type="button"
-            className="btn btn-sm btn-ghost"
-            onClick={() => onFilterSelect("problems")}
+            className="btn btn-sm btn-primary"
+            disabled={!clientUrl}
+            onClick={onOpenClientPreview}
           >
-            Показать проблемные позиции
+            {PROJECT_HEADER_PRIMARY_ACTIONS[0].label}
           </button>
-        ) : (
           <button
             type="button"
-            className="btn btn-sm btn-ghost"
-            onClick={onPrepareClient}
-            title="Дополнительный мастер подготовки — позже"
+            className="btn btn-sm"
+            disabled={!clientUrl}
+            onClick={onCopyClientLink || onOpenClientLink}
           >
-            Подготовить клиенту
+            {PROJECT_HEADER_PRIMARY_ACTIONS[1].label}
           </button>
-        )}
+          <button type="button" className="btn btn-sm" disabled={pdfDisabled} onClick={onExportPdf}>
+            {PROJECT_HEADER_PRIMARY_ACTIONS[2].label}
+          </button>
+          <button type="button" className="btn btn-sm" disabled={excelDisabled} onClick={onExportExcel}>
+            {PROJECT_HEADER_PRIMARY_ACTIONS[3].label}
+          </button>
+          <details
+            className="project-hq__more"
+            open={moreOpen}
+            onToggle={(e) => setMoreOpen(e.target.open)}
+          >
+            <summary className="btn btn-sm btn-ghost">Ещё ▾</summary>
+            <div className="project-hq__more-menu card">
+              {PROJECT_HEADER_MORE_ACTIONS.map((action) => {
+                const handler = moreHandlers[action.key];
+                return (
+                  <button
+                    key={action.key}
+                    type="button"
+                    className="btn btn-sm btn-ghost project-hq__more-item"
+                    disabled={!handler || (action.key === "qr_link" && !clientUrl)}
+                    onClick={() => {
+                      setMoreOpen(false);
+                      handler?.();
+                    }}
+                  >
+                    {action.label}
+                  </button>
+                );
+              })}
+            </div>
+          </details>
+        </div>
       </div>
     </section>
   );

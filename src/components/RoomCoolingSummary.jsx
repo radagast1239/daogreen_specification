@@ -9,7 +9,7 @@ function resolveItemRoomId(item, rooms, itemRoomBySelection) {
   return itemRoomBySelection.get(item?.id) || "_none";
 }
 
-export default function RoomCoolingSummary({ project }) {
+export default function RoomCoolingSummary({ project, forceOpen = false }) {
   const rows = useMemo(() => {
     const rooms = project.rooms || [];
     const items = project.items || [];
@@ -50,35 +50,41 @@ export default function RoomCoolingSummary({ project }) {
 
   if (!rows.length) return null;
 
+  const body = (
+    <div className="card" style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+      {rows.map((r) => (
+        <div
+          key={r.roomId}
+          style={{
+            padding: "8px 12px",
+            background: "var(--bg-info, #eef6ff)",
+            border: "1px solid var(--border-info, #cfe3fb)",
+            borderRadius: 6,
+            fontSize: 13,
+          }}
+        >
+          <b>Комната {roomLabel(project.rooms, r.roomId) || "—"}</b>
+          {" · "}
+          холод <span className="num">{num(r.kw)}</span> кВт
+          {" · "}
+          <span className="num">{num(r.btu)}</span> BTU
+          {" · "}
+          потребление ~<span className="num">{num(r.consumption)}</span> кВт
+          {r.exhaust > 0 && (
+            <>
+              {" · "}вытяжка <span className="num">{num(r.exhaust)}</span> м³/ч
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+
+  if (forceOpen) return body;
+
   return (
-    <Collapsible title="Сводка по комнатам (охлаждение / вытяжка)" defaultOpen>
-      <div className="card" style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-        {rows.map((r) => (
-          <div
-            key={r.roomId}
-            style={{
-              padding: "8px 12px",
-              background: "var(--bg-info, #eef6ff)",
-              border: "1px solid var(--border-info, #cfe3fb)",
-              borderRadius: 6,
-              fontSize: 13,
-            }}
-          >
-            <b>Комната {roomLabel(project.rooms, r.roomId) || "—"}</b>
-            {" · "}
-            холод <span className="num">{num(r.kw)}</span> кВт
-            {" · "}
-            <span className="num">{num(r.btu)}</span> BTU
-            {" · "}
-            потребление ~<span className="num">{num(r.consumption)}</span> кВт
-            {r.exhaust > 0 && (
-              <>
-                {" · "}вытяжка <span className="num">{num(r.exhaust)}</span> м³/ч
-              </>
-            )}
-          </div>
-        ))}
-      </div>
+    <Collapsible title="Сводка по комнатам (охлаждение / вытяжка)" defaultOpen={false}>
+      {body}
     </Collapsible>
   );
 }
