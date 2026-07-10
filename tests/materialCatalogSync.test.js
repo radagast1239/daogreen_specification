@@ -19,36 +19,61 @@ const materials = [
     name: "Труба профильная",
     unit: "м",
     category: "Каркас",
-    supplier: "Местная металлобаза",
+    supplier: "Металлобаза",
     link: "https://tube",
     basePrice: 100,
   },
 ];
 
 describe("applyMaterialCatalogFields", () => {
-  it("always pulls supplier/link/price from materials catalog", () => {
+  it("preserves existing supplier/link/price snapshot by default", () => {
     const line = {
       id: "ln1",
       materialId: "m073",
       name: "old",
-      supplier: "",
-      link: "",
-      price: 0,
+      supplier: "Custom supplier",
+      link: "https://custom",
+      price: 42,
       qty: 4,
       included: true,
     };
     const out = applyMaterialCatalogFields(line, materials);
-    expect(out.supplier).toBe("Лемана про");
-    expect(out.link).toBe("https://bolt");
-    expect(out.price).toBe(12);
-    expect(out.name).toBe("Болт М6×20");
+    expect(out.supplier).toBe("Custom supplier");
+    expect(out.link).toBe("https://custom");
+    expect(out.price).toBe(42);
     expect(out.qty).toBe(4);
-    expect(out.included).toBe(true);
+  });
+
+  it("fills empty fields from catalog", () => {
+    const line = {
+      id: "ln1",
+      materialId: "m073",
+      name: "Болт",
+      supplier: "",
+      link: "",
+      price: 0,
+      qty: 1,
+    };
+    const out = applyMaterialCatalogFields(line, materials);
+    expect(out.supplier).toBe("Лемана про");
+    expect(out.price).toBe(12);
+  });
+
+  it("force mode overwrites from catalog", () => {
+    const line = {
+      id: "ln1",
+      materialId: "m073",
+      supplier: "Custom",
+      price: 42,
+    };
+    const out = applyMaterialCatalogFields(line, materials, { force: true });
+    expect(out.supplier).toBe("Лемана про");
+    expect(out.price).toBe(12);
   });
 });
 
 describe("buildProjectFromBuilder material catalog sync", () => {
-  it("writes supplier from materials even when builder line supplier is empty", () => {
+  it("writes supplier from materials for new builder lines", () => {
     const built = buildProjectFromBuilder({
       form: { name: "P", client: "C", manualParams: {} },
       stellages: [
@@ -94,11 +119,11 @@ describe("frame BOM merge material catalog sync", () => {
         rackLabel: "Стеллаж 1",
         drawingId: "d1",
         materials,
-      }
+      },
     );
     const tube = items.find((it) => it.materialId === "m036");
     expect(tube).toBeTruthy();
-    expect(tube.supplier).toBe("Местная металлобаза");
+    expect(tube.supplier).toBe("Металлобаза");
     expect(tube.link).toBe("https://tube");
     expect(tube.price).toBe(100);
   });

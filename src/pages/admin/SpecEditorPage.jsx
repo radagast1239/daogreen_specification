@@ -46,6 +46,8 @@ import RoomCoolingEditor from "../../components/RoomCoolingEditor.jsx";
 import { syncRoomAcSpecItems } from "../../../shared/roomAcSync.js";
 import ReplacementReviewModal from "../../components/ReplacementReviewModal.jsx";
 import { findStaleProjectPrices } from "../../../shared/staleProjectPrices.js";
+import { buildProjectCatalogUpdateDiff } from "../../../shared/materialCatalogSnapshot.js";
+import { applyProjectCatalogUpdates } from "../../../shared/applyProjectCatalogUpdates.js";
 import ActivityFeed from "../../components/ActivityFeed.jsx";
 import PublishChecklist, { PublishGateModal } from "../../components/PublishChecklist.jsx";
 import ProjectHqBar from "../../components/ProjectHqBar.jsx";
@@ -126,6 +128,10 @@ export default function SpecEditorPage() {
     () => findStaleProjectPrices(project?.items || [], state.materials),
     [project?.items, state.materials]
   );
+  const catalogMaterialDiff = useMemo(
+    () => buildProjectCatalogUpdateDiff(project?.items || [], state.materials),
+    [project?.items, state.materials]
+  );
   const replacementPending = useMemo(
     () => (project?.items || []).filter((i) => i.status === "replacement_check"),
     [project?.items]
@@ -134,6 +140,31 @@ export default function SpecEditorPage() {
     const by = publishCheck?.counts?.byIssue || {};
     return (by.no_client_section || 0) + (by.no_client_subsection || 0);
   }, [publishCheck]);
+
+  const applyAllCatalogUpdates = async () => {
+    const changes = catalogMaterialDiff?.changes || [];
+    if (!changes.length) {
+      success("Нет отличий от базы материалов");
+      return;
+    }
+    const ok = await confirm({
+      title: "Обновить из базы материалов",
+      message: `Обновить catalog-снимок у ${changes.length} поз. (поставщик, ссылка, цена базы…)? Проектные поля (qty, actualPrice, статусы, комментарии) сохранятся.`,
+      confirmLabel: "Обновить всё",
+    });
+    if (!ok) return;
+    try {
+      const { items } = applyProjectCatalogUpdates(project.items, state.materials, {
+        itemIds: changes.map((c) => c.itemId),
+      });
+      await actions.projectUpdate(project.id, { items });
+      await actions.loadProject(project.id);
+      refreshPublishCheck();
+      success(`Обновлено позиций: ${changes.length}`);
+    } catch (e) {
+      error(e.message);
+    }
+  };
 
   const syncAllClientSections = async () => {
     const ids = (project?.items || []).filter((it) => it.materialId).map((it) => it.id);
@@ -718,6 +749,34 @@ export default function SpecEditorPage() {
           </div>
         )}
 
+        {catalogMaterialDiff.changedItemCount > 0 && (
+          <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--accent)" }}>
+            <strong>Проверить обновления материалов: {catalogMaterialDiff.changedItemCount} поз.</strong>
+            <p className="muted" style={{ fontSize: 13, margin: "6px 0 10px" }}>
+              Материалы в базе изменились. Проект показывает сохранённый снимок до явного обновления.
+            </p>
+            <ul style={{ fontSize: 12.5, margin: "0 0 10px", paddingLeft: 18 }}>
+              {catalogMaterialDiff.changes.slice(0, 5).map((ch) => (
+                <li key={ch.itemId}>
+                  {ch.name}
+                  {ch.diffs.slice(0, 2).map((d) => (
+                    <span key={d.field} className="muted">
+                      {" "}
+                      · {d.label}: {String(d.before ?? "—")} → {String(d.after ?? "—")}
+                    </span>
+                  ))}
+                </li>
+              ))}
+              {catalogMaterialDiff.changes.length > 5 && (
+                <li className="muted">…ещё {catalogMaterialDiff.changes.length - 5}</li>
+              )}
+            </ul>
+            <button type="button" className="btn btn-sm btn-primary" onClick={applyAllCatalogUpdates}>
+              Обновить всё из базы
+            </button>
+          </div>
+        )}
+
         {stalePrices.length > 0 && (
           <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--warn)" }}>
             <strong>Цена в базе изменилась у {stalePrices.length} поз.</strong>
@@ -1210,18 +1269,19 @@ function SpecTab({
     actions.itemAdd(project.id, {
       module,
       section: module,
-      name: "Новая позиция",
+      name: "— привязать материал из базы —",
       unit: "шт.",
       category: "Прочее",
       link: "",
       clientNote: "",
       qty: 1,
       price: 0,
-      itemType: "material",
+      itemType: "internal_note",
+      materialId: null,
       includedInProject: true,
-      visibleToClient: true,
-      visible: true,
-      approved: true,
+      visibleToClient: false,
+      visible: false,
+      approved: false,
       enabled: true,
       status: "not_bought",
       actualPrice: null,

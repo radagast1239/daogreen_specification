@@ -1,5 +1,9 @@
 import { uid } from "./ids.js";
 import { FRAME_BOM_SOURCE, isFrameBomLine } from "../../shared/frameBomProjectItems.js";
+import {
+  copyCatalogSnapshotFromMaterial,
+  fillEmptyCatalogFieldsFromMaterial,
+} from "../../shared/materialCatalogSnapshot.js";
 import { normalizeStoredCatalogLine } from "../../shared/catalogLine.js";
 import { mergeLineSpecOverrides } from "../../shared/lineSpecOverrides.js";
 import { materialCompositionGroup } from "../../shared/stellageComposition.js";
@@ -125,56 +129,40 @@ export function lineFromMaterial(mat, overrides = {}) {
 }
 
 /**
- * Для строки с materialId всегда подтянуть каталожные поля из базы материалов.
- * Сохраняет qty/included/id/source/pipeCuts/roomId/responsible и прочие проектные поля.
+ * Подтянуть каталожные поля без перезаписи существующего snapshot.
+ * Для явного обновления из базы используйте refreshItemFromMaterial / applyCatalogDiffToItem.
+ * @param {object} [options]
+ * @param {boolean} [options.force] — перезаписать все catalog-owned поля (legacy / explicit refresh)
+ * @param {boolean} [options.isNewLine] — новая строка: полный snapshot из каталога
  */
-export function applyMaterialCatalogFields(line, materials = []) {
+export function applyMaterialCatalogFields(line, materials = [], options = {}) {
   if (!line) return line;
-  const materialId = String(line.materialId || "").trim();
-  if (!materialId || !materials?.length) return line;
-  const mat = materials.find((m) => (m.id || m.materialId) === materialId);
-  if (!mat) return line;
-  const img = mat.imageUrl || mat.photoUrl || "";
-  const next = {
-    ...line,
-    materialId: mat.id || materialId,
-    name: mat.name,
-    unit: mat.unit || line.unit || "шт.",
-    category: mat.category || line.category || "Прочее",
-    supplier: mat.supplier || "",
-    link: mat.link || "",
-    linkAlt: mat.linkAlt || "",
-    imageUrl: img || line.imageUrl || "",
-    photoUrl: img || line.photoUrl || "",
-    price: Number(mat.basePrice) || 0,
-    vatRate: [0, 5, 20].includes(Number(mat.vatRate)) ? Number(mat.vatRate) : Number(line.vatRate) || 0,
-    clientSection: mat.clientSection || "",
-    clientSubsection: mat.clientSubsection || "",
-    purchaseKey: mat.purchaseKey || "",
-    itemType: resolveItemType({ itemType: mat.itemType || line.itemType }),
-    techNote: mat.techNote || "",
-    clientNote: mat.clientNote || mat.comment || "",
-    coolingKw: Number(mat.coolingKw) || 0,
-    coolingBtu: Number(mat.coolingBtu) || 0,
-    exhaustM3: Number(mat.exhaustM3) || 0,
-  };
-  // subcategory: keep composition group from line if set, else from material
-  if (!String(line.subcategory || line.farmGroup || "").trim()) {
-    next.subcategory = mat.subcategory || materialCompositionGroup(mat) || "";
+  const { force = false, isNewLine = false } = options;
+  if (force || isNewLine) {
+    const snapshotted = copyCatalogSnapshotFromMaterial(line, materials);
+    if (!String(snapshotted.subcategory || snapshotted.farmGroup || "").trim()) {
+      const mat = materials.find((m) => (m.id || m.materialId) === line.materialId);
+      if (mat) snapshotted.subcategory = mat.subcategory || materialCompositionGroup(mat) || "";
+    }
+    if (!Array.isArray(snapshotted.pipeCuts) || !snapshotted.pipeCuts.length) {
+      const mat = materials.find((m) => (m.id || m.materialId) === line.materialId);
+      if (mat) snapshotted.pipeCuts = resolvePipeCuts(mat);
+    }
+    if (!Array.isArray(snapshotted.breakerSpecs) || !snapshotted.breakerSpecs.length) {
+      const mat = materials.find((m) => (m.id || m.materialId) === line.materialId);
+      if (mat) snapshotted.breakerSpecs = resolveBreakerSpecs(mat);
+    }
+    if (!Array.isArray(snapshotted.flowSpecs) || !snapshotted.flowSpecs.length) {
+      const mat = materials.find((m) => (m.id || m.materialId) === line.materialId);
+      if (mat) snapshotted.flowSpecs = resolveFlowSpecs(mat);
+    }
+    if (!Array.isArray(snapshotted.splitSpecs) || !snapshotted.splitSpecs.length) {
+      const mat = materials.find((m) => (m.id || m.materialId) === line.materialId);
+      if (mat) snapshotted.splitSpecs = resolveSplitSpecs(mat);
+    }
+    return snapshotted;
   }
-  if (!Array.isArray(line.pipeCuts) || !line.pipeCuts.length) {
-    next.pipeCuts = resolvePipeCuts(mat);
-  }
-  if (!Array.isArray(line.breakerSpecs) || !line.breakerSpecs.length) {
-    next.breakerSpecs = resolveBreakerSpecs(mat);
-  }
-  if (!Array.isArray(line.flowSpecs) || !line.flowSpecs.length) {
-    next.flowSpecs = resolveFlowSpecs(mat);
-  }
-  if (!Array.isArray(line.splitSpecs) || !line.splitSpecs.length) {
-    next.splitSpecs = resolveSplitSpecs(mat);
-  }
-  return next;
+  return fillEmptyCatalogFieldsFromMaterial(line, materials);
 }
 
 /** Строка каталога/пресета → полная строка редактора (данные только из базы материалов) */

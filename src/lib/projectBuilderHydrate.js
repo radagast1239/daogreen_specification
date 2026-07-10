@@ -11,6 +11,7 @@ import { resolveFlowSpecs } from "../../shared/flowSpecs.js";
 import { resolveSplitSpecs } from "../../shared/splitSpecs.js";
 import { resolveItemType } from "../../shared/itemTypes.js";
 import { applyMaterialCatalogFields } from "./specLineCore.js";
+import { fillEmptyCatalogFieldsFromMaterial } from "../../shared/materialCatalogSnapshot.js";
 import {
   FRAME_BOM_SOURCE,
   frameBomItemsForModuleRack,
@@ -123,7 +124,7 @@ export function mergeStellageEditorLines({
     : manualItems.map((it) => projectItemToBuilderLine(it, { stCount }));
   const merged = overlayFrameBomOnLines(lines, frameBomItems, { stCount, materials });
   if (!materials?.length) return merged;
-  return merged.map((ln) => applyMaterialCatalogFields(ln, materials));
+  return merged.map((ln) => fillEmptyCatalogFieldsFromMaterial(ln, materials));
 }
 
 export function parseBuilderLineIdFromProjectItem(itemId, instanceId = "") {
