@@ -308,7 +308,7 @@ describe("project workspace UI consolidation", () => {
         ],
         context: { ...ctx, drawingId: "d1" },
       }).label
-    ).toBe("BOM в закупке");
+    ).toBe("BOM каркаса в спецификации");
 
     expect(
       resolveFrameBomUiStatus({
@@ -316,6 +316,6 @@ describe("project workspace UI consolidation", () => {
         projectItems: [],
         context: ctx,
       }).label
-    ).toBe("BOM не добавлен");
+    ).toBe("Каркас ещё не добавлен в спецификацию");
   });
 });

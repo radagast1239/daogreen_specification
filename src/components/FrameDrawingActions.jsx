@@ -42,7 +42,7 @@ export default function FrameDrawingActions({
   const [moreOpen, setMoreOpen] = useState(false);
   const latest = drawings[0] || null;
   const older = drawings.slice(1);
-  const status = latest ? 'Схема создана' : drawingStatusLabel(drawings);
+  const status = latest ? 'Схема сохранена' : drawingStatusLabel(drawings);
 
   const baseCtx = { ...context, drawingId: '' };
   const replaceCtx = latest
@@ -114,6 +114,27 @@ export default function FrameDrawingActions({
               onNavigate={onNavigate}
               disabled={navigateDisabled}
             />
+          )}
+          {latest && resolvedBomStatus.id === 'not_added' && onRefreshBom && (
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              disabled={refreshBomBusy || refreshBomDisabled || navigateDisabled}
+              onClick={runRefresh}
+            >
+              {refreshBomBusy ? 'Добавляю…' : 'Добавить каркас и продолжить спецификацию'}
+            </button>
+          )}
+          {latest && resolvedBomStatus.id !== 'not_added' && canRefreshBom && onRefreshBom && (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline"
+              disabled={refreshBomBusy || refreshBomDisabled || navigateDisabled}
+              onClick={runRefresh}
+              title={FRAME_BOM_UPDATE_BOM_HINT}
+            >
+              {refreshBomBusy ? 'Обновляю…' : FRAME_BOM_REFRESH_BUTTON_LABEL}
+            </button>
           )}
           {latest && (
             <details

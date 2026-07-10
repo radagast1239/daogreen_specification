@@ -9,6 +9,7 @@ import {
 import {
   hasFrameBomRowsForRack,
   hasLegacyFrameBomRowsForRack,
+  countResidualFrameBomTwins,
 } from "./frameBomProjectItems.js";
 
 /** Основные фильтры — всегда на экране. */
@@ -146,10 +147,10 @@ export const FRAME_BOM_STATUS = {
 };
 
 export const FRAME_BOM_STATUS_LABELS = {
-  [FRAME_BOM_STATUS.IN_PURCHASE]: "BOM в закупке",
-  [FRAME_BOM_STATUS.NOT_ADDED]: "BOM не добавлен",
+  [FRAME_BOM_STATUS.IN_PURCHASE]: "BOM каркаса в спецификации",
+  [FRAME_BOM_STATUS.NOT_ADDED]: "Каркас ещё не добавлен в спецификацию",
   [FRAME_BOM_STATUS.NEEDS_UPDATE]: "BOM требует обновления",
-  [FRAME_BOM_STATUS.LEGACY_DUPES]: "Есть старые дубли",
+  [FRAME_BOM_STATUS.LEGACY_DUPES]: "Найдены безопасные дубли BOM",
 };
 
 /**
@@ -166,6 +167,7 @@ export function resolveFrameBomUiStatus({
   const hasDrawing = drawingHasUsableRefreshContext(latest) || Boolean(rackOpts.drawingId);
   const hasBom = hasFrameBomRowsForRack(projectItems, rackOpts);
   const hasLegacy = hasLegacyFrameBomRowsForRack(projectItems, rackOpts);
+  const residualTwinCount = hasLegacy ? countResidualFrameBomTwins(projectItems) : 0;
   const refresh = canRefreshFrameBom({
     drawing: latest,
     drawings,
@@ -174,10 +176,10 @@ export function resolveFrameBomUiStatus({
     hasRefreshHandler: true,
   });
 
-  if (hasLegacy) {
+  if (hasLegacy && residualTwinCount > 0) {
     return {
       id: FRAME_BOM_STATUS.LEGACY_DUPES,
-      label: FRAME_BOM_STATUS_LABELS[FRAME_BOM_STATUS.LEGACY_DUPES],
+      label: `${FRAME_BOM_STATUS_LABELS[FRAME_BOM_STATUS.LEGACY_DUPES]}: ${residualTwinCount}`,
       tone: "warn",
       refresh,
     };

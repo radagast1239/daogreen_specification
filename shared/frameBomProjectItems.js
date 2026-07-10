@@ -326,7 +326,8 @@ export function resolveBuilderPrefixedStellageId(item) {
 }
 
 /**
- * Builder-hydrated BOM duplicate rows (ProjectBuilder sync), not canonical frame_bom.
+ * ID-pattern candidate for builder-prefixed rows: st_<rack>__(ln_|it_fbom_).
+ * NOT ownership by itself — ordinary plumbing/builder lines also use st_*__ln_*.
  * @param {object} item
  */
 export function isBuilderSyncedFrameBomLine(item) {
@@ -336,19 +337,100 @@ export function isBuilderSyncedFrameBomLine(item) {
 }
 
 /**
- * True when item should be removed during mergeFrameBomIntoProjectItems for a rack.
- * Uses broad legacy-safe BOM markers + rack scope; never removes explicit manual rows.
+ * Canonical frame BOM ownership (proven markers, not bare st_*__ln_* id).
+ * @param {object} item
+ */
+export function isCanonicalFrameBomItem(item) {
+  return isCanonicalFrameBomLine(item);
+}
+
+/**
+ * Proven residual twin of a canonical frame BOM row (patterns A/B only).
+ * Bare st_*__ln_* without a matching canonical twin is NOT a twin.
  *
  * @param {object} item
+ * @param {object[]} [canonicalItems]
+ */
+export function isProvenLegacyFrameBomTwin(item, canonicalItems = []) {
+  if (!item || isExplicitManualProjectItem(item)) return false;
+  if (isCanonicalFrameBomLine(item)) return false;
+  if (!isBuilderSyncedFrameBomLine(item)) return false;
+
+  const canons = (canonicalItems || []).filter(
+    (c) => c && isCanonicalFrameBomLine(c) && !isExplicitManualProjectItem(c),
+  );
+  if (!canons.length) return false;
+
+  // A: st_<rack>__it_fbom_* with exact canonical id suffix
+  if (twinPrefixedExactCanonicalId(item, canons)) return true;
+
+  // B: same material + rack/section cluster
+  if (canons.some((c) => frameBomItemsSameDedupeCluster(c, item))) return true;
+
+  // B2: same materialId + builder stellage id belongs to canonical moduleRackKey
+  // (legacy builder rows often lack module/section/sourceObjectIds)
+  const mid = String(item.materialId || "").trim();
+  const builderStId = resolveBuilderPrefixedStellageId(item);
+  if (!mid || !builderStId) return false;
+
+  return canons.some((c) => {
+    if (String(c.materialId || "").trim() !== mid) return false;
+    const rack = resolveFrameBomItemModuleRackKey(c);
+    if (!rack) return false;
+    if (rack === `stellage:${builderStId}`) return true;
+    if (rack === builderStId) return true;
+    if (rack.includes(`:${builderStId}`) || rack.endsWith(`:${builderStId}`)) return true;
+    if (rack.includes(builderStId)) return true;
+    return false;
+  });
+}
+
+/**
+ * Ordinary rack/builder/catalog/manual line — must survive frame BOM refresh.
+ * @param {object} item
+ * @param {object[]} [canonicalItems]
+ */
+export function isNonFrameRackItem(item, canonicalItems = []) {
+  if (!item) return false;
+  if (isCanonicalFrameBomItem(item)) return false;
+  if (isFrameBomLine(item)) return false;
+  if (isProvenLegacyFrameBomTwin(item, canonicalItems)) return false;
+  return true;
+}
+
+/**
+ * Frame-owned rows for a rack merge: canonical/evidenced frame BOM + proven twins only.
+ * @param {object[]} items
  * @param {string} moduleRackKey
  * @param {object} [options]
  */
+export function collectFrameBomOwnedItems(items, moduleRackKey, options = {}) {
+  const existing = Array.isArray(items) ? items : [];
+  const opts = { ...options, allItems: existing };
+  return existing.filter((it) => shouldRemoveFrameBomOnMerge(it, moduleRackKey, opts));
+}
+
+/**
+ * True when item should be removed during mergeFrameBomIntoProjectItems for a rack.
+ * Never removes ordinary builder/catalog lines just because id is st_*__ln_*.
+ *
+ * @param {object} item
+ * @param {string} moduleRackKey
+ * @param {object} [options] pass allItems/existingItems for proven-twin detection
+ */
 export function shouldRemoveFrameBomOnMerge(item, moduleRackKey, options = {}) {
   if (!item || isExplicitManualProjectItem(item)) return false;
-  const inScope = itemBelongsToRackMergeScope(item, moduleRackKey, options);
-  if (isBuilderSyncedFrameBomLine(item)) return inScope;
-  if (!isFrameBomLine(item)) return false;
-  return inScope;
+  if (!itemBelongsToRackMergeScope(item, moduleRackKey, options)) return false;
+
+  // Evidenced frame BOM (source/bomKey/note/flags) — including builder-prefixed with markers
+  if (isFrameBomLine(item)) return true;
+
+  const allItems = options.allItems || options.existingItems || [];
+  if (!allItems.length) return false;
+  const canons = allItems.filter(
+    (it) => isCanonicalFrameBomLine(it) && !isExplicitManualProjectItem(it),
+  );
+  return isProvenLegacyFrameBomTwin(item, canons);
 }
 
 /**
@@ -697,11 +779,40 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
     }
   }
 
+  const mergeOpts = { ...options, allItems: existing, existingItems: existing };
   const removedBomItems = existing.filter((it) =>
-    shouldRemoveFrameBomOnMerge(it, moduleRackKey, options)
+    shouldRemoveFrameBomOnMerge(it, moduleRackKey, mergeOpts)
   );
-  const kept = existing.filter((it) => !shouldRemoveFrameBomOnMerge(it, moduleRackKey, options));
+  const removedIds = new Set(removedBomItems.map((it) => String(it.id || "")).filter(Boolean));
+  const kept = existing.filter((it) => !removedIds.has(String(it.id || "")));
   const removedCount = removedBomItems.length;
+
+  // Invariant: non-frame rack/builder lines must never disappear on frame BOM merge
+  const canons = existing.filter(
+    (it) => isCanonicalFrameBomLine(it) && !isExplicitManualProjectItem(it),
+  );
+  const nonFrameBefore = existing.filter((it) => isNonFrameRackItem(it, canons));
+  const nonFrameMissing = nonFrameBefore.filter((it) => removedIds.has(String(it.id || "")));
+  if (nonFrameMissing.length) {
+    const blockedReason =
+      `Обновление BOM отменено: были бы удалены обычные позиции стеллажа (${nonFrameMissing.length}).`;
+    warnings.push(blockedReason);
+    return {
+      items: [...existing],
+      removedCount: 0,
+      addedCount: 0,
+      keptCount: existing.length,
+      sourceRackPrefix,
+      rackScopeKey: moduleRackKey,
+      warnings,
+      blocked: true,
+      blockedReason,
+      missingMaterialIds: [],
+      invariantViolation: {
+        missingNonFrameIds: nonFrameMissing.map((it) => it.id).filter(Boolean),
+      },
+    };
+  }
 
   const preservedByBomKey = new Map();
   const preservedByMaterialId = new Map();
@@ -755,11 +866,68 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
     sortOrder += 1;
   }
 
+  // After new canonical rows exist, drop proven residual twins of those materials only
+  const nextCanons = [
+    ...kept.filter((it) => isCanonicalFrameBomLine(it) && !isExplicitManualProjectItem(it)),
+    ...added,
+  ];
+  const twinExtras = kept.filter((it) => isProvenLegacyFrameBomTwin(it, nextCanons));
+  for (const twin of twinExtras) {
+    removedBomItems.push(twin);
+    removedIds.add(String(twin.id || ""));
+    mergePreservedEntry(preservedByBomKey, resolveFrameBomItemBomKey(twin), twin);
+    const materialId = String(twin.materialId || "").trim();
+    if (materialId) mergePreservedEntry(preservedByMaterialId, materialId, twin);
+  }
+  // Apply newly discovered twin preserve fields onto added canonical rows
+  for (const item of added) {
+    const bomKey = resolveFrameBomItemBomKey(item);
+    const preserved =
+      preservedByBomKey.get(bomKey)
+      || preservedByMaterialId.get(String(item.materialId || "").trim());
+    if (!preserved) continue;
+    item.status = preserved.status;
+    item.purchaseStatus = preserved.purchaseStatus;
+    if (preserved.actualPrice != null) item.actualPrice = preserved.actualPrice;
+    if (preserved.clientComment) item.clientComment = preserved.clientComment;
+    if (preserved.visibleToClient != null) {
+      item.visibleToClient = preserved.visibleToClient;
+      item.visible = preserved.visible ?? preserved.visibleToClient;
+      item.approved = preserved.approved ?? preserved.visibleToClient;
+    }
+    if (preserved.clientSection) item.clientSection = preserved.clientSection;
+    if (preserved.clientSubsection) item.clientSubsection = preserved.clientSubsection;
+  }
+  const keptFinal = kept.filter((it) => !removedIds.has(String(it.id || "")));
+
+  // Re-check invariant against original non-frame set
+  const nonFrameStillMissing = nonFrameBefore.filter((it) => removedIds.has(String(it.id || "")));
+  if (nonFrameStillMissing.length) {
+    const blockedReason =
+      `Обновление BOM отменено: были бы удалены обычные позиции стеллажа (${nonFrameStillMissing.length}).`;
+    warnings.push(blockedReason);
+    return {
+      items: [...existing],
+      removedCount: 0,
+      addedCount: 0,
+      keptCount: existing.length,
+      sourceRackPrefix,
+      rackScopeKey: moduleRackKey,
+      warnings,
+      blocked: true,
+      blockedReason,
+      missingMaterialIds: [],
+      invariantViolation: {
+        missingNonFrameIds: nonFrameStillMissing.map((it) => it.id).filter(Boolean),
+      },
+    };
+  }
+
   return {
-    items: [...kept, ...added],
-    removedCount,
+    items: [...keptFinal, ...added],
+    removedCount: removedBomItems.length,
     addedCount: added.length,
-    keptCount: kept.length,
+    keptCount: keptFinal.length,
     sourceRackPrefix,
     rackScopeKey: moduleRackKey,
     warnings,
@@ -778,9 +946,9 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
 export function frameBomItemsForModuleRack(items, moduleRackKey, options = {}) {
   const rackKey = String(moduleRackKey || "").trim();
   if (!rackKey) return [];
+  // Only evidenced frame BOM — never treat bare st_*__ln_* builder lines as frame BOM
   const candidates = (items || []).filter(
-    (it) => (isFrameBomLine(it) || isBuilderSyncedFrameBomLine(it))
-      && itemBelongsToRackMergeScope(it, rackKey, options),
+    (it) => isFrameBomLine(it) && itemBelongsToRackMergeScope(it, rackKey, options),
   );
   return dedupeFrameBomProjectItems(candidates);
 }
@@ -795,6 +963,9 @@ export function frameBomItemsForModuleRack(items, moduleRackKey, options = {}) {
 export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = {}) {
   const repairOpts = { ...options, explicitRepair: true };
   const existing = Array.isArray(existingItems) ? existingItems : [];
+  const canons = existing.filter(
+    (it) => isCanonicalFrameBomLine(it) && !isExplicitManualProjectItem(it),
+  );
   const mergeResult = mergeFrameBomIntoProjectItems(existing, purchaseDraft, repairOpts);
 
   if (mergeResult.blocked) {
@@ -806,9 +977,11 @@ export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = 
       cleanedItems: [...existing],
       removeItemIds: [],
       upsertItems: [],
-      preservedItems: existing.filter(
-        (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
-      ),
+      preservedItems: existing.filter((it) => isNonFrameRackItem(it, canons)),
+      frameBomCount: collectFrameBomOwnedItems(existing, options.moduleRackKey, options)
+        .filter((it) => isFrameBomLine(it)).length,
+      safeDuplicateCount: 0,
+      preservedOtherCount: existing.filter((it) => isNonFrameRackItem(it, canons)).length,
       debug: { mergeResult },
     };
   }
@@ -817,14 +990,53 @@ export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = 
     mergeResult.items.map((it) => String(it.id || "")).filter(Boolean),
   );
 
+  const ownedBefore = collectFrameBomOwnedItems(existing, options.moduleRackKey, options);
+  const ownedIds = new Set(ownedBefore.map((it) => String(it.id || "")).filter(Boolean));
+
+  // Also treat post-merge proven twins of new canons as owned (for DELETE list)
+  const cleanedCanons = mergeResult.items.filter(
+    (it) => isCanonicalFrameBomLine(it) && !isExplicitManualProjectItem(it),
+  );
+  for (const it of existing) {
+    if (isProvenLegacyFrameBomTwin(it, cleanedCanons)) {
+      ownedIds.add(String(it.id || ""));
+    }
+  }
+
   const removeItemIds = existing
     .filter((it) => {
       const id = String(it.id || "");
       if (!id || cleanedIds.has(id)) return false;
       if (isExplicitManualProjectItem(it)) return false;
-      return isFrameBomLine(it) || isBuilderSyncedFrameBomLine(it);
+      return ownedIds.has(id) || isFrameBomLine(it) || isProvenLegacyFrameBomTwin(it, cleanedCanons);
     })
     .map((it) => it.id);
+
+  // Invariant: every non-frame id before must remain after
+  const nonFrameBefore = existing.filter((it) => isNonFrameRackItem(it, canons));
+  const missingNonFrame = nonFrameBefore.filter((it) => !cleanedIds.has(String(it.id || "")));
+  if (missingNonFrame.length) {
+    return {
+      blocked: true,
+      blockedReason:
+        `Обновление BOM отменено: были бы удалены обычные позиции стеллажа (${missingNonFrame.length}).`,
+      missingMaterialIds: [],
+      warnings: mergeResult.warnings || [],
+      cleanedItems: [...existing],
+      removeItemIds: [],
+      upsertItems: [],
+      preservedItems: nonFrameBefore,
+      frameBomCount: ownedBefore.filter((it) => isFrameBomLine(it)).length,
+      safeDuplicateCount: ownedBefore.filter((it) => isProvenLegacyFrameBomTwin(it, canons)).length,
+      preservedOtherCount: nonFrameBefore.length,
+      debug: {
+        mergeResult,
+        invariantViolation: {
+          missingNonFrameIds: missingNonFrame.map((it) => it.id).filter(Boolean),
+        },
+      },
+    };
+  }
 
   const existingById = new Map(existing.map((it) => [it.id, it]));
   const upsertItems = mergeResult.items.filter((it) => {
@@ -833,9 +1045,11 @@ export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = 
     return !prev || prev.qty !== it.qty || prev.price !== it.price || prev.supplier !== it.supplier;
   });
 
-  const preservedItems = mergeResult.items.filter(
-    (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
-  );
+  const preservedItems = mergeResult.items.filter((it) => isNonFrameRackItem(it, canons));
+  const safeDuplicateCount = ownedBefore.filter((it) =>
+    isProvenLegacyFrameBomTwin(it, canons),
+  ).length;
+  const frameBomCount = ownedBefore.filter((it) => isFrameBomLine(it)).length;
 
   return {
     blocked: false,
@@ -845,6 +1059,9 @@ export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = 
     removeItemIds: [...new Set(removeItemIds)],
     upsertItems,
     preservedItems,
+    frameBomCount,
+    safeDuplicateCount,
+    preservedOtherCount: preservedItems.length,
     warnings: mergeResult.warnings || [],
     debug: {
       removedCount: mergeResult.removedCount,
@@ -856,7 +1073,7 @@ export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = 
 }
 
 /**
- * Frame/BOM lines in rack merge scope (canonical + legacy markers).
+ * Frame/BOM lines in rack merge scope (canonical + proven residual twins only).
  *
  * @param {object[]} items
  * @param {object} [options]
@@ -864,10 +1081,15 @@ export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = 
 export function rackFrameBomScopeItems(items, options = {}) {
   const moduleRackKey = String(options.moduleRackKey || "").trim();
   if (!moduleRackKey) return [];
-  return (items || []).filter((it) => {
+  const list = items || [];
+  const canons = list.filter(
+    (it) => isCanonicalFrameBomLine(it) && !isExplicitManualProjectItem(it),
+  );
+  return list.filter((it) => {
     if (isExplicitManualProjectItem(it)) return false;
-    if (!isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it)) return false;
-    return itemBelongsToRackMergeScope(it, moduleRackKey, options);
+    if (!itemBelongsToRackMergeScope(it, moduleRackKey, options)) return false;
+    if (isFrameBomLine(it)) return true;
+    return isProvenLegacyFrameBomTwin(it, canons);
   });
 }
 
@@ -876,40 +1098,26 @@ export function rackFrameBomScopeItems(items, options = {}) {
  * @param {object} [options]
  */
 export function hasFrameBomRowsForRack(items, options = {}) {
-  return rackFrameBomScopeItems(items, options).length > 0;
+  return rackFrameBomScopeItems(items, options).some((it) => isFrameBomLine(it));
 }
 
 /**
+ * Safe residual twins only — never treat ordinary st_*__ln_* builder lines as legacy.
+ *
  * @param {object[]} items
  * @param {object} [options]
  */
 export function hasLegacyFrameBomRowsForRack(items, options = {}) {
-  const inScope = rackFrameBomScopeItems(items, options);
-  if (inScope.some((it) => isBuilderSyncedFrameBomLine(it))) return true;
-
-  for (let i = 0; i < inScope.length; i += 1) {
-    for (let j = i + 1; j < inScope.length; j += 1) {
-      if (frameBomItemsSameDedupeCluster(inScope[i], inScope[j])) return true;
-    }
-  }
-
-  return inScope.some((it) => {
-    if (isBuilderSyncedFrameBomLine(it)) return true;
-    const price = Number(it.price) || 0;
-    const supplier = String(it.supplier || "").trim();
-    const note = String(it.note || it.clientNote || "");
-    const looksLegacy =
-      price <= 0
-      && (!supplier || supplier.toLowerCase() === "поставщик")
-      && /из схемы (?:каркаса|стеллажа)/i.test(note);
-    if (!looksLegacy) return false;
-    return inScope.some(
-      (other) =>
-        other.id !== it.id
-        && frameBomItemsSameDedupeCluster(other, it)
-        && frameBomLineRank(other) > frameBomLineRank(it),
-    );
-  });
+  const moduleRackKey = String(options.moduleRackKey || "").trim();
+  const plan = buildResidualFrameBomTwinRepairPlan(items || [], { quiet: true });
+  if (!plan.removeItemIds.length) return false;
+  if (!moduleRackKey) return true;
+  const removeSet = new Set(plan.removeItemIds.map(String));
+  return (items || []).some(
+    (it) =>
+      removeSet.has(String(it.id || ""))
+      && itemBelongsToRackMergeScope(it, moduleRackKey, options),
+  );
 }
 
 /**
@@ -928,6 +1136,9 @@ export function hasRepairableFrameBomForRack(items, options = {}) {
  */
 export function buildLegacyFrameBomDedupePlan(existingItems, options = {}) {
   const existing = Array.isArray(existingItems) ? existingItems : [];
+  const canons = existing.filter(
+    (it) => isCanonicalFrameBomLine(it) && !isExplicitManualProjectItem(it),
+  );
   const moduleRackKey = String(options.moduleRackKey || "").trim();
   if (!moduleRackKey) {
     return {
@@ -936,9 +1147,10 @@ export function buildLegacyFrameBomDedupePlan(existingItems, options = {}) {
       cleanedItems: [...existing],
       removeItemIds: [],
       upsertItems: [],
-      preservedItems: existing.filter(
-        (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
-      ),
+      preservedItems: existing.filter((it) => isNonFrameRackItem(it, canons)),
+      frameBomCount: 0,
+      safeDuplicateCount: 0,
+      preservedOtherCount: existing.filter((it) => isNonFrameRackItem(it, canons)).length,
       warnings: [],
       debug: { mode: "legacy_dedupe" },
     };
@@ -961,9 +1173,10 @@ export function buildLegacyFrameBomDedupePlan(existingItems, options = {}) {
       cleanedItems: [...existing],
       removeItemIds: [],
       upsertItems: [],
-      preservedItems: existing.filter(
-        (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
-      ),
+      preservedItems: existing.filter((it) => isNonFrameRackItem(it, canons)),
+      frameBomCount: inScope.filter((it) => isFrameBomLine(it)).length,
+      safeDuplicateCount: 0,
+      preservedOtherCount: existing.filter((it) => isNonFrameRackItem(it, canons)).length,
       warnings: [],
       debug: { mode: "legacy_dedupe", inScopeCount: inScope.length },
     };
@@ -978,9 +1191,11 @@ export function buildLegacyFrameBomDedupePlan(existingItems, options = {}) {
     cleanedItems,
     removeItemIds: [...new Set(removeItemIds)],
     upsertItems: [],
-    preservedItems: cleanedItems.filter(
-      (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
-    ),
+    preservedItems: cleanedItems.filter((it) => isNonFrameRackItem(it, canons)),
+    frameBomCount: inScope.filter((it) => isFrameBomLine(it) && !removeSet.has(String(it.id || ""))).length
+      + winners.filter((it) => isFrameBomLine(it)).length,
+    safeDuplicateCount: removeItemIds.length,
+    preservedOtherCount: cleanedItems.filter((it) => isNonFrameRackItem(it, canons)).length,
     warnings: [],
     debug: {
       mode: "legacy_dedupe",
@@ -1015,12 +1230,12 @@ function twinPrefixedExactCanonicalId(twin, existing = []) {
 
 /**
  * Project-wide residual twin cleanup (no purchaseDraft / moduleRackKey required).
- * Removes only builder-synced twins when a canonical frame_bom row exists in the same cluster.
- * Does NOT touch PP/farm-section rows or manual rows.
+ * Removes only proven builder twins when a canonical frame_bom row exists.
+ * Does NOT touch ordinary st_*__ln_* plumbing/builder lines or manual rows.
  *
  * Patterns:
  * - A: st_<rack>__it_fbom_* + it_fbom_*
- * - B: st_<rack>__ln_* catalog + it_fbom_* (same material/section/rack)
+ * - B: st_<rack>__ln_* + it_fbom_* only with proven same material/section/rack cluster
  *
  * @param {object[]} existingItems
  * @param {object} [options]
@@ -1030,7 +1245,7 @@ export function buildResidualFrameBomTwinRepairPlan(existingItems = [], options 
   const canons = existing.filter(
     (it) => isCanonicalFrameBomLine(it) && !isExplicitManualProjectItem(it),
   );
-  const twins = existing.filter(
+  const candidates = existing.filter(
     (it) => isBuilderSyncedFrameBomLine(it) && !isExplicitManualProjectItem(it),
   );
 
@@ -1038,25 +1253,25 @@ export function buildResidualFrameBomTwinRepairPlan(existingItems = [], options 
   const duplicateGroups = [];
   const skippedAmbiguousGroups = [];
 
-  for (const twin of twins) {
-    const exactCanonId = twinPrefixedExactCanonicalId(twin, existing);
-    const clusterCanons = canons.filter((c) => frameBomItemsSameDedupeCluster(c, twin));
-    if (exactCanonId || clusterCanons.length) {
-      removeItemIds.push(twin.id);
-      duplicateGroups.push({
-        kind: exactCanonId ? "exact_prefixed" : "legacy_catalog",
+  for (const twin of candidates) {
+    if (!isProvenLegacyFrameBomTwin(twin, canons)) {
+      skippedAmbiguousGroups.push({
         twinId: twin.id,
         materialId: twin.materialId || "",
-        keptIds: exactCanonId
-          ? [exactCanonId]
-          : clusterCanons.map((c) => c.id).filter(Boolean),
+        reason: "no_canonical_bom_cluster",
       });
       continue;
     }
-    skippedAmbiguousGroups.push({
+    const exactCanonId = twinPrefixedExactCanonicalId(twin, existing);
+    const clusterCanons = canons.filter((c) => frameBomItemsSameDedupeCluster(c, twin));
+    removeItemIds.push(twin.id);
+    duplicateGroups.push({
+      kind: exactCanonId ? "exact_prefixed" : "legacy_catalog",
       twinId: twin.id,
       materialId: twin.materialId || "",
-      reason: "no_canonical_bom_cluster",
+      keptIds: exactCanonId
+        ? [exactCanonId]
+        : clusterCanons.map((c) => c.id).filter(Boolean),
     });
   }
 
@@ -1076,11 +1291,9 @@ export function buildResidualFrameBomTwinRepairPlan(existingItems = [], options 
       mergedUpdates: [],
       duplicateGroups: [],
       skippedAmbiguousGroups,
-      preservedItems: existing.filter(
-        (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
-      ),
+      preservedItems: existing.filter((it) => isNonFrameRackItem(it, canons)),
       warnings: [],
-      debug: { mode: "residual_twins", twinCount: twins.length },
+      debug: { mode: "residual_twins", twinCount: candidates.length },
     };
   }
 
@@ -1094,13 +1307,11 @@ export function buildResidualFrameBomTwinRepairPlan(existingItems = [], options 
     mergedUpdates: [],
     duplicateGroups,
     skippedAmbiguousGroups,
-    preservedItems: cleanedItems.filter(
-      (it) => !isFrameBomLine(it) && !isBuilderSyncedFrameBomLine(it),
-    ),
+    preservedItems: cleanedItems.filter((it) => isNonFrameRackItem(it, canons)),
     warnings: [],
     debug: {
       mode: "residual_twins",
-      twinCount: twins.length,
+      twinCount: candidates.length,
       removedCount: removeItemIds.length,
     },
   };

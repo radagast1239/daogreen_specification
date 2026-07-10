@@ -82,11 +82,11 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
         loadProject: actions.loadProject.bind(actions),
       });
       if (outcome.cancelled || outcome.skipped) return;
-      const removed = outcome.summary?.removedCount ?? 0;
+      const safeDupes = outcome.plan?.safeDuplicateCount ?? 0;
       success(
-        removed > 0
-          ? `BOM обновлён, старые дубли убраны: ${removed}.`
-          : (outcome.summary?.title || 'BOM обновлён.'),
+        safeDupes > 0
+          ? `BOM каркаса обновлён. Безопасных дублей убрано: ${safeDupes}.`
+          : (outcome.summary?.title || 'BOM каркаса обновлён.'),
       );
     } catch (err) {
       error(err?.message || 'Не удалось обновить BOM.');

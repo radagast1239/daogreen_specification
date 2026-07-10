@@ -172,6 +172,27 @@ export function stellageItemsFromProject(project, stellageConfig) {
   );
 }
 
+function applyStellageGroupsToLines(lines = [], groups = []) {
+  if (!Array.isArray(groups) || !groups.length) return lines;
+  const byName = new Map();
+  for (const g of groups) {
+    const name = String(g?.name || "").trim();
+    if (name) byName.set(name, g);
+  }
+  if (!byName.size) return lines;
+  return (lines || []).map((ln) => {
+    const g = byName.get(String(ln.name || "").trim());
+    if (!g) return ln;
+    const qty = Number(g.qty);
+    return {
+      ...ln,
+      included: true,
+      qty: Number.isFinite(qty) && qty > 0 ? qty : ln.qty,
+      subcategory: g.subcategory || ln.subcategory,
+    };
+  });
+}
+
 export function stellagesFromProject(project, { stellageCatalogs = {}, materials = [] } = {}) {
   const configs = project?.stellageConfigs || [];
   return configs.map((cfg) => {
@@ -184,13 +205,21 @@ export function stellagesFromProject(project, { stellageCatalogs = {}, materials
     );
     const savedProjectItems = stellageItemsFromProject(project, cfg);
     const frameBomItems = frameBomItemsForStellage(project, cfg);
-    const items = mergeStellageEditorLines({
+    let items = mergeStellageEditorLines({
       catalogLines,
       manualItems: savedProjectItems,
       frameBomItems,
       stCount,
       materials,
     });
+    // Recovery: if frame BOM refresh wiped ordinary st_*__ln_* rows, restore
+    // included/qty from stellageConfigs.groups snapshot.
+    const savedNonFrame = (savedProjectItems || []).filter(
+      (it) => (it.source || it.sourceType) !== FRAME_BOM_SOURCE,
+    );
+    if (!savedNonFrame.length && cfg.groups?.length) {
+      items = applyStellageGroupsToLines(items, cfg.groups);
+    }
     return {
       id: cfg.id,
       moduleId: cfg.moduleId,
@@ -412,6 +441,44 @@ export function preserveFrameBomProjectItems(builderItems = [], loadedItems = []
     return isFrameBomLine(it);
   });
   return [...builderItems, ...preserved];
+}
+
+/**
+ * Restore ordinary rack builder lines missing after a bad frame BOM refresh.
+ * Adds only absent logical lines; does not mutate existing rows.
+ *
+ * @param {object[]} existingItems
+ * @param {object[]} builderItems from buildProjectFromBuilder (non-frame)
+ */
+export function restoreMissingNonFrameRackItems(existingItems = [], builderItems = []) {
+  const existing = Array.isArray(existingItems) ? existingItems : [];
+  const existingIds = new Set(existing.map((it) => String(it.id || "")).filter(Boolean));
+  const existingKeys = new Set(
+    existing.map((it) => {
+      const mid = String(it.materialId || "").trim();
+      const section = String(it.section || it.module || "").trim();
+      return mid ? `${mid}::${section}` : `id:${it.id}`;
+    }),
+  );
+  const added = [];
+  for (const bi of builderItems || []) {
+    if (!bi?.id) continue;
+    if (isFrameBomLine(bi)) continue;
+    if ((bi.source || bi.sourceType) === FRAME_BOM_SOURCE) continue;
+    if (existingIds.has(String(bi.id))) continue;
+    const mid = String(bi.materialId || "").trim();
+    const section = String(bi.section || bi.module || "").trim();
+    const key = mid ? `${mid}::${section}` : `id:${bi.id}`;
+    if (existingKeys.has(key)) continue;
+    added.push(bi);
+    existingIds.add(String(bi.id));
+    existingKeys.add(key);
+  }
+  return {
+    items: [...existing, ...added],
+    addedCount: added.length,
+    addedIds: added.map((it) => it.id),
+  };
 }
 
 /**

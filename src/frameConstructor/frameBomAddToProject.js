@@ -30,9 +30,9 @@ export const FRAME_BOM_ADD_CONFIRM_TITLE =
 export const FRAME_BOM_ADD_BUTTON_HINT =
   "Повторное нажатие заменит BOM только этого стеллажа, ручные позиции проекта не трогаются.";
 export const FRAME_BOM_UPDATE_BOM_HINT =
-  "Обновить BOM — пересоберёт позиции каркаса и уберёт старые дубли этого стеллажа.";
+  "Обновить BOM — пересоберёт только позиции каркаса этого стеллажа. Обычные материалы стеллажа не трогаются.";
 export const FRAME_BOM_REFRESH_CONFIRM_TITLE = "Обновить BOM этого стеллажа в спецификации?";
-export const FRAME_BOM_REFRESH_SUCCESS_TITLE = "BOM каркаса обновлён. Дубли удалены.";
+export const FRAME_BOM_REFRESH_SUCCESS_TITLE = "BOM каркаса обновлён.";
 export const FRAME_BOM_NO_PROJECT_REASON =
   "Добавление в закупку доступно только внутри проекта.";
 export const FRAME_BOM_UNSAVED_DRAWING_WARNING =
@@ -210,15 +210,26 @@ export function buildFrameBomMergeOptions(drawingContext = {}, materials = null)
   };
 }
 
-export function buildFrameBomRefreshConfirmMessage({ removeCount, upsertCount }) {
+export function buildFrameBomRefreshConfirmMessage({
+  frameBomCount = 0,
+  safeDuplicateCount = 0,
+  preservedOtherCount = 0,
+  // legacy aliases (ignored for wording)
+  removeCount,
+  upsertCount,
+} = {}) {
+  const frameCount = Number(frameBomCount) || 0;
+  const safeDupes = Number(safeDuplicateCount) || 0;
+  const preserved = Number(preservedOtherCount) || 0;
   return [
-    `Будет пересобрано BOM по сохранённой схеме.`,
-    removeCount > 0 ? `Удалено дублей/legacy: ${removeCount}.` : "",
-    upsertCount > 0 ? `Обновлено BOM-позиций: ${upsertCount}.` : "",
-    "Ручные позиции проекта не будут затронуты.",
+    "Будет пересобран BOM каркаса по сохранённой схеме.",
+    "",
+    `Позиций каркаса сейчас: ${frameCount}`,
+    `Безопасных дублей BOM: ${safeDupes}`,
+    `Остальные позиции стеллажа: ${preserved} — не будут изменены.`,
     "",
     "Продолжить?",
-  ].filter(Boolean).join("\n");
+  ].join("\n");
 }
 
 /**
@@ -459,8 +470,14 @@ export async function executeFrameBomRefreshFromDrawing({
       const ok = await confirm({
         title: FRAME_BOM_REFRESH_CONFIRM_TITLE,
         message: buildFrameBomRefreshConfirmMessage({
-          removeCount: dedupePreview.removeItemIds.length,
-          upsertCount: 0,
+          frameBomCount: dedupePreview.frameBomCount
+            ?? dedupePreview.debug?.inScopeCount
+            ?? 0,
+          safeDuplicateCount: dedupePreview.safeDuplicateCount
+            ?? dedupePreview.removeItemIds.length,
+          preservedOtherCount: dedupePreview.preservedOtherCount
+            ?? dedupePreview.preservedItems?.length
+            ?? 0,
         }),
         confirmLabel: "Обновить BOM",
         cancelLabel: "Отмена",
@@ -507,8 +524,11 @@ export async function executeFrameBomRefreshFromDrawing({
     const ok = await confirm({
       title: FRAME_BOM_REFRESH_CONFIRM_TITLE,
       message: buildFrameBomRefreshConfirmMessage({
-        removeCount: previewPlan.removeItemIds.length,
-        upsertCount: previewPlan.upsertItems.length,
+        frameBomCount: previewPlan.frameBomCount ?? 0,
+        safeDuplicateCount: previewPlan.safeDuplicateCount ?? 0,
+        preservedOtherCount: previewPlan.preservedOtherCount
+          ?? previewPlan.preservedItems?.length
+          ?? 0,
       }),
       confirmLabel: "Обновить BOM",
       cancelLabel: "Отмена",
