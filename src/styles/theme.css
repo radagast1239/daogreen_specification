@@ -2125,19 +2125,41 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 .spec-mass-select__menu,
 .frame-drawing-more__menu {
   position: absolute;
-  z-index: 30;
+  z-index: 40;
   min-width: 200px;
+  max-width: min(280px, calc(100vw - 24px));
   padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-top: 4px;
+  box-sizing: border-box;
+}
+/* Фильтры / массовый выбор — открывать вправо от кнопки, без раздувания страницы */
+.spec-more-filters__menu,
+.spec-mass-select__menu,
+.client-readiness__mass-menu {
+  left: 0;
+  right: auto;
+  top: calc(100% + 4px);
+  margin-top: 0;
+}
+/* «Ещё» у схем каркасов справа — якорить к правому краю кнопки */
+.frame-drawing-more__menu {
+  left: auto;
+  right: 0;
+  top: calc(100% + 4px);
+  margin-top: 0;
 }
 .spec-more-filters,
 .spec-mass-select,
 .frame-drawing-more,
 .client-readiness__mass details {
   position: relative;
+  flex-shrink: 0;
+}
+.spec-quick-filters__row {
+  position: relative;
+  overflow: visible;
 }
 .spec-more-filters > summary,
 .spec-mass-select > summary,
@@ -2933,6 +2955,11 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     padding-bottom: 4px;
+  }
+  /* Открытое меню фильтров не должно клипаться/раздувать горизонтальный скролл */
+  .spec-quick-filters:has(.spec-more-filters[open]),
+  .spec-quick-filters:has(.spec-mass-select[open]) {
+    overflow: visible;
   }
   .spec-quick-filters::-webkit-scrollbar { display: none; }
   .spec-quick-filters .btn,
