@@ -8,6 +8,7 @@ import {
   reconcileProjectItemsVisibility,
   applyClientVisibilityPatch,
 } from "../../shared/itemTypes.js";
+import { createItemPatchQueue } from "./itemPatchQueue.js";
 
 export { buildItemsFromModules };
 
@@ -74,7 +75,7 @@ function reducer(state, action) {
           p.id === action.projectId
             ? {
                 ...p,
-                updatedAt: action.updatedAt || new Date().toISOString(),
+                updatedAt: action.updatedAt === undefined ? p.updatedAt : action.updatedAt,
                 items: p.items.map((it) =>
                   it.id === action.itemId
                     ? reconcileStoredItem({ ...it, ...action.item }, state.materials)
@@ -151,6 +152,26 @@ export function StoreProvider({ children }) {
   const [, tick] = useState(0);
   const materialsInflight = useRef(null);
   const modulesInflight = useRef(null);
+  const itemPatchQueueRef = useRef(null);
+
+  if (!itemPatchQueueRef.current) {
+    itemPatchQueueRef.current = createItemPatchQueue({
+      send: ({ projectId, itemId, patch }) => apiClient.patchItem(projectId, itemId, patch),
+      onOptimistic: ({ projectId, itemId, patch }) => {
+        dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId, item: patch });
+      },
+      onSettled: (item, { projectId, itemId }) => {
+        dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId, item });
+      },
+      onLatestError: (_error, { projectId, itemId }, _revision, lastConfirmed) => {
+        // Do not reload the project after a transient save failure: a stale snapshot
+        // could overwrite a qty already confirmed by an earlier queued PATCH.
+        if (lastConfirmed) {
+          dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId, item: lastConfirmed });
+        }
+      },
+    });
+  }
 
   const refreshSettings = useCallback(async () => {
     const settings = await apiClient.getSettings();
@@ -328,9 +349,7 @@ export function StoreProvider({ children }) {
         dispatch({ type: "PROJECT_REMOVE", id });
       },
       async itemUpdate(projectId, itemId, patch) {
-        const item = await apiClient.patchItem(projectId, itemId, patch);
-        dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId, item });
-        return item;
+        return itemPatchQueueRef.current(`${projectId}:${itemId}`, { projectId, itemId, patch });
       },
       async itemAdd(projectId, item) {
         const created = await apiClient.addItem(projectId, item);

@@ -12,6 +12,7 @@ let db;
 let initDb;
 let saveItems;
 let loadProjectItems;
+let loadProject;
 let patchItem;
 
 function seedMaterial(id = "mat1") {
@@ -57,6 +58,7 @@ beforeAll(async () => {
   db = dbMod.db;
   initDb = dbMod.initDb;
   loadProjectItems = dbMod.loadProjectItems;
+  loadProject = dbMod.loadProject;
   saveItems = projectsMod.saveItems;
   patchItem = projectsMod.patchItem;
   initDb();
@@ -167,5 +169,26 @@ describe("saveItems transactional replace", () => {
     const rows = loadProjectItems("p1");
     expect(rows).toHaveLength(1);
     expect(rows[0].name).toBe("Legacy");
+  });
+
+  it("persists qty through PATCH and reload, including zero and values above one", () => {
+    saveItems("p1", [item("qty-line", "mat1", { qty: 1 })]);
+
+    const changed = patchItem("p1", "qty-line", { qty: 7 });
+    expect(changed.qty).toBe(7);
+    expect(loadProjectItems("p1").find((row) => row.id === "qty-line")?.qty).toBe(7);
+    expect(loadProject("p1")?.items.find((row) => row.id === "qty-line")?.qty).toBe(7);
+
+    const zeroed = patchItem("p1", "qty-line", { qty: 0 });
+    expect(zeroed.qty).toBe(0);
+    expect(zeroed.includedInProject).toBe(false);
+    const reloadedZero = loadProjectItems("p1").find((row) => row.id === "qty-line");
+    expect(reloadedZero).toMatchObject({ qty: 0, includedInProject: false });
+
+    patchItem("p1", "qty-line", { qty: 3, includedInProject: true });
+    expect(loadProjectItems("p1").find((row) => row.id === "qty-line")).toMatchObject({
+      qty: 3,
+      includedInProject: true,
+    });
   });
 });

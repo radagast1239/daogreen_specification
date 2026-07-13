@@ -246,6 +246,7 @@ export default function MaterialsPage() {
             <MaterialsQualityPanel
               materials={state.materials}
               modules={state.modules}
+              suppliers={suppliers}
               onEditMaterial={openMaterialEdit}
               onPatchMaterial={patchMaterialFromQuality}
             />

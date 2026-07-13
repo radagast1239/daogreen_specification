@@ -1,5 +1,5 @@
 import { uid } from "./ids.js";
-import { FRAME_BOM_SOURCE, isFrameBomLine } from "../../shared/frameBomProjectItems.js";
+import { FRAME_BOM_SOURCE } from "../../shared/frameBomProjectItems.js";
 import {
   copyCatalogSnapshotFromMaterial,
   fillEmptyCatalogFieldsFromMaterial,
@@ -169,9 +169,7 @@ export function applyMaterialCatalogFields(line, materials = [], options = {}) {
 export function hydrateCatalogEditorLine(ln, materials) {
   if (!ln) return blankLine();
   const stored = normalizeStoredCatalogLine(ln);
-  const qty = isFrameBomLine(ln)
-    ? Number(ln.qty ?? stored.qty ?? stored.defaultQty) || 0
-    : Number(stored.defaultQty ?? ln.qty) || 0;
+  const qty = Number(ln.qty ?? stored.qty ?? stored.defaultQty) || 0;
   const sub = stored.subcategory || ln.farmGroup || ln.subcategory || "";
   const included = ln.included !== false;
 

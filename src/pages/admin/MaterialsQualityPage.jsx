@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
@@ -14,6 +14,7 @@ import {
 import { buildBulkPatchPayload, formatBulkActionConfirmation } from "../../../shared/materialBulkActions.js";
 import { DEFAULT_RESPONSIBLE_ROLES } from "../../lib/responsibleRoles.js";
 import { getClientSections, subsectionsForSection } from "../../../shared/clientSections.js";
+import { api } from "../../lib/api.js";
 
 const SEV_STYLE = {
   critical: { color: "var(--danger)", chip: "chip chip--danger", label: "Критично" },
@@ -21,7 +22,7 @@ const SEV_STYLE = {
   info: { color: "var(--muted)", chip: "chip chip--neutral", label: "Рекомендация" },
 };
 
-export function MaterialsQualityPanel({ materials, modules, onEditMaterial, onPatchMaterial }) {
+export function MaterialsQualityPanel({ materials, modules, suppliers = [], onEditMaterial, onPatchMaterial }) {
   const [qualityFilter, setQualityFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkAction, setBulkAction] = useState("");
@@ -243,13 +244,17 @@ export function MaterialsQualityPanel({ materials, modules, onEditMaterial, onPa
           )}
 
           {bulkAction === "supplier" && (
-            <input
+            <select
               className="input-sm"
-              placeholder="Название поставщика"
               value={bulkValue}
               onChange={(e) => setBulkValue(e.target.value)}
               disabled={isApplying}
-            />
+            >
+              <option value="">Без поставщика</option>
+              {suppliers.map((supplier) => (
+                <option key={supplier.id} value={supplier.name}>{supplier.name}</option>
+              ))}
+            </select>
           )}
 
           {bulkAction === "clientSection" && (
@@ -430,6 +435,11 @@ export default function MaterialsQualityPage() {
   const { state, actions } = useStore();
   const navigate = useNavigate();
   const { success } = useToast();
+  const [suppliers, setSuppliers] = useState([]);
+
+  useEffect(() => {
+    api.getSuppliers().then(setSuppliers).catch(() => setSuppliers([]));
+  }, []);
 
   return (
     <>
@@ -442,6 +452,7 @@ export default function MaterialsQualityPage() {
         <MaterialsQualityPanel
           materials={state.materials}
           modules={state.modules}
+          suppliers={suppliers}
           onEditMaterial={(id) => navigate(`/materials?edit=${encodeURIComponent(id)}`)}
           onPatchMaterial={async (id, patch) => {
             await actions.materialUpdate(id, patch);

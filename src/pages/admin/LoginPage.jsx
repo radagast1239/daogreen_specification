@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAdminKey, api, setAdminKey } from "../../lib/api.js";
 import { clearClientScope } from "../../components/ClientGuard.jsx";
+import { loginErrorMessage } from "../../lib/requestErrors.js";
 
 export default function LoginPage() {
   const nav = useNavigate();
@@ -19,8 +20,8 @@ export default function LoginPage() {
       clearClientScope();
       nav("/", { replace: true });
       window.location.reload();
-    } catch {
-      setErr("Неверный ключ или API недоступен.");
+    } catch (error) {
+      setErr(loginErrorMessage(error));
     } finally {
       setLoading(false);
     }

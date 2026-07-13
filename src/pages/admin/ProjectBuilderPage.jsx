@@ -75,6 +75,7 @@ import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
 import FloorPlanField from "../../components/FloorPlanField.jsx";
 import FloorPlanPin from "../../components/FloorPlanPin.jsx";
+import { listUploadedSchemes } from "../../lib/clientSchemes.js";
 import { COOLING_FARM_DEFAULTS, computeCoolingFarm } from "../../lib/coolingFarmCalc.js";
 import { newRoom } from "../../lib/roomHelpers.js";
 import {
@@ -256,7 +257,13 @@ export default function ProjectBuilderPage() {
     if (key === "name") setNameTouched(true);
   };
   const floorPlanUrl = form.manualParams?.floorPlanUrl || "";
-  const showFloorPlanPin = (step === "general" || step === "cooling" || step === "consumables" || step === "review") && !!floorPlanUrl;
+  const uploadedSchemes = useMemo(
+    () => listUploadedSchemes(form.manualParams),
+    [form.manualParams]
+  );
+  const showFloorPlanPin =
+    (step === "general" || step === "cooling" || step === "consumables" || step === "review") &&
+    uploadedSchemes.length > 0;
   const basicsErrors = useMemo(() => validateNewProjectForm(form), [form]);
   const canGoNextFromBasics = canSubmitNewProject(form);
   const projectKind = resolveProjectKind({ manualParams: form.manualParams }) || PROJECT_KIND.CLIENT;
@@ -1424,8 +1431,8 @@ export default function ProjectBuilderPage() {
 
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button type="button" className="btn" onClick={() => goToStep("stellages")}>← Стеллажи</button>
-            {floorPlanUrl && (
-              <FloorPlanPin url={floorPlanUrl} title="Схема помещения" variant="button" />
+            {uploadedSchemes.length > 0 && (
+              <FloorPlanPin schemes={uploadedSchemes} title="Схема помещения" variant="button" />
             )}
             <button type="button" className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => goToStep("cooling")}>
               Расчёт охлаждения →
@@ -1436,9 +1443,9 @@ export default function ProjectBuilderPage() {
 
       {step === "cooling" && (
         <div>
-          {floorPlanUrl && (
+          {uploadedSchemes.length > 0 && (
             <div className="toolbar" style={{ marginBottom: 12 }}>
-              <FloorPlanPin url={floorPlanUrl} title="Схема помещения" variant="button" />
+              <FloorPlanPin schemes={uploadedSchemes} title="Схема помещения" variant="button" />
             </div>
           )}
           <CoolingFarmTab
@@ -1601,7 +1608,7 @@ export default function ProjectBuilderPage() {
         </div>
       )}
 
-      {showFloorPlanPin && <FloorPlanPin url={floorPlanUrl} title="Схема помещения" />}
+      {showFloorPlanPin && <FloorPlanPin schemes={uploadedSchemes} title="Схема помещения" />}
     </>
   );
 }

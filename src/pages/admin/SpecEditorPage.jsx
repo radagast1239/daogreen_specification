@@ -26,7 +26,7 @@ import {
   num,
 } from "../../store/helpers.js";
 import { useStore } from "../../store/StoreContext.jsx";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useSearchParams, useNavigate } from "react-router-dom";
 import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
 import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient, buildClientVisibilityPatch } from "../../../shared/itemTypes.js";
@@ -74,6 +74,9 @@ import { filterItemsForViewMode } from "../../../shared/projectReadiness.js";
 import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
 import { clientLinkActiveState } from "../../../shared/clientProjectLoadState.js";
 import { copyToClipboard } from "../../lib/copyText.js";
+import { createDebouncedTask } from "../../lib/debouncedTask.js";
+import { listUploadedSchemes } from "../../lib/clientSchemes.js";
+import { itemHasAdminComments, itemHasClientNote, itemHasInternalNote } from "../../lib/specItemComments.js";
 import {
   compositionGroupLabel,
   groupItemsByComposition,
@@ -124,6 +127,7 @@ export default function SpecEditorPage() {
   const [createOnboardingDismissed, setCreateOnboardingDismissed] = useState(false);
   const clearSpecSelectionRef = useRef(null);
   const applySpecSelectionRef = useRef(null);
+  const itemRefreshRef = useRef(null);
 
   const stalePrices = useMemo(
     () => findStaleProjectPrices(project?.items || [], state.materials),
@@ -200,7 +204,7 @@ export default function SpecEditorPage() {
     }).catch(() => {});
   }, []);
 
-  const refreshPublishCheck = () => {
+  const refreshPublishCheck = useCallback(() => {
     if (!id) return Promise.resolve();
     setPublishCheckLoading(true);
     return api
@@ -208,7 +212,23 @@ export default function SpecEditorPage() {
       .then(setPublishCheck)
       .catch(() => setPublishCheck(null))
       .finally(() => setPublishCheckLoading(false));
-  };
+  }, [id]);
+
+  const refreshActivity = useCallback(() => {
+    if (!id) return Promise.resolve();
+    return api.getProjectActivity(id).then(setActivity).catch(() => setActivity([]));
+  }, [id]);
+
+  useEffect(() => {
+    itemRefreshRef.current?.cancel();
+    itemRefreshRef.current = createDebouncedTask(() => {
+      refreshActivity();
+      refreshPublishCheck();
+    });
+    return () => itemRefreshRef.current?.cancel();
+  }, [refreshActivity, refreshPublishCheck]);
+
+  const scheduleItemRefresh = useCallback(() => itemRefreshRef.current?.schedule(), []);
 
   useEffect(() => {
     refreshPublishCheck();
@@ -216,8 +236,8 @@ export default function SpecEditorPage() {
 
   useEffect(() => {
     if (!id) return;
-    api.getProjectActivity(id).then(setActivity).catch(() => setActivity([]));
-  }, [id, project?.updatedAt]);
+    refreshActivity();
+  }, [refreshActivity, project?.updatedAt]);
 
   useEffect(() => {
     if (highlightItemId) setTab("spec");
@@ -280,8 +300,7 @@ export default function SpecEditorPage() {
     actions
       .itemUpdate(project.id, itemId, patch)
       .then(() => {
-        api.getProjectActivity(project.id).then(setActivity).catch(() => {});
-        refreshPublishCheck();
+        scheduleItemRefresh();
       })
       .catch((e) => error(e.message || "Не удалось сохранить позицию"));
 
@@ -331,7 +350,11 @@ export default function SpecEditorPage() {
   };
 
   const floorPlanUrl = project.manualParams?.floorPlanUrl || "";
-  const showFloorPlanPin = !!floorPlanUrl && (tab === "spec" || tab === "calc");
+  const uploadedSchemes = useMemo(
+    () => listUploadedSchemes(project.manualParams),
+    [project.manualParams]
+  );
+  const showFloorPlanPin = uploadedSchemes.length > 0 && (tab === "spec" || tab === "calc");
 
   const doPublishVersion = async (force = false) => {
     try {
@@ -1051,7 +1074,7 @@ export default function SpecEditorPage() {
         )}
       </div>
 
-      {showFloorPlanPin && <FloorPlanPin url={floorPlanUrl} title="Схема помещения" />}
+      {showFloorPlanPin && <FloorPlanPin schemes={uploadedSchemes} title="Схема помещения" />}
     </>
   );
 }
@@ -1172,6 +1195,7 @@ function SpecTab({
   const [moduleSelected, setModuleSelected] = useState({});
   const [suppliers, setSuppliers] = useState([]);
   const [saveTplModule, setSaveTplModule] = useState(null);
+  const [commentExpandId, setCommentExpandId] = useState(null);
   const moduleScrollRefs = useRef({});
 
   useEffect(() => {
@@ -1434,9 +1458,11 @@ function SpecTab({
         const editItem = readOnly ? () => Promise.resolve() : patchItem;
         const renderItemRow = (it) => {
           const frameBomSourceLabel = clientPreview ? "" : resolveAdminItemSourceLabel(it);
+          const commentsOpen = commentExpandId === it.id;
+          const hasComments = itemHasAdminComments(it);
           return (
+            <React.Fragment key={it.id}>
                   <tr
-                    key={it.id}
                     id={`spec-item-${it.id}`}
                     className={((it.includedInProject === false ? "row-hidden " : "") + (highlightItemId === it.id ? "spec-row--highlight" : ""))}
                   >
@@ -1497,20 +1523,12 @@ function SpecTab({
                           {frameBomSourceLabel}
                         </div>
                       )}
-                      {hasStructuredSpecEditor(it.name) ? (
+                      {hasStructuredSpecEditor(it.name) && (
                         <StructuredSpecEditor
                           compact
                           name={it.name}
                           values={it}
                           onChange={(patch) => editItem(it.id, patch)}
-                        />
-                      ) : (
-                        <input
-                          className="input-inline"
-                          placeholder="сообщение клиенту"
-                          style={{ marginTop: 4, fontSize: 11 }}
-                          value={it.clientNote || ""}
-                          onChange={(e) => editItem(it.id, { clientNote: e.target.value })}
                         />
                       )}
                         </>
@@ -1523,13 +1541,12 @@ function SpecTab({
                       <input className="input-inline" value={it.unit} onChange={(e) => editItem(it.id, { unit: e.target.value })} />
                       )}
                     </td>
-                    <td className="right" style={{ width: 90 }}>
+                    <td className="right spec-qty-cell">
                       {readOnly ? (
                         <span className="num">{it.qty}</span>
                       ) : (
                       <input
-                        className="input-inline num"
-                        style={{ textAlign: "right" }}
+                        className="input-inline num spec-qty-input"
                         type="number"
                         value={it.qty}
                         onChange={(e) => editItem(it.id, { qty: Number(e.target.value) || 0 })}
@@ -1637,14 +1654,23 @@ function SpecTab({
                       )}
                     </td>
                     {!clientPreview && (
-                    <td style={{ minWidth: 100, maxWidth: 140 }}>
-                      <input
-                        className="input-inline"
-                        placeholder="внутр."
-                        title="Не видно клиенту"
-                        value={it.internalNote || ""}
-                        onChange={(e) => editItem(it.id, { internalNote: e.target.value })}
-                      />
+                    <td className="spec-comment-cell">
+                      <button
+                        type="button"
+                        className={`spec-comment-toggle${hasComments ? " has-notes" : ""}${commentsOpen ? " is-open" : ""}`}
+                        title={hasComments ? "Комментарии (есть текст)" : "Комментарии"}
+                        aria-expanded={commentsOpen}
+                        aria-label="Комментарии к позиции"
+                        onClick={() => setCommentExpandId(commentsOpen ? null : it.id)}
+                      >
+                        💬
+                        {hasComments && (
+                          <span className="spec-comment-toggle__dots" aria-hidden>
+                            {itemHasClientNote(it) ? <span className="dot dot--client" /> : null}
+                            {itemHasInternalNote(it) ? <span className="dot dot--internal" /> : null}
+                          </span>
+                        )}
+                      </button>
                     </td>
                     )}
                     <td style={{ minWidth: 100, maxWidth: 160, fontSize: 12 }}>
@@ -1770,6 +1796,33 @@ function SpecTab({
                     </>
                     )}
                   </tr>
+                  {!clientPreview && commentsOpen && (
+                    <tr className="spec-comment-expand-row">
+                      <td colSpan={specColSpan}>
+                        <div className="spec-comment-expand">
+                          <label className="spec-comment-field">
+                            <span>Комментарий клиенту</span>
+                            <textarea
+                              rows={2}
+                              value={it.clientNote || ""}
+                              placeholder="Видно клиенту и в клиентских PDF/Excel"
+                              onChange={(e) => editItem(it.id, { clientNote: e.target.value })}
+                            />
+                          </label>
+                          <label className="spec-comment-field">
+                            <span>Внутренний комментарий</span>
+                            <textarea
+                              rows={2}
+                              value={it.internalNote || ""}
+                              placeholder="Только в админке"
+                              onChange={(e) => editItem(it.id, { internalNote: e.target.value })}
+                            />
+                          </label>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+            </React.Fragment>
           );
         };
         const bodyRows = isStellageModuleTitle(module, modules)
@@ -1842,7 +1895,7 @@ function SpecTab({
                   <th style={{ width: 48 }}>Фото</th>
                   <th>Наименование</th>
                   <th>Ед</th>
-                  <th className="right">Кол-во</th>
+                  <th className="right spec-qty-cell">Кол-во</th>
                   <th className="right">Цена</th>
                   <th>НДС</th>
                   <th>Поставщик</th>
@@ -1850,7 +1903,7 @@ function SpecTab({
                   <th className="right">Сумма</th>
                   <th>Ссылка</th>
                   <th style={{ width: 130 }}>Статус закупки</th>
-                  {!clientPreview && <th title="Внутренний комментарий">Заметка</th>}
+                  {!clientPreview && <th className="spec-comment-cell" title="Комментарии к позиции">💬</th>}
                   <th title="Комментарий клиента">Клиент</th>
                   {!clientPreview && (
                     <>
