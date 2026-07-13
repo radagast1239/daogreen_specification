@@ -49,3 +49,10 @@ local-backup-before-server-restore/
 server-restore/
 server-restore-full/
 scripts/vps-download-restore.mjs
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
