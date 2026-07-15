@@ -73,8 +73,8 @@ import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomCoolingEditor from "../../components/RoomCoolingEditor.jsx";
 import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
-import FloorPlanField from "../../components/FloorPlanField.jsx";
 import FloorPlanPin from "../../components/FloorPlanPin.jsx";
+import ClientSchemesEditor from "../../components/ClientSchemesEditor.jsx";
 import { listUploadedSchemes } from "../../lib/clientSchemes.js";
 import { COOLING_FARM_DEFAULTS, computeCoolingFarm } from "../../lib/coolingFarmCalc.js";
 import { newRoom } from "../../lib/roomHelpers.js";
@@ -119,7 +119,11 @@ export default function ProjectBuilderPage() {
   const [loadedProjectId, setLoadedProjectId] = useState(savedProjectIdFromUrl);
   const [loadedProject, setLoadedProject] = useState(null);
   const [pendingEditRack, setPendingEditRack] = useState(() => String(searchParams.get("editRack") || "").trim());
-  const isDraftSession = !loadedProjectId || isDraftProject(loadedProject) || builderUrl.mode === "draft";
+  const editingFinishedProject = Boolean(loadedProject && !isDraftProject(loadedProject));
+  // mode=edit (or hydrated finished project) must not behave like a draft session.
+  const isDraftSession =
+    !editingFinishedProject &&
+    (!loadedProjectId || isDraftProject(loadedProject) || builderUrl.mode === "draft");
   const isEditMode = Boolean(loadedProjectId);
   const [presets, setPresets] = useState([]);
   const [farmCatalogs, setFarmCatalogs] = useState({});
@@ -256,7 +260,6 @@ export default function ProjectBuilderPage() {
     });
     if (key === "name") setNameTouched(true);
   };
-  const floorPlanUrl = form.manualParams?.floorPlanUrl || "";
   const uploadedSchemes = useMemo(
     () => listUploadedSchemes(form.manualParams),
     [form.manualParams]
@@ -264,6 +267,8 @@ export default function ProjectBuilderPage() {
   const showFloorPlanPin =
     (step === "general" || step === "cooling" || step === "consumables" || step === "review") &&
     uploadedSchemes.length > 0;
+  const setSchemesManualParams = (next) =>
+    setForm((f) => ({ ...f, manualParams: next && typeof next === "object" ? next : f.manualParams }));
   const basicsErrors = useMemo(() => validateNewProjectForm(form), [form]);
   const canGoNextFromBasics = canSubmitNewProject(form);
   const projectKind = resolveProjectKind({ manualParams: form.manualParams }) || PROJECT_KIND.CLIENT;
@@ -673,7 +678,11 @@ export default function ProjectBuilderPage() {
 
   const syncBuilderProjectUrl = (projectId, nextStep = step) => {
     if (!projectId) return;
-    const url = buildBuilderDraftPath(projectId, { step: nextStep });
+    const mode =
+      (loadedProject && !isDraftProject(loadedProject)) || builderUrl.mode === "edit"
+        ? "edit"
+        : "draft";
+    const url = buildBuilderDraftPath(projectId, { step: nextStep, mode });
     const params = new URLSearchParams(url.split("?")[1] || "");
     setSearchParams(params, { replace: true });
   };
@@ -681,6 +690,14 @@ export default function ProjectBuilderPage() {
   const markSaved = () => {
     setSaveState("saved");
     window.setTimeout(() => setSaveState("idle"), 2500);
+  };
+
+  /** Intermediate save must not demote a finished project back to draft. */
+  const resolveSaveStatus = (requested = PROJECT_STATUS_DRAFT) => {
+    if (loadedProject && !isDraftProject(loadedProject)) {
+      return loadedProject.status || PROJECT_STATUS_ACTIVE;
+    }
+    return requested;
   };
 
   const persistProject = async ({
@@ -695,7 +712,8 @@ export default function ProjectBuilderPage() {
     }
     if (!silent) setDraftSaving(true);
     try {
-      const payload = buildProjectPayload({ status, nextStep, draftOverride, stellagesOverride });
+      const effectiveStatus = resolveSaveStatus(status);
+      const payload = buildProjectPayload({ status: effectiveStatus, nextStep, draftOverride, stellagesOverride });
       if (loadedProjectId) {
         const updated = await actions.projectUpdate(loadedProjectId, payload);
         setLoadedProjectId(updated.id);
@@ -725,7 +743,7 @@ export default function ProjectBuilderPage() {
   const saveDraftSilently = async (nextStep = step, overrides = {}) => {
     if (!loadedProjectId || !canSubmitNewProject(form)) return null;
     return persistProject({
-      status: PROJECT_STATUS_DRAFT,
+      status: resolveSaveStatus(PROJECT_STATUS_DRAFT),
       nextStep,
       silent: true,
       ...overrides,
@@ -740,9 +758,12 @@ export default function ProjectBuilderPage() {
       return;
     }
     try {
-      const project = await persistProject({ status: PROJECT_STATUS_DRAFT, silent: false });
+      const project = await persistProject({
+        status: resolveSaveStatus(PROJECT_STATUS_DRAFT),
+        silent: false,
+      });
       if (!project) return;
-      success("Черновик сохранён");
+      success(editingFinishedProject ? "Проект сохранён" : "Черновик сохранён");
     } catch (e) {
       error(e.message || "Не удалось сохранить черновик");
     }
@@ -886,14 +907,17 @@ export default function ProjectBuilderPage() {
     }
     setSaving(true);
     try {
+      const nextStatus = editingFinishedProject
+        ? resolveSaveStatus(loadedProject?.status || PROJECT_STATUS_ACTIVE)
+        : PROJECT_STATUS_ACTIVE;
       const project = await persistProject({
-        status: PROJECT_STATUS_ACTIVE,
+        status: nextStatus,
         nextStep: "review",
         silent: true,
       });
       if (!project) return;
-      // Ensure onboarding flag for SpecEditor
-      if (project?.id && project?.manualParams?.showCreateOnboarding !== true) {
+      // Ensure onboarding flag for SpecEditor (first create only)
+      if (!editingFinishedProject && project?.id && project?.manualParams?.showCreateOnboarding !== true) {
         try {
           await actions.projectUpdate(project.id, {
             manualParams: { ...(project.manualParams || {}), showCreateOnboarding: true },
@@ -902,10 +926,10 @@ export default function ProjectBuilderPage() {
           /* non-fatal */
         }
       }
-      success("Проект создан");
-      nav(`/project/${project.id}?created=1`, { replace: true });
+      success(editingFinishedProject ? "Проект обновлён" : "Проект создан");
+      nav(`/project/${project.id}${editingFinishedProject ? "" : "?created=1"}`, { replace: true });
     } catch (e) {
-      error(e.message || "Ошибка создания проекта");
+      error(e.message || (editingFinishedProject ? "Ошибка сохранения проекта" : "Ошибка создания проекта"));
     } finally {
       setSaving(false);
     }
@@ -916,16 +940,39 @@ export default function ProjectBuilderPage() {
   return (
     <>
       <PageHeader
-        title={isDraftSession ? "Проект в настройке" : "Новый проект"}
-        sub={isEditMode
-          ? "Продолжайте сборку фермы в мастере: стеллажи, разделы, охлаждение, закупка. Проект сохраняется как черновик до финального создания."
-          : "Соберите стеллажи и разделы фермы. После первого сохранения черновик появится в «В процессе»."}
-        back={{ to: isEditMode ? "/projects/in-progress" : "/", label: isEditMode ? "В процессе" : "Проекты" }}
+        title={
+          editingFinishedProject
+            ? "Редактирование проекта"
+            : isDraftSession
+              ? "Проект в настройке"
+              : "Новый проект"
+        }
+        sub={
+          editingFinishedProject
+            ? "Меняйте стеллажи, разделы и параметры. Сохранение обновляет тот же проект без создания копии."
+            : isEditMode
+              ? "Продолжайте сборку фермы в мастере: стеллажи, разделы, охлаждение, закупка. Проект сохраняется как черновик до финального создания."
+              : "Соберите стеллажи и разделы фермы. После первого сохранения черновик появится в «В процессе»."
+        }
+        back={{
+          to: editingFinishedProject
+            ? `/project/${loadedProjectId}`
+            : isEditMode
+              ? "/projects/in-progress"
+              : "/",
+          label: editingFinishedProject ? "К спецификации" : isEditMode ? "В процессе" : "Проекты",
+        }}
         actions={
           <>
-            {isDraftSession && (
+            {(isDraftSession || editingFinishedProject) && (
               <span className="chip" style={{ fontSize: 11, marginRight: 8 }}>
-                {saveState === "saved" ? "Сохранено" : draftSaving ? "Сохранение…" : "Черновик"}
+                {saveState === "saved"
+                  ? "Сохранено"
+                  : draftSaving
+                    ? "Сохранение…"
+                    : editingFinishedProject
+                      ? "Готовый проект"
+                      : "Черновик"}
               </span>
             )}
             <button
@@ -934,7 +981,11 @@ export default function ProjectBuilderPage() {
               disabled={!canGoNextFromBasics || draftSaving}
               onClick={saveDraft}
             >
-              {draftSaving ? "Сохранение…" : "Сохранить черновик"}
+              {draftSaving
+                ? "Сохранение…"
+                : editingFinishedProject
+                  ? "Сохранить"
+                  : "Сохранить черновик"}
             </button>
             <CompactTableToggle />
             <Link to="/modules" className="btn btn-sm">
@@ -1047,7 +1098,12 @@ export default function ProjectBuilderPage() {
 
           <RoomsEditor rooms={rooms} onChange={setRooms} />
 
-          <FloorPlanField value={floorPlanUrl} onChange={(url) => setManual("floorPlanUrl", url)} />
+          <ClientSchemesEditor
+            manualParams={form.manualParams}
+            onChange={setSchemesManualParams}
+            showClientVisibility={false}
+            title="Схемы проекта"
+          />
 
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button
@@ -1345,7 +1401,12 @@ export default function ProjectBuilderPage() {
           <p className="muted" style={{ fontSize: 13, margin: "0 0 12px" }}>
             Общая закупка по разделам фермы — отмечайте позиции здесь (не отдельный стартовый сценарий).
           </p>
-          <FloorPlanField value={floorPlanUrl} onChange={(url) => setManual("floorPlanUrl", url)} />
+          <ClientSchemesEditor
+            manualParams={form.manualParams}
+            onChange={setSchemesManualParams}
+            showClientVisibility={false}
+            title="Схемы проекта"
+          />
 
           {rooms.length > 0 && (
             <p className="muted" style={{ fontSize: 13, margin: "0 0 12px" }}>
@@ -1602,7 +1663,13 @@ export default function ProjectBuilderPage() {
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button type="button" className="btn" onClick={() => goToStep("consumables")}>← Назад</button>
             <button type="button" className="btn btn-primary" disabled={!canFinalize || saving} onClick={finalizeProject}>
-              {saving ? "Создание…" : "Создать проект"}
+              {saving
+                ? editingFinishedProject
+                  ? "Сохранение…"
+                  : "Создание…"
+                : editingFinishedProject
+                  ? "Сохранить и открыть спецификацию"
+                  : "Создать проект"}
             </button>
           </div>
         </div>

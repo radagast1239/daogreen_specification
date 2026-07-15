@@ -21,6 +21,11 @@ import {
   patchMaterialFarmSections,
   resolveMaterialFarmSections,
 } from "../../shared/materialFarmSections.js";
+import { farmSectionModuleAlias } from "../data/farmSections.js";
+import {
+  NASOSNAYA_SECTION_ID,
+  materialBelongsToNasosnaya,
+} from "../../shared/nasosnayaFarmSection.js";
 import { resolveItemType } from "../../shared/itemTypes.js";
 import { isSplitSystemName } from "../../shared/splitSpecs.js";
 import { buildAcLineFromRoom, AC_ITEM_SECTION } from "../../shared/roomAcSpec.js";
@@ -98,9 +103,23 @@ export function syncLineFromMaterial(line, mat) {
 }
 
 /** Строки каталога для раздела «Ферма целиком» */
-export function catalogLinesForFarmSection(materials, sectionId) {
+export function catalogLinesForFarmSection(materials, sectionId, options = {}) {
+  const moduleAlias = farmSectionModuleAlias(sectionId);
+  const legacyFarmSectionIds = options.legacyFarmSectionIds || [];
   return materials
-    .filter((m) => materialInFarmSection(m, sectionId) && m.status === "active")
+    .filter((m) => {
+      if (m.status !== "active") return false;
+      if (materialInFarmSection(m, sectionId)) return true;
+      if (
+        sectionId === NASOSNAYA_SECTION_ID &&
+        materialBelongsToNasosnaya(m, { legacyFarmSectionIds })
+      ) {
+        return true;
+      }
+      // Fallback: materials tagged by module name for this section
+      if (moduleAlias && materialInModule(m, moduleAlias)) return true;
+      return false;
+    })
     .map((m) => lineFromMaterial(m, { included: false }));
 }
 

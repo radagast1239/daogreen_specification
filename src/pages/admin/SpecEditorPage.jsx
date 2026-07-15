@@ -2,6 +2,8 @@ import { resolveAdminItemSourceLabel } from "../../../shared/frameBomProjectItem
 import { applyResidualFrameBomTwinRepair } from "../../frameConstructor/frameBomAddToProject.js";
 import { buildBuilderDraftPath, isDraftProject, resolveBuilderWizardStep } from "../../../shared/projectLifecycle.js";
 import SaveSectionTemplateModal from "../../components/SaveSectionTemplateModal.jsx";
+import AddMaterialToSpecModal from "../../components/AddMaterialToSpecModal.jsx";
+import { buildProjectItemFromMaterial } from "../../lib/addProjectItemFromMaterial.js";
 import { api } from "../../lib/api.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
@@ -1196,6 +1198,7 @@ function SpecTab({
   const [suppliers, setSuppliers] = useState([]);
   const [saveTplModule, setSaveTplModule] = useState(null);
   const [commentExpandId, setCommentExpandId] = useState(null);
+  const [addMaterialModule, setAddMaterialModule] = useState(null);
   const moduleScrollRefs = useRef({});
 
   useEffect(() => {
@@ -1332,29 +1335,42 @@ function SpecTab({
     }
   };
 
-  const addItem = (module) => {
+  const addCustomItem = (module) => {
     actions.itemAdd(project.id, {
       module,
       section: module,
-      name: "— привязать материал из базы —",
+      name: "Произвольная позиция",
       unit: "шт.",
       category: "Прочее",
       link: "",
       clientNote: "",
       qty: 1,
       price: 0,
-      itemType: "internal_note",
+      itemType: "note",
       materialId: null,
       includedInProject: true,
-      visibleToClient: false,
-      visible: false,
-      approved: false,
+      visibleToClient: true,
+      visible: true,
+      approved: true,
       enabled: true,
       status: "not_bought",
       actualPrice: null,
       clientComment: "",
     });
   };
+
+  const addItemFromMaterial = async (module, mat) => {
+    try {
+      const sortOrder = (project.items || []).length;
+      const item = buildProjectItemFromMaterial(mat, module, { sortOrder, qty: 1 });
+      await actions.itemAdd(project.id, item);
+      success(`Добавлено: ${mat.name}`);
+    } catch (e) {
+      error(e.message || "Не удалось добавить позицию");
+    }
+  };
+
+  const openAddItem = (module) => setAddMaterialModule(module);
 
   if (!project.items.length)
     return <Empty title="В проекте нет позиций" hint="Добавь модули при создании проекта или вручную ниже." />;
@@ -1378,6 +1394,24 @@ function SpecTab({
             await api.saveSectionTemplate(project.id, saveTplModule, { name, note });
             setSaveTplModule(null);
             success(`Шаблон «${name}» сохранён`);
+          }}
+        />
+      )}
+      {addMaterialModule && (
+        <AddMaterialToSpecModal
+          module={addMaterialModule}
+          materials={materials}
+          existingItems={project.items}
+          onClose={() => setAddMaterialModule(null)}
+          onSelect={async (mat) => {
+            const mod = addMaterialModule;
+            setAddMaterialModule(null);
+            await addItemFromMaterial(mod, mat);
+          }}
+          onCustom={() => {
+            const mod = addMaterialModule;
+            setAddMaterialModule(null);
+            addCustomItem(mod);
           }}
         />
       )}
@@ -1850,7 +1884,7 @@ function SpecTab({
             <button className="btn btn-sm btn-ghost" onClick={() => setSaveTplModule(module)}>
               Сохранить как шаблон
             </button>
-            <button className="btn btn-sm btn-ghost" onClick={() => addItem(module)}>
+            <button className="btn btn-sm btn-ghost" onClick={() => openAddItem(module)}>
               ＋ позиция
             </button>
             </span>

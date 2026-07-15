@@ -6,6 +6,13 @@ import { hydrateCatalogEditorLine } from "./specLineCore.js";
 import { normalizeStoredCatalog } from "../../shared/catalogLine.js";
 import { parseJson } from "./jsonUtils.js";
 import { DEFAULT_FARM_SECTION_GROUPS, resolveFarmSectionGroups } from "./farmSectionGroupsRef.js";
+import {
+  NASOSNAYA_SECTION_ID,
+  canonicalizeNasosnayaSection,
+  isNasosnayaSectionName,
+  nasosnayaCatalogLookupIds,
+  normalizeFarmSectionLabel,
+} from "../../shared/nasosnayaFarmSection.js";
 
 export { DEFAULT_FARM_SECTION_GROUPS, resolveFarmSectionGroups, parseJson };
 export { stripLineIds } from "./builderLines.js";
@@ -45,14 +52,95 @@ export function normalizeSection(raw) {
     color: raw.color || meta.color,
     defaultResponsible: raw.defaultResponsible || "",
     hiddenForFarmTypes: Array.isArray(raw.hiddenForFarmTypes) ? raw.hiddenForFarmTypes : [],
+    catalogAliasIds: Array.isArray(raw.catalogAliasIds)
+      ? [...new Set(raw.catalogAliasIds.map((x) => String(x || "").trim()).filter(Boolean))]
+      : [],
   };
+}
+
+/**
+ * Runtime dedupe: by id, normalized name, and nasosnaya legacy aliases.
+ * Canonicalizes legacy «Насосы» / «Насосная группа» / live uid ids → sec_nasosnaya.
+ */
+export function dedupeAndCanonicalizeFarmSections(sections) {
+  const list = (Array.isArray(sections) ? sections : []).map(normalizeSection);
+  const out = [];
+  const seenIds = new Set();
+  const seenNames = new Set();
+
+  for (const raw of list) {
+    const originalId = String(raw.id || "").trim();
+    const s = normalizeSection(canonicalizeNasosnayaSection(raw));
+    const nameKey = normalizeFarmSectionLabel(s.name);
+
+    if (seenIds.has(s.id)) {
+      if (s.id === NASOSNAYA_SECTION_ID) {
+        const existing = out.find((x) => x.id === NASOSNAYA_SECTION_ID);
+        if (existing) {
+          const aliases = new Set([...(existing.catalogAliasIds || []), ...(s.catalogAliasIds || [])]);
+          if (originalId && originalId !== NASOSNAYA_SECTION_ID) aliases.add(originalId);
+          existing.catalogAliasIds = [...aliases];
+          existing.hiddenForFarmTypes = [];
+        }
+      }
+      continue;
+    }
+    if (seenNames.has(nameKey)) {
+      if (s.id === NASOSNAYA_SECTION_ID) {
+        const existing = out.find((x) => normalizeFarmSectionLabel(x.name) === nameKey);
+        if (existing && existing.id !== NASOSNAYA_SECTION_ID) {
+          // Replace weaker card with canonical nasosnaya
+          const idx = out.indexOf(existing);
+          const aliases = new Set([
+            ...(existing.catalogAliasIds || []),
+            ...(s.catalogAliasIds || []),
+            existing.id,
+          ]);
+          out[idx] = normalizeSection({
+            ...s,
+            catalogAliasIds: [...aliases],
+            hiddenForFarmTypes: [],
+          });
+          seenIds.delete(existing.id);
+          seenIds.add(NASOSNAYA_SECTION_ID);
+        }
+      }
+      continue;
+    }
+    seenIds.add(s.id);
+    seenNames.add(nameKey);
+    out.push(s);
+  }
+  return out;
+}
+
+/** Append default FARM_SECTIONS missing from a custom settings list (id + nasosnaya alias). */
+export function mergeMissingDefaultFarmSections(sections) {
+  let out = dedupeAndCanonicalizeFarmSections(sections);
+  const haveIds = new Set(out.map((s) => s.id));
+  const haveNasosnaya =
+    haveIds.has(NASOSNAYA_SECTION_ID) || out.some((s) => isNasosnayaSectionName(s.name));
+
+  for (const s of FARM_SECTIONS) {
+    if (haveIds.has(s.id)) continue;
+    if (s.id === NASOSNAYA_SECTION_ID && haveNasosnaya) continue;
+    out.push(
+      normalizeSection({
+        id: s.id,
+        name: s.name,
+        group: inferGroupFromName(s.name),
+      })
+    );
+    haveIds.add(s.id);
+  }
+  return dedupeAndCanonicalizeFarmSections(out);
 }
 
 /** Разделы фермы из настроек (с миграцией со старого формата) */
 export function resolveFarmSections(settings = {}) {
   const direct = parseJson(settings.farmSections, null);
   if (Array.isArray(direct) && direct.length) {
-    return direct.map(normalizeSection);
+    return mergeMissingDefaultFarmSections(direct.map(normalizeSection));
   }
 
   let order = [];
@@ -76,7 +164,7 @@ export function resolveFarmSections(settings = {}) {
       out.push(normalizeSection({ id: s.id, name: names[s.id] || s.name }));
     }
   }
-  return out;
+  return dedupeAndCanonicalizeFarmSections(out);
 }
 
 export function filterSectionsForFarmType(sections, farmType) {
@@ -157,11 +245,28 @@ export function catalogEditorLines(catalogs, sectionId, materials) {
 /** Состав раздела при создании проекта — позиции видны, кол-во из шаблона */
 export function projectLinesFromCatalog(catalogs, sectionId, materials, sectionMeta = null) {
   const defaultResp = sectionMeta?.defaultResponsible || "";
-  const saved = catalogs[sectionId];
   const withMeta = (line) => ({
     ...line,
     responsible: line.responsible || defaultResp || undefined,
   });
+
+  const lookupIds =
+    sectionId === NASOSNAYA_SECTION_ID || isNasosnayaSectionName(sectionMeta?.name)
+      ? nasosnayaCatalogLookupIds(sectionMeta)
+      : [sectionId];
+
+  let saved = null;
+  for (const key of lookupIds) {
+    if (catalogs?.[key]?.length) {
+      saved = catalogs[key];
+      break;
+    }
+  }
+
+  const legacyFarmSectionIds =
+    sectionId === NASOSNAYA_SECTION_ID
+      ? nasosnayaCatalogLookupIds(sectionMeta).filter((id) => id !== NASOSNAYA_SECTION_ID)
+      : [];
 
   if (saved?.length) {
     return cloneBuilderLines(saved).map((ln) => {
@@ -192,7 +297,7 @@ export function projectLinesFromCatalog(catalogs, sectionId, materials, sectionM
       );
     });
   }
-  return catalogLinesForFarmSection(materials, sectionId).map(withMeta);
+  return catalogLinesForFarmSection(materials, sectionId, { legacyFarmSectionIds }).map(withMeta);
 }
 
 export function emptyFarmSectionsState(sections, catalogs, materials) {

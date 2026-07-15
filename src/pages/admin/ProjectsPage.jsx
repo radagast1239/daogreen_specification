@@ -18,6 +18,7 @@ import {
   projectOpenLabel,
   projectOpenPath,
   resolveBuilderWizardStep,
+  buildBuilderContinuePath,
 } from "../../../shared/projectLifecycle.js";
 import {
   getProjectStatusLabel,
@@ -364,6 +365,13 @@ export default function ProjectsPage({ variant = "active" } = {}) {
                     )}
                     {!isInProgress && (
                       <>
+                        <Link
+                          className="btn btn-sm"
+                          to={buildBuilderContinuePath(p)}
+                          title="Открыть мастер без создания нового projectId"
+                        >
+                          Редактировать проект
+                        </Link>
                         <button className="btn btn-sm" onClick={() => setDupSource(p)}>
                           На основе прошлого
                         </button>

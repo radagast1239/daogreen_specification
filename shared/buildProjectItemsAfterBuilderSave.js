@@ -29,13 +29,45 @@ function buildContext(builderContext = {}, existingItems = []) {
   };
 }
 
+/** Fields the builder wizard is allowed to rewrite on re-save. */
+const BUILDER_REWRITE_FIELD_KEYS = new Set([
+  "qty",
+  "includedInProject",
+  "enabled",
+  "visibleToClient",
+  "visible",
+  "approved",
+  "pipeCuts",
+  "breakerSpecs",
+  "flowSpecs",
+  "splitSpecs",
+  "subcategory",
+  "farmGroup",
+  "roomId",
+  "responsible",
+  "sortOrder",
+]);
+
+/**
+ * Catalog/geometry from generated; purchase / notes stay from existing project item.
+ * Prevents wizard regenerate from wiping status/actualPrice/clientNote.
+ */
 function mergeProjectOwnedFields(existing, generated) {
   const merged = { ...existing };
-  for (const key of PROJECT_OWNED_FIELD_KEYS) {
-    if (generated[key] !== undefined) merged[key] = generated[key];
+  for (const [key, val] of Object.entries(generated || {})) {
+    if (PROJECT_OWNED_FIELD_KEYS.includes(key) && !BUILDER_REWRITE_FIELD_KEYS.has(key)) {
+      continue;
+    }
+    if (val !== undefined) merged[key] = val;
   }
-  if (generated.included !== undefined && generated.includedInProject === undefined) {
+  for (const key of BUILDER_REWRITE_FIELD_KEYS) {
+    if (generated?.[key] !== undefined) merged[key] = generated[key];
+  }
+  if (generated?.included !== undefined && generated.includedInProject === undefined) {
     merged.includedInProject = generated.included !== false;
+  }
+  if (existing.purchaseStatus !== undefined && merged.purchaseStatus === undefined) {
+    merged.purchaseStatus = existing.purchaseStatus;
   }
   return merged;
 }
@@ -63,10 +95,23 @@ function indexGenerated(generated = []) {
   return { byId, byKey, keys: new Set([...byKey.keys()]) };
 }
 
-function findGeneratedMatch(existing, { byId, byKey }) {
-  if (byId.has(existing.id)) return byId.get(existing.id);
+function sameBuilderSectionMaterial(a, b) {
+  if (!a?.materialId || !b?.materialId) return false;
+  if (String(a.materialId) !== String(b.materialId)) return false;
+  const secA = String(a.section || a.module || "").trim();
+  const secB = String(b.section || b.module || "").trim();
+  return Boolean(secA) && secA === secB;
+}
+
+function findGeneratedMatch(existing, { byId, byKey }, generated = [], ctx = {}) {
+  if (existing?.id && byId.has(existing.id)) return byId.get(existing.id);
   const key = builderProjectItemLogicalKey(existing);
-  return key ? byKey.get(key) : null;
+  if (key && byKey.has(key)) return byKey.get(key);
+  // Builder farm/stellage re-save: line ids often change; match section+materialId.
+  if (classifyProjectItemOwnership(existing, ctx) === PROJECT_ITEM_OWNERSHIP.BUILDER) {
+    return generated.find((g) => sameBuilderSectionMaterial(existing, g)) || null;
+  }
+  return null;
 }
 
 /**
@@ -97,6 +142,7 @@ export function buildProjectItemsAfterBuilderSave({
 
   const items = [];
   const resultIds = new Set();
+  const matchedGeneratedIds = new Set();
 
   for (const ex of existing) {
     const ownership = classifyProjectItemOwnership(ex, ctx);
@@ -117,29 +163,38 @@ export function buildProjectItemsAfterBuilderSave({
     }
 
     if (ownership === PROJECT_ITEM_OWNERSHIP.FRAME) {
-      const gen = findGeneratedMatch(ex, { byId, byKey });
+      const gen = findGeneratedMatch(ex, { byId, byKey }, generated, ctx);
       const row = gen ? mergeFrameOwnedItem(ex, gen) : ex;
       items.push(row);
       resultIds.add(ex.id);
-      if (gen) updatedBuilderIds.push(ex.id);
+      if (gen) {
+        updatedBuilderIds.push(ex.id);
+        if (gen.id) matchedGeneratedIds.add(gen.id);
+      }
       continue;
     }
 
-    const gen = findGeneratedMatch(ex, { byId, byKey });
+    const gen = findGeneratedMatch(ex, { byId, byKey }, generated, ctx);
     if (gen) {
       items.push(mergeBuilderOwnedItem(ex, gen));
       resultIds.add(ex.id);
       updatedBuilderIds.push(ex.id);
+      if (gen.id) matchedGeneratedIds.add(gen.id);
     } else {
       removedBuilderIds.push(ex.id);
     }
   }
 
   for (const gen of generated) {
-    if (resultIds.has(gen.id)) continue;
+    if (resultIds.has(gen.id) || matchedGeneratedIds.has(gen.id)) continue;
     const key = builderProjectItemLogicalKey(gen);
     const dup = existing.some(
-      (ex) => ex.id === gen.id || builderProjectItemLogicalKey(ex) === key,
+      (ex) =>
+        ex.id === gen.id ||
+        builderProjectItemLogicalKey(ex) === key ||
+        (classifyProjectItemOwnership(ex, ctx) === PROJECT_ITEM_OWNERSHIP.BUILDER &&
+          sameBuilderSectionMaterial(ex, gen) &&
+          resultIds.has(ex.id)),
     );
     if (dup) continue;
     const row = gen.materialId
