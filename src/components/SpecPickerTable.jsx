@@ -144,9 +144,15 @@ export default function SpecPickerTable({
   staticNames = false,
   /** Каталог шаблона: в state только materialId + qty + группа (данные из базы материалов) */
   catalogRefsOnly = false,
+  /** Hide optional columns: { category, supplier, unit } — true = hidden */
+  hiddenColumns = null,
+  onToggleColumn = null,
 }) {
   const categories = categoriesProp?.length ? categoriesProp : CATEGORIES;
   const unitOptions = unitsProp?.length ? unitsProp : ["шт.", "м", "м²", "м³", "кг", "л"];
+  const showCategory = !hiddenColumns?.category;
+  const showSupplier = !hiddenColumns?.supplier;
+  const showUnit = !hiddenColumns?.unit;
   const groupTitle = (id) => {
     if (showFarmLineGroups) return farmLineGroupLabel(id, farmLineGroups);
     return stellageGroups.find((g) => g.id === id)?.label || groupLabel(id);
@@ -388,6 +394,9 @@ export default function SpecPickerTable({
     categories,
     suppliers,
     unitOptions,
+    showCategory,
+    showSupplier,
+    showUnit,
     showCompositionGroups,
     stellageGroups,
     showFarmLineGroups,
@@ -445,7 +454,10 @@ export default function SpecPickerTable({
     (showQty ? 10 : 9) +
     (showRoom ? 1 : 0) +
     (showCompositionGroups || showFarmLineGroups ? 1 : 0) +
-    1;
+    1 -
+    (showCategory ? 0 : 1) -
+    (showSupplier ? 0 : 1) -
+    (showUnit ? 0 : 1);
   const virtualizePicker = flatPickerRows.length >= 24;
 
   return (
@@ -479,6 +491,25 @@ export default function SpecPickerTable({
           <input type="checkbox" checked={onlyOn} onChange={(e) => setOnlyOn(e.target.checked)} />
           Только отмеченные
         </label>
+        {typeof onToggleColumn === "function" && (
+          <span className="row wrap" style={{ gap: 10, fontSize: 12 }}>
+            <span className="muted">Колонки:</span>
+            {[
+              { key: "category", label: "Категория" },
+              { key: "supplier", label: "Поставщик" },
+              { key: "unit", label: "Ед." },
+            ].map((col) => (
+              <label key={col.key} className="row" style={{ gap: 4, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={!hiddenColumns?.[col.key]}
+                  onChange={() => onToggleColumn(col.key)}
+                />
+                {col.label}
+              </label>
+            ))}
+          </span>
+        )}
         <button type="button" className="btn btn-sm" onClick={openPicker}>
           ＋ материал
         </button>
@@ -513,9 +544,9 @@ export default function SpecPickerTable({
                 <th style={{ width: 112 }}>Фото</th>
                 <th style={{ width: 40 }} title="Включить в спецификацию">✓</th>
                 <th style={{ minWidth: staticNames ? 220 : 200, maxWidth: staticNames ? 340 : undefined }}>Наименование</th>
-                <th style={{ width: 120 }}>Категория</th>
-                <th style={{ width: 110 }}>Поставщик</th>
-                <th style={{ width: 72 }}>Ед.</th>
+                {showCategory && <th style={{ width: 120 }}>Категория</th>}
+                {showSupplier && <th style={{ width: 110 }}>Поставщик</th>}
+                {showUnit && <th style={{ width: 88 }}>Ед.</th>}
                 {showCompositionGroups && <th style={{ width: 130 }}>Группа стеллажа</th>}
                 {showFarmLineGroups && <th style={{ width: 130 }}>Группа раздела</th>}
                 {showRoom && <th style={{ width: 130 }}>Комната</th>}

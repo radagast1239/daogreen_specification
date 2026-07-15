@@ -67,12 +67,18 @@ export default function ClientItemCard({
         {!compact && materialSpecLabel(it) && (
           <div style={{ fontSize: 12, marginTop: 2, color: "var(--brand)" }}>{materialSpecLabel(it)}</div>
         )}
-        <div className="muted" style={{ fontSize: compact ? 12 : 12.5, marginTop: 2 }}>
-          <span className="num">{num(it.qty)}</span> {it.unit}
-          {!compact && (it.vatRate || 0) > 0 && <span> · НДС {it.vatRate}%</span>}
+        <div className="client-qty-row">
+          <span className="client-qty-badge" title="Количество">
+            <span className="num">{num(it.qty)}</span>
+            <span className="client-qty-badge__unit">{it.unit || "шт."}</span>
+          </span>
+          {!compact && (it.vatRate || 0) > 0 && (
+            <span className="muted" style={{ fontSize: 12 }}>
+              НДС {it.vatRate}%
+            </span>
+          )}
           {compact && lineTotalLabel && (
-            <span>
-              {" "}
+            <span className="muted" style={{ fontSize: 12 }}>
               · <span className="num">{lineTotalLabel}</span>
             </span>
           )}

@@ -116,12 +116,18 @@ export default function ClientMergedItemCard({
         {!compact && rep && materialSpecLabel(rep) && (
           <div style={{ fontSize: 12, marginTop: 2, color: "var(--brand)" }}>{materialSpecLabel(rep)}</div>
         )}
-        <div className="muted" style={{ fontSize: compact ? 12 : 12.5, marginTop: 2 }}>
-          <span className="num">{num(row.qty)}</span> {row.unit}
-          {!compact && (row.vatRate || 0) > 0 && <span> · НДС {row.vatRate}%</span>}
+        <div className="client-qty-row">
+          <span className="client-qty-badge" title="Количество">
+            <span className="num">{num(row.qty)}</span>
+            <span className="client-qty-badge__unit">{row.unit || "шт."}</span>
+          </span>
+          {!compact && (row.vatRate || 0) > 0 && (
+            <span className="muted" style={{ fontSize: 12 }}>
+              НДС {row.vatRate}%
+            </span>
+          )}
           {compact && lineTotalLabel && (
-            <span>
-              {" "}
+            <span className="muted" style={{ fontSize: 12 }}>
               · <span className="num">{lineTotalLabel}</span>
             </span>
           )}

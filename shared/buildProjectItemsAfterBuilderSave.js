@@ -103,13 +103,25 @@ function sameBuilderSectionMaterial(a, b) {
   return Boolean(secA) && secA === secB;
 }
 
-function findGeneratedMatch(existing, { byId, byKey }, generated = [], ctx = {}) {
-  if (existing?.id && byId.has(existing.id)) return byId.get(existing.id);
+/**
+ * One-to-one match: never return a generated row already claimed in `usedGenerated`.
+ * @param {Set<object>} usedGenerated — identity set of claimed generated items
+ */
+function findGeneratedMatch(existing, { byId, byKey }, generated = [], ctx = {}, usedGenerated = new Set()) {
+  const claimable = (g) => g && !usedGenerated.has(g);
+
+  if (existing?.id && byId.has(existing.id)) {
+    const g = byId.get(existing.id);
+    if (claimable(g)) return g;
+  }
   const key = builderProjectItemLogicalKey(existing);
-  if (key && byKey.has(key)) return byKey.get(key);
-  // Builder farm/stellage re-save: line ids often change; match section+materialId.
+  if (key && byKey.has(key)) {
+    const g = byKey.get(key);
+    if (claimable(g)) return g;
+  }
+  // Builder farm/stellage re-save: line ids often change; match section+materialId once.
   if (classifyProjectItemOwnership(existing, ctx) === PROJECT_ITEM_OWNERSHIP.BUILDER) {
-    return generated.find((g) => sameBuilderSectionMaterial(existing, g)) || null;
+    return generated.find((g) => claimable(g) && sameBuilderSectionMaterial(existing, g)) || null;
   }
   return null;
 }
@@ -143,6 +155,8 @@ export function buildProjectItemsAfterBuilderSave({
   const items = [];
   const resultIds = new Set();
   const matchedGeneratedIds = new Set();
+  /** Claimed generated row objects — enforces one-to-one section+material fallback. */
+  const usedGenerated = new Set();
 
   for (const ex of existing) {
     const ownership = classifyProjectItemOwnership(ex, ctx);
@@ -163,19 +177,21 @@ export function buildProjectItemsAfterBuilderSave({
     }
 
     if (ownership === PROJECT_ITEM_OWNERSHIP.FRAME) {
-      const gen = findGeneratedMatch(ex, { byId, byKey }, generated, ctx);
+      const gen = findGeneratedMatch(ex, { byId, byKey }, generated, ctx, usedGenerated);
       const row = gen ? mergeFrameOwnedItem(ex, gen) : ex;
       items.push(row);
       resultIds.add(ex.id);
       if (gen) {
+        usedGenerated.add(gen);
         updatedBuilderIds.push(ex.id);
         if (gen.id) matchedGeneratedIds.add(gen.id);
       }
       continue;
     }
 
-    const gen = findGeneratedMatch(ex, { byId, byKey }, generated, ctx);
+    const gen = findGeneratedMatch(ex, { byId, byKey }, generated, ctx, usedGenerated);
     if (gen) {
+      usedGenerated.add(gen);
       items.push(mergeBuilderOwnedItem(ex, gen));
       resultIds.add(ex.id);
       updatedBuilderIds.push(ex.id);
@@ -186,7 +202,7 @@ export function buildProjectItemsAfterBuilderSave({
   }
 
   for (const gen of generated) {
-    if (resultIds.has(gen.id) || matchedGeneratedIds.has(gen.id)) continue;
+    if (usedGenerated.has(gen) || resultIds.has(gen.id) || matchedGeneratedIds.has(gen.id)) continue;
     const key = builderProjectItemLogicalKey(gen);
     const dup = existing.some(
       (ex) =>

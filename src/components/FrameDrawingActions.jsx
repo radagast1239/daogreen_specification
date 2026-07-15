@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { photoSrc } from '../lib/api.js';
 import FrameDrawingLinkButton from './FrameDrawingLinkButton.jsx';
-import { buildFrameDrawingLink } from '../../shared/frameDrawingContext.js';
+import { buildFrameDrawingLink, frameDrawingBindingLabel } from '../../shared/frameDrawingContext.js';
 import { drawingStatusLabel } from '../../shared/frameDrawingTargets.js';
 import {
   FRAME_BOM_REFRESH_BUTTON_LABEL,
@@ -43,6 +43,7 @@ export default function FrameDrawingActions({
   const latest = drawings[0] || null;
   const older = drawings.slice(1);
   const status = latest ? 'Схема сохранена' : drawingStatusLabel(drawings);
+  const bindingLabel = frameDrawingBindingLabel(context);
 
   const baseCtx = { ...context, drawingId: '' };
   const replaceCtx = latest
@@ -82,6 +83,11 @@ export default function FrameDrawingActions({
           <span className={`${latest ? 'chip chip--ok' : 'muted'}`} style={{ fontSize: 12 }}>
             {status}
           </span>
+          {bindingLabel ? (
+            <span className="chip chip--neutral" style={{ fontSize: 11 }} title={bindingLabel}>
+              {bindingLabel}
+            </span>
+          ) : null}
           {latest ? (
             <span className="chip chip--ok" style={{ fontSize: 11 }}>v{latest.version}</span>
           ) : null}

@@ -233,6 +233,92 @@ describe("buildProjectItemsAfterBuilderSave", () => {
     expect(r2.items.length).toBe(r1.items.length);
     expect(r2.items[0].supplier).toBe("snap");
   });
+
+  it("one-to-one: same section+materialId with different semantic keys stay separate", () => {
+    const farmSection = "Полив";
+    const existing = [
+      {
+        id: "farm_row_a",
+        materialId: "m073",
+        name: "Болт A",
+        section: farmSection,
+        module: farmSection,
+        roomId: "room_a",
+        farmGroup: "zone_a",
+        sourceKey: "farm:poliv:a",
+        qty: 1,
+        price: 12,
+        purchaseStatus: "ordered",
+        actualPrice: 11,
+        clientComment: "preserve-A",
+      },
+      {
+        id: "farm_row_b",
+        materialId: "m073",
+        name: "Болт B",
+        section: farmSection,
+        module: farmSection,
+        roomId: "room_b",
+        farmGroup: "zone_b",
+        sourceKey: "farm:poliv:b",
+        qty: 2,
+        price: 12,
+        purchaseStatus: "searching",
+        actualPrice: 22,
+        clientComment: "preserve-B",
+      },
+    ];
+    const generated = [
+      {
+        id: "gen_new_a",
+        materialId: "m073",
+        name: "Болт A",
+        section: farmSection,
+        module: farmSection,
+        roomId: "room_a",
+        farmGroup: "zone_a",
+        sourceKey: "farm:poliv:a",
+        qty: 10,
+        price: 12,
+      },
+      {
+        id: "gen_new_b",
+        materialId: "m073",
+        name: "Болт B",
+        section: farmSection,
+        module: farmSection,
+        roomId: "room_b",
+        farmGroup: "zone_b",
+        sourceKey: "farm:poliv:b",
+        qty: 20,
+        price: 12,
+      },
+    ];
+    const result = buildProjectItemsAfterBuilderSave({
+      existingItems: existing,
+      generatedBuilderItems: generated,
+      builderContext: {
+        farmSectionNames: [farmSection],
+        activeStellageIds: [],
+      },
+      materials,
+    });
+    expect(result.blocked).toBe(false);
+    // merge may adopt generated ids; identity of purchase fields must stay per-row
+    const a = result.items.find((it) => it.clientComment === "preserve-A");
+    const b = result.items.find((it) => it.clientComment === "preserve-B");
+    expect(a).toBeTruthy();
+    expect(b).toBeTruthy();
+    expect(a.qty).toBe(10);
+    expect(b.qty).toBe(20);
+    expect(a.actualPrice).toBe(11);
+    expect(b.actualPrice).toBe(22);
+    expect(a.purchaseStatus).toBe("ordered");
+    expect(b.purchaseStatus).toBe("searching");
+    expect(a.roomId).toBe("room_a");
+    expect(b.roomId).toBe("room_b");
+    expect(result.items.filter((it) => it.materialId === "m073")).toHaveLength(2);
+  });
 });
 
 describe("catalog snapshot policy", () => {

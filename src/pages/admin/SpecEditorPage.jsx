@@ -77,7 +77,7 @@ import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
 import { clientLinkActiveState } from "../../../shared/clientProjectLoadState.js";
 import { copyToClipboard } from "../../lib/copyText.js";
 import { createDebouncedTask } from "../../lib/debouncedTask.js";
-import { listUploadedSchemes } from "../../lib/clientSchemes.js";
+import { getFloorPlanUrl, listUploadedSchemes, setFloorPlanUrl } from "../../lib/clientSchemes.js";
 import { itemHasAdminComments, itemHasClientNote, itemHasInternalNote } from "../../lib/specItemComments.js";
 import {
   compositionGroupLabel,
@@ -351,13 +351,17 @@ export default function SpecEditorPage() {
     return actions.projectUpdate(project.id, { manualParams: { ...mp, [key]: value } });
   };
 
-  const floorPlanUrl = project.manualParams?.floorPlanUrl || "";
+  const floorPlanUrl = getFloorPlanUrl(project.manualParams);
   const uploadedSchemes = useMemo(
     () => listUploadedSchemes(project.manualParams),
     [project.manualParams]
   );
   const showFloorPlanPin = uploadedSchemes.length > 0 && (tab === "spec" || tab === "calc");
 
+  const saveFloorPlanUrl = (url) => {
+    const mp = project.manualParams && typeof project.manualParams === "object" ? project.manualParams : {};
+    return actions.projectUpdate(project.id, { manualParams: setFloorPlanUrl(mp, url) });
+  };
   const doPublishVersion = async (force = false) => {
     try {
       const v = await actions.createVersion(project.id, force ? { force: true } : {});
@@ -1025,7 +1029,7 @@ export default function SpecEditorPage() {
               actions={actions}
               saveRooms={saveRooms}
               floorPlanUrl={floorPlanUrl}
-              onFloorPlanChange={(url) => saveManualParam("floorPlanUrl", url)}
+              onFloorPlanChange={saveFloorPlanUrl}
               manualParams={project.manualParams}
               onManualParamsChange={(mp) => actions.projectUpdate(project.id, { manualParams: mp })}
               highlightItemId={highlightItemId}

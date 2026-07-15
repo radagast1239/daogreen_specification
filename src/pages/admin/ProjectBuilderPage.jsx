@@ -46,6 +46,7 @@ import {
   isMeaningfulRackDraft,
   validateStellageForFrameDrawing,
 } from "../../lib/projectBuilderHydrate.js";
+
 import {
   filterSectionsForFarmType,
   GROUP_LABEL,
@@ -84,6 +85,23 @@ import {
   clearRoomCooling,
 } from "../../../shared/roomCoolingWorkflow.js";
 import { enrichRooms } from "../../../shared/roomCoolingCalc.js";
+
+const FARM_COLUMN_PREFS_KEY = "dg.specPicker.farmColumns";
+
+function loadFarmColumnHidden() {
+  try {
+    const raw = localStorage.getItem(FARM_COLUMN_PREFS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return {
+      category: !!parsed?.category,
+      supplier: !!parsed?.supplier,
+      unit: !!parsed?.unit,
+    };
+  } catch {
+    return {};
+  }
+}
 
 const STEPS = [
   { id: "basics", label: "1. Проект" },
@@ -132,7 +150,20 @@ export default function ProjectBuilderPage() {
   const [farmSettings, setFarmSettings] = useState(null);
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [farmHiddenColumns, setFarmHiddenColumns] = useState(loadFarmColumnHidden);
   const [nameTouched, setNameTouched] = useState(false);
+
+  const toggleFarmColumn = (key) => {
+    setFarmHiddenColumns((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try {
+        localStorage.setItem(FARM_COLUMN_PREFS_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
 
   const [form, setForm] = useState({
     name: "",
@@ -363,6 +394,11 @@ export default function ProjectBuilderPage() {
       }
     }
     setStep(next);
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      p.set("step", next);
+      return p;
+    }, { replace: true });
     // Never create on step change — only update an already-saved draft.
     if (shouldUpdateDraftOnStepChange(loadedProjectId) && form.name.trim()) {
       saveDraftSilently(next, { draftOverride: draftForSave, stellagesOverride: stellagesForSave }).catch(() => {});
@@ -1485,6 +1521,8 @@ export default function ProjectBuilderPage() {
                 categories={categories}
                 suppliers={suppliers}
                 farmSectionId={effectiveFarmSectionId}
+                hiddenColumns={farmHiddenColumns}
+                onToggleColumn={toggleFarmColumn}
               />
             </div>
           </div>

@@ -114,9 +114,11 @@ export default function Layout() {
   const [collapsed, setCollapsed] = useState(getSidebarCollapsed());
   const [menuOpen, setMenuOpen] = useState(false);
   const { actions } = useStore();
-  const { pathname } = useLocation();
-
-  const wideLayout = /^\/(materials|project\/|modules|reports|planner)/.test(pathname);
+  const { pathname, search } = useLocation();
+  const builderStep = new URLSearchParams(search).get("step");
+  const builderWide =
+    pathname === "/new" && (builderStep === "stellages" || builderStep === "general");
+  const wideLayout = builderWide || /^\/(materials|project\/|modules|reports|planner)/.test(pathname);
   const plannerFocus = /\/project\/[^/]+\/plan$/.test(pathname);
 
   useEffect(() => {

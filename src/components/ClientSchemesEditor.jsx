@@ -2,15 +2,17 @@ import React, { useState } from "react";
 import { api, photoSrc } from "../lib/api.js";
 import FloorPlanViewer from "./FloorPlanViewer.jsx";
 import {
-  CLIENT_SCHEME_DEFS,
-  defaultClientSchemeVisible,
+  addProjectScheme,
+  clientVisibleSchemes,
   filledSchemeSlots,
-  patchManualSchemes,
-  patchSchemeVisibility,
+  listProjectSchemes,
+  moveProjectScheme,
+  removeProjectScheme,
+  updateProjectScheme,
 } from "../lib/clientSchemes.js";
 
 /**
- * Upload / replace / open / remove for the 5 project scheme slots.
+ * Unlimited project schemes: add / rename / reorder / upload / remove.
  * showClientVisibility — SpecEditor client toggle; false in project builder.
  */
 export default function ClientSchemesEditor({
@@ -21,7 +23,7 @@ export default function ClientSchemesEditor({
   intro = null,
 }) {
   const mp = manualParams && typeof manualParams === "object" ? manualParams : {};
-  const visible = { ...defaultClientSchemeVisible(), ...(mp.clientSchemeVisible || {}) };
+  const schemes = listProjectSchemes(mp);
   const [viewer, setViewer] = useState(null);
   const [uploading, setUploading] = useState(null);
 
@@ -30,15 +32,15 @@ export default function ClientSchemesEditor({
   const description =
     intro ??
     (showClientVisibility
-      ? "Отдельные схемы для клиента — только просмотр, без редактирования. Отметьте галочкой, что показывать в клиентской ссылке."
-      : "Загрузите до пяти схем прямо в мастере. Каждая пишется в свой слот manualParams и сохраняется с проектом.");
+      ? "Добавляйте схемы без лимита. Галочка «Клиенту» управляет показом в клиентской ссылке."
+      : "Добавляйте, переименовывайте и упорядочивайте схемы. Каждая сохраняется в проекте (manualParams.projectSchemes).");
 
-  const upload = async (key, file) => {
+  const upload = async (id, file) => {
     if (!file) return;
-    setUploading(key);
+    setUploading(id);
     try {
       const { url } = await api.uploadPhoto(file);
-      onChange(patchManualSchemes(mp, key, url));
+      onChange(updateProjectScheme(mp, id, { url }));
     } catch (e) {
       alert(e.message || "Не удалось загрузить");
     } finally {
@@ -46,10 +48,10 @@ export default function ClientSchemesEditor({
     }
   };
 
-  const openSlot = (key) => {
-    const idx = filled.findIndex((s) => s.key === key);
+  const openScheme = (id) => {
+    const idx = filled.findIndex((s) => s.id === id || s.key === id);
     if (idx < 0) return;
-    setViewer({ schemes: filled, initialIndex: idx });
+    setViewer({ schemes: filled, activeIndex: idx });
   };
 
   return (
@@ -61,24 +63,28 @@ export default function ClientSchemesEditor({
         {description}
       </p>
       <div className="client-schemes-grid">
-        {CLIENT_SCHEME_DEFS.map((def) => {
-          const url = mp[def.key] || "";
-          const src = url ? photoSrc(url) : "";
+        {schemes.map((scheme, index) => {
+          const src = scheme.url ? photoSrc(scheme.url) : "";
           return (
-            <div key={def.key} className="client-scheme-card card" style={{ padding: 12 }}>
+            <div key={scheme.id} className="client-scheme-card card" style={{ padding: 12 }}>
               <div className="between wrap" style={{ gap: 8, marginBottom: 8 }}>
-                <div>
-                  <strong style={{ fontSize: 13 }}>{def.label}</strong>
-                  <p className="muted" style={{ fontSize: 11, margin: "2px 0 0" }}>
-                    {def.hint}
-                  </p>
+                <div style={{ flex: "1 1 140px", minWidth: 0 }}>
+                  <input
+                    className="spec-cell-input"
+                    value={scheme.title}
+                    aria-label="Название схемы"
+                    onChange={(e) => onChange(updateProjectScheme(mp, scheme.id, { title: e.target.value }))}
+                    style={{ width: "100%", fontWeight: 600, fontSize: 13 }}
+                  />
                 </div>
                 {showClientVisibility && (
                   <label className="row" style={{ fontSize: 11, cursor: "pointer" }}>
                     <input
                       type="checkbox"
-                      checked={visible[def.key] !== false}
-                      onChange={(e) => onChange(patchSchemeVisibility(mp, def.key, e.target.checked))}
+                      checked={scheme.clientVisible !== false}
+                      onChange={(e) =>
+                        onChange(updateProjectScheme(mp, scheme.id, { clientVisible: e.target.checked }))
+                      }
                     />
                     Клиенту
                   </label>
@@ -88,51 +94,80 @@ export default function ClientSchemesEditor({
                 <button
                   type="button"
                   className="client-scheme-card__thumb"
-                  onClick={() => openSlot(def.key)}
+                  onClick={() => openScheme(scheme.id)}
                   title="Открыть"
                 >
-                  <img src={src} alt={def.label} />
+                  <img src={src} alt={scheme.title} />
                 </button>
               ) : (
                 <div className="client-scheme-card__empty muted">Нет файла</div>
               )}
               <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
                 <label className="btn btn-sm" style={{ cursor: "pointer" }}>
-                  {uploading === def.key ? "…" : url ? "Заменить" : "Загрузить"}
+                  {uploading === scheme.id ? "…" : scheme.url ? "Заменить" : "Загрузить"}
                   <input
                     type="file"
                     accept="image/*"
                     hidden
                     disabled={!!uploading}
                     onChange={(e) => {
-                      upload(def.key, e.target.files?.[0]);
+                      upload(scheme.id, e.target.files?.[0]);
                       e.target.value = "";
                     }}
                   />
                 </label>
-                {url && (
-                  <>
-                    <button type="button" className="btn btn-sm" onClick={() => openSlot(def.key)}>
-                      Открыть
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => onChange(patchManualSchemes(mp, def.key, ""))}
-                    >
-                      Убрать
-                    </button>
-                  </>
+                {scheme.url && (
+                  <button type="button" className="btn btn-sm" onClick={() => openScheme(scheme.id)}>
+                    Открыть
+                  </button>
                 )}
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={index === 0}
+                  title="Выше"
+                  onClick={() => onChange(moveProjectScheme(mp, scheme.id, "up"))}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={index >= schemes.length - 1}
+                  title="Ниже"
+                  onClick={() => onChange(moveProjectScheme(mp, scheme.id, "down"))}
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => onChange(removeProjectScheme(mp, scheme.id))}
+                >
+                  Убрать
+                </button>
               </div>
             </div>
           );
         })}
       </div>
+      <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
+        <button
+          type="button"
+          className="btn btn-sm btn-outline"
+          onClick={() => onChange(addProjectScheme(mp))}
+        >
+          + Добавить схему
+        </button>
+      </div>
       {viewer && (
         <FloorPlanViewer
           schemes={viewer.schemes}
-          initialIndex={viewer.initialIndex}
+          activeIndex={viewer.activeIndex}
+          onActiveIndexChange={(next) => {
+            const i = typeof next === "function" ? next(viewer.activeIndex) : next;
+            setViewer((v) => (v ? { ...v, activeIndex: i } : v));
+          }}
           open
           onClose={() => setViewer(null)}
         />
@@ -143,12 +178,9 @@ export default function ClientSchemesEditor({
 
 /** Просмотр схем на клиентской странице */
 export function ClientSchemesViewer({ manualParams }) {
-  const mp = manualParams && typeof manualParams === "object" ? manualParams : {};
-  const visible = { ...defaultClientSchemeVisible(), ...(mp.clientSchemeVisible || {}) };
-  const schemes = CLIENT_SCHEME_DEFS.filter((d) => mp[d.key] && visible[d.key] !== false).map((d) => ({
-    ...d,
-    url: mp[d.key],
-    label: d.label,
+  const schemes = clientVisibleSchemes(manualParams).map((s) => ({
+    ...s,
+    label: s.title || s.label,
   }));
   const [viewer, setViewer] = useState(null);
 
@@ -166,13 +198,13 @@ export function ClientSchemesViewer({ manualParams }) {
           if (!src) return null;
           return (
             <button
-              key={def.key}
+              key={def.id || def.key}
               type="button"
               className="client-scheme-view-btn"
-              onClick={() => setViewer({ schemes, initialIndex: i })}
+              onClick={() => setViewer({ schemes, activeIndex: i })}
             >
               <img src={src} alt="" />
-              <span>{def.label}</span>
+              <span>{def.title || def.label}</span>
             </button>
           );
         })}
@@ -180,7 +212,11 @@ export function ClientSchemesViewer({ manualParams }) {
       {viewer && (
         <FloorPlanViewer
           schemes={viewer.schemes}
-          initialIndex={viewer.initialIndex}
+          activeIndex={viewer.activeIndex}
+          onActiveIndexChange={(next) => {
+            const i = typeof next === "function" ? next(viewer.activeIndex) : next;
+            setViewer((v) => (v ? { ...v, activeIndex: i } : v));
+          }}
           open
           onClose={() => setViewer(null)}
         />

@@ -93,7 +93,10 @@ function MergedTableRow({ row, currency, patch, patchBulk, bought, onProposeRepl
         )}
       </td>
       <td data-label="Кол-во" className="client-purchase-table__num">
-        <span className="num">{num(row.qty)}</span> {row.unit}
+        <span className="client-qty-badge" title="Количество">
+          <span className="num">{num(row.qty)}</span>
+          <span className="client-qty-badge__unit">{row.unit || "шт."}</span>
+        </span>
       </td>
       <td data-label="Цена" className="client-purchase-table__num num">
         {clientPriceLabel(row, currency)}
@@ -168,7 +171,10 @@ function ItemTableRow({ it, currency, patch, bought, onProposeReplacement, compa
         {!compact && it.clientNote && <div className="client-admin-note client-purchase-table__note">{it.clientNote}</div>}
       </td>
       <td data-label="Кол-во" className="client-purchase-table__num">
-        <span className="num">{num(it.qty)}</span> {it.unit}
+        <span className="client-qty-badge" title="Количество">
+          <span className="num">{num(it.qty)}</span>
+          <span className="client-qty-badge__unit">{it.unit || "шт."}</span>
+        </span>
       </td>
       <td data-label="Цена" className="client-purchase-table__num num">
         {clientPriceLabel(it, currency)}

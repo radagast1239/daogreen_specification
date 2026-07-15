@@ -19,6 +19,9 @@ export default function SpecPickerLineRow({
   categories,
   suppliers,
   unitOptions,
+  showCategory = true,
+  showSupplier = true,
+  showUnit = true,
   showCompositionGroups,
   stellageGroups,
   showFarmLineGroups,
@@ -101,6 +104,7 @@ export default function SpecPickerLineRow({
           </span>
         )}
       </td>
+      {showCategory && (
       <td>
         <select
           className="spec-cell-input"
@@ -115,6 +119,8 @@ export default function SpecPickerLineRow({
           ))}
         </select>
       </td>
+      )}
+      {showSupplier && (
       <td>
         <select
           className="spec-cell-input"
@@ -130,10 +136,12 @@ export default function SpecPickerLineRow({
           ))}
         </select>
       </td>
+      )}
+      {showUnit && (
       <td>
         {unitOptions.length > 1 ? (
           <select
-            className="spec-cell-input spec-cell-input--sm"
+            className="spec-cell-input spec-cell-input--unit"
             value={ln.unit}
             disabled={!ln.included || !!ln.materialId}
             onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, { unit: e.target.value }))}
@@ -146,13 +154,14 @@ export default function SpecPickerLineRow({
           </select>
         ) : (
           <input
-            className="spec-cell-input spec-cell-input--sm"
+            className="spec-cell-input spec-cell-input--unit"
             value={ln.unit}
             disabled={!!ln.materialId}
             onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, { unit: e.target.value }))}
           />
         )}
       </td>
+      )}
       {showCompositionGroups && (
         <td>
           <select
@@ -219,7 +228,7 @@ export default function SpecPickerLineRow({
       {showQty && (
         <td>
           <input
-            className="spec-cell-input spec-cell-input--num"
+            className="spec-cell-input spec-cell-input--num spec-cell-input--qty"
             type="number"
             min={0}
             step="any"
@@ -234,7 +243,7 @@ export default function SpecPickerLineRow({
       )}
       <td>
         <input
-          className="spec-cell-input spec-cell-input--num"
+          className="spec-cell-input spec-cell-input--num spec-cell-input--price"
           type="number"
           min={0}
           step="any"
