@@ -13,6 +13,7 @@ import { resolveFrameBomUiStatus } from '../../shared/projectWorkspaceUi.js';
 import {
   FRAME_BOM_UPDATE_BOM_HINT,
 } from '../frameConstructor/frameBomAddToProject.js';
+import { isPresetFrameContext } from '../lib/frameDrawingPresetUx.js';
 
 function formatDate(iso) {
   if (!iso) return '';
@@ -44,6 +45,7 @@ export default function FrameDrawingActions({
   const older = drawings.slice(1);
   const status = latest ? 'Схема сохранена' : drawingStatusLabel(drawings);
   const bindingLabel = frameDrawingBindingLabel(context);
+  const presetFlow = isPresetFrameContext(context);
 
   const baseCtx = { ...context, drawingId: '' };
   const replaceCtx = latest
@@ -75,6 +77,49 @@ export default function FrameDrawingActions({
       drawing: latest,
     });
   };
+
+  if (presetFlow) {
+    return (
+      <div className="frame-drawing-actions frame-drawing-actions--preset">
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+          Схема каркаса шаблона
+        </div>
+        {latest ? (
+          <>
+            <div style={{ fontSize: 13, marginBottom: 3 }}>{latest.title || context.rackLabel || 'Схема каркаса'}</div>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+              Версия {latest.version || 1}
+              {(latest.updatedAt || latest.createdAt) ? ` · ${formatDate(latest.updatedAt || latest.createdAt)}` : ''}
+            </div>
+            <div className="row wrap" style={{ gap: 6 }}>
+              <FrameDrawingLinkButton
+                context={openSchemeCtx}
+                label="Открыть"
+                onNavigate={onNavigate}
+                disabled={navigateDisabled}
+              />
+              <FrameDrawingLinkButton
+                context={replaceCtx}
+                label="Изменить"
+                onNavigate={onNavigate}
+                disabled={navigateDisabled}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Нет схемы</div>
+            <FrameDrawingLinkButton
+              context={baseCtx}
+              label="Создать схему"
+              onNavigate={onNavigate}
+              disabled={navigateDisabled}
+            />
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={compact ? 'frame-drawing-actions frame-drawing-actions--compact' : 'frame-drawing-actions'}>
