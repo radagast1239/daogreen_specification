@@ -1688,6 +1688,8 @@ export default function ModulesPage() {
             onSaveMaterial={saveMaterial}
             categories={categories}
             suppliers={suppliers}
+            showQty
+            qtyLabel="Кол-во по умолч."
             showCompositionGroups
             stellageGroups={stellageGroupsDraft.length ? stellageGroupsDraft : ref.stellageGroups}
             catalogRefsOnly
