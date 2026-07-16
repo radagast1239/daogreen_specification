@@ -90,6 +90,10 @@ import { wallFieldsFromTool, defaultWallThkForTool, wallMaterialForTool } from "
 import { usePlanHistory } from "../../planner/usePlanHistory.js";
 import { normalizePlan } from "../../planner/planNormalize.js";
 import { isPlannerPlanCorrupt } from "../../planner/plannerPersistenceState.js";
+import { validatePlanIntegrity } from "../../planner/core/validation/validatePlanIntegrity.js";
+import { PlanDiagnosticsPanel } from "../../planner/ui/diagnostics/PlanDiagnosticsPanel.jsx";
+import { getDiagnosticFocusTarget } from "../../planner/ui/diagnostics/diagnosticFocus.js";
+import { isDiagnosticsStale } from "../../planner/ui/diagnostics/diagnosticPresentation.js";
 import { DEFAULT_DUCT_SIZE_H_MM, DEFAULT_DUCT_SIZE_W_MM } from "../../planner/ventDuctRender.jsx";
 import {
   PlanGridScreen, PlanAxesScreen, SheetBackdrop, RoomDims, WallEl, WallsTopOverlay, PlannerWallDefs, PlannerLayerDefs, LayerMutedWrap, ItemEl, ZoneEl, LabelEl, LineEl,
@@ -247,6 +251,11 @@ export default function PlanPage() {
   const [propsTab, setPropsTab] = useState("props");
   const [warningsPanelOpen, setWarningsPanelOpen] = useState(false);
   const [viewMode, setViewMode] = useState("2d");
+  // PHASE 0D — read-only проверка целостности плана (session-only, не persisted).
+  const [planDiagnostics, setPlanDiagnostics] = useState(null); // { result, planRef }
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [diagnosticsChecking, setDiagnosticsChecking] = useState(false);
+  const [diagnosticFilters, setDiagnosticFilters] = useState({ error: true, warning: true, info: true });
 
   const structuralKind = tool === "structural" ? pending : null;
 
@@ -3527,6 +3536,38 @@ export default function PlanPage() {
     }
   };
 
+  // PHASE 0D — ручной запуск проверки целостности (без autosave/backend/mutation).
+  const runPlanCheck = () => {
+    setDiagnosticsChecking(true);
+    const result = validatePlanIntegrity(plan);
+    setPlanDiagnostics({ result, planRef: plan });
+    setDiagnosticFilters({ error: true, warning: true, info: true });
+    setDiagnosticsChecking(false);
+    setDiagnosticsOpen(true);
+  };
+  const toggleDiagnosticFilter = (sev) => {
+    if (sev === "all") {
+      setDiagnosticFilters({ error: true, warning: true, info: true });
+      return;
+    }
+    setDiagnosticFilters((f) => ({ ...f, [sev]: !f[sev] }));
+  };
+  const focusDiagnostic = (diag) => {
+    const target = getDiagnosticFocusTarget(plan, diag);
+    if (target.selection) setSel(target.selection);
+    if (target.canFocus && target.point) {
+      centerOnMm(target.point.x, target.point.y, 0.12);
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      message: target.selection
+        ? "Объект нельзя показать на схеме: его геометрия повреждена"
+        : "Объект не найден на плане",
+    };
+  };
+  const diagnosticsStale = isDiagnosticsStale(planDiagnostics?.planRef, plan);
+
   const cursorStyle = spacePan || tool === "pan" ? "grab" : tool === "wall" || tool === "structural" ? "crosshair" : tool === "add" || tool === "label" ? "copy" : tool === "link" ? "crosshair" : tool === "erase" ? "not-allowed" : "default";
   const drawerTitle = activeCategoryId
     ? (categoryById(activeCategoryId)?.label || layerById(active).name)
@@ -3653,6 +3694,7 @@ export default function PlanPage() {
           onImportJson: handleImportJson,
           onRename: handleRenameDraft,
           onAttach: standalone ? () => setAttachOpen(true) : undefined,
+          onCheckPlan: runPlanCheck,
           projectId: project?.id,
         }}
         activeSheetId={activeSheetId}
@@ -4346,6 +4388,19 @@ export default function PlanPage() {
         onConfirm={confirmLabelDraft}
         onCancel={cancelLabelDraft}
       />
+      {diagnosticsOpen && (
+        <PlanDiagnosticsPanel
+          result={planDiagnostics?.result || null}
+          stale={diagnosticsStale}
+          checking={diagnosticsChecking}
+          filters={diagnosticFilters}
+          onFilterToggle={toggleDiagnosticFilter}
+          onRerun={runPlanCheck}
+          onClose={() => setDiagnosticsOpen(false)}
+          onFocus={focusDiagnostic}
+          propertiesOpen={showProperties}
+        />
+      )}
     </>
   );
 }

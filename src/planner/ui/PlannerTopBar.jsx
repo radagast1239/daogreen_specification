@@ -13,6 +13,7 @@ export function PlannerTopBar({
   onImportJson,
   onRename,
   onAttach,
+  onCheckPlan,
   projectId,
 }) {
   const [open, setOpen] = useState(false);
@@ -52,6 +53,17 @@ export function PlannerTopBar({
         <span className={"planner-status" + (saved ? " planner-status--ok" : "")}>
           {saved ? "Сохранено" : "Сохранение…"}
         </span>
+        {onCheckPlan && (
+          <button
+            type="button"
+            className="planner-btn"
+            onClick={onCheckPlan}
+            disabled={busy}
+            title="Проверить структурную целостность плана"
+          >
+            Проверить план
+          </button>
+        )}
         {standalone && (
           <>
             <button type="button" className="planner-btn planner-btn--ghost" onClick={handleRename} disabled={busy}>
