@@ -224,24 +224,38 @@ function itemToParams(it, projectId) {
   };
 }
 
-export function saveItems(projectId, items, options = {}) {
+/**
+ * Внутренняя версия saveItems: выполняет валидацию и SQL, но НЕ открывает
+ * транзакцию — предполагается, что вызывающий код уже находится внутри неё.
+ *
+ * Нужна для атомарного сохранения проекта: db.transaction() (см. db.js) делает
+ * `BEGIN IMMEDIATE`, поэтому вложенный вызов публичного saveItems() внутри
+ * другой транзакции упал бы с "cannot start a transaction within a transaction".
+ */
+function saveItemsWithin(projectId, items, options = {}) {
   validateProjectItemsForSave(items, {
     allowLegacyMissingMaterialId: options.allowLegacyMissingMaterialId !== false,
   });
   const list = Array.isArray(items) ? items : [];
-  const run = db.transaction((pid, rows) => {
-    db.prepare("DELETE FROM project_items WHERE project_id = ?").run(pid);
-    let inserted = 0;
-    for (const it of rows) {
-      INSERT_ITEM.run(itemToParams(it, pid));
-      inserted += 1;
-    }
-    if (inserted !== rows.length) {
-      throw new Error(`Item insert count mismatch: expected ${rows.length}, got ${inserted}`);
-    }
-  });
-  run(projectId, list);
+  db.prepare("DELETE FROM project_items WHERE project_id = ?").run(projectId);
+  let inserted = 0;
+  for (const it of list) {
+    INSERT_ITEM.run(itemToParams(it, projectId));
+    inserted += 1;
+  }
+  if (inserted !== list.length) {
+    throw new Error(`Item insert count mismatch: expected ${list.length}, got ${inserted}`);
+  }
   touchProject(projectId);
+}
+
+/**
+ * Публичное поведение не изменилось: замена позиций проекта в одной транзакции.
+ * (touchProject теперь коммитится вместе с позициями, а не отдельной записью.)
+ */
+export function saveItems(projectId, items, options = {}) {
+  const run = db.transaction(() => saveItemsWithin(projectId, items, options));
+  run();
 }
 
 export function saveItemsAppend(projectId, items) {
@@ -330,33 +344,51 @@ export function createProject(body) {
   return loadProject(id);
 }
 
+/**
+ * Полное сохранение проекта — АТОМАРНО: одна SQLite-транзакция на весь запрос.
+ *
+ * Раньше стадии коммитились по отдельности:
+ *   1) saveItems()            → BEGIN/COMMIT (позиции уже сохранены)
+ *   2) publishReleaseIfNeeded → INSERT spec_versions + UPDATE projects.version
+ *   3) UPDATE_PROJECT.run()   → metadata/manualParams/статус
+ * Падение на (2) или (3) оставляло позиции заменёнными, а проект — нет.
+ *
+ * Теперь все стадии выполняются внутри одной транзакции: либо всё COMMIT,
+ * либо всё ROLLBACK и БД остаётся ровно в состоянии до запроса.
+ */
 export function updateProject(id, patch) {
   const cur = loadProject(id);
   if (!cur) return null;
 
-  if (patch.items) {
-    saveItems(id, patch.items);
-  }
-
-  const base = patch.items ? loadProject(id) : cur;
-  let manualParams = { ...(base.manualParams || {}), ...(patch.manualParams || {}) };
-
-  if (patch.status != null && patch.status !== base.status && isPublishWorkflowStatus(patch.status)) {
-    const pub = publishReleaseIfNeeded(id, { ...base, manualParams }, patch.status);
-    if (pub.publishedRelease) {
-      manualParams = { ...manualParams, publishedRelease: pub.publishedRelease };
+  const run = db.transaction(() => {
+    if (patch.items) {
+      saveItemsWithin(id, patch.items);
     }
-  }
 
-  const merged = { ...base, ...patch, id, manualParams };
-  const row = projectUpdateRow(merged);
-  // PHASE 0B: не затирать повреждённый planner_plan пустым `{}` при апдейте,
-  // где новый план не передан. Исходные байты остаются нетронутыми в SQLite.
-  const storedRow = db.prepare("SELECT planner_plan FROM projects WHERE id = ?").get(id);
-  if (shouldPreserveStoredPlan(storedRow?.planner_plan, patch)) {
-    row.planner_plan = storedRow.planner_plan;
-  }
-  UPDATE_PROJECT.run(row);
+    // Внутри транзакции чтение видит собственные незакоммиченные записи,
+    // поэтому publish-валидация по-прежнему проверяет НОВЫЕ позиции.
+    const base = patch.items ? loadProject(id) : cur;
+    let manualParams = { ...(base.manualParams || {}), ...(patch.manualParams || {}) };
+
+    if (patch.status != null && patch.status !== base.status && isPublishWorkflowStatus(patch.status)) {
+      const pub = publishReleaseIfNeeded(id, { ...base, manualParams }, patch.status);
+      if (pub.publishedRelease) {
+        manualParams = { ...manualParams, publishedRelease: pub.publishedRelease };
+      }
+    }
+
+    const merged = { ...base, ...patch, id, manualParams };
+    const row = projectUpdateRow(merged);
+    // PHASE 0B: не затирать повреждённый planner_plan пустым `{}` при апдейте,
+    // где новый план не передан. Исходные байты остаются нетронутыми в SQLite.
+    const storedRow = db.prepare("SELECT planner_plan FROM projects WHERE id = ?").get(id);
+    if (shouldPreserveStoredPlan(storedRow?.planner_plan, patch)) {
+      row.planner_plan = storedRow.planner_plan;
+    }
+    UPDATE_PROJECT.run(row);
+  });
+
+  run();
   return loadProject(id);
 }
 
