@@ -45,7 +45,7 @@ import {
   applyWallNodeMove, refreshWallMountedItems,
   tryMergeWall, straightenWall, setWallSegmentLength, setWallSegmentLengthAt,
   wallSegmentLengthAt, wallSegmentIndexForNode, alignWallToNeighbor, weldWallNodes,
-  refineWallDraftSnap, ensureWallNodesAtPoints, snapPointsToWallNodes, wallInteractionAt,
+  refineWallDraftSnap, ensureWallNodesAtPoints, snapPointsToWallNodes,
   hitTestWallBody, pickWallBodyHit,
   planWorkingBounds, planHasDrawnWalls,
   alignmentGuides, angleAt, draftChainArea,
@@ -90,6 +90,7 @@ import { wallFieldsFromTool, defaultWallThkForTool, wallMaterialForTool } from "
 import { usePlanHistory } from "../../planner/usePlanHistory.js";
 import { normalizePlan } from "../../planner/planNormalize.js";
 import { isPlannerPlanCorrupt } from "../../planner/plannerPersistenceState.js";
+import { hitTestWallInteraction } from "../../planner/ui/hitTesting/planHitTest.js";
 import { validatePlanIntegrity } from "../../planner/core/validation/validatePlanIntegrity.js";
 import { PlanDiagnosticsPanel } from "../../planner/ui/diagnostics/PlanDiagnosticsPanel.jsx";
 import { getDiagnosticFocusTarget } from "../../planner/ui/diagnostics/diagnosticFocus.js";
@@ -3131,7 +3132,9 @@ export default function PlanPage() {
     e.stopPropagation();
     const mm = toMM(e.clientX, e.clientY);
     const walls = resolvePlanWalls(plan);
-    const hit = wallInteractionAt(wall, mm, view.zoom, { allWalls: walls, room: plan.room });
+    // PHASE 0E: screen-space резолвер (узел ≈10px, тело стены +8px), вместо
+    // прежних 320px/zoom с безусловным приоритетом узла.
+    const hit = hitTestWallInteraction({ wall, worldPoint: mm, zoom: view.zoom, allWalls: walls, room: plan.room });
     if (e.detail >= 2) {
       setSelection({ coll: "walls", ids: wallContourIdsFor(wall, walls) });
       return;

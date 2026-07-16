@@ -10,6 +10,7 @@ import { roomCategoryColor } from "./core/rooms/categories.js";
 import { ObjectIcon, DoorIcon } from "./icons.jsx";
 import { layerOpacity } from "./geometry.js";
 import { layerDisplayState, MUTED_LAYER_OPACITY } from "./canvasLayers.js";
+import { PLAN_HIT_TEST } from "./ui/hitTesting/planHitTest.js";
 import {
   buildItemLabelLines, autoItemLabelPlacement, labelModeForItem,
   labelsVisible, labelAudienceVisible, resolveFreeLabelPosition, labelFontSize,
@@ -297,6 +298,10 @@ export function WallEl({
   hoverNodeIdx = null, hasError = false, openings = [], room = null, allWalls = null, onHover, onNodeHover,
 }) {
   if (!wall?.pts || wall.pts.length < 2) return null;
+  // PHASE 0E: невидимая hit-область = тело стены + постоянный экранный допуск
+  // (PLAN_HIT_TEST.wallDistancePx с каждой стороны, k = 1/zoom). Раньше был
+  // мировой запас +80мм: он давал ~3.6px при мелком зуме и ~40px при zoom=1,
+  // то есть расходился с JS-резолвером. Теперь SVG и резолвер согласованы.
   const hitW = Math.max(wall.thk || 100, 80);
   const isDemolish = wall.kind === "demolish";
   const outerColor = hasError ? DG_THEME.dimError : (selected ? DG_THEME.brand : hovered ? "#5a9d8f" : (isDemolish ? DG_THEME.demolish : DG_THEME.wall));
@@ -317,7 +322,7 @@ export function WallEl({
         d={wallPath}
         fill="none"
         stroke="transparent"
-        strokeWidth={hitW + 80}
+        strokeWidth={hitW + PLAN_HIT_TEST.wallDistancePx * 2 * k}
         onPointerDown={onWallDown}
         onPointerEnter={onHover ? () => onHover(wall.id) : undefined}
         onPointerLeave={onHover ? () => onHover(null) : undefined}

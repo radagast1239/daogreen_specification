@@ -21,6 +21,7 @@ import { createPlannerSpecItems } from "../src/planner/specSync.js";
 import { loadPlannerFixture } from "./fixtures/planner/loadFixture.js";
 import { parsePlannerPlan, resolveProjectPlanFields } from "../backend/src/plannerPlanState.js";
 import { validatePlanIntegrity } from "../src/planner/core/validation/validatePlanIntegrity.js";
+import { hitTestPlan, pxToWorld, PLAN_HIT_TEST } from "../src/planner/ui/hitTesting/planHitTest.js";
 
 function withResolvedWalls(plan) {
   return { ...plan, walls: resolvePlanWalls(plan) };
@@ -87,6 +88,42 @@ describe("PHASE 0A regressions — активные (поведение уже �
     expect(spec.generatedCount).toBe(1);
     expect(spec.generated[0].source).toBe("planner");
     expect(spec.generated[0].sourceObjectIds).toContain("rk1");
+  });
+
+  // #4 node hit radius remains a reasonable screen-space value
+  // Активирован в PHASE 0E: прежний порог узла был `320 / zoom`
+  // (core/walls/wallOps.js:861) — ≈320 ЭКРАННЫХ px при видимом маркере 6px,
+  // причём узел возвращался безусловно, до проверки тела стены.
+  it("node hit radius remains a reasonable screen-space value", () => {
+    // 1. Радиус захвата узла задан в экранных пикселях и разумен.
+    expect(PLAN_HIT_TEST.nodeRadiusPx).toBeGreaterThanOrEqual(8);
+    expect(PLAN_HIT_TEST.nodeRadiusPx).toBeLessThanOrEqual(14);
+
+    const plan = {
+      nodes: { n1: { x: 0, y: 0 }, n2: { x: 4000, y: 0 } },
+      walls: [{ id: "w1", a: "n1", b: "n2", thk: 100 }],
+    };
+
+    for (const zoom of [0.05, 0.1, 0.25, 0.5, 1, 2, 4]) {
+      // 2. Одинаковое ЭКРАННОЕ отклонение даёт одинаковый результат при любом zoom.
+      const onNode = hitTestPlan({ plan, worldPoint: { x: pxToWorld(4, zoom), y: 0 }, zoom });
+      expect(onNode.type, `zoom=${zoom} 4px от узла`).toBe("node");
+      expect(onNode.nodeId).toBe("n1");
+
+      // 3. Узел за пределами порога НЕ перехватывает клик по телу стены.
+      //    40px вдоль стены: со старым радиусом 320px это был бы node.
+      const onWall = hitTestPlan({ plan, worldPoint: { x: pxToWorld(40, zoom), y: 0 }, zoom });
+      expect(onWall.type, `zoom=${zoom} 40px от узла`).toBe("wall");
+      expect(onWall.entityId).toBe("w1");
+
+      // 4. Захват узла не превышает заявленный радиус (не 320px).
+      const justOutside = hitTestPlan({
+        plan,
+        worldPoint: { x: pxToWorld(PLAN_HIT_TEST.nodeRadiusPx + 6, zoom), y: 0 },
+        zoom,
+      });
+      expect(justOutside.type, `zoom=${zoom} чуть вне радиуса`).not.toBe("node");
+    }
   });
 
   // #6 duplicate wall edge is diagnosed
@@ -167,11 +204,8 @@ describe("PHASE 0A regressions — подтверждённые дефекты (
   // половина), новая половина получает новый id -> проём "отвязывается".
   it.todo("opening remains attached after wall split");
 
-  // #4 НЕ ХАРАКТЕРИЗОВАНО: core snap engine экранно-инвариантен (см. активный
-  // тест #3, порог = px/zoom). Но радиус попадания при выделении/захвате узла
-  // живёт в hit-тесте PlanPage.jsx (большой оркестратор, не открывался в PHASE 0A).
-  // Требует отдельной характеризации пути выделения, до тех пор — todo.
-  it.todo("node hit radius remains a reasonable screen-space value");
+  // #4 АКТИВИРОВАН в PHASE 0E (см. активный тест выше): порог узла переведён
+  // в экранные пиксели и вынесен в ui/hitTesting/planHitTest.js.
 
   // #5 АКТИВИРОВАН в PHASE 0B (см. активный тест выше).
 
