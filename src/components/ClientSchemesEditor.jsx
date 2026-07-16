@@ -40,7 +40,7 @@ export default function ClientSchemesEditor({
     setUploading(id);
     try {
       const { url } = await api.uploadPhoto(file);
-      onChange(updateProjectScheme(mp, id, { url }));
+      onChange(updateProjectScheme(mp, id, { url, mimeType: file.type || "image/*", createdAt: new Date().toISOString() }));
     } catch (e) {
       alert(e.message || "Не удалось загрузить");
     } finally {
@@ -86,7 +86,7 @@ export default function ClientSchemesEditor({
                         onChange(updateProjectScheme(mp, scheme.id, { clientVisible: e.target.checked }))
                       }
                     />
-                    Клиенту
+                    Показывать клиенту
                   </label>
                 )}
               </div>
@@ -147,6 +147,11 @@ export default function ClientSchemesEditor({
                   Убрать
                 </button>
               </div>
+              {showClientVisibility && (
+                <p className="muted" style={{ fontSize: 11, margin: "7px 0 0" }}>
+                  {scheme.clientVisible ? "Будет показано клиенту после публикации" : "Только для меня"}
+                </p>
+              )}
             </div>
           );
         })}
@@ -177,8 +182,8 @@ export default function ClientSchemesEditor({
 }
 
 /** Просмотр схем на клиентской странице */
-export function ClientSchemesViewer({ manualParams }) {
-  const schemes = clientVisibleSchemes(manualParams).map((s) => ({
+export function ClientSchemesViewer({ manualParams, images }) {
+  const schemes = (Array.isArray(images) ? images : clientVisibleSchemes(manualParams)).map((s) => ({
     ...s,
     label: s.title || s.label,
   }));
@@ -188,7 +193,7 @@ export function ClientSchemesViewer({ manualParams }) {
 
   return (
     <div className="client-schemes-viewer card" style={{ padding: 16, marginBottom: 16 }}>
-      <strong style={{ fontSize: 14 }}>Схемы и планы</strong>
+      <strong style={{ fontSize: 14 }}>Схемы проекта</strong>
       <p className="muted" style={{ fontSize: 12, margin: "4px 0 12px" }}>
         Нажмите на схему, чтобы открыть на весь экран.
       </p>
@@ -223,4 +228,31 @@ export function ClientSchemesViewer({ manualParams }) {
       )}
     </div>
   );
+}
+
+export function ClientRackImagesViewer({ images = [] }) {
+  const [viewer, setViewer] = useState(null);
+  const groups = images.reduce((map, image) => {
+    if (!map.has(image.rackId)) map.set(image.rackId, { title: image.rackTitle || "Стеллаж", images: [] });
+    map.get(image.rackId).images.push(image);
+    return map;
+  }, new Map());
+  if (!groups.size) return null;
+  return [...groups.entries()].map(([rackId, group]) => (
+    <div key={rackId} className="client-schemes-viewer card" style={{ padding: 16, marginBottom: 16 }}>
+      <strong style={{ fontSize: 14 }}>{group.title}</strong>
+      <h3 style={{ fontSize: 14, margin: "8px 0 12px" }}>Дополнительные схемы и изображения</h3>
+      <div className="client-schemes-viewer__grid">
+        {group.images.map((image, index) => (
+          <button key={image.id} type="button" className="client-scheme-view-btn" onClick={() => setViewer({ schemes: group.images, activeIndex: index })}>
+            <img src={photoSrc(image.url)} alt="" />
+            <span>{image.title}</span>
+          </button>
+        ))}
+      </div>
+      {viewer && viewer.schemes.some((image) => image.rackId === rackId) && (
+        <FloorPlanViewer schemes={viewer.schemes} activeIndex={viewer.activeIndex} onActiveIndexChange={(next) => setViewer((v) => ({ ...v, activeIndex: typeof next === "function" ? next(v.activeIndex) : next }))} open onClose={() => setViewer(null)} />
+      )}
+    </div>
+  ));
 }

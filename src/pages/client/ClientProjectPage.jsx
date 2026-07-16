@@ -10,7 +10,7 @@ import { setClientScope } from "../../components/ClientGuard.jsx";
 import { photoSrc } from "../../lib/api.js";
 import { clientTabDefs, heroEyebrow, legacyTabToPurchaseMode } from "../../lib/clientBrandConfig.js";
 import { printPDF } from "../../lib/exportDownload.js";
-import { ClientSchemesViewer } from "../../components/ClientSchemesEditor.jsx";
+import { ClientSchemesViewer, ClientRackImagesViewer } from "../../components/ClientSchemesEditor.jsx";
 import ClientOverviewPanel from "../../components/client/ClientOverviewPanel.jsx";
 import ClientPurchasePanel from "../../components/client/ClientPurchasePanel.jsx";
 import { isClosedPurchaseStatus } from "../../lib/itemHelpers.js";
@@ -382,7 +382,8 @@ export default function ClientProjectPage() {
         </div>
       </header>
 
-      <ClientSchemesViewer manualParams={project.manualParams} />
+      <ClientSchemesViewer images={project.clientImages?.projectSchemes || []} />
+      <ClientRackImagesViewer images={project.clientImages?.rackImages || []} />
       {!hasPurchase && (
         <div className="card" style={{ padding: 16, marginBottom: 16, borderColor: "var(--accent)" }}>
           <strong>Список закупки пока пуст</strong>

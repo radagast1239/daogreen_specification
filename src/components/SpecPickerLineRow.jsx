@@ -32,7 +32,11 @@ export default function SpecPickerLineRow({
   onSaveMaterial,
   savingId,
   saveLineToBase,
+  showProjectPrice = false,
 }) {
+  const catalogMaterial = ln.materialId ? materials.find((m) => m.id === ln.materialId) : null;
+  const catalogPrice = catalogMaterial ? Number(catalogMaterial.basePrice) || 0 : null;
+  const differsFromCatalog = catalogPrice != null && (Number(ln.price) || 0) !== catalogPrice;
   return (
     <tr key={ln.id} className={ln.included ? "" : "spec-row-off"}>
       <td className="center">
@@ -248,9 +252,24 @@ export default function SpecPickerLineRow({
           min={0}
           step="any"
           value={ln.price}
-          disabled={!ln.included || !!ln.materialId}
-          onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, { price: Number(e.target.value) || 0 }))}
+          disabled={!ln.included || (!!ln.materialId && !showProjectPrice)}
+          aria-label={showProjectPrice ? "Цена проекта" : "Цена"}
+          onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, {
+            price: Number(e.target.value) || 0,
+            ...(showProjectPrice ? { priceOverridden: true } : {}),
+          }))}
         />
+        {showProjectPrice && catalogPrice != null && (
+          <div className="project-price-meta">
+            <span className="muted">Цена в базе: {catalogPrice.toLocaleString("ru-RU")} ₽</span>
+            {differsFromCatalog && <span className="project-price-badge">Изменена в проекте</span>}
+            {(ln.priceOverridden || differsFromCatalog) && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => emitLines(patchLine(normalizedLines, ln.id, { price: catalogPrice, priceOverridden: false }))}>
+                Вернуть цену из базы
+              </button>
+            )}
+          </div>
+        )}
       </td>
       <td>
         <input

@@ -155,6 +155,7 @@ export function projectItemToBuilderLine(item, { stCount = 1 } = {}) {
     photoUrl: item.photoUrl || item.imageUrl || "",
     qty: baseQty,
     price: Number(item.price) || 0,
+    priceOverridden: !!item.priceOverridden,
     vatRate: Number(item.vatRate) || 0,
     techNote: item.techNote || "",
     clientNote: item.clientNote || item.comment || "",
@@ -246,6 +247,7 @@ export function stellagesFromProject(project, { stellageCatalogs = {}, materials
       photoUrl: cfg.photoUrl || "",
       presetId: cfg.presetId || null,
       params: cfg.params || {},
+      extraImages: Array.isArray(cfg.extraImages) ? cfg.extraImages : [],
       items,
     };
   });

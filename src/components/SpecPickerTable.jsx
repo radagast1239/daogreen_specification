@@ -147,6 +147,7 @@ export default function SpecPickerTable({
   /** Hide optional columns: { category, supplier, unit } — true = hidden */
   hiddenColumns = null,
   onToggleColumn = null,
+  showProjectPrice = false,
 }) {
   const categories = categoriesProp?.length ? categoriesProp : CATEGORIES;
   const unitOptions = unitsProp?.length ? unitsProp : ["шт.", "м", "м²", "м³", "кг", "л"];
@@ -407,6 +408,7 @@ export default function SpecPickerTable({
     onSaveMaterial,
     savingId,
     saveLineToBase,
+    showProjectPrice,
   };
 
   const createNewInBase = async () => {
@@ -551,7 +553,7 @@ export default function SpecPickerTable({
                 {showFarmLineGroups && <th style={{ width: 130 }}>Группа раздела</th>}
                 {showRoom && <th style={{ width: 130 }}>Комната</th>}
                 {showQty && <th className="right" style={{ width: 96 }}>{qtyLabel}</th>}
-                <th className="right" style={{ width: 110 }}>Цена, ₽</th>
+                <th className="right" style={{ width: showProjectPrice ? 170 : 110 }}>{showProjectPrice ? "Цена проекта" : "Цена, ₽"}</th>
                 <th style={{ minWidth: 120 }}>Ссылка</th>
                 <th style={{ width: 72 }} />
               </tr>

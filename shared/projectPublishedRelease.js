@@ -2,6 +2,7 @@
 
 import { lineVisibleToClient } from "./itemTypes.js";
 import { projectItemMatchKey } from "./projectItemKey.js";
+import { buildClientImageManifest, normalizeClientImageManifest, clientImageManifestFingerprint } from "./clientImageManifest.js";
 
 /** Workflow statuses that require / imply a published client release. */
 export const PUBLISH_WORKFLOW_STATUSES = new Set([
@@ -46,7 +47,7 @@ export function buildPublishedReleaseMeta(versionRow, workflowStatus = "") {
 export function buildReleaseSnapshotPayload(project, items = project?.items || []) {
   const list = Array.isArray(items) ? items : [];
   return {
-    schema: "release_v1",
+    schema: "release_v2",
     publishedAt: new Date().toISOString(),
     projectMeta: {
       id: project?.id || "",
@@ -58,13 +59,14 @@ export function buildReleaseSnapshotPayload(project, items = project?.items || [
       versionNumber: Number(project?.version) || 0,
     },
     items: list.map((it) => ({ ...it })),
+    imageManifest: buildClientImageManifest(project),
   };
 }
 
 export function parseReleaseSnapshot(raw) {
-  if (!raw) return { items: [], projectMeta: null, schema: null };
+  if (!raw) return { items: [], projectMeta: null, imageManifest: normalizeClientImageManifest(), schema: null };
   if (Array.isArray(raw)) {
-    return { items: raw, projectMeta: null, schema: "legacy_items_array" };
+    return { items: raw, projectMeta: null, imageManifest: normalizeClientImageManifest(), schema: "legacy_items_array" };
   }
   if (typeof raw === "object" && Array.isArray(raw.items)) {
     return {
@@ -72,6 +74,7 @@ export function parseReleaseSnapshot(raw) {
       projectMeta: raw.projectMeta || null,
       schema: raw.schema || "release_v1",
       publishedAt: raw.publishedAt || "",
+      imageManifest: normalizeClientImageManifest(raw.imageManifest),
     };
   }
   return { items: [], projectMeta: null, schema: null };
@@ -82,6 +85,11 @@ export function releaseSnapshotItems(rawSnapshot) {
     ? parseReleaseSnapshot(JSON.parse(rawSnapshot || "[]"))
     : parseReleaseSnapshot(rawSnapshot);
   return parsed.items || [];
+}
+
+export function releaseSnapshotImageManifest(rawSnapshot) {
+  const parsed = typeof rawSnapshot === "string" ? parseReleaseSnapshot(JSON.parse(rawSnapshot || "[]")) : parseReleaseSnapshot(rawSnapshot);
+  return normalizeClientImageManifest(parsed.imageManifest);
 }
 
 /** Client-visible pool from frozen snapshot — no catalog enrich. */
@@ -123,7 +131,7 @@ function itemChanged(a, b) {
 /**
  * Detect unpublished changes vs published snapshot (working draft vs release).
  */
-export function detectUnpublishedChanges(workingItems = [], publishedItems = []) {
+export function detectUnpublishedChanges(workingItems = [], publishedItems = [], workingImages = null, publishedImages = null) {
   const pubMap = new Map((publishedItems || []).map((it) => [it.id, it]));
   const workMap = new Map((workingItems || []).map((it) => [it.id, it]));
   let changedCount = 0;
@@ -142,11 +150,15 @@ export function detectUnpublishedChanges(workingItems = [], publishedItems = [])
     if (!workMap.has(id) && lineVisibleToClient(p)) removedCount++;
   }
 
+  const imagesChanged = workingImages != null && publishedImages != null
+    ? clientImageManifestFingerprint(workingImages) !== clientImageManifestFingerprint(publishedImages)
+    : false;
   return {
-    hasChanges: changedCount > 0 || addedCount > 0 || removedCount > 0,
+    hasChanges: changedCount > 0 || addedCount > 0 || removedCount > 0 || imagesChanged,
     changedCount,
     addedCount,
     removedCount,
+    imagesChanged,
   };
 }
 

@@ -22,6 +22,8 @@ let initDb;
 let loadProject;
 let loadProjectItems;
 let updateProject;
+let loadPublishedReleaseSnapshot;
+let buildClientProjectFromRelease;
 
 function seedMaterial(id = "mat1") {
   // client_section/client_subsection/supplier/link/photo заполнены, чтобы позиция
@@ -67,7 +69,7 @@ function item(id, overrides = {}) {
 
 /** Снимок всего, что должно откатываться целиком. */
 function snapshot(id = "p1") {
-  const row = db.prepare("SELECT name, city, status, manual_params, version FROM projects WHERE id = ?").get(id);
+  const row = db.prepare("SELECT name, city, status, manual_params, stellage_configs, version FROM projects WHERE id = ?").get(id);
   const items = loadProjectItems(id).map((i) => ({ id: i.id, qty: i.qty, price: i.price })).sort((a, b) => a.id.localeCompare(b.id));
   const versions = db.prepare("SELECT COUNT(*) c FROM spec_versions WHERE project_id = ?").get(id).c;
   return { row, items, versions };
@@ -81,11 +83,14 @@ beforeAll(async () => {
   vi.resetModules();
   const dbMod = await import("../backend/src/db.js");
   const projectsMod = await import("../backend/src/routes/projects.js");
+  const releaseMod = await import("../backend/src/services/publishedReleaseService.js");
   db = dbMod.db;
   initDb = dbMod.initDb;
   loadProject = dbMod.loadProject;
   loadProjectItems = dbMod.loadProjectItems;
   updateProject = projectsMod.updateProject;
+  loadPublishedReleaseSnapshot = releaseMod.loadPublishedReleaseSnapshot;
+  buildClientProjectFromRelease = releaseMod.buildClientProjectFromRelease;
   initDb();
 });
 
@@ -128,6 +133,49 @@ describe("1. успешное полное сохранение", () => {
     const items = loadProjectItems("p1");
     expect(items.map((i) => i.id).sort()).toEqual(["it1", "it2"]);
     expect(items.find((i) => i.id === "it2").qty).toBe(5);
+  });
+
+  it("один atomic PATCH публикует новые items, metadata и client-visible изображения в release_v2", () => {
+    const projectScheme = {
+      id: "scheme-client",
+      title: "Схема клиента",
+      url: "/uploads/project-scheme.png",
+      clientVisible: true,
+    };
+    const rackImage = {
+      id: "rack-client",
+      title: "Фото стеллажа",
+      url: "/uploads/rack-client.png",
+      clientVisible: true,
+    };
+
+    const saved = updateProject("p1", {
+      name: "Опубликованный проект",
+      status: "ready_to_send",
+      manualParams: { projectSchemes: [projectScheme] },
+      stellageConfigs: [{ id: "rack-1", name: "Стеллаж 1", extraImages: [rackImage] }],
+      items: [item("published-item", {
+        qty: 3,
+        price: 8500,
+        clientSection: "stellage",
+        clientSubsection: "Каркас и профиль",
+      })],
+    });
+
+    const release = loadPublishedReleaseSnapshot(saved);
+    expect(release.schema).toBe("release_v2");
+    expect(release.projectMeta.name).toBe("Опубликованный проект");
+    expect(release.items).toMatchObject([{ id: "published-item", qty: 3, price: 8500 }]);
+    expect(release.imageManifest.projectSchemes).toMatchObject([
+      { id: "scheme-client", url: "/uploads/project-scheme.png" },
+    ]);
+    expect(release.imageManifest.rackImages).toMatchObject([
+      { id: "rack-client", rackId: "rack-1", url: "/uploads/rack-client.png" },
+    ]);
+
+    const clientProject = buildClientProjectFromRelease(saved, release, { overlayLive: false });
+    expect(clientProject.clientImages).toEqual(release.imageManifest);
+    expect(clientProject.manualParams).toBeUndefined();
   });
 });
 
@@ -202,6 +250,13 @@ describe("4. ошибка создания client release → полный от�
       updateProject("p1", {
         name: "НЕ ДОЛЖНО СОХРАНИТЬСЯ",
         status: "ready_to_send", // publish workflow → создаётся release
+        manualParams: {
+          projectSchemes: [{ id: "rollback-scheme", url: "/uploads/rollback.png", clientVisible: true }],
+        },
+        stellageConfigs: [{
+          id: "rollback-rack",
+          extraImages: [{ id: "rollback-image", url: "/uploads/rollback-rack.png", clientVisible: true }],
+        }],
         items: [item("newA"), item("bad", { price: 0 })],
       }),
     ).toThrow();

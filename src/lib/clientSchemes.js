@@ -79,7 +79,7 @@ export function normalizeSchemeEntry(raw, index = 0) {
   const url = String(raw?.url || "").trim();
   const titleRaw = String(raw?.title || raw?.name || "").trim();
   const sortOrder = Number.isFinite(Number(raw?.sortOrder)) ? Number(raw.sortOrder) : index;
-  const clientVisible = raw?.clientVisible !== false;
+  const clientVisible = raw?.clientVisible === true;
   const label = titleRaw || schemeDisplayTitle({ title: titleRaw, url, label: raw?.label }, index);
   return {
     id,
@@ -89,6 +89,8 @@ export function normalizeSchemeEntry(raw, index = 0) {
     url,
     clientVisible,
     sortOrder,
+    mimeType: String(raw?.mimeType || "image/*"),
+    createdAt: raw?.createdAt || "",
   };
 }
 
@@ -144,8 +146,10 @@ export function patchProjectSchemes(manualParams, nextList) {
     id: s.id,
     title: String(s.title || "").trim(),
     url: String(s.url || "").trim(),
-    clientVisible: s.clientVisible !== false,
+    clientVisible: s.clientVisible === true,
     sortOrder: i,
+    mimeType: s.mimeType || "image/*",
+    createdAt: s.createdAt || "",
   }));
   return mp;
 }
@@ -157,7 +161,9 @@ export function addProjectScheme(manualParams, partial = {}) {
       id: partial.id || newSchemeId(),
       title: partial.title || `Схема ${list.length + 1}`,
       url: partial.url || "",
-      clientVisible: partial.clientVisible !== false,
+      clientVisible: partial.clientVisible === true,
+      mimeType: partial.mimeType || "image/*",
+      createdAt: partial.createdAt || new Date().toISOString(),
       sortOrder: list.length,
     },
     list.length,

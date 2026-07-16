@@ -76,6 +76,7 @@ import CompactTableToggle from "../../components/CompactTableToggle.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
 import FloorPlanPin from "../../components/FloorPlanPin.jsx";
 import ClientSchemesEditor from "../../components/ClientSchemesEditor.jsx";
+import RackImagesEditor from "../../components/RackImagesEditor.jsx";
 import { listUploadedSchemes } from "../../lib/clientSchemes.js";
 import { COOLING_FARM_DEFAULTS, computeCoolingFarm } from "../../lib/coolingFarmCalc.js";
 import { newRoom } from "../../lib/roomHelpers.js";
@@ -1137,7 +1138,7 @@ export default function ProjectBuilderPage() {
           <ClientSchemesEditor
             manualParams={form.manualParams}
             onChange={setSchemesManualParams}
-            showClientVisibility={false}
+            showClientVisibility
             title="Схемы проекта"
           />
 
@@ -1362,6 +1363,15 @@ export default function ProjectBuilderPage() {
                 saving={frameSchemeSaving}
               />
             </div>
+            <RackImagesEditor
+              rackId={draft.id}
+              images={draft.extraImages}
+              onChange={(extraImages) => setDraft((d) => ({ ...d, extraImages }))}
+              onConfirmRemove={(image) => confirm({
+                title: "Удалить изображение?",
+                message: `Привязка «${image.title}» будет удалена только у этого стеллажа.`,
+              })}
+            />
             <div className="toolbar" style={{ marginTop: 10 }}>
               <button type="button" className="btn btn-sm" onClick={saveDraftAsPreset}>
                 💾 Сохранить как пресет
@@ -1403,6 +1413,7 @@ export default function ProjectBuilderPage() {
             onSaveMaterial={saveMaterial}
             showQty
             showCompositionGroups
+            showProjectPrice
             stellageGroups={ref.stellageGroups}
             categories={categories}
             suppliers={suppliers}

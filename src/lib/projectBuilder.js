@@ -179,6 +179,7 @@ export function lineToProjectItem(line, section, sortOrder, opts = {}) {
     splitSpecs: normalizeSplitSpecs(line.splitSpecs ?? resolveSplitSpecs(line)),
     qty,
     price: Number(line.price) || 0,
+    priceOverridden: !!line.priceOverridden,
     vatRate: Number(line.vatRate) || 0,
     coolingKw: Number(line.coolingKw) || 0,
     coolingBtu: Number(line.coolingBtu) || 0,
@@ -216,7 +217,10 @@ export function buildProjectFromBuilder({
     const fromCatalog = line.materialId
       ? copyCatalogSnapshotFromMaterial(line, materials)
       : applyMaterialCatalogFields(line, materials, { isNewLine: true });
-    const hydrated = hydrateLinePhoto(fromCatalog, materials);
+    const hydrated = hydrateLinePhoto(
+      line.priceOverridden ? { ...fromCatalog, price: Number(line.price) || 0, priceOverridden: true } : fromCatalog,
+      materials,
+    );
     items.push(lineToProjectItem(hydrated, section, order++, opts));
   };
 
@@ -233,6 +237,7 @@ export function buildProjectFromBuilder({
       presetId: st.presetId || null,
       photoUrl: resolveStellagePhoto(stellageModuleMeta, st.moduleId, st.photoUrl || st.params?.photoUrl),
       params: st.params || {},
+      extraImages: st.extraImages || [],
       groups: activeLines(st.items).map((ln) => ({
         name: ln.name,
         qty: ln.qty,

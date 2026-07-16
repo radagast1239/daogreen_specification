@@ -322,6 +322,20 @@ describe("buildProjectItemsAfterBuilderSave", () => {
 });
 
 describe("catalog snapshot policy", () => {
+  it("keeps an overridden project price through builder generation", () => {
+    const built = buildProjectFromBuilder({
+      form: { name: "P", client: "C", manualParams: {} },
+      stellages: [{
+        id: "st1", moduleId: "mod1", moduleName: "Rack", name: "Rack A", count: 1,
+        items: [{ id: "ln1", materialId: "m073", name: "Болт", unit: "шт.", category: "Крепёж", qty: 1, included: true, price: 8.5, priceOverridden: true }],
+      }],
+      farmSections: [], materials,
+    });
+    expect(built.items[0].price).toBe(8.5);
+    expect(built.items[0].priceOverridden).toBe(true);
+    expect(materials[0].basePrice).toBe(12);
+  });
+
   it("does not overwrite existing snapshot on applyMaterialCatalogFields", () => {
     const line = {
       id: "ln1",

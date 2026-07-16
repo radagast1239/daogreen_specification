@@ -9,8 +9,10 @@ import {
   parsePublishedRelease,
   parseReleaseSnapshot,
   releaseSnapshotItems,
+  releaseSnapshotImageManifest,
   workingItemsPublishFingerprint,
 } from "../../../shared/projectPublishedRelease.js";
+import { buildClientImageManifest } from "../../../shared/clientImageManifest.js";
 import { stripClientTechnicalFields } from "../../../shared/clientPurchaseRows.js";
 import { normalizePurchaseStatus, getPurchaseStatusLabel } from "../../../shared/purchaseStatusRules.js";
 import { lineVisibleToClient } from "../../../shared/itemTypes.js";
@@ -48,6 +50,14 @@ export function loadPublishedSnapshotItems(project) {
   return releaseSnapshotItems(ver.snapshot);
 }
 
+export function loadPublishedReleaseSnapshot(project) {
+  const release = parsePublishedRelease(project?.manualParams);
+  if (!release) return null;
+  const ver = loadVersionRow(project.id, release.versionId);
+  if (!ver) return null;
+  return parseReleaseSnapshot(JSON.parse(ver.snapshot || "[]"));
+}
+
 export function prepareSnapshotItemForClient(item) {
   const base = stripClientTechnicalFields({ ...item });
   const status = normalizePurchaseStatus(base);
@@ -59,7 +69,9 @@ export function prepareSnapshotItemForClient(item) {
   };
 }
 
-export function buildClientProjectFromRelease(workingProject, snapshotItems, { overlayLive = true } = {}) {
+export function buildClientProjectFromRelease(workingProject, snapshot, { overlayLive = true } = {}) {
+  const snapshotItems = Array.isArray(snapshot) ? snapshot : snapshot?.items || [];
+  const clientImages = Array.isArray(snapshot) ? { projectSchemes: [], rackImages: [] } : snapshot?.imageManifest || { projectSchemes: [], rackImages: [] };
   const liveItems = workingProject?.items || [];
   const merged = overlayLive
     ? mergeLivePurchaseOverlay(snapshotItems, liveItems)
@@ -72,6 +84,7 @@ export function buildClientProjectFromRelease(workingProject, snapshotItems, { o
     zones,
     purchaseStartedAt,
     installationDoneAt,
+    manualParams: _manualParams,
     items: _drop,
     ...safe
   } = workingProject;
@@ -81,14 +94,18 @@ export function buildClientProjectFromRelease(workingProject, snapshotItems, { o
     items: clientItems,
     publishedRelease: release,
     isPublishedRelease: true,
+    clientImages,
   };
 }
 
 export function getProjectReleaseInfo(project) {
   const release = parsePublishedRelease(project?.manualParams);
   const publishedItems = release ? loadPublishedSnapshotItems(project) : [];
+  const publishedSnapshot = release ? loadPublishedReleaseSnapshot(project) : null;
+  const workingImages = buildClientImageManifest(project);
+  const publishedImages = publishedSnapshot?.imageManifest || { projectSchemes: [], rackImages: [] };
   const unpublished = release
-    ? detectUnpublishedChanges(project?.items || [], publishedItems)
+    ? detectUnpublishedChanges(project?.items || [], publishedItems, workingImages, publishedImages)
     : { hasChanges: false, changedCount: 0, addedCount: 0, removedCount: 0 };
   return {
     publishedRelease: release,
@@ -108,14 +125,20 @@ export function shouldPublishOnStatusChange(currentProject, nextStatus) {
   const release = parsePublishedRelease(currentProject?.manualParams);
   if (!release) return true;
   const publishedItems = loadPublishedSnapshotItems(currentProject);
+  const publishedSnapshot = loadPublishedReleaseSnapshot(currentProject);
   const fpWork = workingItemsPublishFingerprint(currentProject?.items || []);
   const fpPub = workingItemsPublishFingerprint(publishedItems);
-  if (fpWork === fpPub) return false;
-  return detectUnpublishedChanges(currentProject?.items || [], publishedItems).hasChanges;
+  const imagesChanged = detectUnpublishedChanges(
+    currentProject?.items || [], publishedItems,
+    buildClientImageManifest(currentProject),
+    publishedSnapshot?.imageManifest || { projectSchemes: [], rackImages: [] },
+  ).hasChanges;
+  if (fpWork === fpPub && !imagesChanged) return false;
+  return imagesChanged;
 }
 
 export function buildReleaseSnapshotJson(project) {
   return JSON.stringify(buildReleaseSnapshotPayload(project, project?.items || []));
 }
 
-export { parseReleaseSnapshot, releaseSnapshotItems, parsePublishedRelease, isPublishWorkflowStatus };
+export { parseReleaseSnapshot, releaseSnapshotItems, releaseSnapshotImageManifest, parsePublishedRelease, isPublishWorkflowStatus };

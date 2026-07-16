@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { photoSrc } from "../lib/api.js";
 
 /** Полноэкранный просмотр схемы — Esc или клик по фону закрывает */
@@ -11,6 +11,9 @@ export default function FloorPlanViewer({
   activeIndex = 0,
   onActiveIndexChange,
 }) {
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef(null);
   const list = Array.isArray(schemes) && schemes.length ? schemes : null;
   const idx = list
     ? Math.min(Math.max(0, Number(activeIndex) || 0), list.length - 1)
@@ -21,6 +24,11 @@ export default function FloorPlanViewer({
     ? `${active.title || title} · ${idx + 1} из ${list.length}`
     : title;
   const canNav = list && list.length > 1 && typeof onActiveIndexChange === "function";
+
+  useEffect(() => {
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
+  }, [idx, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -74,13 +82,26 @@ export default function FloorPlanViewer({
               </button>
             </div>
           )}
+          <div className="floor-plan-fullscreen__nav" aria-label="Масштаб">
+            <button type="button" className="btn btn-sm" onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))}>−</button>
+            <span>{Math.round(zoom * 100)}%</span>
+            <button type="button" className="btn btn-sm" onClick={() => setZoom((z) => Math.min(5, z + 0.25))}>+</button>
+            <button type="button" className="btn btn-sm" onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}>Сбросить</button>
+          </div>
         </div>
         <button type="button" className="btn btn-sm" onClick={onClose}>
           ✕ Закрыть
         </button>
       </div>
-      <div className="floor-plan-fullscreen__body" onClick={(e) => e.stopPropagation()}>
-        <img src={src} alt={heading} className="floor-plan-fullscreen__img" />
+      <div
+        className="floor-plan-fullscreen__body"
+        onClick={(e) => e.stopPropagation()}
+        onWheel={(e) => { e.preventDefault(); setZoom((z) => Math.min(5, Math.max(0.5, z + (e.deltaY < 0 ? 0.2 : -0.2)))); }}
+        onPointerDown={(e) => { dragRef.current = { clientX: e.clientX, clientY: e.clientY, originX: offset.x, originY: offset.y }; e.currentTarget.setPointerCapture(e.pointerId); }}
+        onPointerMove={(e) => { if (!dragRef.current) return; setOffset({ x: dragRef.current.originX + e.clientX - dragRef.current.clientX, y: dragRef.current.originY + e.clientY - dragRef.current.clientY }); }}
+        onPointerUp={() => { dragRef.current = null; }}
+      >
+        <img src={src} alt={heading} className="floor-plan-fullscreen__img" draggable="false" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }} />
       </div>
       {canNav && (
         <div className="floor-plan-fullscreen__thumbs" onClick={(e) => e.stopPropagation()}>
@@ -98,7 +119,7 @@ export default function FloorPlanViewer({
         </div>
       )}
       <p className="floor-plan-fullscreen__hint muted">
-        Esc или клик по фону — закрыть{canNav ? " · ← → переключение схем" : ""}
+        Esc или клик по фону — закрыть · колесо — масштаб · перетаскивание — перемещение{canNav ? " · ← → переключение схем" : ""}
       </p>
     </div>
   );

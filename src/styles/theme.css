@@ -1999,6 +1999,21 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   margin: 10px 0 0;
   color: #9ecdb8;
 }
+.rack-images-editor { margin-top: 14px; padding: 14px; }
+.rack-images-editor h4 { margin: 0 0 5px; font-size: 14px; }
+.rack-images-editor > p { font-size: 12px; margin: 0 0 10px; }
+.rack-images-editor__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.rack-image-card { min-width: 0; border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+.rack-image-card__thumb { display: block; width: 100%; height: 112px; border: 0; padding: 0; border-radius: 6px; overflow: hidden; background: var(--surface-alt); cursor: pointer; margin-bottom: 7px; }
+.rack-image-card__thumb img { width: 100%; height: 100%; object-fit: cover; }
+.rack-image-card > input { width: 100%; margin-bottom: 7px; }
+.rack-image-card__visibility { display: flex; align-items: center; gap: 6px; font-size: 11px; margin-bottom: 3px; cursor: pointer; }
+.rack-image-card__status { display: block; font-size: 10px; margin-bottom: 7px; }
+.rack-images-editor__error { color: var(--danger, #b42318); }
+.rack-images-editor__add { cursor: pointer; }
+.project-price-meta { display: grid; gap: 3px; margin-top: 4px; font-size: 10px; text-align: left; }
+.project-price-badge { width: fit-content; border-radius: 999px; padding: 2px 6px; color: #725b00; background: #fff4c2; }
+.project-price-meta .btn { width: fit-content; white-space: normal; text-align: left; padding-left: 0; }
 
 /* Publish rules & checklist */
 .publish-rules-card { overflow: hidden; }

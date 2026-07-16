@@ -72,6 +72,7 @@ import {
   getProjectReleaseInfo,
   loadLatestVersionRow,
   loadPublishedSnapshotItems,
+  loadPublishedReleaseSnapshot,
   loadVersionRow,
   shouldPublishOnStatusChange,
 } from "../services/publishedReleaseService.js";
@@ -369,15 +370,18 @@ export function updateProject(id, patch) {
     // поэтому publish-валидация по-прежнему проверяет НОВЫЕ позиции.
     const base = patch.items ? loadProject(id) : cur;
     let manualParams = { ...(base.manualParams || {}), ...(patch.manualParams || {}) };
+    let merged = { ...base, ...patch, id, manualParams };
 
     if (patch.status != null && patch.status !== base.status && isPublishWorkflowStatus(patch.status)) {
-      const pub = publishReleaseIfNeeded(id, { ...base, manualParams }, patch.status);
+      // Build the release from the complete PATCH candidate. This keeps images and
+      // metadata changed in the same request inside the immutable release_v2 snapshot.
+      const pub = publishReleaseIfNeeded(id, merged, patch.status);
       if (pub.publishedRelease) {
         manualParams = { ...manualParams, publishedRelease: pub.publishedRelease };
+        merged = { ...merged, manualParams };
       }
     }
 
-    const merged = { ...base, ...patch, id, manualParams };
     const row = projectUpdateRow(merged);
     // PHASE 0B: не затирать повреждённый planner_plan пустым `{}` при апдейте,
     // где новый план не передан. Исходные байты остаются нетронутыми в SQLite.
@@ -416,7 +420,14 @@ export function duplicateProject(id, body = {}) {
     items,
     selectedModules: src.selectedModules,
     zones: src.zones,
-    stellageConfigs: src.stellageConfigs,
+    stellageConfigs: (src.stellageConfigs || []).map((rack) => ({
+      ...rack,
+      extraImages: (Array.isArray(rack.extraImages) ? rack.extraImages : []).map((image, sortOrder) => ({
+        ...image,
+        id: uid("rack_img"),
+        sortOrder,
+      })),
+    })),
     manualParams: src.manualParams,
     rooms: remapRoomsSelectedItemIds(src.rooms, idMap),
   });
@@ -1167,7 +1178,7 @@ function serveClientProject(req, res) {
     });
   }
 
-  const clientProject = buildClientProjectFromRelease(p, snapshotItems, { overlayLive: true });
+  const clientProject = buildClientProjectFromRelease(p, loadPublishedReleaseSnapshot(p), { overlayLive: true });
   const versions = listVersions(p.id);
   const versionInfo = versions.find((v) => v.id === release.versionId) || versions[0] || null;
   const documents = getClientProjectDocuments(p.id);
