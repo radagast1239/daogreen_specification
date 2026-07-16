@@ -7,6 +7,7 @@ import {
   loadSlimItemsForProjects,
   rowToProject,
 } from "../db.js";
+import { shouldPreserveStoredPlan } from "../plannerPlanState.js";
 import {
   uid,
   clientToken,
@@ -349,6 +350,12 @@ export function updateProject(id, patch) {
 
   const merged = { ...base, ...patch, id, manualParams };
   const row = projectUpdateRow(merged);
+  // PHASE 0B: не затирать повреждённый planner_plan пустым `{}` при апдейте,
+  // где новый план не передан. Исходные байты остаются нетронутыми в SQLite.
+  const storedRow = db.prepare("SELECT planner_plan FROM projects WHERE id = ?").get(id);
+  if (shouldPreserveStoredPlan(storedRow?.planner_plan, patch)) {
+    row.planner_plan = storedRow.planner_plan;
+  }
   UPDATE_PROJECT.run(row);
   return loadProject(id);
 }

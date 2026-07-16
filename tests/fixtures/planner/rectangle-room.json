@@ -1,0 +1,21 @@
+{
+  "_fixture": "rectangle-room",
+  "_note": "Четыре стены (network-модель nodes+a/b), один замкнутый контур -> одно авто-помещение. Baseline PHASE 0A.",
+  "unit": "mm",
+  "room": { "w": 12000, "h": 8000, "wallThk": 120, "height": 3000, "defaultRoomHeightMm": 3000, "showBoundary": false },
+  "nodes": {
+    "n1": { "x": 0, "y": 0 },
+    "n2": { "x": 6000, "y": 0 },
+    "n3": { "x": 6000, "y": 4000 },
+    "n4": { "x": 0, "y": 4000 }
+  },
+  "walls": [
+    { "id": "w1", "a": "n1", "b": "n2", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w1" },
+    { "id": "w2", "a": "n2", "b": "n3", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w2" },
+    { "id": "w3", "a": "n3", "b": "n4", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w3" },
+    { "id": "w4", "a": "n4", "b": "n1", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w4" }
+  ],
+  "items": [],
+  "lines": [],
+  "dimensions": []
+}

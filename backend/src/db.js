@@ -10,6 +10,7 @@ import { resolveMaterialModules } from "../../shared/materialModules.js";
 import { resolveMaterialFarmSections } from "../../shared/materialFarmSections.js";
 import { normalizeItemFlags, resolveItemType } from "../../shared/itemTypes.js";
 import { runSqlMigrations } from "./migrations/runner.js";
+import { resolveProjectPlanFields } from "./plannerPlanState.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.DATABASE_PATH || path.join(__dirname, "../data/daogreen.db");
@@ -516,9 +517,9 @@ export function rowToProject(row, items = []) {
   if (!row) return null;
   const mpRaw = JSON.parse(row.manual_params || "{}");
   const { floorPlan, ...manualParams } = mpRaw;
-  let plan = {};
-  try { plan = JSON.parse(row.planner_plan || "{}"); } catch { plan = {}; }
-  if ((!plan || !Object.keys(plan).length) && floorPlan) plan = floorPlan;
+  // PHASE 0B: повреждённый planner_plan диагностируется явно и НЕ превращается
+  // молча в пустой план (см. backend/src/plannerPlanState.js).
+  const planFields = resolveProjectPlanFields(row.planner_plan, floorPlan);
   return {
     id: row.id,
     name: row.name,
@@ -537,7 +538,8 @@ export function rowToProject(row, items = []) {
     zones: JSON.parse(row.zones || "[]"),
     stellageConfigs: JSON.parse(row.stellage_configs || "[]"),
     manualParams,
-    plan: Object.keys(plan).length ? plan : null,
+    plan: planFields.plan,
+    ...(planFields.plannerPlanState ? { plannerPlanState: planFields.plannerPlanState } : {}),
     plannerSyncAt: row.planner_sync_at || mpRaw.plannerSyncAt || "",
     rooms: JSON.parse(row.rooms || "[]"),
     version: row.version,

@@ -1,0 +1,12 @@
+{
+  "_fixture": "legacy-pts-wall",
+  "_note": "Legacy-стена только с pts[] и без nodes. normalizePlan мигрирует её в network-модель (nodes+a/b). Проверка обратной совместимости старых проектов.",
+  "unit": "mm",
+  "room": { "w": 12000, "h": 8000, "wallThk": 120, "height": 3000 },
+  "walls": [
+    { "id": "w1", "thk": 100, "pts": [{ "x": 0, "y": 0 }, { "x": 3000, "y": 0 }] }
+  ],
+  "items": [],
+  "lines": [],
+  "dimensions": []
+}

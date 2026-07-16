@@ -89,6 +89,7 @@ import { defaultWallFields, WALL_KINDS, THICKNESS_SIDES } from "../../planner/wa
 import { wallFieldsFromTool, defaultWallThkForTool, wallMaterialForTool } from "../../planner/wallToolPresets.js";
 import { usePlanHistory } from "../../planner/usePlanHistory.js";
 import { normalizePlan } from "../../planner/planNormalize.js";
+import { isPlannerPlanCorrupt } from "../../planner/plannerPersistenceState.js";
 import { DEFAULT_DUCT_SIZE_H_MM, DEFAULT_DUCT_SIZE_W_MM } from "../../planner/ventDuctRender.jsx";
 import {
   PlanGridScreen, PlanAxesScreen, SheetBackdrop, RoomDims, WallEl, WallsTopOverlay, PlannerWallDefs, PlannerLayerDefs, LayerMutedWrap, ItemEl, ZoneEl, LabelEl, LineEl,
@@ -160,6 +161,9 @@ export default function PlanPage() {
   const { state, actions } = useStore();
   const project = standalone ? null : state.projects.find((p) => p.id === id);
   const [draftMeta, setDraftMeta] = useState(() => (standalone ? getStandalonePlan(draftId) : null));
+  // PHASE 0B: повреждённый сохранённый план — запрет любой автозаписи/синка,
+  // чтобы не затереть исходные данные пустым планом.
+  const plannerPlanCorrupt = !standalone && isPlannerPlanCorrupt(project);
 
   const initialPlan = () => {
     if (standalone) return normalizePlan(draftMeta?.plan || getStandalonePlan(draftId)?.plan);
@@ -315,6 +319,8 @@ export default function PlanPage() {
       return () => window.clearTimeout(t);
     }
     if (!project?.id) return;
+    // PHASE 0B: не автосохранять поверх повреждённого сохранённого плана.
+    if (plannerPlanCorrupt) return;
     setSaved(false);
     const t = window.setTimeout(() => {
       actions.projectUpdate(project.id, { plan })
@@ -322,7 +328,7 @@ export default function PlanPage() {
         .catch((e) => console.error("Planner autosave failed", e));
     }, 700);
     return () => window.clearTimeout(t);
-  }, [plan, standalone, draftMeta?.id, draftMeta?.name, project?.id, actions]);
+  }, [plan, standalone, draftMeta?.id, draftMeta?.name, project?.id, actions, plannerPlanCorrupt]);
 
   const snapOn = display.snapOn && !altSnapOff;
   const snapStep = (ctrlSnapFine || view.zoom >= 1.2) ? 10 : 50;
@@ -2303,6 +2309,25 @@ export default function PlanPage() {
     );
   }
 
+  // PHASE 0B: повреждённый сохранённый план — безопасный экран без canvas.
+  // Редактор не открывается, автозапись и создание нового пустого плана
+  // поверх повреждённых данных исключены; исходный payload не перезаписан.
+  if (!standalone && plannerPlanCorrupt) {
+    return (
+      <div className="content">
+        <Empty title="Не удалось загрузить сохранённую планировку">
+          <p style={{ maxWidth: 520, margin: "0 auto 16px", lineHeight: 1.5 }}>
+            Проект «{project.name}». Данные планировки повреждены или имеют
+            неподдерживаемый формат. Исходные данные не перезаписаны. Для
+            восстановления используйте резервную копию или обратитесь к
+            администратору.
+          </p>
+          <Link className="btn btn-primary" to={`/project/${project.id}`}>Назад к проекту</Link>
+        </Empty>
+      </div>
+    );
+  }
+
   const planTitle = standalone ? draftMeta.name : project.name;
   const planMetaId = standalone ? draftMeta.id : project.id.replace(/\D/g, "").slice(0, 7);
 
@@ -3218,6 +3243,9 @@ export default function PlanPage() {
   };
 
   const syncSpec = async () => {
+    // PHASE 0B: не запускать planner → specification sync при повреждённом плане
+    // (иначе projectUpdate({ plan }) затрёт исходные данные).
+    if (plannerPlanCorrupt) return;
     setBusy(true);
     try {
       const materials = state.materialsLoaded ? state.materials : await actions.ensureMaterials();
