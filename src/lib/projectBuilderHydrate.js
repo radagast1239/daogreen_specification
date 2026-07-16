@@ -319,7 +319,9 @@ export function mergeStellageBuilderLines(
     catalogLines,
     manualItems,
     frameBomItems,
-    stCount: Math.max(1, Number(stellage.count) || 1),
+    // stellage.items are already editor/per-rack quantities. Only project items
+    // loaded by stellagesFromProject need total -> per-rack division.
+    stCount: 1,
     materials,
   });
 }
