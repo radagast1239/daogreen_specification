@@ -1422,15 +1422,19 @@ function SpecTab({
       )}
       {!clientPreview && (
       <>
-      <Collapsible title="Схема и комнаты" defaultOpen={hasFarmItems || !!floorPlanUrl}>
+      <Collapsible title="Схема, комнаты и электропотребление" defaultOpen={hasFarmItems || rooms.length > 0 || !!floorPlanUrl}>
         <FloorPlanField value={floorPlanUrl || ""} onChange={onFloorPlanChange} />
-        {hasFarmItems && (
+        {(hasFarmItems || rooms.length > 0) && (
           <div style={{ marginTop: 12 }}>
             <RoomsEditor rooms={rooms} onChange={(next) => saveRooms(next)} compact />
             <RoomCoolingEditor
               rooms={rooms}
               onChange={(next) => saveRooms(next)}
             />
+            <div className="card" style={{ padding: 14, marginTop: 14 }}>
+              <h4 style={{ margin: "0 0 8px" }}>Электропотребление фермы</h4>
+              <FarmPowerEditor manualParams={manualParams} onChange={onManualParamsChange} rooms={rooms} />
+            </div>
           </div>
         )}
       </Collapsible>
@@ -1440,10 +1444,6 @@ function SpecTab({
           manualParams={manualParams}
           onChange={onManualParamsChange}
         />
-      </Collapsible>
-
-      <Collapsible title="Общее и пиковое потребление фермы" subtitle="ручная ведомость электрических приборов" defaultOpen={false}>
-        <FarmPowerEditor manualParams={manualParams} onChange={onManualParamsChange} rooms={rooms} />
       </Collapsible>
 
       <Collapsible title="Корзина расходников" defaultOpen={!!manualParams?.consumablesCartUrl}>
