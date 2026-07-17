@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api, photoSrc } from "../lib/api.js";
 import FloorPlanViewer from "./FloorPlanViewer.jsx";
 import {
@@ -10,6 +10,54 @@ import {
   removeProjectScheme,
   updateProjectScheme,
 } from "../lib/clientSchemes.js";
+
+function SchemeTitleInput({ value, onCommit }) {
+  const [draft, setDraft] = useState(value);
+  const editingRef = useRef(false);
+  const cancelCommitRef = useRef(false);
+
+  useEffect(() => {
+    if (!editingRef.current) setDraft(value);
+  }, [value]);
+
+  const commit = () => {
+    editingRef.current = false;
+    if (cancelCommitRef.current) {
+      cancelCommitRef.current = false;
+      setDraft(value);
+      return;
+    }
+    const next = draft.trim();
+    if (!next) {
+      setDraft(value);
+      return;
+    }
+    if (next !== value) onCommit(next);
+    setDraft(next);
+  };
+
+  return (
+    <input
+      className="spec-cell-input"
+      value={draft}
+      aria-label="Название схемы"
+      onFocus={() => {
+        editingRef.current = true;
+        cancelCommitRef.current = false;
+      }}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+        if (event.key === "Escape") {
+          cancelCommitRef.current = true;
+          event.currentTarget.blur();
+        }
+      }}
+      style={{ width: "100%", fontWeight: 600, fontSize: 13 }}
+    />
+  );
+}
 
 /**
  * Unlimited project schemes: add / rename / reorder / upload / remove.
@@ -69,12 +117,9 @@ export default function ClientSchemesEditor({
             <div key={scheme.id} className="client-scheme-card card" style={{ padding: 12 }}>
               <div className="between wrap" style={{ gap: 8, marginBottom: 8 }}>
                 <div style={{ flex: "1 1 140px", minWidth: 0 }}>
-                  <input
-                    className="spec-cell-input"
+                  <SchemeTitleInput
                     value={scheme.title}
-                    aria-label="Название схемы"
-                    onChange={(e) => onChange(updateProjectScheme(mp, scheme.id, { title: e.target.value }))}
-                    style={{ width: "100%", fontWeight: 600, fontSize: 13 }}
+                    onCommit={(title) => onChange(updateProjectScheme(mp, scheme.id, { title }))}
                   />
                 </div>
                 {showClientVisibility && (
