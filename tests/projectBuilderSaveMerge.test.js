@@ -336,6 +336,28 @@ describe("catalog snapshot policy", () => {
     expect(materials[0].basePrice).toBe(12);
   });
 
+  it("keeps project-local primary and alternative links through builder generation", () => {
+    const catalogLink = materials[0].link;
+    const built = buildProjectFromBuilder({
+      form: { name: "P", client: "C", manualParams: {} },
+      stellages: [{
+        id: "st1", moduleId: "mod1", moduleName: "Rack", name: "Rack A", count: 1,
+        items: [{
+          id: "ln1", materialId: "m073", name: "Болт", unit: "шт.", category: "Крепёж",
+          qty: 1, included: true, price: 12,
+          link: "https://project.example/bolt", linkOverridden: true,
+          linkAlt: "https://project.example/bolt-alt", linkAltOverridden: true,
+        }],
+      }],
+      farmSections: [], materials,
+    });
+    expect(built.items[0].link).toBe("https://project.example/bolt");
+    expect(built.items[0].linkAlt).toBe("https://project.example/bolt-alt");
+    expect(built.items[0].linkOverridden).toBe(true);
+    expect(built.items[0].linkAltOverridden).toBe(true);
+    expect(materials[0].link).toBe(catalogLink);
+  });
+
   it("does not overwrite existing snapshot on applyMaterialCatalogFields", () => {
     const line = {
       id: "ln1",

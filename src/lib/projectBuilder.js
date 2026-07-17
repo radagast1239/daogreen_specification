@@ -180,6 +180,8 @@ export function lineToProjectItem(line, section, sortOrder, opts = {}) {
     qty,
     price: Number(line.price) || 0,
     priceOverridden: !!line.priceOverridden,
+    linkOverridden: !!line.linkOverridden,
+    linkAltOverridden: !!line.linkAltOverridden,
     vatRate: Number(line.vatRate) || 0,
     coolingKw: Number(line.coolingKw) || 0,
     coolingBtu: Number(line.coolingBtu) || 0,
@@ -217,10 +219,12 @@ export function buildProjectFromBuilder({
     const fromCatalog = line.materialId
       ? copyCatalogSnapshotFromMaterial(line, materials)
       : applyMaterialCatalogFields(line, materials, { isNewLine: true });
-    const hydrated = hydrateLinePhoto(
-      line.priceOverridden ? { ...fromCatalog, price: Number(line.price) || 0, priceOverridden: true } : fromCatalog,
-      materials,
-    );
+    const projectOverrides = {
+      ...(line.priceOverridden ? { price: Number(line.price) || 0, priceOverridden: true } : {}),
+      ...(line.linkOverridden ? { link: line.link || "", linkOverridden: true } : {}),
+      ...(line.linkAltOverridden ? { linkAlt: line.linkAlt || "", linkAltOverridden: true } : {}),
+    };
+    const hydrated = hydrateLinePhoto({ ...fromCatalog, ...projectOverrides }, materials);
     items.push(lineToProjectItem(hydrated, section, order++, opts));
   };
 

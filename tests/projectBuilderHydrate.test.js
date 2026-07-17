@@ -202,6 +202,28 @@ describe('projectBuilderHydrate', () => {
     expect(line.qty).toBe(2);
   });
 
+  it('infers project-local price and link overrides from the catalog snapshot', () => {
+    const materials = [{ id: 'm1', basePrice: 100, link: 'https://catalog.example/a', linkAlt: '' }];
+    const line = projectItemToBuilderLine({
+      id: 'st1__ln1', materialId: 'm1', name: 'A', qty: 1, price: 85,
+      link: 'https://project.example/a', linkAlt: 'https://project.example/alt',
+    }, { materials });
+    expect(line.priceOverridden).toBe(true);
+    expect(line.linkOverridden).toBe(true);
+    expect(line.linkAltOverridden).toBe(true);
+  });
+
+  it('does not mark catalog values as project overrides after reset', () => {
+    const materials = [{ id: 'm1', basePrice: 100, link: 'https://catalog.example/a', linkAlt: 'https://catalog.example/alt' }];
+    const line = projectItemToBuilderLine({
+      id: 'st1__ln1', materialId: 'm1', name: 'A', qty: 1, price: 100,
+      link: 'https://catalog.example/a', linkAlt: 'https://catalog.example/alt',
+    }, { materials });
+    expect(line.priceOverridden).toBe(false);
+    expect(line.linkOverridden).toBe(false);
+    expect(line.linkAltOverridden).toBe(false);
+  });
+
   it('findStellageByEditRack matches rack id or moduleRackKey', () => {
     const stellages = [{ id: 'st1', moduleId: 'mod1', name: 'A' }];
     expect(findStellageByEditRack(stellages, 'st1')?.id).toBe('st1');

@@ -121,8 +121,8 @@ export function mergeStellageEditorLines({
   materials = null,
 } = {}) {
   const lines = catalogLines.length
-    ? applySavedItemsToCatalogLines(catalogLines, manualItems, { stCount })
-    : manualItems.map((it) => projectItemToBuilderLine(it, { stCount }));
+    ? applySavedItemsToCatalogLines(catalogLines, manualItems, { stCount, materials })
+    : manualItems.map((it) => projectItemToBuilderLine(it, { stCount, materials }));
   const merged = overlayFrameBomOnLines(lines, frameBomItems, { stCount, materials });
   if (!materials?.length) return merged;
   return merged.map((ln) => fillEmptyCatalogFieldsFromMaterial(ln, materials));
@@ -137,10 +137,16 @@ export function parseBuilderLineIdFromProjectItem(itemId, instanceId = "") {
   return id || uid("ln");
 }
 
-export function projectItemToBuilderLine(item, { stCount = 1 } = {}) {
+export function projectItemToBuilderLine(item, { stCount = 1, materials = null } = {}) {
   const count = Math.max(1, Number(stCount) || 1);
   const qty = Number(item.qty) || 0;
   const baseQty = count > 1 ? Math.round((qty / count) * 100) / 100 : qty;
+  const material = item.materialId && materials?.length
+    ? materials.find((m) => (m.id || m.materialId) === item.materialId)
+    : null;
+  const priceOverridden = !!item.priceOverridden || !!(material && (Number(item.price) || 0) !== (Number(material.basePrice) || 0));
+  const linkOverridden = !!item.linkOverridden || !!(material && String(item.link || "").trim() !== String(material.link || "").trim());
+  const linkAltOverridden = !!item.linkAltOverridden || !!(material && String(item.linkAlt || "").trim() !== String(material.linkAlt || "").trim());
   return {
     id: parseBuilderLineIdFromProjectItem(item.id),
     materialId: item.materialId || null,
@@ -155,7 +161,9 @@ export function projectItemToBuilderLine(item, { stCount = 1 } = {}) {
     photoUrl: item.photoUrl || item.imageUrl || "",
     qty: baseQty,
     price: Number(item.price) || 0,
-    priceOverridden: !!item.priceOverridden,
+    priceOverridden,
+    linkOverridden,
+    linkAltOverridden,
     vatRate: Number(item.vatRate) || 0,
     techNote: item.techNote || "",
     clientNote: item.clientNote || item.comment || "",
@@ -260,7 +268,7 @@ function isStellageProjectItem(item, configs = []) {
   return configs.some((cfg) => cfg.name === section || cfg.moduleName === section);
 }
 
-function applySavedItemsToCatalogLines(catalogLines, savedItems, { stCount = 1 } = {}) {
+function applySavedItemsToCatalogLines(catalogLines, savedItems, { stCount = 1, materials = null } = {}) {
   const savedByMaterial = new Map();
   const savedByName = new Map();
   for (const it of savedItems) {
@@ -274,13 +282,13 @@ function applySavedItemsToCatalogLines(catalogLines, savedItems, { stCount = 1 }
     used.add(saved.id);
     return {
       ...ln,
-      ...projectItemToBuilderLine(saved, { stCount }),
-      included: projectItemToBuilderLine(saved, { stCount }).included,
+      ...projectItemToBuilderLine(saved, { stCount, materials }),
+      included: projectItemToBuilderLine(saved, { stCount, materials }).included,
     };
   });
   for (const it of savedItems) {
     if (used.has(it.id)) continue;
-    merged.push({ ...projectItemToBuilderLine(it, { stCount }), included: projectItemToBuilderLine(it, { stCount }).included });
+    merged.push({ ...projectItemToBuilderLine(it, { stCount, materials }), included: projectItemToBuilderLine(it, { stCount, materials }).included });
   }
   return merged;
 }
@@ -307,6 +315,13 @@ export function mergeStellageBuilderLines(
       includedInProject: ln.included,
       enabled: ln.included,
       unit: ln.unit,
+      supplier: ln.supplier,
+      link: ln.link,
+      linkAlt: ln.linkAlt,
+      price: ln.price,
+      priceOverridden: ln.priceOverridden,
+      linkOverridden: ln.linkOverridden,
+      linkAltOverridden: ln.linkAltOverridden,
       techNote: ln.techNote,
       clientNote: ln.clientNote,
       pipeCuts: ln.pipeCuts,

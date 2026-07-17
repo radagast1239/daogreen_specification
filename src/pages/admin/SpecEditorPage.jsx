@@ -1495,6 +1495,13 @@ function SpecTab({
         const lineGroups = isStellage ? stellageGroups : FARM_LINE_GROUPS;
         const editItem = readOnly ? () => Promise.resolve() : patchItem;
         const renderItemRow = (it) => {
+          const catalogMaterial = materials.find((material) => material.id === it.materialId);
+          const catalogPrice = Number(catalogMaterial?.basePrice) || 0;
+          const catalogLink = catalogMaterial?.link || "";
+          const catalogLinkAlt = catalogMaterial?.linkAlt || "";
+          const priceChanged = Boolean(catalogMaterial) && Number(it.price || 0) !== catalogPrice;
+          const linkChanged = Boolean(catalogMaterial) && (it.link || "") !== catalogLink;
+          const linkAltChanged = Boolean(catalogMaterial) && (it.linkAlt || "") !== catalogLinkAlt;
           const frameBomSourceLabel = clientPreview ? "" : resolveAdminItemSourceLabel(it);
           const commentsOpen = commentExpandId === it.id;
           const hasComments = itemHasAdminComments(it);
@@ -1595,13 +1602,25 @@ function SpecTab({
                       {readOnly ? (
                         <span className="num">{it.price}</span>
                       ) : (
-                      <input
-                        className="input-inline num"
-                        style={{ textAlign: "right" }}
-                        type="number"
-                        value={it.price}
-                        onChange={(e) => editItem(it.id, { price: Number(e.target.value) || 0 })}
-                      />
+                        <div style={{ display: "grid", gap: 3 }}>
+                          <input
+                            className="input-inline num"
+                            style={{ textAlign: "right" }}
+                            type="number"
+                            value={it.price}
+                            onChange={(e) => editItem(it.id, { price: Number(e.target.value) || 0 })}
+                          />
+                          {priceChanged && (
+                            <button
+                              type="button"
+                              className="btn btn-xs btn-ghost"
+                              title={`Вернуть цену из базы: ${catalogPrice}`}
+                              onClick={() => editItem(it.id, { price: catalogPrice })}
+                            >
+                              ↺ база
+                            </button>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td style={{ width: 56 }}>
@@ -1654,15 +1673,40 @@ function SpecTab({
                     <td className="right num" style={{ width: 100, fontWeight: 600 }}>
                       {lineContributesToSum(it) ? money(lineGross(it), project.currency) : "—"}
                     </td>
-                    <td style={{ minWidth: 120, maxWidth: 180 }}>
-                      {it.link ? (
-                        <a href={it.link} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
-                          ссылка ↗
-                        </a>
-                      ) : readOnly ? (
-                        <span className="muted">—</span>
+                    <td style={{ minWidth: 170, maxWidth: 240 }}>
+                      {readOnly ? (
+                        <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                          {it.link && <a href={it.link} target="_blank" rel="noreferrer">основная ↗</a>}
+                          {it.linkAlt && <a href={it.linkAlt} target="_blank" rel="noreferrer">доп. ↗</a>}
+                          {!it.link && !it.linkAlt && <span className="muted">—</span>}
+                        </span>
                       ) : (
-                        <input className="input-inline" placeholder="url" onBlur={(e) => editItem(it.id, { link: e.target.value })} />
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <div className="row" style={{ gap: 4 }}>
+                            <input
+                              className="input-inline"
+                              value={it.link || ""}
+                              placeholder="Основная ссылка"
+                              onChange={(e) => editItem(it.id, { link: e.target.value })}
+                            />
+                            {it.link && <a href={it.link} target="_blank" rel="noreferrer" title="Открыть">↗</a>}
+                            {linkChanged && (
+                              <button type="button" className="btn btn-xs btn-ghost" title="Вернуть основную ссылку из базы" onClick={() => editItem(it.id, { link: catalogLink })}>↺</button>
+                            )}
+                          </div>
+                          <div className="row" style={{ gap: 4 }}>
+                            <input
+                              className="input-inline"
+                              value={it.linkAlt || ""}
+                              placeholder="Дополнительная ссылка"
+                              onChange={(e) => editItem(it.id, { linkAlt: e.target.value })}
+                            />
+                            {it.linkAlt && <a href={it.linkAlt} target="_blank" rel="noreferrer" title="Открыть">↗</a>}
+                            {linkAltChanged && (
+                              <button type="button" className="btn btn-xs btn-ghost" title="Вернуть дополнительную ссылку из базы" onClick={() => editItem(it.id, { linkAlt: catalogLinkAlt })}>↺</button>
+                            )}
+                          </div>
+                        </div>
                       )}
                     </td>
                     <td style={{ minWidth: 120, maxWidth: 150 }}>
