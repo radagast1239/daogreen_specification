@@ -165,7 +165,9 @@ export function evaluateFrameBomAddToProject({
  */
 export function buildFrameBomProjectMerge(project, purchaseDraft, drawingContext = {}, materials = null) {
   const existingItems = project?.items || [];
-  const mergeResult = mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, {
+  const rackCount = resolveFrameBomRackCount(project, drawingContext);
+  const scaledDraft = scaleFrameBomDraftForRackCount(purchaseDraft, rackCount);
+  const mergeResult = mergeFrameBomIntoProjectItems(existingItems, scaledDraft, {
     projectId: drawingContext.projectId || "",
     drawingId: drawingContext.drawingId || "",
     moduleRackKey: resolveFrameBomModuleRackKey(drawingContext),
@@ -184,6 +186,33 @@ export function buildFrameBomProjectMerge(project, purchaseDraft, drawingContext
     mergeResult,
     patch: { items: mergeResult.items },
   };
+}
+
+export function resolveFrameBomRackCount(project, drawingContext = {}) {
+  const configs = Array.isArray(project?.stellageConfigs) ? project.stellageConfigs : [];
+  const rackId = String(drawingContext.rackId || drawingContext.stellageId || "").trim();
+  const rackKey = resolveFrameBomModuleRackKey(drawingContext);
+  const rackLabel = String(drawingContext.rackLabel || "").trim();
+  const config = configs.find((cfg) => {
+    if (rackId && String(cfg.id || "") === rackId) return true;
+    if (rackKey && cfg.moduleId && cfg.id && `${cfg.moduleId}:${cfg.id}` === rackKey) return true;
+    return rackLabel && String(cfg.name || cfg.moduleName || "") === rackLabel;
+  });
+  return Math.max(1, Number(config?.count) || 1);
+}
+
+export function scaleFrameBomDraftForRackCount(purchaseDraft = [], rackCount = 1) {
+  const count = Math.max(1, Number(rackCount) || 1);
+  return (purchaseDraft || []).map((line) => ({
+    ...line,
+    qty: Math.round((Number(line.qty) || 0) * count * 100) / 100,
+    pipeCuts: Array.isArray(line.pipeCuts)
+      ? line.pipeCuts.map((cut) => ({
+          ...cut,
+          qty: Math.round((Number(cut.qty) || 0) * count * 100) / 100,
+        }))
+      : line.pipeCuts,
+  }));
 }
 
 export function formatFrameBomAddSuccessSummary(mergeResult) {
@@ -387,9 +416,11 @@ export async function applyFrameBomRefreshRepair({
     return { skipped: true };
   }
 
+  const rackCount = resolveFrameBomRackCount(project, drawingContext);
+  const scaledDraft = scaleFrameBomDraftForRackCount(purchaseDraft, rackCount);
   const plan = buildFrameBomRepairPlan(
     project.items,
-    purchaseDraft,
+    scaledDraft,
     buildFrameBomMergeOptions({ ...drawingContext, projectId }, materials),
   );
 
@@ -511,9 +542,11 @@ export async function executeFrameBomRefreshFromDrawing({
     throw new Error(evalResult.addDisabledReason || "BOM нельзя обновить.");
   }
 
+  const rackCount = resolveFrameBomRackCount(project, ctx);
+  const scaledDraft = scaleFrameBomDraftForRackCount(purchaseDraft, rackCount);
   const previewPlan = buildFrameBomRepairPlan(
     project.items,
-    purchaseDraft,
+    scaledDraft,
     buildFrameBomMergeOptions(ctx, materials),
   );
   if (previewPlan.blocked) {

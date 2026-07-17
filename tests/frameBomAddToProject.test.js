@@ -17,6 +17,8 @@ import {
   buildFrameBomAddConfirmMessage,
   buildFrameSavePdfAndBomConfirmMessage,
   countExistingFrameBomForRack,
+  resolveFrameBomRackCount,
+  scaleFrameBomDraftForRackCount,
   executeFrameBomProjectAdd,
   executeFrameSavePdfAndBom,
   requestFrameSavePdfAndBomConfirmation,
@@ -114,6 +116,48 @@ describe("evaluateFrameBomAddToProject", () => {
     expect(
       resolveFrameBomModuleRackKey({ stellageId: "st42" }),
     ).toBe("stellage:st42");
+  });
+});
+
+describe("Frame BOM rack count scaling", () => {
+  it("multiplies total qty and every pipe cut by the project rack count", () => {
+    const project = {
+      items: [],
+      stellageConfigs: [{ id: "rack1", moduleId: "mod1", name: "Стеллаж 1", count: 12 }],
+    };
+    const context = { ...drawingContext, moduleId: "mod1", rackId: "rack1" };
+    expect(resolveFrameBomRackCount(project, context)).toBe(12);
+
+    const [scaled] = scaleFrameBomDraftForRackCount([{
+      materialId: "m036",
+      qty: 98.24,
+      pipeCuts: [
+        { lengthMm: 3200, qty: 6 },
+        { lengthMm: 870, qty: 32 },
+        { lengthMm: 800, qty: 64 },
+      ],
+    }], 12);
+    expect(scaled.qty).toBe(1178.88);
+    expect(scaled.pipeCuts).toEqual([
+      { lengthMm: 3200, qty: 72 },
+      { lengthMm: 870, qty: 384 },
+      { lengthMm: 800, qty: 768 },
+    ]);
+  });
+
+  it("builds project items from per-rack BOM without cumulative multiplication", () => {
+    const project = {
+      items: [],
+      stellageConfigs: [{ id: "rack1", moduleId: "mod1", name: "Стеллаж 1", count: 12 }],
+    };
+    const context = { ...drawingContext, moduleId: "mod1", rackId: "rack1" };
+    const once = buildFrameBomProjectMerge(project, draft, context, materials).patch.items;
+    const twice = buildFrameBomProjectMerge({ ...project, items: once }, draft, context, materials).patch.items;
+    expect(once.find((item) => item.materialId === "m036").qty).toBe(120);
+    expect(twice.find((item) => item.materialId === "m036").qty).toBe(120);
+    expect(twice.find((item) => item.materialId === "m036").pipeCuts).toEqual([
+      { lengthMm: 3200, qty: 24 },
+    ]);
   });
 });
 
