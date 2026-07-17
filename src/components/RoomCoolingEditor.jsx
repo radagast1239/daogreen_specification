@@ -263,10 +263,10 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
                       }
                     />
                   </td>
-                  <td className="right"><input type="number" min={0} step="any" className="spec-cell-input spec-cell-input--num" style={{ width: 64 }} value={unit.dayElectricKw ?? unit.electricKw ?? ""} placeholder={recommendedElecKw || "0"} onChange={(e) => patchUnit(roomId, unit.id, { dayElectricKw: parseNumInput(e.target.value) })} /></td>
-                  <td className="right"><input type="number" min={0} max={24} step="any" className="spec-cell-input spec-cell-input--num" style={{ width: 52 }} value={unit.dayHours ?? 16} onChange={(e) => patchUnit(roomId, unit.id, { dayHours: parseNumInput(e.target.value) })} /></td>
+                  <td className="right num" title="Автоматически: требуемая мощность холода ÷ COP">{recommendedElecKw > 0 ? num(recommendedElecKw) : "—"}</td>
+                  <td className="right num">{list.find((room) => room.id === roomId)?.cooling?.params?.dayHours ?? 16}</td>
                   <td className="right"><input type="number" min={0} step="any" className="spec-cell-input spec-cell-input--num" style={{ width: 64 }} value={unit.nightElectricKw ?? ""} onChange={(e) => patchUnit(roomId, unit.id, { nightElectricKw: parseNumInput(e.target.value) })} /></td>
-                  <td className="right"><input type="number" min={0} max={24} step="any" className="spec-cell-input spec-cell-input--num" style={{ width: 52 }} value={unit.nightHours ?? 8} onChange={(e) => patchUnit(roomId, unit.id, { nightHours: parseNumInput(e.target.value) })} /></td>
+                  <td className="right num">{24 - Math.min(24, Number(list.find((room) => room.id === roomId)?.cooling?.params?.dayHours ?? 16) || 0)}</td>
                   <td>
                     <input
                       type="url"

@@ -65,6 +65,8 @@ export function roomAcCop(room) {
  * Это НЕ холод: recommendedKw остаётся холодом, здесь только оценка потребления.
  */
 export function roomAcRecommendedElecKw(room) {
+  const calculated = toNum(room?.cooling?.electricalKw);
+  if (calculated > 0) return calculated;
   const kw = roomAcRecommendedKw(room);
   const cop = roomAcCop(room);
   if (!(kw > 0) || !(cop > 0)) return 0;

@@ -87,19 +87,19 @@ export function automaticFarmPowerDevices(raw = {}, rooms = []) {
       });
     }
     const units = Array.isArray(room?.acUnits) ? room.acUnits : [];
-    const hasUnitPower = units.some((unit) => numberOrZero(unit?.dayElectricKw ?? unit?.electricKw) > 0 || numberOrZero(unit?.nightElectricKw) > 0);
+    const calculatedDayKw = numberOrZero(room?.cooling?.electricalKw);
+    const hasUnitPower = calculatedDayKw > 0 || units.some((unit) => numberOrZero(unit?.dayElectricKw ?? unit?.electricKw) > 0 || numberOrZero(unit?.nightElectricKw) > 0);
     const schedule = schedules.get(String(room.id || ""));
     const dayKw = hasUnitPower
-      ? units.reduce((sum, unit) => sum + numberOrZero(unit?.qty || 1) * numberOrZero(unit?.dayElectricKw ?? unit?.electricKw), 0)
+      ? calculatedDayKw || units.reduce((sum, unit) => sum + numberOrZero(unit?.qty || 1) * numberOrZero(unit?.dayElectricKw ?? unit?.electricKw), 0)
       : numberOrZero(schedule?.dayKw);
     const nightKw = hasUnitPower
       ? units.reduce((sum, unit) => sum + numberOrZero(unit?.qty || 1) * numberOrZero(unit?.nightElectricKw), 0)
       : numberOrZero(schedule?.nightKw);
+    const dayHours = Math.min(24, numberOrZero(room?.cooling?.params?.dayHours ?? units[0]?.dayHours ?? 16));
+    const nightHours = Math.max(0, 24 - dayHours);
     const dailyKwh = hasUnitPower
-      ? units.reduce((sum, unit) => sum + numberOrZero(unit?.qty || 1) * (
-        numberOrZero(unit?.dayElectricKw ?? unit?.electricKw) * numberOrZero(unit?.dayHours ?? 16)
-        + numberOrZero(unit?.nightElectricKw) * numberOrZero(unit?.nightHours ?? 8)
-      ), 0)
+      ? dayKw * dayHours + nightKw * nightHours
       : dayKw * numberOrZero(schedule?.dayHours) + nightKw * numberOrZero(schedule?.nightHours);
     if (dayKw > 0 || nightKw > 0) {
       rows.push({
@@ -110,7 +110,7 @@ export function automaticFarmPowerDevices(raw = {}, rooms = []) {
         dailyKwh: round3(dailyKwh),
         source: "ac_schedule",
         roomId: String(room.id || ""),
-        details: hasUnitPower ? "фактическое потребление выбранных кондиционеров" : `день ${dayKw} кВт × ${schedule?.dayHours || 0} ч; ночь ${nightKw} кВт × ${schedule?.nightHours || 0} ч`,
+        details: hasUnitPower ? `день ${dayKw} кВт × ${dayHours} ч; ночь ${nightKw} кВт × ${nightHours} ч` : `день ${dayKw} кВт × ${schedule?.dayHours || 0} ч; ночь ${nightKw} кВт × ${schedule?.nightHours || 0} ч`,
       });
     }
   }

@@ -53,6 +53,13 @@ describe("farm power manual summary", () => {
     expect(automaticFarmPowerDevices({}, rooms)[0]).toMatchObject({ peakKw: 10, dailyKwh: 179.2 });
   });
 
+  it("prefers calculated daytime electrical kW and keeps night power editable", () => {
+    const rooms = [{ id: "r1", name: "Ферма", cooling: { electricalKw: 20.88, params: { dayHours: 16 } }, acUnits: [
+      { qty: 1, nightElectricKw: 3 },
+    ] }];
+    expect(automaticFarmPowerDevices({}, rooms)[0]).toMatchObject({ normalKw: 14.92, peakKw: 20.88, dailyKwh: 358.08 });
+  });
+
   it("calculates manual daily/monthly energy and monthly cost", () => {
     const power = normalizeFarmPower({ tariffPerKwh: 7.5, daysPerMonth: 30, devices: [
       { id: "pump", name: "Насос", powerKw: 2, quantity: 3, hoursPerDay: 10, peakPowerKw: 2 },
