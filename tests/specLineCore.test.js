@@ -10,4 +10,37 @@ describe("hydrateCatalogEditorLine", () => {
 
     expect(hydrateCatalogEditorLine(line, materials).qty).toBe(5);
   });
+
+  it("keeps project-local price and links during controlled-input rehydration", () => {
+    const materials = [{
+      id: "m1",
+      name: "Вентилятор",
+      unit: "шт.",
+      basePrice: 3500,
+      link: "https://catalog.example/fan",
+      linkAlt: "https://catalog.example/fan-alt",
+    }];
+    const edited = {
+      id: "ln1",
+      materialId: "m1",
+      included: true,
+      qty: 1,
+      price: 4200,
+      priceOverridden: true,
+      link: "https://project.example/fan",
+      linkOverridden: true,
+      linkAlt: "https://project.example/fan-alt",
+      linkAltOverridden: true,
+    };
+
+    expect(hydrateCatalogEditorLine(edited, materials)).toMatchObject({
+      price: 4200,
+      priceOverridden: true,
+      link: "https://project.example/fan",
+      linkOverridden: true,
+      linkAlt: "https://project.example/fan-alt",
+      linkAltOverridden: true,
+    });
+    expect(materials[0].basePrice).toBe(3500);
+  });
 });

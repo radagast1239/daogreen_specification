@@ -186,7 +186,7 @@ export function hydrateCatalogEditorLine(ln, materials) {
         included,
       });
     }
-    return mergeLineSpecOverrides(
+    const hydrated = mergeLineSpecOverrides(
       {
         ...lineFromMaterial(mat, {
           included,
@@ -199,6 +199,12 @@ export function hydrateCatalogEditorLine(ln, materials) {
       },
       ln
     );
+    return {
+      ...hydrated,
+      ...(ln.priceOverridden ? { price: Number(ln.price) || 0, priceOverridden: true } : {}),
+      ...(ln.linkOverridden ? { link: ln.link || "", linkOverridden: true } : {}),
+      ...(ln.linkAltOverridden ? { linkAlt: ln.linkAlt || "", linkAltOverridden: true } : {}),
+    };
   }
 
   return blankLine({
