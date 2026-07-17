@@ -1145,7 +1145,7 @@ export default function ProjectBuilderPage() {
 
           <div className="card" style={{ padding: 14, marginBottom: 14 }}>
             <h4 style={{ margin: "0 0 8px" }}>Общее и пиковое потребление фермы</h4>
-            <FarmPowerEditor manualParams={form.manualParams} onChange={setSchemesManualParams} />
+            <FarmPowerEditor manualParams={form.manualParams} onChange={setSchemesManualParams} rooms={rooms} />
           </div>
 
           <div className="toolbar" style={{ marginTop: 16 }}>
@@ -1463,7 +1463,7 @@ export default function ProjectBuilderPage() {
 
           <div className="card" style={{ padding: 14, marginBottom: 14 }}>
             <h4 style={{ margin: "0 0 8px" }}>Общее и пиковое потребление фермы</h4>
-            <FarmPowerEditor manualParams={form.manualParams} onChange={setSchemesManualParams} />
+            <FarmPowerEditor manualParams={form.manualParams} onChange={setSchemesManualParams} rooms={rooms} />
           </div>
 
           {rooms.length > 0 && (

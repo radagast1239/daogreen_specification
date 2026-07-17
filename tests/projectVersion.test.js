@@ -210,7 +210,7 @@ describe("published release snapshot", () => {
 
     updateProject("p1", { manualParams: { farmPower: { devices: [{ id: "draft", name: "Черновик", normalKw: 99, peakKw: 99 }] } } });
     const clientProject = buildClientProjectFromRelease(loadProject("p1"), published, { overlayLive: false });
-    expect(clientProject.farmPower).toEqual(farmPower);
+    expect(clientProject.farmPower.devices).toMatchObject(farmPower.devices);
   });
 
   it("changing materials catalog does not change published snapshot", () => {

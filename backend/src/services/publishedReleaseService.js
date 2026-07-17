@@ -13,6 +13,7 @@ import {
   workingItemsPublishFingerprint,
 } from "../../../shared/projectPublishedRelease.js";
 import { buildClientImageManifest } from "../../../shared/clientImageManifest.js";
+import { buildFarmPowerSnapshot } from "../../../shared/farmPower.js";
 import { stripClientTechnicalFields } from "../../../shared/clientPurchaseRows.js";
 import { normalizePurchaseStatus, getPurchaseStatusLabel } from "../../../shared/purchaseStatusRules.js";
 import { lineVisibleToClient } from "../../../shared/itemTypes.js";
@@ -116,7 +117,7 @@ export function getProjectReleaseInfo(project) {
         publishedImages,
         project?.rooms || [],
         publishedSnapshot?.coolingRooms || [],
-        project?.manualParams?.farmPower || {},
+        buildFarmPowerSnapshot(project?.manualParams?.farmPower, project?.rooms),
         publishedSnapshot?.farmPower || {},
       )
     : { hasChanges: false, changedCount: 0, addedCount: 0, removedCount: 0 };
@@ -147,7 +148,7 @@ export function shouldPublishOnStatusChange(currentProject, nextStatus) {
     publishedSnapshot?.imageManifest || { projectSchemes: [], rackImages: [] },
     currentProject?.rooms || [],
     publishedSnapshot?.coolingRooms || [],
-    currentProject?.manualParams?.farmPower || {},
+    buildFarmPowerSnapshot(currentProject?.manualParams?.farmPower, currentProject?.rooms),
     publishedSnapshot?.farmPower || {},
   ).hasChanges;
   if (fpWork === fpPub && !snapshotExtrasChanged) return false;

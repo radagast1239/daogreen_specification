@@ -1443,7 +1443,7 @@ function SpecTab({
       </Collapsible>
 
       <Collapsible title="Общее и пиковое потребление фермы" subtitle="ручная ведомость электрических приборов" defaultOpen={false}>
-        <FarmPowerEditor manualParams={manualParams} onChange={onManualParamsChange} />
+        <FarmPowerEditor manualParams={manualParams} onChange={onManualParamsChange} rooms={rooms} />
       </Collapsible>
 
       <Collapsible title="Корзина расходников" defaultOpen={!!manualParams?.consumablesCartUrl}>

@@ -3,7 +3,7 @@
 import { lineVisibleToClient } from "./itemTypes.js";
 import { projectItemMatchKey } from "./projectItemKey.js";
 import { buildClientImageManifest, normalizeClientImageManifest, clientImageManifestFingerprint } from "./clientImageManifest.js";
-import { farmPowerFingerprint, normalizeFarmPower } from "./farmPower.js";
+import { buildFarmPowerSnapshot, farmPowerFingerprint, normalizeFarmPower } from "./farmPower.js";
 
 function cloneJson(value, fallback) {
   try {
@@ -100,7 +100,7 @@ export function buildReleaseSnapshotPayload(project, items = project?.items || [
     items: list.map((it) => ({ ...it })),
     imageManifest: buildClientImageManifest(project),
     coolingRooms: buildPublishedCoolingRooms(project?.rooms),
-    farmPower: normalizeFarmPower(project?.manualParams?.farmPower),
+    farmPower: buildFarmPowerSnapshot(project?.manualParams?.farmPower, project?.rooms),
   };
 }
 

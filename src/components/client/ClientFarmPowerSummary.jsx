@@ -14,8 +14,8 @@ export default function ClientFarmPowerSummary({ farmPower }) {
         <div className="stat"><div className="k">Пиковое потребление</div><div className="v num">{totals.peakKw.toLocaleString("ru-RU")} кВт</div></div>
       </div>
       <table className="spec">
-        <thead><tr><th>Прибор</th><th className="right">Общее, кВт</th><th className="right">Пиковое, кВт</th></tr></thead>
-        <tbody>{devices.map((device) => <tr key={device.id}><td>{device.name || "Прибор"}</td><td className="right num">{device.normalKw.toLocaleString("ru-RU")}</td><td className="right num">{device.peakKw.toLocaleString("ru-RU")}</td></tr>)}</tbody>
+        <thead><tr><th>Прибор</th><th className="right">Общее, кВт</th><th className="right">Пиковое, кВт</th><th className="right">кВт·ч/сут</th></tr></thead>
+        <tbody>{devices.map((device) => <tr key={device.id}><td>{device.name || "Прибор"}{device.details ? <div className="muted" style={{ fontSize: 11 }}>{device.details}</div> : null}</td><td className="right num">{device.normalKw.toLocaleString("ru-RU")}</td><td className="right num">{device.peakKw.toLocaleString("ru-RU")}</td><td className="right num">{device.dailyKwh > 0 ? device.dailyKwh.toLocaleString("ru-RU") : "—"}</td></tr>)}</tbody>
       </table>
     </section>
   );
