@@ -72,6 +72,7 @@ import ImportFromProjectModal from "../../components/ImportFromProjectModal.jsx"
 import CompareProjectsModal from "../../components/CompareProjectsModal.jsx";
 import DuplicateProjectModal from "../../components/DuplicateProjectModal.jsx";
 import ClientSchemesEditor from "../../components/ClientSchemesEditor.jsx";
+import FarmPowerEditor from "../../components/FarmPowerEditor.jsx";
 import { filterItemsForViewMode } from "../../../shared/projectReadiness.js";
 import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
 import { clientLinkActiveState } from "../../../shared/clientProjectLoadState.js";
@@ -1439,6 +1440,10 @@ function SpecTab({
           manualParams={manualParams}
           onChange={onManualParamsChange}
         />
+      </Collapsible>
+
+      <Collapsible title="Общее и пиковое потребление фермы" subtitle="ручная ведомость электрических приборов" defaultOpen={false}>
+        <FarmPowerEditor manualParams={manualParams} onChange={onManualParamsChange} />
       </Collapsible>
 
       <Collapsible title="Корзина расходников" defaultOpen={!!manualParams?.consumablesCartUrl}>

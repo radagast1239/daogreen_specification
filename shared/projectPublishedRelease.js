@@ -3,6 +3,7 @@
 import { lineVisibleToClient } from "./itemTypes.js";
 import { projectItemMatchKey } from "./projectItemKey.js";
 import { buildClientImageManifest, normalizeClientImageManifest, clientImageManifestFingerprint } from "./clientImageManifest.js";
+import { farmPowerFingerprint, normalizeFarmPower } from "./farmPower.js";
 
 function cloneJson(value, fallback) {
   try {
@@ -99,13 +100,14 @@ export function buildReleaseSnapshotPayload(project, items = project?.items || [
     items: list.map((it) => ({ ...it })),
     imageManifest: buildClientImageManifest(project),
     coolingRooms: buildPublishedCoolingRooms(project?.rooms),
+    farmPower: normalizeFarmPower(project?.manualParams?.farmPower),
   };
 }
 
 export function parseReleaseSnapshot(raw) {
-  if (!raw) return { items: [], projectMeta: null, imageManifest: normalizeClientImageManifest(), coolingRooms: [], schema: null };
+  if (!raw) return { items: [], projectMeta: null, imageManifest: normalizeClientImageManifest(), coolingRooms: [], farmPower: normalizeFarmPower(), schema: null };
   if (Array.isArray(raw)) {
-    return { items: raw, projectMeta: null, imageManifest: normalizeClientImageManifest(), coolingRooms: [], schema: "legacy_items_array" };
+    return { items: raw, projectMeta: null, imageManifest: normalizeClientImageManifest(), coolingRooms: [], farmPower: normalizeFarmPower(), schema: "legacy_items_array" };
   }
   if (typeof raw === "object" && Array.isArray(raw.items)) {
     return {
@@ -115,9 +117,10 @@ export function parseReleaseSnapshot(raw) {
       publishedAt: raw.publishedAt || "",
       imageManifest: normalizeClientImageManifest(raw.imageManifest),
       coolingRooms: buildPublishedCoolingRooms(raw.coolingRooms),
+      farmPower: normalizeFarmPower(raw.farmPower),
     };
   }
-  return { items: [], projectMeta: null, imageManifest: normalizeClientImageManifest(), coolingRooms: [], schema: null };
+  return { items: [], projectMeta: null, imageManifest: normalizeClientImageManifest(), coolingRooms: [], farmPower: normalizeFarmPower(), schema: null };
 }
 
 export function releaseSnapshotItems(rawSnapshot) {
@@ -178,6 +181,8 @@ export function detectUnpublishedChanges(
   publishedImages = null,
   workingCoolingRooms = null,
   publishedCoolingRooms = null,
+  workingFarmPower = null,
+  publishedFarmPower = null,
 ) {
   const pubMap = new Map((publishedItems || []).map((it) => [it.id, it]));
   const workMap = new Map((workingItems || []).map((it) => [it.id, it]));
@@ -203,13 +208,17 @@ export function detectUnpublishedChanges(
   const coolingChanged = workingCoolingRooms != null && publishedCoolingRooms != null
     ? coolingRoomsFingerprint(workingCoolingRooms) !== coolingRoomsFingerprint(publishedCoolingRooms)
     : false;
+  const farmPowerChanged = workingFarmPower != null && publishedFarmPower != null
+    ? farmPowerFingerprint(workingFarmPower) !== farmPowerFingerprint(publishedFarmPower)
+    : false;
   return {
-    hasChanges: changedCount > 0 || addedCount > 0 || removedCount > 0 || imagesChanged || coolingChanged,
+    hasChanges: changedCount > 0 || addedCount > 0 || removedCount > 0 || imagesChanged || coolingChanged || farmPowerChanged,
     changedCount,
     addedCount,
     removedCount,
     imagesChanged,
     coolingChanged,
+    farmPowerChanged,
   };
 }
 

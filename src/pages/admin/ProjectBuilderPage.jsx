@@ -77,6 +77,7 @@ import RoomsEditor from "../../components/RoomsEditor.jsx";
 import FloorPlanPin from "../../components/FloorPlanPin.jsx";
 import ClientSchemesEditor from "../../components/ClientSchemesEditor.jsx";
 import RackImagesEditor from "../../components/RackImagesEditor.jsx";
+import FarmPowerEditor from "../../components/FarmPowerEditor.jsx";
 import { listUploadedSchemes } from "../../lib/clientSchemes.js";
 import { COOLING_FARM_DEFAULTS, computeCoolingFarm } from "../../lib/coolingFarmCalc.js";
 import { newRoom } from "../../lib/roomHelpers.js";
@@ -1142,6 +1143,11 @@ export default function ProjectBuilderPage() {
             title="Схемы проекта"
           />
 
+          <div className="card" style={{ padding: 14, marginBottom: 14 }}>
+            <h4 style={{ margin: "0 0 8px" }}>Общее и пиковое потребление фермы</h4>
+            <FarmPowerEditor manualParams={form.manualParams} onChange={setSchemesManualParams} />
+          </div>
+
           <div className="toolbar" style={{ marginTop: 16 }}>
             <button
               type="button"
@@ -1454,6 +1460,11 @@ export default function ProjectBuilderPage() {
             showClientVisibility={false}
             title="Схемы проекта"
           />
+
+          <div className="card" style={{ padding: 14, marginBottom: 14 }}>
+            <h4 style={{ margin: "0 0 8px" }}>Общее и пиковое потребление фермы</h4>
+            <FarmPowerEditor manualParams={form.manualParams} onChange={setSchemesManualParams} />
+          </div>
 
           {rooms.length > 0 && (
             <p className="muted" style={{ fontSize: 13, margin: "0 0 12px" }}>

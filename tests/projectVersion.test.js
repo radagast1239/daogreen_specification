@@ -196,6 +196,23 @@ describe("published release snapshot", () => {
     expect(clientProject.rooms[0].cooling.recommendedKw).toBe(8.4);
   });
 
+  it("publishes manual farm power summary and keeps it immutable for the client", () => {
+    const farmPower = { devices: [
+      { id: "pump", name: "Насос", normalKw: 2.5, peakKw: 4 },
+      { id: "ac", name: "Кондиционер", normalKw: 12, peakKw: 18 },
+    ] };
+    seedProject("p1", { items: [clientItem("it1", "mat1")], manualParams: { farmPower } });
+    createVersion("p1", "admin", { force: true });
+
+    const published = loadPublishedReleaseSnapshot(loadProject("p1"));
+    expect(published.farmPower.devices).toHaveLength(2);
+    expect(published.farmPower.devices[1]).toMatchObject({ name: "Кондиционер", normalKw: 12, peakKw: 18 });
+
+    updateProject("p1", { manualParams: { farmPower: { devices: [{ id: "draft", name: "Черновик", normalKw: 99, peakKw: 99 }] } } });
+    const clientProject = buildClientProjectFromRelease(loadProject("p1"), published, { overlayLive: false });
+    expect(clientProject.farmPower).toEqual(farmPower);
+  });
+
   it("changing materials catalog does not change published snapshot", () => {
     seedProject("p1", { items: [clientItem("it1", "mat1")] });
     createVersion("p1", "admin", { force: true });

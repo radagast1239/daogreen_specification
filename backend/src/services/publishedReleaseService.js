@@ -73,6 +73,7 @@ export function buildClientProjectFromRelease(workingProject, snapshot, { overla
   const snapshotItems = Array.isArray(snapshot) ? snapshot : snapshot?.items || [];
   const clientImages = Array.isArray(snapshot) ? { projectSchemes: [], rackImages: [] } : snapshot?.imageManifest || { projectSchemes: [], rackImages: [] };
   const coolingRooms = Array.isArray(snapshot) ? [] : snapshot?.coolingRooms || [];
+  const farmPower = Array.isArray(snapshot) ? { devices: [] } : snapshot?.farmPower || { devices: [] };
   const liveItems = workingProject?.items || [];
   const merged = overlayLive
     ? mergeLivePurchaseOverlay(snapshotItems, liveItems)
@@ -93,6 +94,7 @@ export function buildClientProjectFromRelease(workingProject, snapshot, { overla
   return {
     ...safe,
     rooms: coolingRooms,
+    farmPower,
     items: clientItems,
     publishedRelease: release,
     isPublishedRelease: true,
@@ -114,6 +116,8 @@ export function getProjectReleaseInfo(project) {
         publishedImages,
         project?.rooms || [],
         publishedSnapshot?.coolingRooms || [],
+        project?.manualParams?.farmPower || {},
+        publishedSnapshot?.farmPower || {},
       )
     : { hasChanges: false, changedCount: 0, addedCount: 0, removedCount: 0 };
   return {
@@ -143,6 +147,8 @@ export function shouldPublishOnStatusChange(currentProject, nextStatus) {
     publishedSnapshot?.imageManifest || { projectSchemes: [], rackImages: [] },
     currentProject?.rooms || [],
     publishedSnapshot?.coolingRooms || [],
+    currentProject?.manualParams?.farmPower || {},
+    publishedSnapshot?.farmPower || {},
   ).hasChanges;
   if (fpWork === fpPub && !snapshotExtrasChanged) return false;
   return snapshotExtrasChanged;

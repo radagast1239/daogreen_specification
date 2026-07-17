@@ -6,6 +6,7 @@ import { isBoughtStatus } from "./ClientItemCard.jsx";
 import ActivityFeed from "../ActivityFeed.jsx";
 import { Progress } from "../ui.jsx";
 import ClientCoolingCalculations from "./ClientCoolingCalculations.jsx";
+import ClientFarmPowerSummary from "./ClientFarmPowerSummary.jsx";
 
 export default function ClientOverviewPanel({
   project,
@@ -50,6 +51,7 @@ export default function ClientOverviewPanel({
       </div>
 
       <ClientCoolingCalculations rooms={project.rooms || []} />
+      <ClientFarmPowerSummary farmPower={project.farmPower} />
 
       <div className="card" style={{ padding: 16, marginTop: 16 }}>
         <strong style={{ fontSize: 16, color: "var(--brand)" }}>Что делать дальше</strong>
