@@ -62,7 +62,7 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
 
   return (
     <div style={{ marginTop: 14 }}>
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="card" style={{ padding: 0, overflow: "hidden", display: "none" }} aria-hidden="true">
         <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)" }}>
           <h4 style={{ margin: 0, fontSize: 14 }}>Расчёт нагрузки по комнатам</h4>
           <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>

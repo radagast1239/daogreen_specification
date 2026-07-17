@@ -71,6 +71,12 @@ export default function FarmPowerEditor({ manualParams, onChange, rooms = [] }) 
           <tfoot><tr><th colSpan={4}>Итого по ферме</th><th className="num">{totals.normalKw.toLocaleString("ru-RU")}</th><th className="num">{totals.peakKw.toLocaleString("ru-RU")}</th><th className="num">{totals.dailyKwh.toLocaleString("ru-RU")}</th><th className="num">{totals.monthlyKwh.toLocaleString("ru-RU")}</th><th /></tr></tfoot>
         </table>
       </div>
+      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(4, minmax(150px, 1fr))", marginTop: 12 }}>
+        <div className="stat" style={{ background: "var(--brand-tint)", border: "2px solid var(--brand)" }}><div className="k">Установленная мощность</div><div className="v num" style={{ fontSize: 22 }}>{totals.normalKw.toLocaleString("ru-RU")} кВт</div></div>
+        <div className="stat" style={{ background: "var(--brand-tint)", border: "2px solid var(--brand)" }}><div className="k">Пиковая мощность</div><div className="v num" style={{ fontSize: 22 }}>{totals.peakKw.toLocaleString("ru-RU")} кВт</div></div>
+        <div className="stat" style={{ background: "var(--brand-tint)", border: "2px solid var(--brand)" }}><div className="k">Потребление в сутки</div><div className="v num" style={{ fontSize: 22 }}>{totals.dailyKwh.toLocaleString("ru-RU")} кВт·ч</div></div>
+        <div className="stat" style={{ background: "var(--brand-tint)", border: "2px solid var(--brand)" }}><div className="k">Потребление в месяц</div><div className="v num" style={{ fontSize: 22 }}>{totals.monthlyKwh.toLocaleString("ru-RU")} кВт·ч</div></div>
+      </div>
       <button type="button" className="btn btn-sm btn-outline" style={{ marginTop: 10 }} onClick={() => save({ ...model, devices: [...model.devices, newDevice()] })}>+ Добавить прибор</button>
       <div className="row wrap" style={{ gap: 12, marginTop: 14 }}>
         <label>Дней в месяце<DraftInput type="number" value={model.daysPerMonth} onCommit={(value) => save({ ...model, daysPerMonth: Math.max(1, value) })} /></label>
