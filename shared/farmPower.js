@@ -5,16 +5,28 @@ function numberOrZero(value) {
 
 export function normalizeFarmPower(raw = {}) {
   const devices = (Array.isArray(raw?.devices) ? raw.devices : [])
-    .map((device, index) => ({
+    .map((device, index) => {
+      const source = String(device?.source || "manual");
+      const powerKw = numberOrZero(device?.powerKw ?? device?.normalKw);
+      const quantity = numberOrZero(device?.quantity ?? 1);
+      const hoursPerDay = numberOrZero(device?.hoursPerDay);
+      const peakPowerKw = numberOrZero(device?.peakPowerKw ?? device?.peakKw ?? powerKw);
+      const calculated = source === "manual" && (device?.powerKw != null || device?.hoursPerDay != null);
+      return ({
       id: String(device?.id || `device_${index + 1}`),
       name: String(device?.name || "").trim(),
-      normalKw: numberOrZero(device?.normalKw),
-      peakKw: numberOrZero(device?.peakKw),
-      dailyKwh: numberOrZero(device?.dailyKwh),
-      source: String(device?.source || "manual"),
+      normalKw: calculated ? powerKw * quantity : numberOrZero(device?.normalKw),
+      peakKw: calculated ? peakPowerKw * quantity : numberOrZero(device?.peakKw),
+      dailyKwh: calculated ? powerKw * quantity * hoursPerDay : numberOrZero(device?.dailyKwh),
+      source,
       roomId: String(device?.roomId || ""),
       details: String(device?.details || ""),
-    }));
+      powerKw,
+      quantity,
+      hoursPerDay,
+      peakPowerKw,
+    });
+    });
   const acSchedules = (Array.isArray(raw?.acSchedules) ? raw.acSchedules : []).map((schedule, index) => ({
     roomId: String(schedule?.roomId || `room_${index + 1}`),
     dayKw: numberOrZero(schedule?.dayKw),
@@ -22,18 +34,27 @@ export function normalizeFarmPower(raw = {}) {
     nightKw: numberOrZero(schedule?.nightKw),
     nightHours: numberOrZero(schedule?.nightHours),
   }));
-  return { devices, acSchedules };
+  return {
+    devices,
+    acSchedules,
+    tariffPerKwh: numberOrZero(raw?.tariffPerKwh),
+    daysPerMonth: Math.max(1, numberOrZero(raw?.daysPerMonth) || 30),
+  };
 }
 
 export function farmPowerTotals(raw = {}) {
-  const { devices } = normalizeFarmPower(raw);
-  return devices.reduce(
+  const model = normalizeFarmPower(raw);
+  const totals = model.devices.reduce(
     (total, device) => ({
       normalKw: Math.round((total.normalKw + device.normalKw) * 1000) / 1000,
       peakKw: Math.round((total.peakKw + device.peakKw) * 1000) / 1000,
+      dailyKwh: Math.round((total.dailyKwh + device.dailyKwh) * 1000) / 1000,
     }),
-    { normalKw: 0, peakKw: 0 },
+    { normalKw: 0, peakKw: 0, dailyKwh: 0 },
   );
+  totals.monthlyKwh = round3(totals.dailyKwh * model.daysPerMonth);
+  totals.monthlyCost = round3(totals.monthlyKwh * model.tariffPerKwh);
+  return totals;
 }
 
 export function farmPowerFingerprint(raw = {}) {
@@ -65,18 +86,31 @@ export function automaticFarmPowerDevices(raw = {}, rooms = []) {
         details: `${lightHours} ч/сут`,
       });
     }
+    const units = Array.isArray(room?.acUnits) ? room.acUnits : [];
+    const hasUnitPower = units.some((unit) => numberOrZero(unit?.dayElectricKw ?? unit?.electricKw) > 0 || numberOrZero(unit?.nightElectricKw) > 0);
     const schedule = schedules.get(String(room.id || ""));
-    if (schedule && (schedule.dayKw > 0 || schedule.nightKw > 0)) {
-      const dailyKwh = schedule.dayKw * schedule.dayHours + schedule.nightKw * schedule.nightHours;
+    const dayKw = hasUnitPower
+      ? units.reduce((sum, unit) => sum + numberOrZero(unit?.qty || 1) * numberOrZero(unit?.dayElectricKw ?? unit?.electricKw), 0)
+      : numberOrZero(schedule?.dayKw);
+    const nightKw = hasUnitPower
+      ? units.reduce((sum, unit) => sum + numberOrZero(unit?.qty || 1) * numberOrZero(unit?.nightElectricKw), 0)
+      : numberOrZero(schedule?.nightKw);
+    const dailyKwh = hasUnitPower
+      ? units.reduce((sum, unit) => sum + numberOrZero(unit?.qty || 1) * (
+        numberOrZero(unit?.dayElectricKw ?? unit?.electricKw) * numberOrZero(unit?.dayHours ?? 16)
+        + numberOrZero(unit?.nightElectricKw) * numberOrZero(unit?.nightHours ?? 8)
+      ), 0)
+      : dayKw * numberOrZero(schedule?.dayHours) + nightKw * numberOrZero(schedule?.nightHours);
+    if (dayKw > 0 || nightKw > 0) {
       rows.push({
         id: `auto_ac_${room.id}`,
         name: `Кондиционер — ${room.name || "Комната"}`,
         normalKw: round3(dailyKwh / 24),
-        peakKw: round3(Math.max(schedule.dayKw, schedule.nightKw)),
+        peakKw: round3(Math.max(dayKw, nightKw)),
         dailyKwh: round3(dailyKwh),
         source: "ac_schedule",
         roomId: String(room.id || ""),
-        details: `день ${schedule.dayKw} кВт × ${schedule.dayHours} ч; ночь ${schedule.nightKw} кВт × ${schedule.nightHours} ч`,
+        details: hasUnitPower ? "фактическое потребление выбранных кондиционеров" : `день ${dayKw} кВт × ${schedule?.dayHours || 0} ч; ночь ${nightKw} кВт × ${schedule?.nightHours || 0} ч`,
       });
     }
   }
@@ -88,5 +122,7 @@ export function buildFarmPowerSnapshot(raw = {}, rooms = []) {
   return normalizeFarmPower({
     devices: [...model.devices.filter((device) => device.source === "manual"), ...automaticFarmPowerDevices(model, rooms)],
     acSchedules: model.acSchedules,
+    tariffPerKwh: model.tariffPerKwh,
+    daysPerMonth: model.daysPerMonth,
   });
 }

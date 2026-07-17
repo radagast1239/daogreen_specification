@@ -201,9 +201,13 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
                 <th>Комната</th>
                 <th className="right">Рек. холод, кВт</th>
                 <th className="right">BTU/ч</th>
-                <th className="right">Потр., кВт</th>
+                <th className="right">Оценка потр., кВт</th>
                 <th className="right">шт</th>
                 <th className="right">Факт. холод, кВт</th>
+                <th className="right">День, кВт</th>
+                <th className="right">День, ч</th>
+                <th className="right">Ночь, кВт</th>
+                <th className="right">Ночь, ч</th>
                 <th>Ссылка</th>
                 <th>Комментарий</th>
                 <th style={{ width: 40 }} />
@@ -259,6 +263,10 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
                       }
                     />
                   </td>
+                  <td className="right"><input type="number" min={0} step="any" className="spec-cell-input spec-cell-input--num" style={{ width: 64 }} value={unit.dayElectricKw ?? unit.electricKw ?? ""} placeholder={recommendedElecKw || "0"} onChange={(e) => patchUnit(roomId, unit.id, { dayElectricKw: parseNumInput(e.target.value) })} /></td>
+                  <td className="right"><input type="number" min={0} max={24} step="any" className="spec-cell-input spec-cell-input--num" style={{ width: 52 }} value={unit.dayHours ?? 16} onChange={(e) => patchUnit(roomId, unit.id, { dayHours: parseNumInput(e.target.value) })} /></td>
+                  <td className="right"><input type="number" min={0} step="any" className="spec-cell-input spec-cell-input--num" style={{ width: 64 }} value={unit.nightElectricKw ?? ""} onChange={(e) => patchUnit(roomId, unit.id, { nightElectricKw: parseNumInput(e.target.value) })} /></td>
+                  <td className="right"><input type="number" min={0} max={24} step="any" className="spec-cell-input spec-cell-input--num" style={{ width: 52 }} value={unit.nightHours ?? 8} onChange={(e) => patchUnit(roomId, unit.id, { nightHours: parseNumInput(e.target.value) })} /></td>
                   <td>
                     <input
                       type="url"

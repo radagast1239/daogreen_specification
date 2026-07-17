@@ -9,7 +9,7 @@ describe("farm power manual summary", () => {
       { id: "ac", name: "Кондиционер", normalKw: "12", peakKw: "18.5" },
     ] });
     expect(power.devices[0].name).toBe("Насос");
-    expect(farmPowerTotals(power)).toEqual({ normalKw: 14.5, peakKw: 22.5 });
+    expect(farmPowerTotals(power)).toEqual({ normalKw: 14.5, peakKw: 22.5, dailyKwh: 0, monthlyKwh: 0, monthlyCost: 0 });
   });
 
   it("clamps invalid and negative values to zero", () => {
@@ -44,5 +44,19 @@ describe("farm power manual summary", () => {
     expect(row.normalKw).not.toBe(63.52);
     expect(row.normalKw).not.toBe(80);
     expect(buildFarmPowerSnapshot(raw, rooms).devices[0].source).toBe("ac_schedule");
+  });
+
+  it("uses actual AC electrical fields from the cooling table", () => {
+    const rooms = [{ id: "r1", name: "Ферма", cooling: { params: {} }, acUnits: [
+      { qty: 2, coolingKw: 40, dayElectricKw: 5, dayHours: 16, nightElectricKw: 1.2, nightHours: 8 },
+    ] }];
+    expect(automaticFarmPowerDevices({}, rooms)[0]).toMatchObject({ peakKw: 10, dailyKwh: 179.2 });
+  });
+
+  it("calculates manual daily/monthly energy and monthly cost", () => {
+    const power = normalizeFarmPower({ tariffPerKwh: 7.5, daysPerMonth: 30, devices: [
+      { id: "pump", name: "Насос", powerKw: 2, quantity: 3, hoursPerDay: 10, peakPowerKw: 2 },
+    ] });
+    expect(farmPowerTotals(power)).toMatchObject({ normalKw: 6, peakKw: 6, dailyKwh: 60, monthlyKwh: 1800, monthlyCost: 13500 });
   });
 });

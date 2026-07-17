@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { automaticFarmPowerDevices, farmPowerFingerprint, farmPowerTotals, normalizeFarmPower } from "../../shared/farmPower.js";
 
 function newDevice() {
-  return { id: `power_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, name: "", normalKw: 0, peakKw: 0 };
+  return { id: `power_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, name: "", powerKw: 0, quantity: 1, hoursPerDay: 0, peakPowerKw: 0, source: "manual" };
 }
 
 function DraftInput({ value, type = "text", placeholder, onCommit }) {
@@ -34,7 +34,8 @@ export default function FarmPowerEditor({ manualParams, onChange, rooms = [] }) 
     setModel(incoming);
   }, [incomingFingerprint]);
   const automaticDevices = automaticFarmPowerDevices(model, rooms);
-  const totals = farmPowerTotals({ devices: [...model.devices, ...automaticDevices] });
+  const allDevices = [...automaticDevices, ...model.devices];
+  const totals = farmPowerTotals({ ...model, devices: allDevices });
   const save = (rawNext) => {
     const next = normalizeFarmPower(rawNext);
     setModel(next);
@@ -42,73 +43,40 @@ export default function FarmPowerEditor({ manualParams, onChange, rooms = [] }) 
     onChange({ ...(manualParams || {}), farmPower: next });
   };
   const patch = (id, field, value) => save({ ...model, devices: model.devices.map((device) => device.id === id ? { ...device, [field]: value } : device) });
-  const scheduleFor = (roomId) => model.acSchedules.find((schedule) => schedule.roomId === roomId) || { roomId, dayKw: 0, dayHours: 16, nightKw: 0, nightHours: 8 };
-  const patchSchedule = (roomId, field, value) => {
-    const current = scheduleFor(roomId);
-    const exists = model.acSchedules.some((schedule) => schedule.roomId === roomId);
-    save({ ...model, acSchedules: exists
-      ? model.acSchedules.map((schedule) => schedule.roomId === roomId ? { ...schedule, [field]: value } : schedule)
-      : [...model.acSchedules, { ...current, [field]: value }],
-    });
-  };
 
   return (
     <div className="farm-power-editor">
       <p className="muted" style={{ fontSize: 12, margin: "0 0 10px" }}>
-        Освещение берётся из расчёта комнат автоматически. Для кондиционеров указывается только фактическое электрическое потребление — не мощность холода.
+        Освещение и фактическое потребление кондиционеров берутся из расчётов комнат. Для остальных приборов укажите мощность, количество и часы работы.
       </p>
-      {(rooms || []).some((room) => room?.cooling?.params) && (
-        <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-          <strong>Автоматически из расчётов комнат</strong>
-          {(rooms || []).filter((room) => room?.cooling?.params).map((room) => {
-            const roomId = String(room.id || "");
-            const schedule = scheduleFor(roomId);
-            const light = automaticFarmPowerDevices(model, [room]).find((device) => device.source === "cooling_lighting");
-            return (
-              <div key={room.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
-                <b>{room.name || "Комната"}</b>
-                <div className="muted" style={{ fontSize: 12, margin: "4px 0 8px" }}>
-                  Освещение: <span className="num">{(light?.normalKw || 0).toLocaleString("ru-RU")} кВт</span>
-                  {light?.dailyKwh > 0 ? ` · ${light.dailyKwh.toLocaleString("ru-RU")} кВт·ч/сут` : ""}
-                </div>
-                <div className="row wrap" style={{ gap: 8 }}>
-                  <label style={{ minWidth: 130 }}>Кондиционер день, кВт<DraftInput type="number" value={schedule.dayKw} onCommit={(value) => patchSchedule(roomId, "dayKw", value)} /></label>
-                  <label style={{ minWidth: 110 }}>День, ч/сут<DraftInput type="number" value={schedule.dayHours} onCommit={(value) => patchSchedule(roomId, "dayHours", Math.min(24, value))} /></label>
-                  <label style={{ minWidth: 130 }}>Кондиционер ночь, кВт<DraftInput type="number" value={schedule.nightKw} onCommit={(value) => patchSchedule(roomId, "nightKw", value)} /></label>
-                  <label style={{ minWidth: 110 }}>Ночь, ч/сут<DraftInput type="number" value={schedule.nightHours} onCommit={(value) => patchSchedule(roomId, "nightHours", Math.min(24, value))} /></label>
-                </div>
-                {schedule.dayKw > 0 || schedule.nightKw > 0 ? (
-                  <div className="muted" style={{ fontSize: 12, marginTop: 7 }}>
-                    Кондиционер: {(schedule.dayKw * schedule.dayHours + schedule.nightKw * schedule.nightHours).toLocaleString("ru-RU")} кВт·ч/сут · пик {Math.max(schedule.dayKw, schedule.nightKw).toLocaleString("ru-RU")} кВт
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      )}
       <div style={{ overflowX: "auto" }}>
-        <table className="spec" style={{ minWidth: 620 }}>
-          <thead><tr><th>Прибор</th><th style={{ width: 150 }}>Общее, кВт</th><th style={{ width: 150 }}>Пиковое, кВт</th><th style={{ width: 70 }} /></tr></thead>
+        <table className="spec" style={{ minWidth: 980 }}>
+          <thead><tr><th>Прибор</th><th>Мощность, кВт</th><th>Кол-во</th><th>Часов/сут</th><th>Установлено, кВт</th><th>Пик, кВт</th><th>кВт·ч/сут</th><th>кВт·ч/мес</th><th /></tr></thead>
           <tbody>
+            {automaticDevices.map((device) => <tr key={device.id}><td><b>{device.name}</b><div className="muted" style={{ fontSize: 11 }}>{device.details}</div></td><td colSpan={3} className="muted">автоматически</td><td className="num">{device.normalKw.toLocaleString("ru-RU")}</td><td className="num">{device.peakKw.toLocaleString("ru-RU")}</td><td className="num">{device.dailyKwh.toLocaleString("ru-RU")}</td><td className="num">{(device.dailyKwh * model.daysPerMonth).toLocaleString("ru-RU")}</td><td /></tr>)}
             {model.devices.map((device) => (
               <tr key={device.id}>
                 <td><DraftInput value={device.name} placeholder="Насос, вентилятор, кондиционер…" onCommit={(value) => patch(device.id, "name", value)} /></td>
-                <td><DraftInput type="number" value={device.normalKw} onCommit={(value) => patch(device.id, "normalKw", value)} /></td>
-                <td><DraftInput type="number" value={device.peakKw} onCommit={(value) => patch(device.id, "peakKw", value)} /></td>
+                <td><DraftInput type="number" value={device.powerKw} onCommit={(value) => patch(device.id, "powerKw", value)} /></td>
+                <td><DraftInput type="number" value={device.quantity} onCommit={(value) => patch(device.id, "quantity", value)} /></td>
+                <td><DraftInput type="number" value={device.hoursPerDay} onCommit={(value) => patch(device.id, "hoursPerDay", Math.min(24, value))} /></td>
+                <td className="num">{device.normalKw.toLocaleString("ru-RU")}</td>
+                <td><DraftInput type="number" value={device.peakPowerKw} onCommit={(value) => patch(device.id, "peakPowerKw", value)} /></td>
+                <td className="num">{device.dailyKwh.toLocaleString("ru-RU")}</td>
+                <td className="num">{(device.dailyKwh * model.daysPerMonth).toLocaleString("ru-RU")}</td>
                 <td><button type="button" className="btn btn-ghost btn-sm" onClick={() => save({ ...model, devices: model.devices.filter((item) => item.id !== device.id) })}>Убрать</button></td>
               </tr>
             ))}
           </tbody>
-          <tfoot><tr><th>Итого по ферме</th><th className="num">{totals.normalKw.toLocaleString("ru-RU")} кВт</th><th className="num">{totals.peakKw.toLocaleString("ru-RU")} кВт</th><th /></tr></tfoot>
+          <tfoot><tr><th colSpan={4}>Итого по ферме</th><th className="num">{totals.normalKw.toLocaleString("ru-RU")}</th><th className="num">{totals.peakKw.toLocaleString("ru-RU")}</th><th className="num">{totals.dailyKwh.toLocaleString("ru-RU")}</th><th className="num">{totals.monthlyKwh.toLocaleString("ru-RU")}</th><th /></tr></tfoot>
         </table>
       </div>
-      {automaticDevices.length > 0 && (
-        <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-          Автоматических строк: {automaticDevices.length}. «Общее» для кондиционера — средняя электрическая мощность по заданным часам; «пиковое» — максимальный режим.
-        </div>
-      )}
       <button type="button" className="btn btn-sm btn-outline" style={{ marginTop: 10 }} onClick={() => save({ ...model, devices: [...model.devices, newDevice()] })}>+ Добавить прибор</button>
+      <div className="row wrap" style={{ gap: 12, marginTop: 14 }}>
+        <label>Дней в месяце<DraftInput type="number" value={model.daysPerMonth} onCommit={(value) => save({ ...model, daysPerMonth: Math.max(1, value) })} /></label>
+        <label>Стоимость 1 кВт·ч, ₽<DraftInput type="number" value={model.tariffPerKwh} onCommit={(value) => save({ ...model, tariffPerKwh: value })} /></label>
+        <div className="card" style={{ padding: 10 }}><b>Затраты в месяц: <span className="num">{totals.monthlyCost.toLocaleString("ru-RU")} ₽</span></b></div>
+      </div>
     </div>
   );
 }
