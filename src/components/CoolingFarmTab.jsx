@@ -20,18 +20,18 @@ function fmt(val, row = {}) {
 }
 
 function filterSections(variant) {
-  if (variant !== "client") return COOLING_FARM_SECTIONS;
-  return COOLING_FARM_SECTIONS.filter((s) => CLIENT_COOLING_SECTIONS.has(s.title));
+  if (variant === "client") return COOLING_FARM_SECTIONS.filter((s) => CLIENT_COOLING_SECTIONS.has(s.title));
+  return COOLING_FARM_SECTIONS;
 }
 
 function rowEditable(row, variant) {
-  if (variant !== "client") return !!row.input;
-  return row.key === "safetyFactor";
+  if (variant === "admin") return !!row.input;
+  if (variant === "client") return row.key === "safetyFactor";
+  return false;
 }
 
 function rowReadOnly(row, variant) {
-  if (variant !== "client") return !row.input;
-  return row.key !== "safetyFactor";
+  return !rowEditable(row, variant);
 }
 
 export default function CoolingFarmTab({
@@ -76,7 +76,8 @@ export default function CoolingFarmTab({
     if (moreRef.current) moreRef.current.open = false;
   };
   const canPersist = !!(project?.id && actions?.projectUpdate);
-  const isClient = variant === "client";
+  const isClient = variant !== "admin";
+  const isFullClient = variant === "client_full";
 
   const calc = useMemo(() => computeCoolingFarm(inputs), [inputs]);
   const sections = useMemo(() => filterSections(variant), [variant]);
@@ -228,7 +229,7 @@ export default function CoolingFarmTab({
             <div className="eyebrow">BTU / модель</div>
             <div className="num cooling-calc__num cooling-calc__num--hero">{fmt(calc.standardBtu)} BTU</div>
           </div>
-          {!isClient && (
+          {(!isClient || isFullClient) && (
             <>
               <div>
                 <div className="eyebrow">Электропотребление</div>
@@ -295,7 +296,7 @@ export default function CoolingFarmTab({
         </div>
       ))}
 
-      {isClient && (
+      {variant === "client" && (
         <p className="muted" style={{ fontSize: 12.5, marginTop: 8, paddingLeft: 20 }}>
           Можно изменить только «Запас, %» — остальные параметры задаёт Daogreen.
         </p>

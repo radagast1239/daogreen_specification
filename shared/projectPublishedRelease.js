@@ -4,6 +4,44 @@ import { lineVisibleToClient } from "./itemTypes.js";
 import { projectItemMatchKey } from "./projectItemKey.js";
 import { buildClientImageManifest, normalizeClientImageManifest, clientImageManifestFingerprint } from "./clientImageManifest.js";
 
+function cloneJson(value, fallback) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return fallback;
+  }
+}
+
+/** Client-safe, immutable room cooling calculations for a published release. */
+export function buildPublishedCoolingRooms(rooms = []) {
+  return (Array.isArray(rooms) ? rooms : [])
+    .filter((room) => room?.cooling?.params && typeof room.cooling.params === "object")
+    .map((room) => ({
+      id: String(room.id || ""),
+      name: String(room.name || "Комната"),
+      area: room.area ?? "",
+      height: room.height ?? "",
+      volume: room.volume ?? "",
+      targetTempC: room.targetTempC ?? "",
+      reservePct: room.reservePct ?? "",
+      lightingW: room.lightingW ?? "",
+      peopleEquipW: room.peopleEquipW ?? "",
+      heatGainW: room.heatGainW ?? "",
+      cooling: cloneJson(room.cooling, {}),
+      acUnits: (Array.isArray(room.acUnits) ? room.acUnits : []).map((unit) => ({
+        id: String(unit?.id || ""),
+        qty: unit?.qty ?? "",
+        coolingKw: unit?.coolingKw ?? "",
+        link: String(unit?.link || ""),
+        comment: String(unit?.comment || ""),
+      })),
+    }));
+}
+
+export function coolingRoomsFingerprint(rooms = []) {
+  return JSON.stringify(buildPublishedCoolingRooms(rooms));
+}
+
 /** Workflow statuses that require / imply a published client release. */
 export const PUBLISH_WORKFLOW_STATUSES = new Set([
   "ready_to_send",
@@ -60,13 +98,14 @@ export function buildReleaseSnapshotPayload(project, items = project?.items || [
     },
     items: list.map((it) => ({ ...it })),
     imageManifest: buildClientImageManifest(project),
+    coolingRooms: buildPublishedCoolingRooms(project?.rooms),
   };
 }
 
 export function parseReleaseSnapshot(raw) {
-  if (!raw) return { items: [], projectMeta: null, imageManifest: normalizeClientImageManifest(), schema: null };
+  if (!raw) return { items: [], projectMeta: null, imageManifest: normalizeClientImageManifest(), coolingRooms: [], schema: null };
   if (Array.isArray(raw)) {
-    return { items: raw, projectMeta: null, imageManifest: normalizeClientImageManifest(), schema: "legacy_items_array" };
+    return { items: raw, projectMeta: null, imageManifest: normalizeClientImageManifest(), coolingRooms: [], schema: "legacy_items_array" };
   }
   if (typeof raw === "object" && Array.isArray(raw.items)) {
     return {
@@ -75,9 +114,10 @@ export function parseReleaseSnapshot(raw) {
       schema: raw.schema || "release_v1",
       publishedAt: raw.publishedAt || "",
       imageManifest: normalizeClientImageManifest(raw.imageManifest),
+      coolingRooms: buildPublishedCoolingRooms(raw.coolingRooms),
     };
   }
-  return { items: [], projectMeta: null, schema: null };
+  return { items: [], projectMeta: null, imageManifest: normalizeClientImageManifest(), coolingRooms: [], schema: null };
 }
 
 export function releaseSnapshotItems(rawSnapshot) {
@@ -131,7 +171,14 @@ function itemChanged(a, b) {
 /**
  * Detect unpublished changes vs published snapshot (working draft vs release).
  */
-export function detectUnpublishedChanges(workingItems = [], publishedItems = [], workingImages = null, publishedImages = null) {
+export function detectUnpublishedChanges(
+  workingItems = [],
+  publishedItems = [],
+  workingImages = null,
+  publishedImages = null,
+  workingCoolingRooms = null,
+  publishedCoolingRooms = null,
+) {
   const pubMap = new Map((publishedItems || []).map((it) => [it.id, it]));
   const workMap = new Map((workingItems || []).map((it) => [it.id, it]));
   let changedCount = 0;
@@ -153,12 +200,16 @@ export function detectUnpublishedChanges(workingItems = [], publishedItems = [],
   const imagesChanged = workingImages != null && publishedImages != null
     ? clientImageManifestFingerprint(workingImages) !== clientImageManifestFingerprint(publishedImages)
     : false;
+  const coolingChanged = workingCoolingRooms != null && publishedCoolingRooms != null
+    ? coolingRoomsFingerprint(workingCoolingRooms) !== coolingRoomsFingerprint(publishedCoolingRooms)
+    : false;
   return {
-    hasChanges: changedCount > 0 || addedCount > 0 || removedCount > 0 || imagesChanged,
+    hasChanges: changedCount > 0 || addedCount > 0 || removedCount > 0 || imagesChanged || coolingChanged,
     changedCount,
     addedCount,
     removedCount,
     imagesChanged,
+    coolingChanged,
   };
 }
 

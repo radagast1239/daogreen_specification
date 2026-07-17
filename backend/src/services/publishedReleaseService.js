@@ -72,6 +72,7 @@ export function prepareSnapshotItemForClient(item) {
 export function buildClientProjectFromRelease(workingProject, snapshot, { overlayLive = true } = {}) {
   const snapshotItems = Array.isArray(snapshot) ? snapshot : snapshot?.items || [];
   const clientImages = Array.isArray(snapshot) ? { projectSchemes: [], rackImages: [] } : snapshot?.imageManifest || { projectSchemes: [], rackImages: [] };
+  const coolingRooms = Array.isArray(snapshot) ? [] : snapshot?.coolingRooms || [];
   const liveItems = workingProject?.items || [];
   const merged = overlayLive
     ? mergeLivePurchaseOverlay(snapshotItems, liveItems)
@@ -91,6 +92,7 @@ export function buildClientProjectFromRelease(workingProject, snapshot, { overla
   const release = parsePublishedRelease(workingProject.manualParams);
   return {
     ...safe,
+    rooms: coolingRooms,
     items: clientItems,
     publishedRelease: release,
     isPublishedRelease: true,
@@ -105,7 +107,14 @@ export function getProjectReleaseInfo(project) {
   const workingImages = buildClientImageManifest(project);
   const publishedImages = publishedSnapshot?.imageManifest || { projectSchemes: [], rackImages: [] };
   const unpublished = release
-    ? detectUnpublishedChanges(project?.items || [], publishedItems, workingImages, publishedImages)
+    ? detectUnpublishedChanges(
+        project?.items || [],
+        publishedItems,
+        workingImages,
+        publishedImages,
+        project?.rooms || [],
+        publishedSnapshot?.coolingRooms || [],
+      )
     : { hasChanges: false, changedCount: 0, addedCount: 0, removedCount: 0 };
   return {
     publishedRelease: release,
@@ -128,13 +137,15 @@ export function shouldPublishOnStatusChange(currentProject, nextStatus) {
   const publishedSnapshot = loadPublishedReleaseSnapshot(currentProject);
   const fpWork = workingItemsPublishFingerprint(currentProject?.items || []);
   const fpPub = workingItemsPublishFingerprint(publishedItems);
-  const imagesChanged = detectUnpublishedChanges(
+  const snapshotExtrasChanged = detectUnpublishedChanges(
     currentProject?.items || [], publishedItems,
     buildClientImageManifest(currentProject),
     publishedSnapshot?.imageManifest || { projectSchemes: [], rackImages: [] },
+    currentProject?.rooms || [],
+    publishedSnapshot?.coolingRooms || [],
   ).hasChanges;
-  if (fpWork === fpPub && !imagesChanged) return false;
-  return imagesChanged;
+  if (fpWork === fpPub && !snapshotExtrasChanged) return false;
+  return snapshotExtrasChanged;
 }
 
 export function buildReleaseSnapshotJson(project) {

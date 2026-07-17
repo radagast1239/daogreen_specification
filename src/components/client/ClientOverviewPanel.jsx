@@ -5,6 +5,7 @@ import { groupByClientSection, resolveClientSection } from "../../../shared/clie
 import { isBoughtStatus } from "./ClientItemCard.jsx";
 import ActivityFeed from "../ActivityFeed.jsx";
 import { Progress } from "../ui.jsx";
+import ClientCoolingCalculations from "./ClientCoolingCalculations.jsx";
 
 export default function ClientOverviewPanel({
   project,
@@ -47,6 +48,8 @@ export default function ClientOverviewPanel({
           Куплено {boughtCount} из {items.length} позиций
         </p>
       </div>
+
+      <ClientCoolingCalculations rooms={project.rooms || []} />
 
       <div className="card" style={{ padding: 16, marginTop: 16 }}>
         <strong style={{ fontSize: 16, color: "var(--brand)" }}>Что делать дальше</strong>

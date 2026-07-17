@@ -25,6 +25,7 @@ let updateProject;
 let listVersions;
 let loadVersionRow;
 let loadPublishedSnapshotItems;
+let loadPublishedReleaseSnapshot;
 let buildClientProjectFromRelease;
 let getProjectReleaseInfo;
 let buildReleaseSnapshotJson;
@@ -71,11 +72,11 @@ function clientItem(id, materialId, overrides = {}) {
   };
 }
 
-function seedProject(id = "proj1", { items = [], manualParams = {}, status = "active", projectVersion = 0 } = {}) {
+function seedProject(id = "proj1", { items = [], manualParams = {}, rooms = [], status = "active", projectVersion = 0 } = {}) {
   db.prepare(`
-    INSERT INTO projects (id, name, client_token, status, manual_params, currency, vat, version)
-    VALUES (?, 'Test project', ?, ?, ?, '₽', 1, ?)
-  `).run(id, `token-${id}`, status, JSON.stringify(manualParams), projectVersion);
+    INSERT INTO projects (id, name, client_token, status, manual_params, rooms, currency, vat, version)
+    VALUES (?, 'Test project', ?, ?, ?, ?, '₽', 1, ?)
+  `).run(id, `token-${id}`, status, JSON.stringify(manualParams), JSON.stringify(rooms), projectVersion);
   if (items.length) saveItems(id, items);
 }
 
@@ -97,6 +98,7 @@ beforeAll(async () => {
   listVersions = projectsMod.listVersions;
   loadVersionRow = releaseMod.loadVersionRow;
   loadPublishedSnapshotItems = releaseMod.loadPublishedSnapshotItems;
+  loadPublishedReleaseSnapshot = releaseMod.loadPublishedReleaseSnapshot;
   buildClientProjectFromRelease = releaseMod.buildClientProjectFromRelease;
   getProjectReleaseInfo = releaseMod.getProjectReleaseInfo;
   buildReleaseSnapshotJson = releaseMod.buildReleaseSnapshotJson;
@@ -161,6 +163,37 @@ describe("published release snapshot", () => {
     const snap = loadPublishedSnapshotItems(loadProject("p1"));
     expect(snap[0].qty).toBe(2);
     expect(snap[0].price).toBe(100);
+  });
+
+  it("publishes full room cooling calculations and does not expose later live room edits", () => {
+    const room = {
+      id: "room-1",
+      name: "Рассадная",
+      area: 20,
+      height: 3,
+      cooling: {
+        params: { length: 5, width: 4, height: 3, shelves: 12, tiers: 5, safetyFactor: 1.3, cop: 3.2 },
+        recommendedKw: 8.4,
+        standardBtu: 36000,
+      },
+      acUnits: [{ id: "ac-1", qty: 2, coolingKw: 5, link: "https://shop.example/ac", comment: "инвертор" }],
+      selectedItemId: "internal-item-id",
+      comment: "internal room note",
+    };
+    seedProject("p1", { items: [clientItem("it1", "mat1")], rooms: [room] });
+    createVersion("p1", "admin", { force: true });
+
+    const published = loadPublishedReleaseSnapshot(loadProject("p1"));
+    expect(published.coolingRooms).toHaveLength(1);
+    expect(published.coolingRooms[0].cooling.params).toMatchObject({ shelves: 12, tiers: 5, safetyFactor: 1.3 });
+    expect(published.coolingRooms[0].acUnits[0]).toMatchObject({ qty: 2, coolingKw: 5, link: "https://shop.example/ac" });
+    expect(published.coolingRooms[0].selectedItemId).toBeUndefined();
+    expect(published.coolingRooms[0].comment).toBeUndefined();
+
+    updateProject("p1", { rooms: [{ ...room, name: "Черновое новое имя", cooling: { ...room.cooling, recommendedKw: 99 } }] });
+    const clientProject = buildClientProjectFromRelease(loadProject("p1"), published, { overlayLive: false });
+    expect(clientProject.rooms[0].name).toBe("Рассадная");
+    expect(clientProject.rooms[0].cooling.recommendedKw).toBe(8.4);
   });
 
   it("changing materials catalog does not change published snapshot", () => {
