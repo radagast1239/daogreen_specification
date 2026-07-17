@@ -8,7 +8,7 @@ import { planHasDrawnWalls } from "./wallGeometry.js";
 import { ensureWallNetwork, mergeCloseNodes, resolvePlanWalls } from "./wallNetwork.js";
 import { upgradeLegacyWall } from "./core/walls/wallModel.js";
 import { normalizeDimensions } from "./core/dimensions/model.js";
-import { normalizeLegacyRoomsFromZones, syncRooms } from "./core/rooms/index.js";
+import { normalizeLegacyRoomsFromZones, syncRoomsSafe } from "./core/rooms/index.js";
 import { normalizePlannerObject } from "./farmObjects.js";
 import { isPipeLine, normalizePipe, syncPlanPipes } from "./pipes.js";
 import { syncElectricalPlan } from "./electrical.js";
@@ -20,7 +20,10 @@ export function stripManualZones(zones = []) {
   return zones.filter((z) => z.auto);
 }
 
-export function normalizePlan(raw) {
+// PHASE 0G: options.roomSyncFn — точка инъекции для controlled-failure тестов
+// room detection (см. syncRoomsSafe). Production-код всегда вызывает с одним
+// аргументом; параметр не меняет схему plan.
+export function normalizePlan(raw, options = {}) {
   const d = DEFAULT_PLAN();
   if (!raw) return d;
 
@@ -96,18 +99,20 @@ export function normalizePlan(raw) {
 
   const hasDrawnWalls = planHasDrawnWalls(plan.walls);
   if (hasDrawnWalls) {
-    try {
-      const resolved = resolvePlanWalls(plan);
-      const synced = syncRooms({ ...plan, walls: resolved });
+    const resolved = resolvePlanWalls(plan);
+    const synced = options.roomSyncFn
+      ? syncRoomsSafe({ ...plan, walls: resolved }, options.roomSyncFn)
+      : syncRoomsSafe({ ...plan, walls: resolved });
+    // PHASE 0G: на ok:false (сбой room-engine, не «нет комнат») сохраняем уже
+    // вычисленные выше legacy rooms/zones как есть — без auto-fix и без записи
+    // runtime diagnostic внутрь plan (diagnostics session-only, живут в UI).
+    if (synced.ok) {
       plan.rooms = synced.rooms;
       plan.zones = synced.zones;
       plan.validationWarnings = [
         ...(plan.validationWarnings || []).filter((w) => w.source !== "rooms"),
         ...(synced.validationWarnings || []),
       ];
-    } catch (_) {
-      plan.zones = plan.zones.filter((z) => z.auto);
-      plan.rooms = plan.rooms.filter((r) => r.type === "room");
     }
   } else {
     plan.zones = [];
