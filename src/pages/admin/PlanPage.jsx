@@ -50,7 +50,7 @@ import {
   planWorkingBounds, planHasDrawnWalls,
   alignmentGuides, angleAt, draftChainArea,
 } from "../../planner/core/walls/index.js";
-import { syncRooms } from "../../planner/core/rooms/index.js";
+import { syncRoomsSafe } from "../../planner/core/rooms/index.js";
 import { validateRooms } from "../../planner/core/rooms/validateRooms.js";
 import {
   resolvePlanWalls, commitWallEdge, deleteWallEdge, movePlanNode,
@@ -94,7 +94,7 @@ import { hitTestWallInteraction } from "../../planner/ui/hitTesting/planHitTest.
 import { validatePlanIntegrity } from "../../planner/core/validation/validatePlanIntegrity.js";
 import { PlanDiagnosticsPanel } from "../../planner/ui/diagnostics/PlanDiagnosticsPanel.jsx";
 import { getDiagnosticFocusTarget } from "../../planner/ui/diagnostics/diagnosticFocus.js";
-import { isDiagnosticsStale } from "../../planner/ui/diagnostics/diagnosticPresentation.js";
+import { isDiagnosticsStale, mergeDiagnosticsResult } from "../../planner/ui/diagnostics/diagnosticPresentation.js";
 import { DEFAULT_DUCT_SIZE_H_MM, DEFAULT_DUCT_SIZE_W_MM } from "../../planner/ventDuctRender.jsx";
 import {
   PlanGridScreen, PlanAxesScreen, SheetBackdrop, RoomDims, WallEl, WallsTopOverlay, PlannerWallDefs, PlannerLayerDefs, LayerMutedWrap, ItemEl, ZoneEl, LabelEl, LineEl,
@@ -256,6 +256,9 @@ export default function PlanPage() {
   const [planDiagnostics, setPlanDiagnostics] = useState(null); // { result, planRef }
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [diagnosticsChecking, setDiagnosticsChecking] = useState(false);
+  // PHASE 0G — последний сбой room detection (session-only, не persisted в plan).
+  // Очищается следующим успешным syncAutoZones; сливается в runPlanCheck.
+  const [roomDetectionDiagnostic, setRoomDetectionDiagnostic] = useState(null);
   const [diagnosticFilters, setDiagnosticFilters] = useState({ error: true, warning: true, info: true });
 
   const structuralKind = tool === "structural" ? pending : null;
@@ -572,20 +575,24 @@ export default function PlanPage() {
     return { pt, snap, guides: s?.guides || [] };
   }, [snapOn, snapStep, display.snapGrid, display.snapWalls, display.snapObjects, display.snapGuides, plan, view, measure]);
 
+  // PHASE 0G: syncRoomsSafe — единая orchestration-граница room detection.
+  // ok:false (сбой движка, не «нет комнат») не трогает план — существующие
+  // rooms/zones/metadata сохраняются как есть; сбой всплывает как session-only
+  // diagnostic в существующей панели «Проверить план» (runPlanCheck).
   const syncAutoZones = (p) => {
-    try {
-      const synced = syncRooms({ ...p, walls: resolvePlanWalls(p) });
-      const dimWarnings = (p.validationWarnings || []).filter((w) => w.source === "dimensions");
-      return {
-        ...p,
-        rooms: synced.rooms,
-        zones: synced.zones,
-        validationWarnings: [...dimWarnings, ...(synced.validationWarnings || [])],
-      };
-    } catch (e) {
-      console.error("syncAutoZones failed", e);
+    const synced = syncRoomsSafe({ ...p, walls: resolvePlanWalls(p) });
+    if (!synced.ok) {
+      setRoomDetectionDiagnostic(synced.diagnostics[0]);
       return p;
     }
+    if (roomDetectionDiagnostic) setRoomDetectionDiagnostic(null);
+    const dimWarnings = (p.validationWarnings || []).filter((w) => w.source === "dimensions");
+    return {
+      ...p,
+      rooms: synced.rooms,
+      zones: synced.zones,
+      validationWarnings: [...dimWarnings, ...(synced.validationWarnings || [])],
+    };
   };
 
   const applyTypedLength = () => {
@@ -3547,10 +3554,12 @@ export default function PlanPage() {
   };
 
   // PHASE 0D — ручной запуск проверки целостности (без autosave/backend/mutation).
+  // PHASE 0G: сливает session-only room detection diagnostic в тот же result.
   const runPlanCheck = () => {
     setDiagnosticsChecking(true);
     const result = validatePlanIntegrity(plan);
-    setPlanDiagnostics({ result, planRef: plan });
+    const merged = mergeDiagnosticsResult(result, roomDetectionDiagnostic ? [roomDetectionDiagnostic] : []);
+    setPlanDiagnostics({ result: merged, planRef: plan });
     setDiagnosticFilters({ error: true, warning: true, info: true });
     setDiagnosticsChecking(false);
     setDiagnosticsOpen(true);
