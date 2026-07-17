@@ -1,28 +1,86 @@
 /**
- * PHASE 0G — room detection: успех / честное «нет комнат» / сбой движка должны
- * быть различимы, а сбой — не терять существующие rooms/zones/metadata и не
- * мутировать plan. Проверяет контракт syncRoomsSafe (core/rooms/syncRooms.js),
- * его использование в normalizePlan и в паттерне PlanPage.syncAutoZones
- * (воспроизведён локально — компонент не рендерится, окружение тестов "node").
+ * PHASE 0G (+ corrective pass) — room detection: успех / честное «нет комнат» /
+ * сбой движка должны быть различимы, а сбой — не терять существующие
+ * rooms/zones/metadata, не мутировать plan и не создавать лишних history
+ * checkpoint. Проверяет контракт syncRoomsSafe (core/rooms/syncRooms.js),
+ * normalizePlanResult (planNormalize.js) и паттерн PlanPage.jsx
+ * (computeAutoZonesSync/syncAutoZones/runAutoZonesSync/runPlanCheck) —
+ * воспроизведён локально, компонент не рендерится (окружение тестов "node").
+ *
+ * PHASE 0G corrective — import-order stability:
+ * src/planner/wallGeometry.js делает `export * from "./core/walls/index.js"`
+ * (строка 2) — часть уже задокументированного 15-файлового цикла зависимостей
+ * planner (см. node scripts/plannerDepGraph.mjs, «Крупнейший цикл»). Это
+ * ПРЕДСУЩЕСТВУЮЩИЙ цикл в production-графе — не исправляется в этой фазе (см.
+ * PHASE 0G corrective report, «Known risk for PHASE 1A»).
+ *
+ * Эмпирически проверено (PHASE 0G corrective): при статическом import ИЛИ
+ * при простом переупорядочивании последовательных dynamic import()
+ * planHasDrawnWalls внутри planNormalize.js мог временно резолвиться в
+ * undefined, если core/rooms/index.js достигал цикла раньше wallGeometry.js
+ * по ДРУГОМУ транзитивному пути (core/rooms/detectRooms.js → ../walls/wallOps.js
+ * напрямую, минуя wallGeometry.js). Простое «await import(planNormalize)
+ * раньше» НЕ является надёжным фиксом — тот же баг воспроизводится и при
+ * последовательных dynamic import(), если поменять порядок местами (проверено
+ * прогоном с обратным порядком до и после фикса ниже).
+ *
+ * Надёжный фикс: явно и ПЕРВЫМ прогреть (await import) именно
+ * wallGeometry.js — тот модуль, откуда planNormalize.js берёт
+ * planHasDrawnWalls. Это заставляет его export* полностью материализоваться
+ * ДО того, как любой другой путь (core/rooms/*) войдёт в тот же цикл через
+ * wallOps.js напрямую. Проверено: результат остаётся зелёным (41/41)
+ * независимо от того, в каком порядке импортируются planNormalize.js и
+ * core/rooms/index.js ПОСЛЕ этого прогрева.
  */
-import { describe, it, expect } from "vitest";
-import { normalizePlan } from "../src/planner/planNormalize.js";
-import {
-  syncRooms,
-  syncRoomsSafe,
-  ROOM_DETECTION_FAILED,
-} from "../src/planner/core/rooms/index.js";
-import { resolvePlanWalls } from "../src/planner/wallNetwork.js";
-import { HistoryModel } from "../src/planner/core/history/historyModel.js";
-import {
-  mergeDiagnosticsResult,
-  filterDiagnostics,
-  groupBySeverity,
-  isDiagnosticsStale,
-  entityTypeLabel,
-} from "../src/planner/ui/diagnostics/diagnosticPresentation.js";
-import { getDiagnosticFocusTarget } from "../src/planner/ui/diagnostics/diagnosticFocus.js";
-import { validatePlanIntegrity } from "../src/planner/core/validation/validatePlanIntegrity.js";
+import { describe, it, expect, beforeAll } from "vitest";
+
+let normalizePlan;
+let normalizePlanResult;
+let syncRooms;
+let syncRoomsSafe;
+let ROOM_DETECTION_FAILED;
+let resolvePlanWalls;
+let HistoryModel;
+let mergeDiagnosticsResult;
+let filterDiagnostics;
+let groupBySeverity;
+let isDiagnosticsStale;
+let entityTypeLabel;
+let getDiagnosticFocusTarget;
+let validatePlanIntegrity;
+
+beforeAll(async () => {
+  // Прогрев фрагильного export* ПЕРВЫМ — см. комментарий в шапке файла.
+  await import("../src/planner/wallGeometry.js");
+
+  const planNormalizeMod = await import("../src/planner/planNormalize.js");
+  normalizePlan = planNormalizeMod.normalizePlan;
+  normalizePlanResult = planNormalizeMod.normalizePlanResult;
+
+  const roomsMod = await import("../src/planner/core/rooms/index.js");
+  syncRooms = roomsMod.syncRooms;
+  syncRoomsSafe = roomsMod.syncRoomsSafe;
+  ROOM_DETECTION_FAILED = roomsMod.ROOM_DETECTION_FAILED;
+
+  const wallNetworkMod = await import("../src/planner/wallNetwork.js");
+  resolvePlanWalls = wallNetworkMod.resolvePlanWalls;
+
+  const historyMod = await import("../src/planner/core/history/historyModel.js");
+  HistoryModel = historyMod.HistoryModel;
+
+  const presentationMod = await import("../src/planner/ui/diagnostics/diagnosticPresentation.js");
+  mergeDiagnosticsResult = presentationMod.mergeDiagnosticsResult;
+  filterDiagnostics = presentationMod.filterDiagnostics;
+  groupBySeverity = presentationMod.groupBySeverity;
+  isDiagnosticsStale = presentationMod.isDiagnosticsStale;
+  entityTypeLabel = presentationMod.entityTypeLabel;
+
+  const focusMod = await import("../src/planner/ui/diagnostics/diagnosticFocus.js");
+  getDiagnosticFocusTarget = focusMod.getDiagnosticFocusTarget;
+
+  const validationMod = await import("../src/planner/core/validation/validatePlanIntegrity.js");
+  validatePlanIntegrity = validationMod.validatePlanIntegrity;
+});
 
 // ── fixtures ─────────────────────────────────────────────────────────────
 
@@ -177,70 +235,173 @@ describe("PHASE 0G — room detection engine failure", () => {
 
 // ── 8.3 паттерн PlanPage.syncAutoZones (без рендера React) ──────────────
 
-/** Воспроизводит логику src/pages/admin/PlanPage.jsx syncAutoZones + session diagnostic. */
-function createSyncAutoZonesHarness() {
+/**
+ * Воспроизводит src/pages/admin/PlanPage.jsx (PHASE 0G corrective):
+ *   computeAutoZonesSync — чистая функция { ok, plan, diagnostics }, без setState;
+ *   syncAutoZones        — обёртка для bundled-edit callers (используется ВНУТРИ
+ *                          setPlan updater вместе с реальной правкой геометрии);
+ *   runAutoZonesSync      — для pure room-only sync (useEffect / кнопка
+ *                          «Синхронизировать зоны»): сам решает, вызывать ли
+ *                          history.setPlan — НЕ вызывает его при ok:false и НЕ
+ *                          вызывает при ok:true без фактического изменения
+ *                          rooms/zones.
+ * Принимает реальный HistoryModel вместо React state.
+ */
+function createPlanPageRoomSyncHarness(history) {
   let diagnostic = null;
-  const syncAutoZones = (p, syncFn) => {
+
+  const computeAutoZonesSync = (p, syncFn) => {
     const synced = syncRoomsSafe({ ...p, walls: resolvePlanWalls(p) }, syncFn);
-    if (!synced.ok) {
-      diagnostic = synced.diagnostics[0];
+    if (!synced.ok) return { ok: false, plan: p, diagnostics: synced.diagnostics };
+    const dimWarnings = (p.validationWarnings || []).filter((w) => w.source === "dimensions");
+    return {
+      ok: true,
+      diagnostics: [],
+      plan: {
+        ...p,
+        rooms: synced.rooms,
+        zones: synced.zones,
+        validationWarnings: [...dimWarnings, ...(synced.validationWarnings || [])],
+      },
+    };
+  };
+
+  const syncAutoZones = (p, syncFn) => {
+    const result = computeAutoZonesSync(p, syncFn);
+    if (!result.ok) {
+      diagnostic = result.diagnostics[0];
       return p;
     }
     if (diagnostic) diagnostic = null;
-    const dimWarnings = (p.validationWarnings || []).filter((w) => w.source === "dimensions");
-    return {
-      ...p,
-      rooms: synced.rooms,
-      zones: synced.zones,
-      validationWarnings: [...dimWarnings, ...(synced.validationWarnings || [])],
-    };
+    return result.plan;
   };
-  return { syncAutoZones, getDiagnostic: () => diagnostic };
+
+  const runAutoZonesSync = (syncFn) => {
+    const result = computeAutoZonesSync(history.current, syncFn);
+    if (!result.ok) {
+      diagnostic = result.diagnostics[0];
+      return;
+    }
+    if (diagnostic) diagnostic = null;
+    const changed = JSON.stringify(result.plan.rooms) !== JSON.stringify(history.current.rooms)
+      || JSON.stringify(result.plan.zones) !== JSON.stringify(history.current.zones);
+    if (!changed) return;
+    history.setPlan(() => result.plan);
+  };
+
+  return { computeAutoZonesSync, syncAutoZones, runAutoZonesSync, getDiagnostic: () => diagnostic };
 }
 
 describe("PHASE 0G — syncAutoZones pattern (PlanPage integration)", () => {
   it("success updates rooms/zones as before", () => {
-    const { syncAutoZones } = createSyncAutoZonesHarness();
-    const next = syncAutoZones(closedRectPlan());
+    const history = new HistoryModel(closedRectPlan());
+    const { syncAutoZones } = createPlanPageRoomSyncHarness(history);
+    const next = syncAutoZones(history.current);
     expect(next.rooms).toHaveLength(1);
     expect(next.zones).toHaveLength(1);
   });
 
   it("failure returns the original plan object unchanged", () => {
-    const { syncAutoZones } = createSyncAutoZonesHarness();
-    const plan = closedRectPlan();
+    const history = new HistoryModel(closedRectPlan());
+    const { syncAutoZones } = createPlanPageRoomSyncHarness(history);
+    const plan = history.current;
     const next = syncAutoZones(plan, throwingSyncFn);
     expect(next).toBe(plan);
   });
 
   it("failure does not clear existing rooms/zones", () => {
-    const { syncAutoZones } = createSyncAutoZonesHarness();
     const plan = closedRectPlan();
     plan.rooms = [{ id: "r1", type: "room", name: "Сушка" }];
     plan.zones = [{ id: "r1", auto: true }];
+    const history = new HistoryModel(plan);
+    const { syncAutoZones } = createPlanPageRoomSyncHarness(history);
     const next = syncAutoZones(plan, throwingSyncFn);
     expect(next.rooms).toEqual(plan.rooms);
     expect(next.zones).toEqual(plan.zones);
   });
 
-  it("failure does not create a history checkpoint beyond the enclosing edit", () => {
+  it("failure inside a bundled edit checkpoints only the enclosing edit, not room sync", () => {
     const plan = closedRectPlan();
     const history = new HistoryModel(plan);
-    const { syncAutoZones } = createSyncAutoZonesHarness();
-    // Тот же паттерн, что и useEffect/handlers в PlanPage: setPlan(p => syncAutoZones(p)).
+    const { syncAutoZones } = createPlanPageRoomSyncHarness(history);
+    // Тот же паттерн, что и wall-edit handlers в PlanPage: setPlan(p => { ...edit...; return syncAutoZones(edited); }).
     history.setPlan((p) => syncAutoZones(p, throwingSyncFn));
     expect(history.past).toHaveLength(1); // ровно один checkpoint enclosing-операции
     expect(history.current).toBe(plan); // содержимое не изменилось (return p)
   });
 
   it("a following successful detection clears the session diagnostic", () => {
-    const { syncAutoZones, getDiagnostic } = createSyncAutoZonesHarness();
-    const plan = closedRectPlan();
+    const history = new HistoryModel(closedRectPlan());
+    const { syncAutoZones, getDiagnostic } = createPlanPageRoomSyncHarness(history);
+    const plan = history.current;
     syncAutoZones(plan, throwingSyncFn);
     expect(getDiagnostic()).toMatchObject({ code: ROOM_DETECTION_FAILED });
 
     syncAutoZones(plan); // повторный расчёт без инъекции — успешен
     expect(getDiagnostic()).toBeNull();
+  });
+});
+
+// ── PHASE 0G corrective #1 — history on the PURE room-only sync pattern ──
+// (useEffect autosync / кнопка «Синхронизировать зоны» — вызывают room sync
+// БЕЗ бандла с другой правкой геометрии; здесь rejected/no-op sync ранее мог
+// создать пустой history checkpoint через HistoryModel.mutate.)
+
+describe("PHASE 0G corrective — history on pure room-only sync (runAutoZonesSync)", () => {
+  it("room engine failure: no checkpoint, canUndo unchanged, same plan reference, diagnostic set", () => {
+    const plan = closedRectPlan();
+    const history = new HistoryModel(plan);
+    const harness = createPlanPageRoomSyncHarness(history);
+
+    harness.runAutoZonesSync(throwingSyncFn);
+
+    expect(history.past).toHaveLength(0);
+    expect(history.canUndo).toBe(false);
+    expect(history.current).toBe(plan);
+    expect(harness.getDiagnostic()).toMatchObject({ code: ROOM_DETECTION_FAILED });
+  });
+
+  it("successful room sync: exactly one history entry, undo restores the original plan", () => {
+    const plan = closedRectPlan(); // изначально rooms:[] — sync реально меняет план
+    const history = new HistoryModel(plan);
+    const harness = createPlanPageRoomSyncHarness(history);
+
+    harness.runAutoZonesSync();
+
+    expect(history.past).toHaveLength(1);
+    expect(history.canUndo).toBe(true);
+    expect(history.current).not.toBe(plan);
+    expect(history.current.rooms).toHaveLength(1);
+    expect(history.undo()).toBe(plan);
+  });
+
+  it("successful sync without actual changes does not create an empty checkpoint", () => {
+    const plan = closedRectPlan();
+    const history = new HistoryModel(plan);
+    const harness = createPlanPageRoomSyncHarness(history);
+
+    harness.runAutoZonesSync(); // первый sync -> реальное изменение (комната появляется)
+    expect(history.past).toHaveLength(1);
+
+    harness.runAutoZonesSync(); // повторный sync той же геометрии -> без изменений
+    expect(history.past).toHaveLength(1); // НЕ 2 — пустой checkpoint не создан
+    expect(history.canUndo).toBe(true);
+  });
+
+  it("failure after a successful sync leaves the already-committed plan and history intact", () => {
+    const plan = closedRectPlan();
+    const history = new HistoryModel(plan);
+    const harness = createPlanPageRoomSyncHarness(history);
+
+    harness.runAutoZonesSync(); // успех -> 1 checkpoint, rooms заполнены
+    const afterSuccess = history.current;
+    expect(history.past).toHaveLength(1);
+
+    harness.runAutoZonesSync(throwingSyncFn); // сбой -> НЕ должен ничего испортить
+
+    expect(history.past).toHaveLength(1); // без нового checkpoint
+    expect(history.current).toBe(afterSuccess); // committed-план не тронут
+    expect(harness.getDiagnostic()).toMatchObject({ code: ROOM_DETECTION_FAILED });
   });
 });
 
@@ -293,6 +454,111 @@ describe("PHASE 0G — normalize/load", () => {
     expect(plan).not.toHaveProperty("diagnostics");
     expect(plan).not.toHaveProperty("ok");
     expect(plan).not.toHaveProperty("roomSyncFn");
+  });
+});
+
+// ── PHASE 0G corrective #2 — normalizePlanResult (result-aware load) ─────
+
+describe("PHASE 0G corrective — normalizePlanResult result-aware contract", () => {
+  it("controlled failure during normalize: existing rooms preserved, diagnostics returned to caller (not into plan)", () => {
+    const polygon = [{ x: 0, y: 0 }, { x: 4000, y: 0 }, { x: 4000, y: 3000 }, { x: 0, y: 3000 }];
+    const raw = {
+      ...closedRectPlan(),
+      rooms: [{ id: "r1", type: "room", name: "Существующая комната", polygon }],
+      zones: [{ id: "r1", auto: true, polygon }],
+    };
+    const { plan, diagnostics } = normalizePlanResult(raw, { roomSyncFn: throwingSyncFn });
+    expect(plan.rooms).toHaveLength(1);
+    expect(plan.rooms[0].name).toBe("Существующая комната");
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({ code: ROOM_DETECTION_FAILED, severity: "error" });
+    expect(plan).not.toHaveProperty("diagnostics");
+  });
+
+  it("normalizePlan() compatibility wrapper returns only plan", () => {
+    const plan = normalizePlan(closedRectPlan(), { roomSyncFn: throwingSyncFn });
+    expect(plan).not.toHaveProperty("diagnostics");
+    expect(plan.rooms).toEqual([]); // closedRectPlan имеет пустые исходные rooms/zones
+  });
+
+  it("production-like load path: diagnostic reaches session-only UI state, not the serialized plan", () => {
+    // Воспроизводит src/pages/admin/PlanPage.jsx (эффект загрузки project/draft):
+    //   const { plan: normalized, diagnostics } = normalizePlanResult(raw);
+    //   resetHistory(normalized);
+    //   setRoomDetectionDiagnostic(diagnostics[0] || null);
+    let sessionDiagnostic = null;
+    const history = new HistoryModel(null);
+    const raw = closedRectPlan();
+
+    const load = (rawPlan, syncFn) => {
+      const { plan: normalized, diagnostics } = normalizePlanResult(rawPlan, syncFn ? { roomSyncFn: syncFn } : {});
+      history.reset(normalized);
+      sessionDiagnostic = diagnostics[0] || null;
+    };
+
+    load(raw, throwingSyncFn);
+    expect(sessionDiagnostic).toMatchObject({ code: ROOM_DETECTION_FAILED });
+    expect(JSON.stringify(history.current)).not.toContain("ROOM_DETECTION_FAILED");
+  });
+
+  it("honest empty room detection during load produces no diagnostic and no error", () => {
+    const { plan, diagnostics } = normalizePlanResult(noWallsPlan());
+    expect(plan.rooms).toEqual([]);
+    expect(diagnostics).toEqual([]);
+  });
+
+  it("recovery: a following successful load-time sync clears the diagnostic", () => {
+    let sessionDiagnostic = null;
+    const raw = closedRectPlan();
+
+    const load = (syncFn) => {
+      const { diagnostics } = normalizePlanResult(raw, syncFn ? { roomSyncFn: syncFn } : {});
+      sessionDiagnostic = diagnostics[0] || null;
+    };
+
+    load(throwingSyncFn);
+    expect(sessionDiagnostic).toMatchObject({ code: ROOM_DETECTION_FAILED });
+
+    load(); // повторная загрузка без инъекции — успех
+    expect(sessionDiagnostic).toBeNull();
+  });
+});
+
+// ── PHASE 0G corrective #3 — runPlanCheck behavior ────────────────────────
+
+describe("PHASE 0G corrective — runPlanCheck sees but never clears the room diagnostic", () => {
+  it("re-runs only validatePlanIntegrity, merges load-time diagnostic, never clears it itself", () => {
+    // Воспроизводит src/pages/admin/PlanPage.jsx runPlanCheck:
+    //   const result = validatePlanIntegrity(plan);
+    //   const merged = mergeDiagnosticsResult(result, roomDetectionDiagnostic ? [roomDetectionDiagnostic] : []);
+    let roomDetectionDiagnostic = null;
+    const plan = closedRectPlan();
+
+    const runPlanCheck = (currentPlan) => {
+      const result = validatePlanIntegrity(currentPlan);
+      return mergeDiagnosticsResult(result, roomDetectionDiagnostic ? [roomDetectionDiagnostic] : []);
+    };
+
+    // 1. Load-time failure устанавливает diagnostic — ВНЕ runPlanCheck.
+    roomDetectionDiagnostic = syncRoomsSafe(plan, throwingSyncFn).diagnostics[0];
+
+    // 2. runPlanCheck видит diagnostic, не запуская room detection повторно
+    //    (использует только validatePlanIntegrity).
+    const first = runPlanCheck(plan);
+    expect(first.diagnostics.some((d) => d.code === ROOM_DETECTION_FAILED)).toBe(true);
+
+    // 3. Повторный вызов runPlanCheck НЕ затирает и не очищает diagnostic сам по себе.
+    const second = runPlanCheck(plan);
+    expect(second.diagnostics.some((d) => d.code === ROOM_DETECTION_FAILED)).toBe(true);
+    expect(roomDetectionDiagnostic).not.toBeNull();
+
+    // 4. Только реальный успешный room sync (не runPlanCheck) очищает diagnostic.
+    const synced = syncRoomsSafe(plan);
+    roomDetectionDiagnostic = synced.ok ? null : synced.diagnostics[0];
+    expect(roomDetectionDiagnostic).toBeNull();
+
+    const third = runPlanCheck(plan);
+    expect(third.diagnostics.some((d) => d.code === ROOM_DETECTION_FAILED)).toBe(false);
   });
 });
 

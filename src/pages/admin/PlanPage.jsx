@@ -88,7 +88,7 @@ import { isDoorItem } from "../../planner/doorTypes.js";
 import { defaultWallFields, WALL_KINDS, THICKNESS_SIDES } from "../../planner/wallTypes.js";
 import { wallFieldsFromTool, defaultWallThkForTool, wallMaterialForTool } from "../../planner/wallToolPresets.js";
 import { usePlanHistory } from "../../planner/usePlanHistory.js";
-import { normalizePlan } from "../../planner/planNormalize.js";
+import { normalizePlan, normalizePlanResult } from "../../planner/planNormalize.js";
 import { isPlannerPlanCorrupt } from "../../planner/plannerPersistenceState.js";
 import { hitTestWallInteraction } from "../../planner/ui/hitTesting/planHitTest.js";
 import { validatePlanIntegrity } from "../../planner/core/validation/validatePlanIntegrity.js";
@@ -170,6 +170,11 @@ export default function PlanPage() {
   // чтобы не затереть исходные данные пустым планом.
   const plannerPlanCorrupt = !standalone && isPlannerPlanCorrupt(project);
 
+  // PHASE 0G corrective: lazy-seed для usePlanHistory — выполняется синхронно
+  // до первого effect, где нельзя безопасно вызвать setRoomDetectionDiagnostic.
+  // Diagnostic от этого начального normalize не теряется: effect ниже (загрузка
+  // standalone/project) выполняет normalizePlanResult ЗАНОВО сразу после mount
+  // и surfacing diagnostic через resetHistory + setRoomDetectionDiagnostic.
   const initialPlan = () => {
     if (standalone) return normalizePlan(draftMeta?.plan || getStandalonePlan(draftId)?.plan);
     return normalizePlan(project?.plan);
@@ -299,25 +304,37 @@ export default function PlanPage() {
     return () => ro.disconnect();
   }, []);
 
+  // PHASE 0G corrective: реальный production load path — result-aware API,
+  // room detection failure на загрузке всплывает в session-only state, а не
+  // теряется молча внутри normalizePlan().
   useEffect(() => {
     if (standalone) {
       const d = getStandalonePlan(draftId);
       if (d) {
         setDraftMeta(d);
-        resetHistory(normalizePlan(d.plan));
+        const { plan: normalized, diagnostics } = normalizePlanResult(d.plan);
+        resetHistory(normalized);
+        setRoomDetectionDiagnostic(diagnostics[0] || null);
       }
       return;
     }
     let cancelled = false;
     actions.loadProject(id).then((p) => {
-      if (!cancelled && p?.plan && Object.keys(p.plan).length) resetHistory(normalizePlan(p.plan));
+      if (!cancelled && p?.plan && Object.keys(p.plan).length) {
+        const { plan: normalized, diagnostics } = normalizePlanResult(p.plan);
+        resetHistory(normalized);
+        setRoomDetectionDiagnostic(diagnostics[0] || null);
+      }
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [id, draftId, standalone, actions, resetHistory]);
 
+  // PHASE 0G corrective: чистый room-only sync — runAutoZonesSync сам решает,
+  // вызывать ли setPlan (см. определение ниже). Rejected/no-op sync не создаёт
+  // history checkpoint.
   useEffect(() => {
     if (!planHasDrawnWalls(plan.walls)) return;
-    setPlan((p) => syncAutoZones(p));
+    runAutoZonesSync();
   }, [standalone ? draftId : id, plan.walls, plan.zones?.length, plan.rooms?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -575,24 +592,56 @@ export default function PlanPage() {
     return { pt, snap, guides: s?.guides || [] };
   }, [snapOn, snapStep, display.snapGrid, display.snapWalls, display.snapObjects, display.snapGuides, plan, view, measure]);
 
-  // PHASE 0G: syncRoomsSafe — единая orchestration-граница room detection.
-  // ok:false (сбой движка, не «нет комнат») не трогает план — существующие
-  // rooms/zones/metadata сохраняются как есть; сбой всплывает как session-only
-  // diagnostic в существующей панели «Проверить план» (runPlanCheck).
-  const syncAutoZones = (p) => {
+  // PHASE 0G corrective: чистое вычисление room sync БЕЗ setState/setPlan —
+  // { ok, plan, diagnostics }. Единственная точка, откуда caller решает, что
+  // делать с результатом: setPlan только при ok:true и реальном изменении.
+  const computeAutoZonesSync = (p) => {
     const synced = syncRoomsSafe({ ...p, walls: resolvePlanWalls(p) });
-    if (!synced.ok) {
-      setRoomDetectionDiagnostic(synced.diagnostics[0]);
+    if (!synced.ok) return { ok: false, plan: p, diagnostics: synced.diagnostics };
+    const dimWarnings = (p.validationWarnings || []).filter((w) => w.source === "dimensions");
+    return {
+      ok: true,
+      diagnostics: [],
+      plan: {
+        ...p,
+        rooms: synced.rooms,
+        zones: synced.zones,
+        validationWarnings: [...dimWarnings, ...(synced.validationWarnings || [])],
+      },
+    };
+  };
+
+  // PHASE 0G: используется callers, которые УЖЕ выполняют реальную правку
+  // геометрии (split/drag/delete/straighten) внутри того же setPlan updater —
+  // checkpoint там принадлежит этой правке независимо от исхода room sync.
+  // ok:false не трогает план — existing rooms/zones/metadata сохраняются как
+  // есть; сбой всплывает как session-only diagnostic в панели «Проверить план».
+  const syncAutoZones = (p) => {
+    const result = computeAutoZonesSync(p);
+    if (!result.ok) {
+      setRoomDetectionDiagnostic(result.diagnostics[0]);
       return p;
     }
     if (roomDetectionDiagnostic) setRoomDetectionDiagnostic(null);
-    const dimWarnings = (p.validationWarnings || []).filter((w) => w.source === "dimensions");
-    return {
-      ...p,
-      rooms: synced.rooms,
-      zones: synced.zones,
-      validationWarnings: [...dimWarnings, ...(synced.validationWarnings || [])],
-    };
+    return result.plan;
+  };
+
+  // PHASE 0G corrective: для «чистых» room-only sync (авто-эффект после
+  // загрузки/правки, кнопка «Синхронизировать зоны») — вычисляем результат ДО
+  // setPlan. Rejected sync НЕ вызывает setPlan вовсе (нет history checkpoint,
+  // canUndo не меняется, autosave не запускается). Успешный sync без
+  // фактических изменений rooms/zones тоже не создаёт пустой checkpoint.
+  const runAutoZonesSync = () => {
+    const result = computeAutoZonesSync(plan);
+    if (!result.ok) {
+      setRoomDetectionDiagnostic(result.diagnostics[0]);
+      return;
+    }
+    if (roomDetectionDiagnostic) setRoomDetectionDiagnostic(null);
+    const changed = JSON.stringify(result.plan.rooms) !== JSON.stringify(plan.rooms)
+      || JSON.stringify(result.plan.zones) !== JSON.stringify(plan.zones);
+    if (!changed) return;
+    setPlan(() => result.plan);
   };
 
   const applyTypedLength = () => {
@@ -2367,7 +2416,10 @@ export default function PlanPage() {
   const handleImportJson = async (file) => {
     try {
       const { plan: imported } = await readPlanFile(file);
-      resetHistory(normalizePlan(imported));
+      // PHASE 0G corrective: импорт — production load path, доступен UI.
+      const { plan: normalized, diagnostics } = normalizePlanResult(imported);
+      resetHistory(normalized);
+      setRoomDetectionDiagnostic(diagnostics[0] || null);
       setSaved(false);
     } catch (e) {
       alert("Не удалось импортировать: " + (e?.message || e));
@@ -3748,7 +3800,7 @@ export default function PlanPage() {
               onRoomPatch={(patch) => setPlan((p) => ({ ...p, room: { ...p.room, ...patch } }))}
               specSummary={specSummary}
               onSync={syncSpec}
-              onSyncZones={() => setPlan((p) => syncAutoZones(p))}
+              onSyncZones={runAutoZonesSync}
               onSelectPlanItem={handlePickPlanItem}
               projectId={project?.id}
             />
@@ -3768,7 +3820,7 @@ export default function PlanPage() {
                 onWallThk={setWallThk}
                 onRoomPatch={(patch) => setPlan((p) => ({ ...p, room: { ...p.room, ...patch } }))}
                 onSync={syncSpec}
-                onSyncZones={() => setPlan((p) => syncAutoZones(p))}
+                onSyncZones={runAutoZonesSync}
                 onSelectPlanItem={handlePickPlanItem}
                 projectId={project?.id}
               />
