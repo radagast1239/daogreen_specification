@@ -5,6 +5,105 @@
 import { dist, near, NODE_LINK_THR, breakWallAt, alignWallToNeighbor, straightenWall } from "./wallGeometry.js";
 
 export const NODE_MERGE_MM = 1;
+export const SPLIT_INTERSECTS_OPENING = "SPLIT_INTERSECTS_OPENING";
+export const SPLIT_OPENING_GEOMETRY_INVALID = "SPLIT_OPENING_GEOMETRY_INVALID";
+
+/**
+ * Допуск границы проёма при разрыве стены, в миллиметрах world-space.
+ *
+ * Политика:
+ *   • split строго внутри проёма дальше этого допуска от границ — блокируется;
+ *   • split точно на границе или в пределах допуска считается граничным (разрешён).
+ *
+ * marginT = WALL_SPLIT_BOUNDARY_TOLERANCE_MM / wallLength делает допуск
+ * инвариантным к длине стены: одинаковое расстояние в мм даёт одинаковый
+ * результат на стенах любой длины. Это НЕ snap tolerance, НЕ hit radius,
+ * НЕ NODE_LINK_THR и НЕ экранные пиксели — отдельный геометрический допуск.
+ */
+export const WALL_SPLIT_BOUNDARY_TOLERANCE_MM = 1;
+
+// Чисто численный guard от деления на ноль (НЕ геометрический допуск границ).
+const SPLIT_EPS = 1e-9;
+
+function projectParam(pt, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  return len2 > 0 ? ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / len2 : 0;
+}
+
+function pointAt(a, b, t) {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
+function isOpening(item) {
+  return item?.kind === "door" || item?.kind === "window";
+}
+
+function openingRange(item, a, b) {
+  const width = Number(item?.w ?? item?.widthMm);
+  if (!Number.isFinite(width) || width <= 0) return null;
+  const center = {
+    x: Number(item.x) + width / 2,
+    y: Number(item.y) + (Number(item.h) || 0) / 2,
+  };
+  if (!Number.isFinite(center.x) || !Number.isFinite(center.y)) return null;
+  const length = dist(a, b);
+  if (length <= SPLIT_EPS) return null;
+  const t = projectParam(center, a, b);
+  const half = width / (2 * length);
+  return { start: t - half, end: t + half, center: t };
+}
+
+/**
+ * Manual (persisted) размер против auto/derived. Auto/derived размеры
+ * регенерируются из геометрии, поэтому их нельзя превращать в persisted manual
+ * при разрыве стены.
+ */
+function isManualDimension(dim) {
+  if (dim?.auto === true) return false;
+  const kind = dim?.kind;
+  return kind == null || kind === "manual";
+}
+
+function remapWallDimension(dim, originalWallId, childWallIds, splitT, a, b, marginT) {
+  const at = dim?.attachedTo;
+  const attachedWallId = at?.wallId ?? at?.id;
+  if (at?.type !== "wall" || attachedWallId !== originalWallId) return { dimension: dim, remap: null, warning: null };
+  const t0 = Number.isFinite(at.t0) ? at.t0 : 0;
+  const t1 = Number.isFinite(at.t1) ? at.t1 : 1;
+  const lo = Math.min(t0, t1);
+  const hi = Math.max(t0, t1);
+  if (lo < splitT - marginT - SPLIT_EPS && hi > splitT + marginT + SPLIT_EPS) {
+    // Auto/derived размер, пересекающий split, не конвертируем в manual —
+    // он будет пересчитан регенерацией. Оставляем как есть (без дубля).
+    if (!isManualDimension(dim)) return { dimension: dim, remap: null, warning: null };
+    const p1 = dim.p1 || pointAt(a, b, t0);
+    const p2 = dim.p2 || pointAt(a, b, t1);
+    return {
+      dimension: { ...dim, p1, p2, attachedTo: null, kind: "manual", auto: false },
+      remap: { entityId: dim.id, fromWallId: originalWallId, toWallId: null, action: "detached-cross-split" },
+      warning: { code: "DIMENSION_DETACHED_AFTER_WALL_SPLIT", entityId: dim.id, wallId: originalWallId },
+    };
+  }
+  const targetIndex = hi <= splitT + marginT ? 0 : 1;
+  const rangeStart = targetIndex === 0 ? 0 : splitT;
+  const rangeLength = targetIndex === 0 ? splitT : 1 - splitT;
+  const local = (t) => (t - rangeStart) / rangeLength;
+  const nextAt = {
+    ...at,
+    ...(Object.prototype.hasOwnProperty.call(at, "id") ? { id: childWallIds[targetIndex] } : {}),
+    wallId: childWallIds[targetIndex],
+    segIndex: 0,
+    t0: local(t0),
+    t1: local(t1),
+  };
+  return {
+    dimension: { ...dim, attachedTo: nextAt },
+    remap: { entityId: dim.id, fromWallId: originalWallId, toWallId: childWallIds[targetIndex], action: "reattached" },
+    warning: null,
+  };
+}
 
 export function isNetworkPlan(plan) {
   return plan?.nodes && typeof plan.nodes === "object" && (plan.walls || []).some((w) => w.a && w.b);
@@ -267,21 +366,99 @@ export function tryMergeWallEdge(plan, wallId) {
 /** Разорвать ребро в точке клика — два ребра с общим узлом. */
 export function breakWallEdgeAt(plan, wallId, clickPt, makeId) {
   const rw = resolvePlanWalls(plan).find((w) => w.id === wallId);
+  if (!rw) return null;
   const parts = breakWallAt(rw, clickPt);
   if (!parts) return null;
   const splitPt = parts[0].pts[parts[0].pts.length - 1];
+  const a = rw.pts[0];
+  const b = rw.pts[rw.pts.length - 1];
+  const splitT = projectParam(splitPt, a, b);
+  const wallLength = dist(a, b);
+  const marginT = wallLength > SPLIT_EPS ? WALL_SPLIT_BOUNDARY_TOLERANCE_MM / wallLength : 0;
+  const attachedOpenings = (plan.items || [])
+    .filter((item) => isOpening(item) && item.wallId === wallId)
+    .map((item) => ({ item, range: openingRange(item, a, b) }));
+  // Проём этой стены с невычислимой геометрией блокирует split (не переносим эвристикой).
+  const invalidOpening = attachedOpenings.find(({ range }) => range === null);
+  if (invalidOpening) {
+    return {
+      ok: false,
+      plan,
+      error: {
+        code: SPLIT_OPENING_GEOMETRY_INVALID,
+        entityId: invalidOpening.item.id,
+        wallId,
+        message: "Не удалось надёжно вычислить геометрию проёма при разрыве стены.",
+      },
+    };
+  }
+  // marginT — геометрический допуск (мм → param). SPLIT_EPS лишь гасит FP-шум,
+  // чтобы split точно на границе допуска стабильно считался граничным (разрешён).
+  const intersecting = attachedOpenings.find(({ range }) =>
+    range.start < splitT - marginT - SPLIT_EPS && range.end > splitT + marginT + SPLIT_EPS);
+  if (intersecting) {
+    return {
+      ok: false,
+      plan,
+      error: {
+        code: SPLIT_INTERSECTS_OPENING,
+        message: "Нельзя разделить стену через дверной или оконный проём.",
+        entityId: intersecting.item.id,
+      },
+    };
+  }
   let nodes = { ...(plan.nodes || {}) };
   const rMid = findOrCreateNode(nodes, splitPt, makeId);
   nodes = rMid.nodes;
   const meta = pickWallMeta(rw);
+  const targetWallId = makeId("wl");
+  const childWallIds = [wallId, targetWallId];
   const walls = (plan.walls || [])
     .filter((w) => w.id !== wallId)
     .concat([
       { id: wallId, a: rw.a, b: rMid.id, ...meta },
-      { id: makeId("wl"), a: rMid.id, b: rw.b, ...meta },
+      { id: targetWallId, a: rMid.id, b: rw.b, ...meta },
     ]);
-  const newWallId = walls[walls.length - 1].id;
-  return { plan: { ...plan, nodes, walls }, newWallId };
+  const childSegments = [
+    { a: { ...a }, b: { ...splitPt } },
+    { a: { ...splitPt }, b: { ...b } },
+  ];
+  const openingRemap = [];
+  const items = (plan.items || []).map((item) => {
+    if (!isOpening(item) || item.wallId !== wallId) return item;
+    const range = openingRange(item, a, b);
+    if (!range) return item;
+    const targetIndex = range.center <= splitT ? 0 : 1;
+    const next = { ...item, wallId: childWallIds[targetIndex], wallSeg: childSegments[targetIndex] };
+    openingRemap.push({ entityId: item.id, fromWallId: wallId, toWallId: next.wallId });
+    return next;
+  });
+  const dimensionRemap = [];
+  const warnings = [];
+  const dimensions = (plan.dimensions || []).map((dim) => {
+    const result = remapWallDimension(dim, wallId, childWallIds, splitT, a, b, marginT);
+    if (result.remap) dimensionRemap.push(result.remap);
+    if (result.warning) warnings.push(result.warning);
+    return result.dimension;
+  });
+  const entityRemap = {
+    walls: { originalWallId: wallId, childWallIds },
+    openings: openingRemap,
+    dimensions: dimensionRemap,
+  };
+  return {
+    ok: true,
+    plan: { ...plan, nodes, walls, items, dimensions },
+    newWallId: targetWallId,
+    originalWallId: wallId,
+    splitNodeId: rMid.id,
+    splitT,
+    childWallIds,
+    sourceRange: [0, splitT],
+    targetRange: [splitT, 1],
+    entityRemap,
+    warnings,
+  };
 }
 
 export function straightenWallEdge(plan, wallId, mode = "h") {

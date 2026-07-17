@@ -2024,15 +2024,22 @@ export default function PlanPage() {
     else if (actionId === "wall-break" && sel.coll === "walls") {
       const mm = ctxMenuRef.current?.mm;
       if (!mm) return;
-      setPlan((p) => {
-        const res = breakWallEdgeAt(p, obj.id, mm, uid);
-        if (!res) {
-          window.alert("Не удалось разорвать стену — кликните ближе к сегменту.");
-          return p;
-        }
-        setSel({ coll: "walls", id: res.newWallId });
-        return syncAutoZones(res.plan);
-      });
+      // Split вычисляется ДО setPlan: заблокированный split не должен создавать
+      // history checkpoint, менять selection или запускать autosave.
+      const res = breakWallEdgeAt(plan, obj.id, mm, uid);
+      if (!res) {
+        window.alert("Не удалось разорвать стену — кликните ближе к сегменту.");
+        return;
+      }
+      if (res.ok === false) {
+        window.alert(res.error?.message || "Не удалось разорвать стену.");
+        return;
+      }
+      setPlan(() => syncAutoZones(res.plan));
+      setSel({ coll: "walls", id: res.newWallId });
+      if (res.warnings?.length) {
+        window.alert("Стена разделена. Часть размеров пересекала линию разрыва и была откреплена.");
+      }
     }
     else if (actionId === "rename" && sel.coll === "zones") {
       const name = prompt("Название помещения:", obj.name || "Помещение");

@@ -14,7 +14,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { normalizePlan } from "../src/planner/planNormalize.js";
-import { resolvePlanWalls, movePlanNode } from "../src/planner/wallNetwork.js";
+import { breakWallEdgeAt, resolvePlanWalls, movePlanNode } from "../src/planner/wallNetwork.js";
 import { resolveAttachedDimension } from "../src/planner/core/dimensions/model.js";
 import { runSnapEngine } from "../src/planner/core/snap/snapEngine.js";
 import { createPlannerSpecItems } from "../src/planner/specSync.js";
@@ -199,10 +199,28 @@ describe("PHASE 0A regressions — активные (поведение уже �
 });
 
 describe("PHASE 0A regressions — подтверждённые дефекты (todo до миграции)", () => {
-  // #1 ПОДТВЕРЖДЕНО: breakWallEdgeAt не мигрирует проём на новую половину стены.
-  // Дверь с center на второй половине сохраняет wallId исходной стены (теперь первая
-  // половина), новая половина получает новый id -> проём "отвязывается".
-  it.todo("opening remains attached after wall split");
+  // #1 АКТИВИРОВАН в PHASE 0F: split атомарно мигрирует opening references.
+  it("opening remains attached after wall split", () => {
+    const ids = ["n-mid", "w-right"];
+    const plan = {
+      nodes: { a: { x: 0, y: 0 }, b: { x: 6000, y: 0 } },
+      walls: [{ id: "w1", a: "a", b: "b" }],
+      items: [{ id: "d1", kind: "door", x: 4050, y: -50, w: 900, h: 100, wallId: "w1" }],
+    };
+    const result = breakWallEdgeAt(plan, "w1", { x: 3000, y: 0 }, () => ids.shift());
+    expect(result.ok).toBe(true);
+    expect(result.newWallId).toBe("w-right");
+    expect(result.plan.items[0].wallId).toBe("w-right");
+    expect(result.plan.items[0].wallSeg).toEqual({ a: { x: 3000, y: 0 }, b: { x: 6000, y: 0 } });
+
+    // Проём привязан к реальной дочерней стене, без opening-диагностик целостности.
+    const child = result.plan.walls.find((w) => w.id === "w-right");
+    expect(result.plan.nodes[child.a]).toEqual({ x: 3000, y: 0 });
+    expect(result.plan.nodes[child.b]).toEqual({ x: 6000, y: 0 });
+    const openingDiagnostics = validatePlanIntegrity(result.plan).diagnostics
+      .filter((d) => d.entityType === "opening");
+    expect(openingDiagnostics).toEqual([]);
+  });
 
   // #4 АКТИВИРОВАН в PHASE 0E (см. активный тест выше): порог узла переведён
   // в экранные пиксели и вынесен в ui/hitTesting/planHitTest.js.
