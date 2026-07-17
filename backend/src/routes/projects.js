@@ -1129,7 +1129,7 @@ function loadBrandingSettings() {
 
 /** Client-visible project files: excludes hidden frame_drawings (is_client_visible=0). */
 export function getClientProjectDocuments(projectId) {
-  return db.prepare(`
+  const documents = db.prepare(`
     SELECT
       f.id,
       f.type,
@@ -1153,6 +1153,28 @@ export function getClientProjectDocuments(projectId) {
       )
     ORDER BY f.uploaded_at DESC
   `).all(projectId);
+
+  const latestFrameDrawingByTarget = new Map();
+  return documents.filter((document) => {
+    if (document.type !== "frame_drawing") return true;
+    const targetKey =
+      document.moduleRackKey ||
+      document.stellageId ||
+      document.presetId ||
+      document.id;
+    const current = latestFrameDrawingByTarget.get(targetKey);
+    if (!current) {
+      latestFrameDrawingByTarget.set(targetKey, document);
+      return true;
+    }
+    const currentVersion = Number(current.drawingVersion || 0);
+    const candidateVersion = Number(document.drawingVersion || 0);
+    if (candidateVersion <= currentVersion) return false;
+    const currentIndex = documents.indexOf(current);
+    if (currentIndex >= 0) documents[currentIndex].__supersededFrameDrawing = true;
+    latestFrameDrawingByTarget.set(targetKey, document);
+    return true;
+  }).filter((document) => !document.__supersededFrameDrawing);
 }
 
 function serveClientProject(req, res) {

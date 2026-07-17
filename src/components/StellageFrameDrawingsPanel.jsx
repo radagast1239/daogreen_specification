@@ -14,6 +14,7 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
   const [presetDrawings, setPresetDrawings] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshBusyRack, setRefreshBusyRack] = useState('');
+  const [deleteDrawingBusy, setDeleteDrawingBusy] = useState('');
   const { actions, state } = useStore();
   const { confirm, success, error } = useToast();
   const materials = state.materials || [];
@@ -95,6 +96,26 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
     }
   };
 
+  const handleDeleteDrawing = async (drawing) => {
+    if (!drawing?.id) return;
+    const accepted = await confirm({
+      title: `Удалить версию v${drawing.version || 1}?`,
+      message: 'Будут удалены запись версии и её PDF. Актуальная схема стеллажа останется.',
+      confirmLabel: 'Удалить версию',
+    });
+    if (!accepted) return;
+    setDeleteDrawingBusy(drawing.id);
+    try {
+      await api.deleteFrameDrawing(drawing.id);
+      setDrawings((current) => current.filter((item) => item.id !== drawing.id));
+      success(`Версия v${drawing.version || 1} удалена.`);
+    } catch (err) {
+      error(err?.message || 'Не удалось удалить версию схемы.');
+    } finally {
+      setDeleteDrawingBusy('');
+    }
+  };
+
   if (!stellages.length) return null;
 
   return (
@@ -145,6 +166,8 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
                   canRefreshBom={refreshState.enabled}
                   refreshBomBusy={refreshBusyRack === moduleRackKey}
                   refreshBomDisabled={!refreshState.enabled}
+                  onDeleteDrawing={handleDeleteDrawing}
+                  deleteDrawingBusy={deleteDrawingBusy}
                 />
                 {!refreshState.enabled && refreshState.reason && latestDrawing && (
                   <p className="muted" style={{ fontSize: 10, margin: '4px 0 0' }}>

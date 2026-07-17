@@ -38,6 +38,8 @@ export default function FrameDrawingActions({
   canRefreshBom: canRefreshBomProp = null,
   projectItems = [],
   bomStatus = null,
+  onDeleteDrawing = null,
+  deleteDrawingBusy = '',
 }) {
   const [showOlder, setShowOlder] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -285,6 +287,20 @@ export default function FrameDrawingActions({
               <Link to={buildFrameDrawingLink({ ...context, drawingId: d.id })} target="_blank" rel="noreferrer">
                 открыть
               </Link>
+              {onDeleteDrawing && (
+                <>
+                  {' · '}
+                  <button
+                    type="button"
+                    className="btn-link"
+                    style={{ fontSize: 11, padding: 0, color: 'var(--danger, #a33)' }}
+                    disabled={deleteDrawingBusy === d.id}
+                    onClick={() => onDeleteDrawing(d)}
+                  >
+                    {deleteDrawingBusy === d.id ? 'удаляю…' : 'удалить версию'}
+                  </button>
+                </>
+              )}
             </li>
           ))}
         </ul>
