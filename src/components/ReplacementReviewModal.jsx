@@ -1,12 +1,13 @@
 import React from "react";
-import { api } from "../lib/api.js";
 import { num, money } from "../store/helpers.js";
 import { purchasePriorityLabel } from "../../shared/purchasePriority.js";
 import { PURCHASE_PRIORITIES } from "../../shared/purchasePriority.js";
 import { enrichRoom, actualCoolingFromItem } from "../../shared/roomCoolingCalc.js";
 import { roomLabel } from "../lib/roomHelpers.js";
+import { useStore } from "../store/StoreContext.jsx";
 
 export default function ReplacementReviewModal({ projectId, item, currency, onClose, onDone }) {
+  const { actions } = useStore();
   const [link, setLink] = React.useState(item?.replacementLink || item?.link || "");
   const [supplier, setSupplier] = React.useState(item?.supplier || "");
   const [price, setPrice] = React.useState(
@@ -20,7 +21,7 @@ export default function ReplacementReviewModal({ projectId, item, currency, onCl
   const review = async (action) => {
     setBusy(true);
     try {
-      await api.reviewReplacement(projectId, item.id, {
+      await actions.reviewReplacement(projectId, item.id, {
         action,
         link,
         supplier,

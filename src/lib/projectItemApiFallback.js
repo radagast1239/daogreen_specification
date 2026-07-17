@@ -51,13 +51,13 @@ export async function bulkPatchItemsWithFallback(request, projectId, body = {}) 
 export async function refreshItemsFromMaterialWithFallback(
   request,
   projectId,
-  { itemIds = [], fields = [] } = {},
+  { itemIds = [], fields = [], expectedRevision } = {},
   { items = [], materials = [] } = {}
 ) {
   try {
     return await request(`/api/projects/${projectId}/items/refresh-from-material`, {
       method: "POST",
-      body: { itemIds, fields },
+      body: { itemIds, fields, expectedRevision },
     });
   } catch (e) {
     if (e?.status !== 404) throw e;

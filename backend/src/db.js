@@ -125,6 +125,7 @@ export function initDb() {
       zones TEXT NOT NULL DEFAULT '[]',
       stellage_configs TEXT NOT NULL DEFAULT '[]',
       manual_params TEXT NOT NULL DEFAULT '{}',
+      revision INTEGER NOT NULL DEFAULT 1,
       version INTEGER NOT NULL DEFAULT 1,
       last_client_activity_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -276,6 +277,9 @@ function migrateDb() {
   addCol("project_items", "source_object_ids", "TEXT NOT NULL DEFAULT '[]'");
   addCol("projects", "planner_plan", "TEXT NOT NULL DEFAULT '{}'");
   addCol("projects", "planner_sync_at", "TEXT DEFAULT ''");
+  // Technical optimistic-lock revision. Adding the column is non-destructive:
+  // SQLite assigns the DEFAULT to existing rows without rewriting project data.
+  addCol("projects", "revision", "INTEGER NOT NULL DEFAULT 1");
   addCol("material_price_history", "changed_by", "TEXT DEFAULT ''");
 
   const needsItemFlagBackfill = db
@@ -543,6 +547,7 @@ export function rowToProject(row, items = []) {
     plannerSyncAt: row.planner_sync_at || mpRaw.plannerSyncAt || "",
     rooms: JSON.parse(row.rooms || "[]"),
     version: row.version,
+    revision: Number(row.revision) || 1,
     lastClientActivityAt: row.last_client_activity_at,
     clientTokenExpiresAt: row.client_token_expires_at || "",
     purchaseStartedAt: row.purchase_started_at || "",

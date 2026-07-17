@@ -4,7 +4,7 @@ import { useStore } from "../../store/StoreContext.jsx";
 import { projectTotals, money } from "../../store/helpers.js";
 import { PURCHASE_STATUSES } from "../../data/modules.js";
 import { clientVisibleItems, clientPurchaseItems } from "../../lib/itemHelpers.js";
-import { Progress, Empty } from "../../components/ui.jsx";
+import { Progress, Empty, Modal } from "../../components/ui.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
 import { setClientScope } from "../../components/ClientGuard.jsx";
 import { photoSrc } from "../../lib/api.js";
@@ -70,6 +70,7 @@ export default function ClientProjectPage() {
   const [topbarExpanded, setTopbarExpanded] = useState(() =>
     typeof window !== "undefined" ? !window.matchMedia("(max-width: 860px)").matches : true
   );
+  const [revisionConflict, setRevisionConflict] = useState(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -228,6 +229,26 @@ export default function ClientProjectPage() {
     setTab(nextTab);
   };
 
+  const reloadClientProject = async () => {
+    const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
+    applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
+    setData(fresh);
+    setRevisionConflict(null);
+    return fresh;
+  };
+
+  const handleClientWriteError = (error) => {
+    if (error?.code === "PROJECT_REVISION_CONFLICT") {
+      setRevisionConflict({
+        expectedRevision: error.expectedRevision,
+        currentRevision: error.currentRevision,
+        projectId: error.projectId,
+      });
+      return true;
+    }
+    return false;
+  };
+
   const patch = async (itemId, p) => {
     setData((prev) => {
       if (!prev?.project?.items) return prev;
@@ -235,18 +256,19 @@ export default function ClientProjectPage() {
       return { ...prev, project: { ...prev.project, items } };
     });
     try {
-      const updated = await actions.clientPatchItem(token, itemId, p);
+      const updated = await actions.clientPatchItem(decodeURIComponent(token || ""), itemId, p);
       if (updated?.id) {
         setData((prev) => {
           if (!prev?.project?.items) return prev;
           const items = prev.project.items.map((it) => (it.id === itemId ? { ...it, ...updated } : it));
-          return { ...prev, project: { ...prev.project, items } };
+          const next = { ...prev, project: { ...prev.project, items } };
+          if (updated.revision != null) next.revision = updated.revision;
+          return next;
         });
       }
-    } catch {
-      const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
-      applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
-      setData(fresh);
+    } catch (error) {
+      if (handleClientWriteError(error)) return;
+      await reloadClientProject();
     }
   };
 
@@ -260,25 +282,31 @@ export default function ClientProjectPage() {
     try {
       const result = await api.bulkPatchClientItems(decodeURIComponent(token || ""), { itemIds, patch: p });
       const byId = new Map((result?.updated || []).map((it) => [it.id, it]));
-      if (byId.size) {
+      if (byId.size || result?.revision != null) {
         setData((prev) => {
           if (!prev?.project?.items) return prev;
-          const items = prev.project.items.map((it) => (byId.has(it.id) ? { ...it, ...byId.get(it.id) } : it));
-          return { ...prev, project: { ...prev.project, items } };
+          const items = byId.size
+            ? prev.project.items.map((it) => (byId.has(it.id) ? { ...it, ...byId.get(it.id) } : it))
+            : prev.project.items;
+          const next = { ...prev, project: { ...prev.project, items } };
+          if (result.revision != null) next.revision = result.revision;
+          return next;
         });
       }
-    } catch {
-      const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
-      applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
-      setData(fresh);
+    } catch (error) {
+      if (handleClientWriteError(error)) return;
+      await reloadClientProject();
     }
   };
 
   const proposeReplacement = async (body) => {
-    await api.proposeClientReplacement(decodeURIComponent(token || ""), replacementItem.id, body);
-    const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
-    applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
-    setData(fresh);
+    try {
+      await api.proposeClientReplacement(decodeURIComponent(token || ""), replacementItem.id, body);
+      await reloadClientProject();
+    } catch (error) {
+      if (handleClientWriteError(error)) return;
+      throw error;
+    }
   };
 
   const exportPdf = async (mode = "client_full") => {
@@ -520,6 +548,19 @@ export default function ClientProjectPage() {
         onClose={() => setPdfExportOpen(false)}
         onExport={exportPdf}
       />
+      {revisionConflict && (
+        <Modal
+          title="Конфликт изменений проекта"
+          onClose={() => setRevisionConflict(null)}
+          footer={<>
+            <button type="button" className="btn" onClick={() => setRevisionConflict(null)}>Остаться и скопировать свои изменения</button>
+            <button type="button" className="btn btn-primary" onClick={reloadClientProject}>Загрузить актуальную версию</button>
+          </>}
+        >
+          <p>Проект изменён в другой вкладке. Ваши изменения не сохранены поверх новой версии.</p>
+          <p className="muted">Серверная версия: {revisionConflict.currentRevision}; версия этой вкладки: {revisionConflict.expectedRevision}.</p>
+        </Modal>
+      )}
     </div>
   );
 }

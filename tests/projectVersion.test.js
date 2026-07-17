@@ -22,6 +22,11 @@ let loadProject;
 let saveItems;
 let createVersion;
 let updateProject;
+
+function lockedUpdate(id, patch) {
+  const revision = Number(db.prepare("SELECT revision FROM projects WHERE id = ?").get(id)?.revision) || 1;
+  return updateProject(id, { ...patch, expectedRevision: revision });
+}
 let listVersions;
 let loadVersionRow;
 let loadPublishedSnapshotItems;
@@ -190,7 +195,7 @@ describe("published release snapshot", () => {
     expect(published.coolingRooms[0].selectedItemId).toBeUndefined();
     expect(published.coolingRooms[0].comment).toBeUndefined();
 
-    updateProject("p1", { rooms: [{ ...room, name: "Черновое новое имя", cooling: { ...room.cooling, recommendedKw: 99 } }] });
+    lockedUpdate("p1", { rooms: [{ ...room, name: "Черновое новое имя", cooling: { ...room.cooling, recommendedKw: 99 } }] });
     const clientProject = buildClientProjectFromRelease(loadProject("p1"), published, { overlayLive: false });
     expect(clientProject.rooms[0].name).toBe("Рассадная");
     expect(clientProject.rooms[0].cooling.recommendedKw).toBe(8.4);
@@ -208,7 +213,7 @@ describe("published release snapshot", () => {
     expect(published.farmPower.devices).toHaveLength(2);
     expect(published.farmPower.devices[1]).toMatchObject({ name: "Кондиционер", normalKw: 12, peakKw: 18 });
 
-    updateProject("p1", { manualParams: { farmPower: { devices: [{ id: "draft", name: "Черновик", normalKw: 99, peakKw: 99 }] } } });
+    lockedUpdate("p1", { manualParams: { farmPower: { devices: [{ id: "draft", name: "Черновик", normalKw: 99, peakKw: 99 }] } } });
     const clientProject = buildClientProjectFromRelease(loadProject("p1"), published, { overlayLive: false });
     expect(clientProject.farmPower.devices).toMatchObject(farmPower.devices);
   });
@@ -261,9 +266,9 @@ describe("published release snapshot", () => {
     createVersion("p1", "admin", { force: true });
     const afterPublish = loadProject("p1");
     const versionId = afterPublish.manualParams.publishedRelease.versionId;
-    updateProject("p1", { status: "ready_to_send" });
+    lockedUpdate("p1", { status: "ready_to_send" });
     expect(listVersions("p1")).toHaveLength(1);
-    updateProject("p1", { status: "sent_to_client" });
+    lockedUpdate("p1", { status: "sent_to_client" });
     expect(listVersions("p1")).toHaveLength(1);
     expect(loadProject("p1").manualParams.publishedRelease.versionId).toBe(versionId);
   });

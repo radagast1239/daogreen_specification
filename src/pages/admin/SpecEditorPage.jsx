@@ -187,7 +187,7 @@ export default function SpecEditorPage() {
     });
     if (!ok) return;
     try {
-      const res = await api.refreshItemsFromMaterial(
+      const res = await actions.refreshItemsFromMaterial(
         project.id,
         { itemIds: ids, fields: ["clientSection"] },
         { items: project.items, materials: state.materials }
@@ -590,7 +590,7 @@ export default function SpecEditorPage() {
     const normalizedPatch =
       patch.visibleToClient != null ? buildClientVisibilityPatch(patch.visibleToClient) : patch;
     try {
-      await api.bulkPatchItems(project.id, { itemIds: ids, patch: normalizedPatch });
+      await actions.bulkPatchItems(project.id, { itemIds: ids, patch: normalizedPatch });
       await actions.loadProject(project.id);
       if (patch.visibleToClient != null) {
         actions.applyItemsVisibilityPatch(project.id, ids, normalizedPatch);
@@ -604,7 +604,7 @@ export default function SpecEditorPage() {
   const bulkDeliveryRefreshPrice = async () => {
     if (!specSelectedIds.length || !project) return;
     try {
-      const res = await api.refreshItemsFromMaterial(
+      const res = await actions.refreshItemsFromMaterial(
         project.id,
         { itemIds: specSelectedIds, fields: ["price"] },
         { items: project.items, materials: state.materials }
@@ -860,7 +860,7 @@ export default function SpecEditorPage() {
               type="button"
               className="btn btn-sm btn-primary"
               onClick={async () => {
-                await api.refreshItemsFromMaterial(
+                await actions.refreshItemsFromMaterial(
                   project.id,
                   {
                     itemIds: stalePrices.map((s) => s.itemId),
@@ -943,7 +943,7 @@ export default function SpecEditorPage() {
               disabled={!applyTplId}
               onClick={async () => {
                 const tpl = sectionTemplates.find((t) => t.id === applyTplId);
-                await api.applySectionTemplate(project.id, {
+                await actions.applySectionTemplate(project.id, {
                   templateId: applyTplId,
                   targetModule: tpl?.moduleName,
                 });
@@ -1238,7 +1238,7 @@ function SpecTab({
       return;
     }
     try {
-      const res = await api.refreshItemsFromMaterial(
+      const res = await actions.refreshItemsFromMaterial(
         project.id,
         { itemIds, fields },
         { items: project.items, materials }
@@ -1330,7 +1330,7 @@ function SpecTab({
           });
         }
       } else {
-        await api.bulkPatchItems(project.id, { itemIds: ids, patch });
+        await actions.bulkPatchItems(project.id, { itemIds: ids, patch });
         await actions.loadProject(project.id);
       }
       setModuleSelected((s) => ({ ...s, [module]: new Set() }));

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
 import { IMPORT_KIND_LABELS } from "../../shared/importFromProject.js";
+import { useStore } from "../store/StoreContext.jsx";
 
 const QUICK_ACTIONS = [
   ["section", "Раздел из прошлого"],
@@ -39,6 +40,7 @@ export default function ImportFromProjectModal({
   initialModule = "",
   initialItemIds = [],
 }) {
+  const { actions } = useStore();
   const [sourceProject, setSourceProject] = useState(null);
   const others = useMemo(
     () => (projects || []).filter((p) => p.id !== targetProjectId),
@@ -97,7 +99,7 @@ export default function ImportFromProjectModal({
   const apply = async () => {
     setApplying(true);
     try {
-      const res = await api.importFromProject(targetProjectId, {
+      const res = await actions.importFromProject(targetProjectId, {
         sourceProjectId: sourceId,
         kind,
         module: kind === "section" ? module : "",

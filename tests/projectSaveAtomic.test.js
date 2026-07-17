@@ -1,7 +1,7 @@
 /**
  * ATOMIC PROJECT SAVE — полное сохранение проекта должно быть атомарным.
  *
- * Раньше updateProject() коммитил стадии по отдельности:
+ * Раньше lockedUpdate() коммитил стадии по отдельности:
  *   saveItems() (BEGIN/COMMIT) → publishReleaseIfNeeded() → UPDATE_PROJECT.run()
  * Падение на любой стадии после первой оставляло позиции заменёнными,
  * а metadata/статус/публикацию — несохранёнными.
@@ -22,6 +22,11 @@ let initDb;
 let loadProject;
 let loadProjectItems;
 let updateProject;
+
+function lockedUpdate(id, patch) {
+  const revision = Number(db.prepare("SELECT revision FROM projects WHERE id = ?").get(id)?.revision) || 1;
+  return updateProject(id, { ...patch, expectedRevision: revision });
+}
 let loadPublishedReleaseSnapshot;
 let buildClientProjectFromRelease;
 
@@ -115,7 +120,7 @@ afterAll(() => {
 
 describe("1. успешное полное сохранение", () => {
   it("metadata + manualParams + статус + позиции сохраняются вместе", () => {
-    const res = updateProject("p1", {
+    const res = lockedUpdate("p1", {
       name: "Новое имя",
       city: "Казань",
       status: "in_progress",
@@ -149,7 +154,7 @@ describe("1. успешное полное сохранение", () => {
       clientVisible: true,
     };
 
-    const saved = updateProject("p1", {
+    const saved = lockedUpdate("p1", {
       name: "Опубликованный проект",
       status: "ready_to_send",
       manualParams: { projectSchemes: [projectScheme] },
@@ -182,13 +187,13 @@ describe("1. успешное полное сохранение", () => {
 describe("2. ошибка вставки позиции → полный откат", () => {
   it("дубликат id позиции (PRIMARY KEY) не меняет ни metadata, ни статус, ни старые items", () => {
     // исходное состояние
-    updateProject("p1", { items: [item("keep1"), item("keep2")] });
+    lockedUpdate("p1", { items: [item("keep1"), item("keep2")] });
     const before = snapshot();
     expect(before.items.map((i) => i.id)).toEqual(["keep1", "keep2"]);
 
     // вторая вставка с тем же id падает на PRIMARY KEY уже ПОСЛЕ DELETE+первого INSERT
     expect(() =>
-      updateProject("p1", {
+      lockedUpdate("p1", {
         name: "НЕ ДОЛЖНО СОХРАНИТЬСЯ",
         city: "НЕ ДОЛЖНО",
         status: "in_progress",
@@ -208,10 +213,10 @@ describe("2. ошибка вставки позиции → полный отк�
   });
 
   it("ошибка валидации позиций тоже не трогает проект", () => {
-    updateProject("p1", { items: [item("keep1")] });
+    lockedUpdate("p1", { items: [item("keep1")] });
     const before = snapshot();
     expect(() =>
-      updateProject("p1", {
+      lockedUpdate("p1", {
         name: "НЕ ДОЛЖНО",
         items: [item("bad", { materialId: "missing-material" })],
       }),
@@ -222,12 +227,12 @@ describe("2. ошибка вставки позиции → полный отк�
 
 describe("3. ошибка ПОСЛЕ сохранения позиций → новые позиции тоже откатываются", () => {
   it("падение UPDATE проекта (NOT NULL name) откатывает уже вставленные items", () => {
-    updateProject("p1", { items: [item("old1"), item("old2")] });
+    lockedUpdate("p1", { items: [item("old1"), item("old2")] });
     const before = snapshot();
 
     // items пройдут вставку, затем UPDATE_PROJECT упадёт на NOT NULL name
     expect(() =>
-      updateProject("p1", {
+      lockedUpdate("p1", {
         items: [item("new1"), item("new2"), item("new3")],
         name: null,
       }),
@@ -242,12 +247,12 @@ describe("3. ошибка ПОСЛЕ сохранения позиций → н�
 
 describe("4. ошибка создания client release → полный откат", () => {
   it("blocked publish validation откатывает items, metadata и статус", () => {
-    updateProject("p1", { items: [item("old1")] });
+    lockedUpdate("p1", { items: [item("old1")] });
     const before = snapshot();
 
     // zero_price — критическая проблема публикации (CRITICAL_ISSUES)
     expect(() =>
-      updateProject("p1", {
+      lockedUpdate("p1", {
         name: "НЕ ДОЛЖНО СОХРАНИТЬСЯ",
         status: "ready_to_send", // publish workflow → создаётся release
         manualParams: {
@@ -279,7 +284,7 @@ describe("4. ошибка создания client release → полный от�
       }),
     );
 
-    const res = updateProject("p1", { status: "sent_to_client", name: "Опубликован", items: [] });
+    const res = lockedUpdate("p1", { status: "sent_to_client", name: "Опубликован", items: [] });
 
     expect(res.status).toBe("sent_to_client");
     expect(res.name).toBe("Опубликован");
@@ -310,12 +315,12 @@ describe("5. повторное сохранение", () => {
       responsible: "Иван",
     });
 
-    updateProject("p1", { name: "Сейв 1", items: [manualRow, frameBom, purchase] });
+    lockedUpdate("p1", { name: "Сейв 1", items: [manualRow, frameBom, purchase] });
     const first = loadProjectItems("p1");
     expect(first).toHaveLength(3);
 
     // второе сохранение тем же набором (round-trip как из UI)
-    updateProject("p1", { name: "Сейв 2", items: first });
+    lockedUpdate("p1", { name: "Сейв 2", items: first });
     const second = loadProjectItems("p1");
 
     // проект не пересоздан, дублей нет
@@ -343,10 +348,10 @@ describe("5. повторное сохранение", () => {
 
 describe("6. сохранение без items", () => {
   it("PATCH только metadata/статуса работает и не трогает позиции", () => {
-    updateProject("p1", { items: [item("keep1"), item("keep2")] });
+    lockedUpdate("p1", { items: [item("keep1"), item("keep2")] });
     const itemsBefore = loadProjectItems("p1").map((i) => i.id).sort();
 
-    const res = updateProject("p1", { name: "Только метаданные", status: "in_progress" });
+    const res = lockedUpdate("p1", { name: "Только метаданные", status: "in_progress" });
 
     expect(res.name).toBe("Только метаданные");
     expect(res.status).toBe("in_progress");
@@ -354,21 +359,21 @@ describe("6. сохранение без items", () => {
   });
 
   it("PATCH только manualParams мержится и не теряет существующие ключи", () => {
-    updateProject("p1", { manualParams: { b: 2 } });
+    lockedUpdate("p1", { manualParams: { b: 2 } });
     const mp = JSON.parse(db.prepare("SELECT manual_params FROM projects WHERE id='p1'").get().manual_params);
     expect(mp).toMatchObject({ a: 1, b: 2 });
   });
 
   it("несуществующий проект → null, без исключения", () => {
-    expect(updateProject("nope", { name: "x" })).toBeNull();
+    expect(lockedUpdate("nope", { name: "x" })).toBeNull();
   });
 });
 
 describe("транзакция не остаётся открытой после ошибки", () => {
   it("после падения последующее сохранение работает нормально", () => {
-    expect(() => updateProject("p1", { items: [item("dup"), item("dup")] })).toThrow();
+    expect(() => lockedUpdate("p1", { items: [item("dup"), item("dup")] })).toThrow();
     // если бы транзакция не откатилась/осталась открытой — следующий BEGIN упал бы
-    const res = updateProject("p1", { name: "После ошибки", items: [item("ok1")] });
+    const res = lockedUpdate("p1", { name: "После ошибки", items: [item("ok1")] });
     expect(res.name).toBe("После ошибки");
     expect(loadProjectItems("p1").map((i) => i.id)).toEqual(["ok1"]);
   });

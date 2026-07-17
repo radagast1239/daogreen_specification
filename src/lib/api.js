@@ -6,6 +6,31 @@ import {
 const API = (import.meta.env.VITE_API_URL || import.meta.env.BASE_URL || "").replace(/\/$/, "");
 
 const ADMIN_KEY_STORAGE = "daogreen-admin-key";
+const projectRevisionCache = new Map();
+const clientRevisionCache = new Map();
+
+function projectIdFromPath(path) {
+  const match = String(path).match(/^\/api\/projects\/([^/?]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+function rememberProjectRevision(projectId, value) {
+  const revision = Number(value?.revision ?? value);
+  if (projectId && revision > 0) projectRevisionCache.set(projectId, revision);
+}
+
+function rememberClientRevision(token, value) {
+  const revision = Number(value?.revision ?? value);
+  if (token && revision > 0) clientRevisionCache.set(token, revision);
+}
+
+export function getCachedProjectRevision(projectId) {
+  return projectRevisionCache.get(projectId) || null;
+}
+
+export function getCachedClientRevision(token) {
+  return clientRevisionCache.get(token) || null;
+}
 
 export function getAdminKey() {
   return localStorage.getItem(ADMIN_KEY_STORAGE) || "";
@@ -20,20 +45,38 @@ async function request(path, { method = "GET", body, admin = true, token } = {})
   if (admin) headers["X-Admin-Key"] = getAdminKey();
   if (token) headers["X-Client-Token"] = token;
 
+  const projectId = projectIdFromPath(path);
+  let effectiveBody = body;
+  if (admin && projectId && method !== "GET" && method !== "DELETE" && body && typeof body === "object" && body.expectedRevision == null) {
+    effectiveBody = { ...body, expectedRevision: projectRevisionCache.get(projectId) };
+  }
+  if (!admin && token && method !== "GET" && body && typeof body === "object" && body.expectedRevision == null) {
+    effectiveBody = { ...body, expectedRevision: clientRevisionCache.get(token) };
+  }
   const res = await fetch(`${API}${path}`, {
     method,
     headers,
-    body: body != null ? JSON.stringify(body) : undefined,
+    body: effectiveBody != null ? JSON.stringify(effectiveBody) : undefined,
   });
 
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error(data.error || `HTTP ${res.status}`);
+    const payload = data?.error && typeof data.error === "object" ? data.error : data;
+    const err = new Error(payload?.message || data.error || `HTTP ${res.status}`);
     err.status = res.status;
-    if (data.code) err.code = data.code;
+    if (payload?.code) err.code = payload.code;
+    if (payload?.projectId) err.projectId = payload.projectId;
+    if (payload?.expectedRevision != null) err.expectedRevision = payload.expectedRevision;
+    if (payload?.currentRevision != null) err.currentRevision = payload.currentRevision;
     if (data.problems) err.problems = data.problems;
     throw err;
+  }
+  if (Array.isArray(data)) {
+    for (const project of data) rememberProjectRevision(project?.id, project);
+  } else {
+    rememberProjectRevision(projectId || data?.id || data?.projectId || data?.project?.id, data?.project || data);
+    if (token) rememberClientRevision(token, data);
   }
   return data;
 }
@@ -117,18 +160,18 @@ export const api = {
     request(`/api/projects/${id}/sections/${encodeURIComponent(module)}/save-template`, { method: "POST", body }),
   applySectionTemplate: (id, body) =>
     request(`/api/projects/${id}/apply-section-template`, { method: "POST", body }),
-  approveAll: (id) => request(`/api/projects/${id}/approve-all`, { method: "POST" }),
-  createVersion: (id, body) => request(`/api/projects/${id}/versions`, { method: "POST", body: body || {} }),
+  approveAll: (id, expectedRevision) => request(`/api/projects/${id}/approve-all`, { method: "POST", body: { expectedRevision } }),
+  createVersion: (id, body, expectedRevision) => request(`/api/projects/${id}/versions`, { method: "POST", body: { ...(body || {}), expectedRevision } }),
   getVersions: (id) => request(`/api/projects/${id}/versions`),
-  regenerateToken: (id) => request(`/api/projects/${id}/regenerate-token`, { method: "POST" }),
-  patchItem: (projectId, itemId, patch) =>
-    request(`/api/projects/${projectId}/items/${encodeURIComponent(itemId)}`, { method: "PATCH", body: patch }),
+  regenerateToken: (id, expectedRevision) => request(`/api/projects/${id}/regenerate-token`, { method: "POST", body: { expectedRevision } }),
+  patchItem: (projectId, itemId, patch, expectedRevision) =>
+    request(`/api/projects/${projectId}/items/${encodeURIComponent(itemId)}`, { method: "PATCH", body: { ...patch, expectedRevision } }),
   refreshItemsFromMaterial: (projectId, body, context) =>
     refreshItemsFromMaterialWithFallback(request, projectId, body, context),
   bulkPatchItems: (projectId, body) => bulkPatchItemsWithFallback(request, projectId, body),
-  addItem: (projectId, item) => request(`/api/projects/${projectId}/items`, { method: "POST", body: item }),
-  deleteItem: (projectId, itemId) =>
-    request(`/api/projects/${projectId}/items/${encodeURIComponent(itemId)}`, { method: "DELETE" }),
+  addItem: (projectId, item, expectedRevision) => request(`/api/projects/${projectId}/items`, { method: "POST", body: { ...item, expectedRevision } }),
+  deleteItem: (projectId, itemId, expectedRevision) =>
+    request(`/api/projects/${projectId}/items/${encodeURIComponent(itemId)}?expectedRevision=${encodeURIComponent(expectedRevision ?? projectRevisionCache.get(projectId) ?? "")}`, { method: "DELETE" }),
 
   getClientProject: (token) =>
     request(`/api/client/p/${encodeURIComponent(token)}`, { admin: false, token }),
@@ -146,10 +189,10 @@ export const api = {
       admin: false,
       token,
     }),
-  patchClientCooling: (token, safetyFactor) =>
+  patchClientCooling: (token, safetyFactor, expectedRevision) =>
     request(`/api/client/p/${encodeURIComponent(token)}/cooling`, {
       method: "PATCH",
-      body: { safetyFactor },
+      body: { safetyFactor, expectedRevision },
       admin: false,
       token,
     }),
@@ -267,8 +310,8 @@ export const api = {
     }
     return data;
   },
-  archiveProject: (id) => request(`/api/projects/${id}/archive`, { method: "POST" }),
-  restoreProject: (id) => request(`/api/projects/${id}/restore`, { method: "POST" }),
+  archiveProject: (id, expectedRevision) => request(`/api/projects/${id}/archive`, { method: "POST", body: { expectedRevision } }),
+  restoreProject: (id, expectedRevision) => request(`/api/projects/${id}/restore`, { method: "POST", body: { expectedRevision: expectedRevision ?? projectRevisionCache.get(id) } }),
 };
 
 export function photoSrc(url) {

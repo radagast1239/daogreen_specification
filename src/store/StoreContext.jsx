@@ -2,13 +2,14 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { buildReferenceData } from "../lib/referenceData.js";
 import { applyClientSectionsFromSettings } from "../lib/clientSectionsConfig.js";
 import { buildItemsFromModules } from "../lib/apiHelpers.js";
-import { api as apiClient } from "../lib/api.js";
+import { api as apiClient, getCachedProjectRevision } from "../lib/api.js";
 import {
   reconcileItemClientVisibilityFlags,
   reconcileProjectItemsVisibility,
   applyClientVisibilityPatch,
 } from "../../shared/itemTypes.js";
 import { createItemPatchQueue } from "./itemPatchQueue.js";
+import { Modal } from "../components/ui.jsx";
 
 export { buildItemsFromModules };
 
@@ -149,14 +150,60 @@ const initial = {
 
 export function StoreProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initial);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const revisionRef = useRef(new Map());
+  const projectWriteTailsRef = useRef(new Map());
+  const [revisionConflict, setRevisionConflict] = useState(null);
   const [, tick] = useState(0);
   const materialsInflight = useRef(null);
   const modulesInflight = useRef(null);
   const itemPatchQueueRef = useRef(null);
 
+  const currentProjectRevision = useCallback((projectId) => {
+    const fromRef = revisionRef.current.has(projectId) ? Number(revisionRef.current.get(projectId)) : 0;
+    const fromCache = Number(getCachedProjectRevision(projectId)) || 0;
+    const fromState = Number(stateRef.current.projects.find((project) => project.id === projectId)?.revision) || 0;
+    return Math.max(fromRef, fromCache, fromState, 1);
+  }, []);
+
+  const noteRevisionConflict = useCallback((error, projectId) => {
+    if (error?.code !== "PROJECT_REVISION_CONFLICT") return false;
+    setRevisionConflict({
+      projectId: projectId || error.projectId,
+      expectedRevision: error.expectedRevision,
+      currentRevision: error.currentRevision,
+      scope: "admin",
+    });
+    return true;
+  }, []);
+
+  const runProjectWrite = useCallback((projectId, sender) => {
+    const previous = projectWriteTailsRef.current.get(projectId) || Promise.resolve();
+    const next = previous.catch(() => {}).then(async () => {
+      const expectedRevision = currentProjectRevision(projectId);
+      try {
+        const result = await sender(expectedRevision);
+        const revision = Number(result?.revision);
+        if (revision > 0) revisionRef.current.set(projectId, revision);
+        return result;
+      } catch (error) {
+        noteRevisionConflict(error, projectId);
+        throw error;
+      }
+    });
+    projectWriteTailsRef.current.set(projectId, next);
+    next.finally(() => {
+      if (projectWriteTailsRef.current.get(projectId) === next) projectWriteTailsRef.current.delete(projectId);
+    }).catch(() => {});
+    return next;
+  }, [currentProjectRevision, noteRevisionConflict]);
+
   if (!itemPatchQueueRef.current) {
     itemPatchQueueRef.current = createItemPatchQueue({
-      send: ({ projectId, itemId, patch }) => apiClient.patchItem(projectId, itemId, patch),
+      send: ({ projectId, itemId, patch }) => runProjectWrite(projectId, (expectedRevision) =>
+        apiClient.patchItem(projectId, itemId, patch, expectedRevision)
+      ),
       onOptimistic: ({ projectId, itemId, patch }) => {
         dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId, item: patch });
       },
@@ -308,11 +355,14 @@ export function StoreProvider({ children }) {
       },
       async projectCreate(data) {
         const p = await apiClient.createProject(data);
+        revisionRef.current.set(p.id, Number(p.revision) || 1);
         dispatch({ type: "PROJECT_PREPEND", project: p });
         return p;
       },
       async projectUpdate(id, patch) {
-        const p = await apiClient.updateProject(id, patch);
+        const p = await runProjectWrite(id, (expectedRevision) =>
+          apiClient.updateProject(id, { ...patch, expectedRevision })
+        );
         dispatch({ type: "PROJECT_SET", project: p });
         return p;
       },
@@ -326,13 +376,13 @@ export function StoreProvider({ children }) {
         return p;
       },
       async approveAll(id) {
-        const p = await apiClient.approveAll(id);
+        const p = await runProjectWrite(id, (expectedRevision) => apiClient.approveAll(id, expectedRevision));
         dispatch({ type: "PROJECT_SET", project: p });
         return p;
       },
       async createVersion(id, opts = {}) {
         try {
-          return await apiClient.createVersion(id, opts);
+          return await runProjectWrite(id, (expectedRevision) => apiClient.createVersion(id, opts, expectedRevision));
         } catch (e) {
           const err = new Error(e.message);
           if (e.problems) err.problems = e.problems;
@@ -340,24 +390,24 @@ export function StoreProvider({ children }) {
         }
       },
       async regenerateToken(id) {
-        const { clientToken } = await apiClient.regenerateToken(id);
+        const { clientToken } = await runProjectWrite(id, (expectedRevision) => apiClient.regenerateToken(id, expectedRevision));
         dispatch({ type: "PROJECT_TOKEN", id, clientToken });
         return clientToken;
       },
       async archiveProject(id) {
-        await apiClient.archiveProject(id);
+        await runProjectWrite(id, (expectedRevision) => apiClient.archiveProject(id, expectedRevision));
         dispatch({ type: "PROJECT_REMOVE", id });
       },
       async itemUpdate(projectId, itemId, patch) {
         return itemPatchQueueRef.current(`${projectId}:${itemId}`, { projectId, itemId, patch });
       },
       async itemAdd(projectId, item) {
-        const created = await apiClient.addItem(projectId, item);
+        const created = await runProjectWrite(projectId, (expectedRevision) => apiClient.addItem(projectId, item, expectedRevision));
         dispatch({ type: "PROJECT_ITEM_ADD", projectId, item: created });
         return created;
       },
       async itemDelete(projectId, itemId) {
-        await apiClient.deleteItem(projectId, itemId);
+        await runProjectWrite(projectId, (expectedRevision) => apiClient.deleteItem(projectId, itemId, expectedRevision));
         dispatch({ type: "PROJECT_ITEM_REMOVE", projectId, itemId });
       },
       async importExcel(file, opts) {
@@ -367,6 +417,7 @@ export function StoreProvider({ children }) {
       },
       async loadProject(id) {
         const p = await apiClient.getProject(id);
+        revisionRef.current.set(id, Number(p.revision) || 1);
         dispatch({ type: "PROJECT_ENSURE", project: p });
         return p;
       },
@@ -382,6 +433,32 @@ export function StoreProvider({ children }) {
       async clientPatchCooling(token, safetyFactor) {
         return apiClient.patchClientCooling(token, safetyFactor);
       },
+      async bulkPatchItems(projectId, body) {
+        return runProjectWrite(projectId, (expectedRevision) =>
+          apiClient.bulkPatchItems(projectId, { ...body, expectedRevision })
+        );
+      },
+      async refreshItemsFromMaterial(projectId, body, context) {
+        return runProjectWrite(projectId, (expectedRevision) =>
+          apiClient.refreshItemsFromMaterial(projectId, { ...body, expectedRevision }, context)
+        );
+      },
+      async applySectionTemplate(projectId, body) {
+        return runProjectWrite(projectId, (expectedRevision) =>
+          apiClient.applySectionTemplate(projectId, { ...body, expectedRevision })
+        );
+      },
+      async importFromProject(projectId, body) {
+        return runProjectWrite(projectId, (expectedRevision) =>
+          apiClient.importFromProject(projectId, { ...body, expectedRevision })
+        );
+      },
+      async reviewReplacement(projectId, itemId, body) {
+        return runProjectWrite(projectId, (expectedRevision) =>
+          apiClient.reviewReplacement(projectId, itemId, { ...body, expectedRevision })
+        );
+      },
+      noteRevisionConflict,
       rerender: () => tick((n) => n + 1),
     }),
     [
@@ -394,11 +471,38 @@ export function StoreProvider({ children }) {
       refreshModules,
       refreshProjects,
       refreshDashboard,
+      runProjectWrite,
+      noteRevisionConflict,
     ]
   );
 
   const value = useMemo(() => ({ state, dispatch, actions }), [state, actions]);
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  const loadCurrentProject = async () => {
+    const projectId = revisionConflict?.projectId;
+    if (!projectId) return;
+    const project = await apiClient.getProject(projectId);
+    revisionRef.current.set(projectId, Number(project.revision) || 1);
+    dispatch({ type: "PROJECT_ENSURE", project });
+    setRevisionConflict(null);
+  };
+  return (
+    <StoreContext.Provider value={value}>
+      {children}
+      {revisionConflict && (
+        <Modal
+          title="Конфликт изменений проекта"
+          onClose={() => setRevisionConflict(null)}
+          footer={<>
+            <button type="button" className="btn" onClick={() => setRevisionConflict(null)}>Остаться и скопировать свои изменения</button>
+            <button type="button" className="btn btn-primary" onClick={loadCurrentProject}>Загрузить актуальную версию</button>
+          </>}
+        >
+          <p>Проект изменён в другой вкладке. Ваши изменения не сохранены поверх новой версии.</p>
+          <p className="muted">Серверная версия: {revisionConflict.currentRevision}; версия этой вкладки: {revisionConflict.expectedRevision}.</p>
+        </Modal>
+      )}
+    </StoreContext.Provider>
+  );
 }
 
 export function useStore() {

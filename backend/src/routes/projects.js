@@ -98,9 +98,83 @@ const UPDATE_PROJECT = db.prepare(`
     status=@status, selected_modules=@selected_modules, zones=@zones,
     stellage_configs=@stellage_configs, manual_params=@manual_params, rooms=@rooms, version=@version,
     planner_plan=@planner_plan, planner_sync_at=@planner_sync_at,
-    last_client_activity_at=@last_client_activity_at, updated_at=datetime('now')
-  WHERE id=@id
+    last_client_activity_at=@last_client_activity_at,
+    revision=revision + 1, updated_at=datetime('now')
+  WHERE id=@id AND revision=@expected_revision
 `);
+
+export const PROJECT_REVISION_CONFLICT = "PROJECT_REVISION_CONFLICT";
+
+function revisionConflict(projectId, expectedRevision, currentRevision) {
+  const error = new Error("Проект был изменён в другой вкладке или другим пользователем.");
+  error.code = PROJECT_REVISION_CONFLICT;
+  error.projectId = projectId;
+  error.expectedRevision = expectedRevision;
+  error.currentRevision = currentRevision;
+  return error;
+}
+
+function parseExpectedRevision(value) {
+  const revision = Number(value);
+  return Number.isInteger(revision) && revision > 0 ? revision : null;
+}
+
+function requireExpectedRevision(projectId, value) {
+  const expected = parseExpectedRevision(value);
+  if (expected == null) {
+    const error = new Error("expectedRevision is required");
+    error.code = "EXPECTED_REVISION_REQUIRED";
+    error.projectId = projectId;
+    throw error;
+  }
+  return expected;
+}
+
+function assertRevision(projectId, expectedRevision) {
+  const current = db.prepare("SELECT revision FROM projects WHERE id = ?").get(projectId);
+  if (!current) return null;
+  if (Number(current.revision) !== expectedRevision) {
+    throw revisionConflict(projectId, expectedRevision, Number(current.revision));
+  }
+  return current;
+}
+
+function bumpRevision(projectId, expectedRevision) {
+  const result = db.prepare(`
+    UPDATE projects SET revision = revision + 1, updated_at = datetime('now')
+    WHERE id = ? AND revision = ?
+  `).run(projectId, expectedRevision);
+  if (result.changes !== 1) {
+    const current = db.prepare("SELECT revision FROM projects WHERE id = ?").get(projectId);
+    if (!current) return false;
+    throw revisionConflict(projectId, expectedRevision, Number(current.revision));
+  }
+  return true;
+}
+
+function mutateWithRevision(projectId, expectedValue, callback) {
+  const expectedRevision = requireExpectedRevision(projectId, expectedValue);
+  const run = db.transaction(() => {
+    const existing = assertRevision(projectId, expectedRevision);
+    if (!existing) return null;
+    const value = callback();
+    bumpRevision(projectId, expectedRevision);
+    return { value, revision: expectedRevision + 1 };
+  });
+  return run();
+}
+
+function revisionErrorResponse(res, error) {
+  if (error?.code !== PROJECT_REVISION_CONFLICT) return false;
+  res.status(409).json({ error: {
+    code: error.code,
+    projectId: error.projectId,
+    expectedRevision: error.expectedRevision,
+    currentRevision: error.currentRevision,
+    message: error.message,
+  } });
+  return true;
+}
 
 const INSERT_ITEM = db.prepare(`
   INSERT INTO project_items (
@@ -358,24 +432,27 @@ export function createProject(body) {
  * либо всё ROLLBACK и БД остаётся ровно в состоянии до запроса.
  */
 export function updateProject(id, patch) {
-  const cur = loadProject(id);
-  if (!cur) return null;
+  const expectedRevision = requireExpectedRevision(id, patch?.expectedRevision);
 
   const run = db.transaction(() => {
-    if (patch.items) {
-      saveItemsWithin(id, patch.items);
+    const cur = loadProject(id);
+    if (!cur) return null;
+    assertRevision(id, expectedRevision);
+    const { expectedRevision: _expectedRevision, ...safePatch } = patch;
+    if (safePatch.items) {
+      saveItemsWithin(id, safePatch.items);
     }
 
     // Внутри транзакции чтение видит собственные незакоммиченные записи,
     // поэтому publish-валидация по-прежнему проверяет НОВЫЕ позиции.
-    const base = patch.items ? loadProject(id) : cur;
-    let manualParams = { ...(base.manualParams || {}), ...(patch.manualParams || {}) };
-    let merged = { ...base, ...patch, id, manualParams };
+    const base = safePatch.items ? loadProject(id) : cur;
+    let manualParams = { ...(base.manualParams || {}), ...(safePatch.manualParams || {}) };
+    let merged = { ...base, ...safePatch, id, manualParams };
 
-    if (patch.status != null && patch.status !== base.status && isPublishWorkflowStatus(patch.status)) {
+    if (safePatch.status != null && safePatch.status !== base.status && isPublishWorkflowStatus(safePatch.status)) {
       // Build the release from the complete PATCH candidate. This keeps images and
       // metadata changed in the same request inside the immutable release_v2 snapshot.
-      const pub = publishReleaseIfNeeded(id, merged, patch.status);
+      const pub = publishReleaseIfNeeded(id, merged, safePatch.status);
       if (pub.publishedRelease) {
         manualParams = { ...manualParams, publishedRelease: pub.publishedRelease };
         merged = { ...merged, manualParams };
@@ -386,13 +463,20 @@ export function updateProject(id, patch) {
     // PHASE 0B: не затирать повреждённый planner_plan пустым `{}` при апдейте,
     // где новый план не передан. Исходные байты остаются нетронутыми в SQLite.
     const storedRow = db.prepare("SELECT planner_plan FROM projects WHERE id = ?").get(id);
-    if (shouldPreserveStoredPlan(storedRow?.planner_plan, patch)) {
+    if (shouldPreserveStoredPlan(storedRow?.planner_plan, safePatch)) {
       row.planner_plan = storedRow.planner_plan;
     }
-    UPDATE_PROJECT.run(row);
+    row.expected_revision = expectedRevision;
+    const updated = UPDATE_PROJECT.run(row);
+    if (updated.changes !== 1) {
+      const current = db.prepare("SELECT revision FROM projects WHERE id = ?").get(id);
+      throw revisionConflict(id, expectedRevision, Number(current?.revision || 0));
+    }
+    return true;
   });
 
-  run();
+  const found = run();
+  if (!found) return null;
   return loadProject(id);
 }
 
@@ -564,8 +648,7 @@ export function approveAll(id) {
       visibleToClient: it.includedInProject !== false,
     })
   );
-  saveItems(id, items);
-  touchProject(id);
+  saveItemsWithin(id, items);
   return loadProject(id);
 }
 
@@ -885,6 +968,7 @@ api.post("/", (req, res) => {
   try {
     res.status(201).json(createProject(req.body));
   } catch (e) {
+    if (revisionErrorResponse(res, e)) return;
     res.status(400).json({ error: e.message });
   }
 });
@@ -895,13 +979,14 @@ api.patch("/:id", (req, res) => {
     if (!p) return res.status(404).json({ error: "Not found" });
     res.json({ ...p, ...getProjectReleaseInfo(p) });
   } catch (e) {
+    if (revisionErrorResponse(res, e)) return;
     if (e.code === "PUBLISH_VALIDATION") {
       return res.status(422).json({ error: e.message, problems: e.problems, code: e.code });
     }
     if (e.code === "ITEM_VALIDATION") {
       return res.status(400).json({ error: e.message, details: e.details, code: e.code });
     }
-    return res.status(400).json({ error: e.message });
+    return res.status(400).json({ error: e.message, code: e.code });
   }
 });
 
@@ -929,9 +1014,11 @@ api.post("/:id/import-preview", (req, res) => {
 });
 
 api.post("/:id/import-from-project", (req, res) => {
-  const result = importToProject(req.params.id, req.body || {});
-  if (!result) return res.status(404).json({ error: "Not found" });
-  res.json(result);
+  try {
+    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => importToProject(req.params.id, req.body || {}));
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.get("/:id/compare/:otherId", (req, res) => {
@@ -947,28 +1034,29 @@ api.post("/:id/sections/:module/save-template", (req, res) => {
 });
 
 api.post("/:id/apply-section-template", (req, res) => {
-  const result = applySectionTemplate(req.params.id, req.body?.templateId, {
-    targetModule: req.body?.targetModule,
-  });
-  if (!result) return res.status(404).json({ error: "Not found" });
-  res.json(result);
+  try {
+    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => applySectionTemplate(req.params.id, req.body?.templateId, { targetModule: req.body?.targetModule }));
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.post("/:id/approve-all", (req, res) => {
-  const p = approveAll(req.params.id);
-  if (!p) return res.status(404).json({ error: "Not found" });
-  logProjectEvent({
-    projectId: req.params.id,
-    actor: "admin",
-    summary: "Daogreen: утверждены все позиции для клиента",
-    clientVisible: false,
-  });
-  res.json(p);
+  try {
+    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
+      const p = approveAll(req.params.id);
+      if (p) logProjectEvent({ projectId: req.params.id, actor: "admin", summary: "Daogreen: утверждены все позиции для клиента", clientVisible: false });
+      return p;
+    });
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.json({ ...loadProject(req.params.id), revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.post("/:id/versions", (req, res) => {
   try {
-    const v = createVersion(req.params.id, req.body?.createdBy, { force: !!req.body?.force });
+    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => createVersion(req.params.id, req.body?.createdBy, { force: !!req.body?.force }));
+    const v = changed?.value;
     if (!v) return res.status(404).json({ error: "Not found" });
     logProjectEvent({
       projectId: req.params.id,
@@ -976,8 +1064,9 @@ api.post("/:id/versions", (req, res) => {
       summary: `Daogreen: опубликована версия ${v.versionNumber}`,
       clientVisible: false,
     });
-    res.status(201).json(v);
+    res.status(201).json({ ...v, revision: changed.revision });
   } catch (e) {
+    if (revisionErrorResponse(res, e)) return;
     if (e.code === "PUBLISH_VALIDATION") {
       return res.status(422).json({ error: e.message, problems: e.problems });
     }
@@ -1005,8 +1094,10 @@ api.get("/:id/versions/:versionId", (req, res) => {
 });
 
 api.post("/:id/items/bulk-patch", (req, res) => {
+  try {
+  const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
   const p = loadProject(req.params.id);
-  if (!p) return res.status(404).json({ error: "Not found" });
+  if (!p) return null;
   const result = bulkPatchItems(req.params.id, {
     itemIds: req.body?.itemIds || [],
     patch: req.body?.patch || {},
@@ -1021,12 +1112,18 @@ api.post("/:id/items/bulk-patch", (req, res) => {
       patch: result.patch,
     });
   }
-  res.json(result);
+  return result;
+  });
+  if (!changed?.value) return res.status(404).json({ error: "Not found" });
+  res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.post("/:id/items/refresh-from-material", (req, res) => {
+  try {
+  const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
   const p = loadProject(req.params.id);
-  if (!p) return res.status(404).json({ error: "Not found" });
+  if (!p) return null;
   const beforeMap = new Map((p.items || []).map((it) => [it.id, it]));
   const result = refreshItemsFromMaterial(req.params.id, {
     itemIds: req.body?.itemIds || (req.body?.itemId ? [req.body.itemId] : []),
@@ -1050,24 +1147,35 @@ api.post("/:id/items/refresh-from-material", (req, res) => {
       });
     }
   }
-  res.json(result);
+  return result;
+  });
+  if (!changed?.value) return res.status(404).json({ error: "Not found" });
+  res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.patch("/:id/items/:itemId", (req, res) => {
+  try {
+  const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
   const p = loadProject(req.params.id);
-  if (!p) return res.status(404).json({ error: "Not found" });
+  if (!p) return null;
   const before = p.items.find((i) => i.id === req.params.itemId);
-  const it = patchItem(req.params.id, req.params.itemId, req.body);
-  if (!it) return res.status(404).json({ error: "Not found" });
+  const { expectedRevision: _expectedRevision, ...itemPatch } = req.body || {};
+  const it = patchItem(req.params.id, req.params.itemId, itemPatch);
+  if (!it) return null;
   logItemPatch({
     projectId: req.params.id,
     itemId: it.id,
     itemName: it.name,
     actor: "admin",
     before,
-    patch: req.body,
+    patch: itemPatch,
   });
-  res.json(it);
+  return it;
+  });
+  if (!changed?.value) return res.status(404).json({ error: "Not found" });
+  res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.post("/:id/items/:itemId/replacement-review", reviewItemReplacement);
@@ -1080,9 +1188,14 @@ api.get("/:id/activity", (req, res) => {
 
 api.post("/:id/items", (req, res) => {
   try {
-    const it = addItem(req.params.id, req.body);
-    res.status(201).json(it);
+    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
+      const { expectedRevision: _expectedRevision, ...item } = req.body || {};
+      return addItem(req.params.id, item);
+    });
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.status(201).json({ ...changed.value, revision: changed.revision });
   } catch (e) {
+    if (revisionErrorResponse(res, e)) return;
     if (e.code === "ITEM_VALIDATION") {
       return res.status(400).json({ error: e.message, details: e.details, code: e.code });
     }
@@ -1091,8 +1204,11 @@ api.post("/:id/items", (req, res) => {
 });
 
 api.delete("/:id/items/:itemId", (req, res) => {
-  removeItem(req.params.id, req.params.itemId);
-  res.status(204).end();
+  try {
+    const changed = mutateWithRevision(req.params.id, req.query?.expectedRevision, () => removeItem(req.params.id, req.params.itemId));
+    if (!changed) return res.status(404).json({ error: "Not found" });
+    res.json({ ok: true, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 function linkExpiresAt() {
@@ -1103,22 +1219,30 @@ function linkExpiresAt() {
 }
 
 api.post("/:id/regenerate-token", (req, res) => {
+  try {
+  const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
   const token = clientToken();
   const expires = linkExpiresAt();
   db.prepare(
     "UPDATE projects SET client_token = ?, client_token_expires_at = ?, updated_at = datetime('now') WHERE id = ?"
   ).run(token, expires, req.params.id);
-  res.json({ clientToken: token, clientTokenExpiresAt: expires });
+  return { clientToken: token, clientTokenExpiresAt: expires };
+  });
+  if (!changed) return res.status(404).json({ error: "Not found" });
+  res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.post("/:id/archive", (req, res) => {
-  db.prepare("UPDATE projects SET status = 'archived', updated_at = datetime('now') WHERE id = ?").run(req.params.id);
-  res.json({ ok: true });
+  try { const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => db.prepare("UPDATE projects SET status = 'archived', updated_at = datetime('now') WHERE id = ?").run(req.params.id));
+  if (!changed) return res.status(404).json({ error: "Not found" }); res.json({ ok: true, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.post("/:id/restore", (req, res) => {
-  db.prepare("UPDATE projects SET status = 'active', updated_at = datetime('now') WHERE id = ?").run(req.params.id);
-  res.json({ ok: true });
+  try { const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => db.prepare("UPDATE projects SET status = 'active', updated_at = datetime('now') WHERE id = ?").run(req.params.id));
+  if (!changed) return res.status(404).json({ error: "Not found" }); res.json({ ok: true, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 export default api;
@@ -1208,6 +1332,8 @@ function serveClientProject(req, res) {
 
   res.json({
     project: clientProject,
+    projectId: p.id,
+    revision: Number(p.revision) || 1,
     versionInfo,
     publishedRelease: release,
     branding: loadBrandingSettings(),
@@ -1215,6 +1341,28 @@ function serveClientProject(req, res) {
     documents,
     activity,
   });
+}
+
+function loadClientProjectOrRespond(req, res) {
+  const p = loadProjectByToken(req.clientToken);
+  if (!p) {
+    res.status(404).json({ error: "Not found" });
+    return null;
+  }
+  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
+    res.status(410).json({ error: "Link expired" });
+    return null;
+  }
+  return p;
+}
+
+function clientWriteError(res, error) {
+  if (revisionErrorResponse(res, error)) return true;
+  if (error?.code === "EXPECTED_REVISION_REQUIRED") {
+    res.status(400).json({ error: error.message, code: error.code, projectId: error.projectId });
+    return true;
+  }
+  return false;
 }
 
 function clientPatchAllowed(body = {}) {
@@ -1236,62 +1384,21 @@ function clientSnapshotItem(project, itemId) {
 }
 
 function patchClientItem(req, res) {
-  const p = loadProjectByToken(req.clientToken);
-  if (!p) return res.status(404).json({ error: "Not found" });
-  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
-    return res.status(410).json({ error: "Link expired" });
-  }
-  const snapBefore = clientSnapshotItem(p, req.params.itemId);
-  if (!snapBefore || !lineVisibleToClient(snapBefore)) {
-    return res.status(403).json({ error: "Item not available" });
-  }
-  const before = p.items.find((i) => i.id === req.params.itemId) || snapBefore;
-  const patch = clientPatchAllowed(req.body);
-  if (patch.status !== undefined && !validateClientStatus(patch.status)) {
-    return res.status(400).json({ error: "Invalid status" });
-  }
-  const it = patchItem(p.id, req.params.itemId, patch);
-  logItemPatch({
-    projectId: p.id,
-    itemId: it.id,
-    itemName: it.name,
-    actor: "client",
-    before,
-    patch,
-  });
-  const bought = ["bought", "delivered", "have"].includes(patch.status);
-  if (bought && !p.purchaseStartedAt) {
-    db.prepare("UPDATE projects SET purchase_started_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(
-      p.id
-    );
-  }
-  db.prepare(
-    "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-  ).run(p.id);
-  res.json(sanitizeItemForClient(it));
-}
-
-function bulkPatchClientItems(req, res) {
-  const p = loadProjectByToken(req.clientToken);
-  if (!p) return res.status(404).json({ error: "Not found" });
-  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
-    return res.status(410).json({ error: "Link expired" });
-  }
-  const patch = clientPatchAllowed(req.body?.patch || req.body);
-  const itemIds = Array.isArray(req.body?.itemIds) ? req.body.itemIds : [];
-  if (!itemIds.length) return res.status(400).json({ error: "itemIds required" });
-  if (patch.status !== undefined && !validateClientStatus(patch.status)) {
-    return res.status(400).json({ error: "Invalid status" });
-  }
-  const visibleIds = itemIds.filter((id) => {
-    const snap = clientSnapshotItem(p, id);
-    return snap && lineVisibleToClient(snap);
-  });
-  if (!visibleIds.length) return res.status(403).json({ error: "No items available" });
-  const result = bulkPatchItems(p.id, { itemIds: visibleIds, patch });
-  for (const it of result.updated) {
-    const before = result.before.find((b) => b.id === it.id);
-    if (before) {
+  try {
+    const p = loadClientProjectOrRespond(req, res);
+    if (!p) return;
+    const snapBefore = clientSnapshotItem(p, req.params.itemId);
+    if (!snapBefore || !lineVisibleToClient(snapBefore)) {
+      return res.status(403).json({ error: "Item not available" });
+    }
+    const before = p.items.find((i) => i.id === req.params.itemId) || snapBefore;
+    const { expectedRevision: _expectedRevision, ...rawBody } = req.body || {};
+    const patch = clientPatchAllowed(rawBody);
+    if (patch.status !== undefined && !validateClientStatus(patch.status)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+    const changed = mutateWithRevision(p.id, req.body?.expectedRevision, () => {
+      const it = patchItem(p.id, req.params.itemId, patch);
       logItemPatch({
         projectId: p.id,
         itemId: it.id,
@@ -1300,61 +1407,127 @@ function bulkPatchClientItems(req, res) {
         before,
         patch,
       });
+      const bought = ["bought", "delivered", "have"].includes(patch.status);
+      if (bought && !p.purchaseStartedAt) {
+        db.prepare("UPDATE projects SET purchase_started_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(
+          p.id
+        );
+      }
+      db.prepare(
+        "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+      ).run(p.id);
+      return it;
+    });
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.json({ ...sanitizeItemForClient(changed.value), revision: changed.revision, projectId: p.id });
+  } catch (e) {
+    if (!clientWriteError(res, e)) res.status(400).json({ error: e.message, code: e.code });
+  }
+}
+
+function bulkPatchClientItems(req, res) {
+  try {
+    const p = loadClientProjectOrRespond(req, res);
+    if (!p) return;
+    const patch = clientPatchAllowed(req.body?.patch || req.body);
+    const itemIds = Array.isArray(req.body?.itemIds) ? req.body.itemIds : [];
+    if (!itemIds.length) return res.status(400).json({ error: "itemIds required" });
+    if (patch.status !== undefined && !validateClientStatus(patch.status)) {
+      return res.status(400).json({ error: "Invalid status" });
     }
+    const visibleIds = itemIds.filter((id) => {
+      const snap = clientSnapshotItem(p, id);
+      return snap && lineVisibleToClient(snap);
+    });
+    if (!visibleIds.length) return res.status(403).json({ error: "No items available" });
+    const changed = mutateWithRevision(p.id, req.body?.expectedRevision, () => {
+      const result = bulkPatchItems(p.id, { itemIds: visibleIds, patch });
+      for (const it of result.updated) {
+        const before = result.before.find((b) => b.id === it.id);
+        if (before) {
+          logItemPatch({
+            projectId: p.id,
+            itemId: it.id,
+            itemName: it.name,
+            actor: "client",
+            before,
+            patch,
+          });
+        }
+      }
+      if (patch.status && ["bought", "delivered", "have"].includes(patch.status) && !p.purchaseStartedAt) {
+        db.prepare("UPDATE projects SET purchase_started_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(
+          p.id
+        );
+      }
+      db.prepare(
+        "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+      ).run(p.id);
+      return result;
+    });
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.json({
+      updated: changed.value.updated.map(sanitizeItemForClient),
+      skipped: changed.value.skipped,
+      revision: changed.revision,
+      projectId: p.id,
+    });
+  } catch (e) {
+    if (!clientWriteError(res, e)) res.status(400).json({ error: e.message, code: e.code });
   }
-  if (patch.status && ["bought", "delivered", "have"].includes(patch.status) && !p.purchaseStartedAt) {
-    db.prepare("UPDATE projects SET purchase_started_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(
-      p.id
-    );
-  }
-  db.prepare(
-    "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-  ).run(p.id);
-  res.json({ updated: result.updated.map(sanitizeItemForClient), skipped: result.skipped });
 }
 
 function proposeClientReplacement(req, res) {
-  const p = loadProjectByToken(req.clientToken);
-  if (!p) return res.status(404).json({ error: "Not found" });
-  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
-    return res.status(410).json({ error: "Link expired" });
+  try {
+    const p = loadClientProjectOrRespond(req, res);
+    if (!p) return;
+    const before = p.items.find((i) => i.id === req.params.itemId) || clientSnapshotItem(p, req.params.itemId);
+    if (!before || !lineVisibleToClient(before)) {
+      return res.status(403).json({ error: "Item not available" });
+    }
+    const patch = {
+      status: "replacement_check",
+      replacementLink: String(req.body?.link || "").trim(),
+      replacementPhotoUrl: String(req.body?.photoUrl || "").trim(),
+      replacementPrice:
+        req.body?.price != null && req.body.price !== "" ? Number(req.body.price) : null,
+      replacementComment: String(req.body?.comment || "").trim(),
+      replacementProposedAt: new Date().toISOString(),
+    };
+    const changed = mutateWithRevision(p.id, req.body?.expectedRevision, () => {
+      const it = patchItem(p.id, req.params.itemId, patch);
+      logItemPatch({
+        projectId: p.id,
+        itemId: it.id,
+        itemName: it.name,
+        actor: "client",
+        before,
+        patch: { status: "replacement_check", replacementProposed: true },
+      });
+      db.prepare(
+        "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+      ).run(p.id);
+      return it;
+    });
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.json({ ...sanitizeItemForClient(changed.value), revision: changed.revision, projectId: p.id });
+  } catch (e) {
+    if (!clientWriteError(res, e)) res.status(400).json({ error: e.message, code: e.code });
   }
-  const before = p.items.find((i) => i.id === req.params.itemId) || clientSnapshotItem(p, req.params.itemId);
-  if (!before || !lineVisibleToClient(before)) {
-    return res.status(403).json({ error: "Item not available" });
-  }
-  const patch = {
-    status: "replacement_check",
-    replacementLink: String(req.body?.link || "").trim(),
-    replacementPhotoUrl: String(req.body?.photoUrl || "").trim(),
-    replacementPrice:
-      req.body?.price != null && req.body.price !== "" ? Number(req.body.price) : null,
-    replacementComment: String(req.body?.comment || "").trim(),
-    replacementProposedAt: new Date().toISOString(),
-  };
-  const it = patchItem(p.id, req.params.itemId, patch);
-  logItemPatch({
-    projectId: p.id,
-    itemId: it.id,
-    itemName: it.name,
-    actor: "client",
-    before,
-    patch: { status: "replacement_check", replacementProposed: true },
-  });
-  db.prepare(
-    "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-  ).run(p.id);
-  res.json(sanitizeItemForClient(it));
 }
 
 function reviewItemReplacement(req, res) {
+  try {
+  const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
   const p = loadProject(req.params.id);
-  if (!p) return res.status(404).json({ error: "Not found" });
+  if (!p) return null;
   const before = p.items.find((i) => i.id === req.params.itemId);
-  if (!before) return res.status(404).json({ error: "Item not found" });
+  if (!before) return null;
   const action = req.body?.action;
   if (!["accept", "reject"].includes(action)) {
-    return res.status(400).json({ error: "action must be accept or reject" });
+    const error = new Error("action must be accept or reject");
+    error.code = "INVALID_REPLACEMENT_ACTION";
+    throw error;
   }
   const patch = {
     status: "not_bought",
@@ -1379,41 +1552,52 @@ function reviewItemReplacement(req, res) {
     itemName: it.name,
     actor: "admin",
     before,
-    patch: { replacementReview: action, ...req.body },
+    patch: { replacementReview: action, ...req.body, expectedRevision: undefined },
   });
-  res.json(it);
+  return it;
+  });
+  if (!changed?.value) return res.status(404).json({ error: "Not found" });
+  res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) {
+    if (!revisionErrorResponse(res, e)) res.status(e.code === "INVALID_REPLACEMENT_ACTION" ? 400 : 400).json({ error: e.message, code: e.code });
+  }
 }
 
 function patchClientCooling(req, res) {
-  const p = loadProjectByToken(req.clientToken);
-  if (!p) return res.status(404).json({ error: "Not found" });
-  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
-    return res.status(410).json({ error: "Link expired" });
-  }
-  const sf = Number(req.body?.safetyFactor);
-  if (!Number.isFinite(sf) || sf < 1 || sf > 2.5) {
-    return res.status(400).json({ error: "Invalid safetyFactor" });
-  }
-  const mp = typeof p.manualParams === "object" && p.manualParams ? { ...p.manualParams } : {};
-  const cf = mp.coolingFarm && typeof mp.coolingFarm === "object" ? { ...mp.coolingFarm } : {};
-  const oldSf = cf.safetyFactor;
-  cf.safetyFactor = sf;
-  mp.coolingFarm = cf;
-  db.prepare("UPDATE projects SET manual_params = ?, updated_at = datetime('now') WHERE id = ?").run(
-    JSON.stringify(mp),
-    p.id
-  );
-  if (oldSf !== sf) {
-    logProjectEvent({
-      projectId: p.id,
-      actor: "client",
-      summary: `Клиент: запасной коэфф. ${oldSf ?? "—"} → ${sf}`,
+  try {
+    const p = loadClientProjectOrRespond(req, res);
+    if (!p) return;
+    const sf = Number(req.body?.safetyFactor);
+    if (!Number.isFinite(sf) || sf < 1 || sf > 2.5) {
+      return res.status(400).json({ error: "Invalid safetyFactor" });
+    }
+    const changed = mutateWithRevision(p.id, req.body?.expectedRevision, () => {
+      const mp = typeof p.manualParams === "object" && p.manualParams ? { ...p.manualParams } : {};
+      const cf = mp.coolingFarm && typeof mp.coolingFarm === "object" ? { ...mp.coolingFarm } : {};
+      const oldSf = cf.safetyFactor;
+      cf.safetyFactor = sf;
+      mp.coolingFarm = cf;
+      db.prepare("UPDATE projects SET manual_params = ?, updated_at = datetime('now') WHERE id = ?").run(
+        JSON.stringify(mp),
+        p.id
+      );
+      if (oldSf !== sf) {
+        logProjectEvent({
+          projectId: p.id,
+          actor: "client",
+          summary: `Клиент: запасной коэфф. ${oldSf ?? "—"} → ${sf}`,
+        });
+      }
+      db.prepare(
+        "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+      ).run(p.id);
+      return mp;
     });
+    if (!changed) return res.status(404).json({ error: "Not found" });
+    res.json({ manualParams: changed.value, revision: changed.revision, projectId: p.id });
+  } catch (e) {
+    if (!clientWriteError(res, e)) res.status(400).json({ error: e.message, code: e.code });
   }
-  db.prepare(
-    "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-  ).run(p.id);
-  res.json({ manualParams: mp });
 }
 
 // Client router — основной путь /api/client/p/:token
