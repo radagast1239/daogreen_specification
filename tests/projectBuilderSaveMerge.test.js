@@ -358,6 +358,67 @@ describe("catalog snapshot policy", () => {
     expect(materials[0].link).toBe(catalogLink);
   });
 
+  it("keeps project-local price and links for farm-wide section lines", () => {
+    const catalogBefore = { ...materials[0] };
+    const built = buildProjectFromBuilder({
+      form: { name: "P", client: "C", manualParams: {} },
+      stellages: [{
+        id: "rack-1",
+        moduleId: "rack-module",
+        moduleName: "Стеллаж",
+        name: "Стеллаж 1",
+        count: 1,
+        items: [{
+          id: "rack-ln1",
+          materialId: "m073",
+          name: "Болт",
+          unit: "шт.",
+          qty: 2,
+          included: true,
+          price: materials[0].basePrice,
+          link: materials[0].link,
+        }],
+      }],
+      farmSections: [{
+        id: "consumables",
+        sectionName: "Расходники запуска",
+        items: [{
+          id: "farm-ln1",
+          materialId: "m073",
+          name: "Болт",
+          unit: "шт.",
+          qty: 3,
+          included: true,
+          price: 9.5,
+          priceOverridden: true,
+          link: "https://project.example/farm-bolt",
+          linkOverridden: true,
+          linkAlt: "https://project.example/farm-bolt-alt",
+          linkAltOverridden: true,
+        }],
+      }],
+      materials,
+    });
+
+    const farmItem = built.items.find((item) => item.section === "Расходники запуска");
+    const rackItem = built.items.find((item) => item.section === "Стеллаж 1");
+    expect(farmItem).toMatchObject({
+      section: "Расходники запуска",
+      price: 9.5,
+      link: "https://project.example/farm-bolt",
+      linkAlt: "https://project.example/farm-bolt-alt",
+      priceOverridden: true,
+      linkOverridden: true,
+      linkAltOverridden: true,
+    });
+    expect(rackItem).toMatchObject({
+      materialId: "m073",
+      price: catalogBefore.basePrice,
+      link: catalogBefore.link,
+    });
+    expect(materials[0]).toEqual(catalogBefore);
+  });
+
   it("does not overwrite existing snapshot on applyMaterialCatalogFields", () => {
     const line = {
       id: "ln1",

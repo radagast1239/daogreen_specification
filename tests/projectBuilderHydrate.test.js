@@ -14,6 +14,7 @@ import {
   mergeFrameBomQtyFromBuilderLines,
   frameBomProjectItemToBuilderLine,
   FRAME_BOM_SOURCE_LABEL,
+  farmSectionLinesFromProject,
 } from '../src/lib/projectBuilderHydrate.js';
 import { hydrateCatalogEditorLine } from '../src/lib/specLineCore.js';
 import { syncFastenersFromCrabs } from '../shared/fastenerRules.js';
@@ -29,6 +30,49 @@ import {
 import { FRAME_BOM_SOURCE, mergeFrameBomIntoProjectItems } from '../shared/frameBomProjectItems.js';
 
 describe('projectBuilderHydrate', () => {
+  it('keeps farm-wide project price and links marked as overrides after reload', () => {
+    const materials = [{
+      id: 'm-farm',
+      name: 'Расходник',
+      unit: 'шт.',
+      basePrice: 100,
+      link: 'https://catalog.example/item',
+      linkAlt: 'https://catalog.example/item-alt',
+    }];
+    const sections = [{ id: 'farm-sec', name: 'Расходники запуска' }];
+    const farmCatalogs = {
+      'farm-sec': [{ materialId: 'm-farm', qty: 1, included: true }],
+    };
+    const project = {
+      items: [{
+        id: 'farm-item',
+        materialId: 'm-farm',
+        name: 'Расходник',
+        unit: 'шт.',
+        section: 'Расходники запуска',
+        module: 'Расходники запуска',
+        qty: 3,
+        price: 125,
+        link: 'https://project.example/item',
+        linkAlt: 'https://project.example/item-alt',
+        includedInProject: true,
+        enabled: true,
+      }],
+      stellageConfigs: [],
+    };
+
+    const [line] = farmSectionLinesFromProject(project, sections, farmCatalogs, materials)['farm-sec'];
+    expect(line).toMatchObject({
+      price: 125,
+      priceOverridden: true,
+      link: 'https://project.example/item',
+      linkOverridden: true,
+      linkAlt: 'https://project.example/item-alt',
+      linkAltOverridden: true,
+    });
+    expect(materials[0].basePrice).toBe(100);
+  });
+
   const project = {
     id: 'p1',
     name: 'Тестовая ферма',

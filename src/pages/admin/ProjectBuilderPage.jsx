@@ -1526,6 +1526,7 @@ export default function ProjectBuilderPage() {
                 staticNames
                 onSaveMaterial={saveMaterial}
                 showQty
+                showProjectPrice
                 showRoom={rooms.length > 0}
                 rooms={rooms}
                 showFarmLineGroups

@@ -354,7 +354,7 @@ export function farmSectionLinesFromProject(project, sections = [], farmCatalogs
       if (sectionName === AC_ITEM_SECTION || it.roomId) return false;
       return true;
     });
-    result[sec.id] = applySavedItemsToCatalogLines(catalogLines, savedItems);
+    result[sec.id] = applySavedItemsToCatalogLines(catalogLines, savedItems, { materials });
   }
   return result;
 }
