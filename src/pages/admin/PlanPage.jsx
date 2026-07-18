@@ -63,6 +63,7 @@ import {
 } from "../../planner/ui/wallLengthDimensionMapping.js";
 import { applyWallDelete } from "../../planner/ui/applyWallDelete.js";
 import { applyWallBulkDelete } from "../../planner/ui/applyWallBulkDelete.js";
+import { applyItemBulkDelete } from "../../planner/ui/applyItemBulkDelete.js";
 import { applyWallLengthEdit, createWallLengthEditSession } from "../../planner/ui/applyWallLengthEdit.js";
 import { formatWallLengthMm } from "../../planner/ui/parseWallLengthInput.js";
 import { validateOpeningPlacement, nextDoorNumber, nextOpeningNumber } from "../../planner/doorGeometry.js";
@@ -152,6 +153,12 @@ const LINE_LAYER_IDS = ["drain", "irrigation", "supply", "power", "vent", "clima
 const ITEM_LAYER_IDS = LAYERS.map((l) => l.id).filter(
   (id) => !["room", "zones", "partitions", "client", "install", "spec"].includes(id)
 );
+// PHASE 1A-2C2D3B — только эти пять item-слоёв уже сегодня реально очищают
+// items через clearSheet (не перехватываются LINE_LAYER_IDS раньше по
+// цепочке if/else-if, см. RESULT — AUDIT PHASE 1A-2C2D3A). Намеренно не
+// весь ITEM_LAYER_IDS — irrigation/power/light/vent (mode:"both"), climate
+// и staff остаются legacy-путём до отдельной фазы.
+const MIGRATED_ITEM_CLEAR_LAYER_IDS = ["racks", "water", "sockets", "sanitary", "furn"];
 
 function draftPt(from, to, opts) {
   const { point, angleSnap } = resolveDraftPoint(from, to, opts);
@@ -768,13 +775,22 @@ export default function PlanPage() {
       // analysis/retry, geometry unchanged — no false-success cleanup.
       return status === "success";
     }
+    if (coll === "items") {
+      // PHASE 1A-2C2D3B (deleteHits): canonical command boundary —
+      // item.bulkDelete already handles links cleanup and item-attached
+      // dimension detach/delete atomically for the whole delete set (see
+      // geometryCommands.js deleteItemsFromPlan) — not duplicated here.
+      const { status } = applyItemBulkDelete({ itemIds: ids, runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        clearSelection();
+      }
+      // geometry-rejected / commit-failed: selection preserved for
+      // analysis/retry, geometry unchanged — no false-success cleanup.
+      return status === "success";
+    }
     setPlan((p) => {
       let next = { ...p };
-      if (coll === "items") {
-        const idSet = new Set(ids);
-        next.items = p.items.filter((o) => !idSet.has(o.id));
-        next.links = (p.links || []).filter((l) => !idSet.has(l.fromId) && !idSet.has(l.toId));
-      } else if (coll === "rulers") {
+      if (coll === "rulers") {
         const idSet = new Set(ids);
         next.rulers = (p.rulers || []).filter((r) => !idSet.has(r.id));
       } else if (coll === "measurements") {
@@ -795,7 +811,7 @@ export default function PlanPage() {
           next[coll] = p[coll].filter((o) => o.id !== id);
         }
       }
-      if (coll === "items" || coll === "lines") {
+      if (coll === "lines") {
         next = syncEngineeringPlan(next);
       }
       return next;
@@ -1659,6 +1675,20 @@ export default function PlanPage() {
       // openings are untouched.
       const wallIds = getCurrentPlan().walls.filter((w) => w.role !== "outer").map((w) => w.id);
       const { status } = applyWallBulkDelete({ wallIds, runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        setSel(null);
+      }
+      // geometry-rejected / commit-failed: selection preserved, no
+      // false-success cleanup.
+      return;
+    }
+    if (MIGRATED_ITEM_CLEAR_LAYER_IDS.includes(active)) {
+      // PHASE 1A-2C2D3B (clearSheet): canonical command boundary —
+      // item.bulkDelete already handles links cleanup and item-attached
+      // dimension detach/delete atomically for the whole delete set (see
+      // geometryCommands.js deleteItemsFromPlan) — not duplicated here.
+      const itemIds = getCurrentPlan().items.filter((it) => it.layer === active).map((it) => it.id);
+      const { status } = applyItemBulkDelete({ itemIds, runGeometryCommand });
       if (status === "success" || status === "noop" || status === "no-target") {
         setSel(null);
       }

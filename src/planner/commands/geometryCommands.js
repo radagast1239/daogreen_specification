@@ -22,7 +22,8 @@
  *   • неизвестная команда не бросает исключение наружу.
  *
  * Leaf imports только: wallNetwork.js, core/walls/wallOps.js,
- * core/dimensions/model.js (dependency-free), core/rooms/syncRooms.js —
+ * core/dimensions/model.js (dependency-free), core/rooms/syncRooms.js,
+ * и (PHASE 1A-2C2D3B, item.bulkDelete) climate.js/electrical.js/pipes.js —
  * НЕ core/rooms/index.js и НЕ wallGeometry.js (broad barrels, см. PHASE 0G
  * import-order fragility). Этот модуль не входит в известный 15-файловый
  * SCC — он лишь ЗАВИСИТ от его членов (wallNetwork.js, wallOps.js уже в
@@ -44,12 +45,21 @@ import { commitWallChain } from "../core/walls/wallCommit.js";
 import { refreshWallMountedItems } from "../core/walls/wallOps.js";
 import { resolveAttachedDimension } from "../core/dimensions/model.js";
 import { syncRoomsSafe } from "../core/rooms/syncRooms.js";
+// PHASE 1A-2C2D3B — same 3 authoritative pure engineering-derived-sync
+// functions PlanPage.jsx's own syncEngineeringPlan composes (climate/
+// electrical/pipe recompute over items/lines); not a duplicated algorithm,
+// just the same exported functions recomposed here so item.bulkDelete can
+// run the identical production post-processing exactly once.
+import { syncClimatePlan } from "../climate.js";
+import { syncElectricalPlan } from "../electrical.js";
+import { syncPlanPipes } from "../pipes.js";
 
 export const GEOMETRY_COMMAND_UNKNOWN = "GEOMETRY_COMMAND_UNKNOWN";
 export const GEOMETRY_COMMAND_INVALID = "GEOMETRY_COMMAND_INVALID";
 export const GEOMETRY_COMMAND_FAILED = "GEOMETRY_COMMAND_FAILED";
 export const GEOMETRY_COMMAND_NO_TARGET = "GEOMETRY_COMMAND_NO_TARGET";
 export const DIMENSION_DETACHED_AFTER_WALL_REMOVED = "DIMENSION_DETACHED_AFTER_WALL_REMOVED";
+export const DIMENSION_DETACHED_AFTER_ITEM_REMOVED = "DIMENSION_DETACHED_AFTER_ITEM_REMOVED";
 
 // PHASE 1B-1A — wall.setLength-specific structured error codes (не переиспользуют
 // generic GEOMETRY_COMMAND_INVALID/NO_TARGET — вызывающий код должен различать
@@ -764,12 +774,125 @@ function handleWallSetLength(plan, command) {
   return changedOk("wall.setLength", applied.plan, { entityChanges: applied.entityChanges });
 }
 
+// ── item deletion (PHASE 1A-2C2D3B) ──────────────────────────────────────
+
+/**
+ * Same 3 authoritative pure functions PlanPage.jsx's own syncEngineeringPlan
+ * composes, in the same order — not a re-derived algorithm, just the shared
+ * exported functions recomposed here so the command layer can run the exact
+ * same production post-processing.
+ */
+function runEngineeringSync(nextPlan) {
+  return syncClimatePlan(syncElectricalPlan(syncPlanPipes(nextPlan)));
+}
+
+/**
+ * PHASE 1A-2C2D3B — shared bulk-safe item-deletion mutation. Used by
+ * item.bulkDelete (single ID or many) — the single source of this cleanup
+ * policy. Computes the FINAL surviving item set ONCE, cleans up links and
+ * item-attached dimensions against it, then runs the same engineering-
+ * derived sync production already runs once per item delete
+ * (see PlanPage.jsx syncEngineeringPlan) — exactly once, not per item.
+ *
+ * Deleting an item never changes wall topology or other items' placement:
+ * no mounted-item refresh, no wall/node mutation is performed here.
+ *
+ * @param {object} plan
+ * @param {string[]} itemIds — may contain duplicates and/or IDs absent from
+ *   plan.items (both silently normalized away) — matches wall.bulkDelete's
+ *   own "operate only on what actually exists" policy.
+ * @returns {object|null} internal result, or null if none of itemIds exist.
+ */
+function deleteItemsFromPlan(plan, itemIds) {
+  const existingItemIdSet = new Set((plan.items || []).map((it) => it.id));
+  const deletedItemIds = [...new Set(itemIds)].filter((id) => existingItemIdSet.has(id));
+  if (deletedItemIds.length === 0) return null;
+  const deletedItemIdSet = new Set(deletedItemIds);
+
+  const items = (plan.items || []).filter((it) => !deletedItemIdSet.has(it.id));
+
+  // PHASE 1A-2C2B corrective F-02 policy, applied to items: links referencing
+  // (fromId/toId) a deleted item lose their meaning along with it.
+  const deletedLinkIds = [];
+  const links = (plan.links || []).filter((l) => {
+    if (deletedItemIdSet.has(l.fromId) || deletedItemIdSet.has(l.toId)) {
+      deletedLinkIds.push(l.id);
+      return false;
+    }
+    return true;
+  });
+
+  // Item-attached размеры (attachedTo.type==="item") на удаляемом item:
+  // persisted auto — УДАЛЯЮТСЯ (тот же F-01 policy, что и для wall
+  // auto-dims — resolvePlanDimensions всегда игнорирует persisted auto-
+  // записи и генерирует их заново из живой геометрии, см. runtime.js).
+  // Manual — detach с сохранением ЖИВОГО p1/p2 (resolveAttachedDimension),
+  // аналогично wall-attached manual dimension detach.
+  const dimensionWarnings = [];
+  const changedDimensionIds = [];
+  const deletedDimensionIds = [];
+  const dimensions = (plan.dimensions || []).flatMap((dim) => {
+    const at = dim?.attachedTo;
+    const attachedItemId = at?.id ?? at?.itemId;
+    if (at?.type !== "item" || !deletedItemIdSet.has(attachedItemId)) return [dim];
+    if (dim.auto === true) {
+      deletedDimensionIds.push(dim.id);
+      return [];
+    }
+    const resolved = resolveAttachedDimension(dim, plan);
+    changedDimensionIds.push(dim.id);
+    dimensionWarnings.push({ code: DIMENSION_DETACHED_AFTER_ITEM_REMOVED, entityId: dim.id, itemId: attachedItemId });
+    return [{
+      ...dim,
+      p1: resolved.invalid ? dim.p1 : resolved.p1,
+      p2: resolved.invalid ? dim.p2 : resolved.p2,
+      attachedTo: null,
+      kind: "manual",
+      auto: false,
+    }];
+  });
+
+  const nextPlan = runEngineeringSync({ ...plan, items, links, dimensions });
+
+  return {
+    plan: nextPlan,
+    deletedItemIds,
+    deletedLinkIds,
+    deletedDimensionIds,
+    changedDimensionIds,
+    dimensionWarnings,
+  };
+}
+
+function handleItemBulkDelete(plan, command) {
+  const { itemIds } = command;
+  if (!Array.isArray(itemIds) || itemIds.length === 0) {
+    return rejected("item.bulkDelete", plan, GEOMETRY_COMMAND_INVALID, "item.bulkDelete требует непустой массив itemIds");
+  }
+  const result = deleteItemsFromPlan(plan, itemIds);
+  if (!result) {
+    return rejected("item.bulkDelete", plan, GEOMETRY_COMMAND_NO_TARGET, "Ни один из указанных объектов не найден");
+  }
+  return changedOk("item.bulkDelete", result.plan, {
+    entityChanges: {
+      deleted: {
+        items: result.deletedItemIds,
+        links: result.deletedLinkIds,
+        dimensions: result.deletedDimensionIds,
+      },
+      changed: { dimensions: result.changedDimensionIds },
+    },
+    warnings: result.dimensionWarnings,
+  });
+}
+
 // ── dispatch table ────────────────────────────────────────────────────────
 
 const HANDLERS = {
   "wall.split": handleWallSplit,
   "wall.delete": handleWallDelete,
   "wall.bulkDelete": handleWallBulkDelete,
+  "item.bulkDelete": handleItemBulkDelete,
   "wall.create": handleWallCreate,
   "wall.finishDraft": handleWallCreate,
   "wall.straighten": handleWallStraighten,
