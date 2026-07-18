@@ -51,6 +51,14 @@ export const GEOMETRY_COMMAND_FAILED = "GEOMETRY_COMMAND_FAILED";
 export const GEOMETRY_COMMAND_NO_TARGET = "GEOMETRY_COMMAND_NO_TARGET";
 export const DIMENSION_DETACHED_AFTER_WALL_REMOVED = "DIMENSION_DETACHED_AFTER_WALL_REMOVED";
 
+// PHASE 1B-1A — wall.setLength-specific structured error codes (не переиспользуют
+// generic GEOMETRY_COMMAND_INVALID/NO_TARGET — вызывающий код должен различать
+// "неверная длина" от "неверный anchor" от "стена не найдена" без парсинга message).
+export const WALL_SET_LENGTH_WALL_NOT_FOUND = "WALL_SET_LENGTH_WALL_NOT_FOUND";
+export const WALL_SET_LENGTH_INVALID_LENGTH = "WALL_SET_LENGTH_INVALID_LENGTH";
+export const WALL_SET_LENGTH_INVALID_ANCHOR = "WALL_SET_LENGTH_INVALID_ANCHOR";
+export const WALL_SET_LENGTH_DEGENERATE_WALL = "WALL_SET_LENGTH_DEGENERATE_WALL";
+
 // ── result helpers ──────────────────────────────────────────────────────
 
 function dedupe(ids) {
@@ -493,6 +501,34 @@ function handleWallMoveSegment(plan, command) {
   });
 }
 
+/**
+ * PHASE 1B-1A — общая (pure) реализация "переместить существующий node на
+ * wallId/nodeIdx в point": network node move + no-op guard + ГЛОБАЛЬНЫЙ
+ * mounted-item refresh (узел может быть общим для нескольких стен) + diff
+ * связанных стен. Единственный источник cascade-логики для node.move
+ * (handleNodeMove ниже) и wall.setLength (handleWallSetLength) — оба знают
+ * целевую точку перемещаемого узла (wall.setLength вычисляет её из
+ * lengthMm/fixedEndpoint ДО вызова этого helper'а) и делегируют сюда
+ * саму мутацию + cascade, не дублируя её.
+ */
+function applyNodeMoveGeometry(plan, { wallId, nodeIdx, point }) {
+  const geomPlan = applyNetworkNodeAtWall(plan, wallId, nodeIdx, point);
+  const changedNodeIds = diffNodeIds(plan.nodes, geomPlan.nodes);
+  if (changedNodeIds.length === 0) return { changed: false, plan };
+
+  const items = refreshMountedItemsForCoordinateChange(geomPlan, null);
+  const changedItemIds = diffChangedItemIds(plan.items, items);
+  const wallIds = wallsUsingNodes(geomPlan.walls, changedNodeIds);
+  const nextPlan = { ...geomPlan, items };
+  return {
+    changed: true,
+    plan: nextPlan,
+    entityChanges: {
+      changed: { nodes: changedNodeIds, walls: wallIds, items: changedItemIds },
+    },
+  };
+}
+
 function handleNodeMove(plan, command) {
   const { wallId, nodeIdx, point } = command;
   if (!wallId || nodeIdx == null || !isFinitePoint(point)) {
@@ -500,21 +536,9 @@ function handleNodeMove(plan, command) {
   }
   const wall = (plan.walls || []).find((w) => w.id === wallId);
   if (!wall) return rejected("node.move", plan, GEOMETRY_COMMAND_NO_TARGET, "Стена не найдена");
-  const geomPlan = applyNetworkNodeAtWall(plan, wallId, nodeIdx, point);
-  const changedNodeIds = diffNodeIds(plan.nodes, geomPlan.nodes);
-  if (changedNodeIds.length === 0) return noop("node.move", plan);
-
-  // Production: node.move refresh — ГЛОБАЛЬНЫЙ (узел может быть общим для
-  // нескольких стен — см. audit table, PlanPage.jsx onMove "node" branch).
-  const items = refreshMountedItemsForCoordinateChange(geomPlan, null);
-  const changedItemIds = diffChangedItemIds(plan.items, items);
-  const wallIds = wallsUsingNodes(geomPlan.walls, changedNodeIds);
-  const nextPlan = { ...geomPlan, items };
-  return changedOk("node.move", nextPlan, {
-    entityChanges: {
-      changed: { nodes: changedNodeIds, walls: wallIds, items: changedItemIds },
-    },
-  });
+  const applied = applyNodeMoveGeometry(plan, { wallId, nodeIdx, point });
+  if (!applied.changed) return noop("node.move", plan);
+  return changedOk("node.move", applied.plan, { entityChanges: applied.entityChanges });
 }
 
 function handleNodeNudge(plan, command) {
@@ -550,6 +574,70 @@ function handleNodeNudge(plan, command) {
   });
 }
 
+// PHASE 1B-1A: минимальная длина стены через typed-input — тот же порядок
+// величины, что и производственный UX для ручного ввода размеров (не 0, не
+// доли миллиметра). Не путать с NODE_LINK_THR (85мм, snap-допуск склейки
+// узлов) — это отдельная, чисто UX-валидационная граница.
+const WALL_SET_LENGTH_MIN_MM = 50;
+// Тот же порядок величины, что и POINT_DEDUPE_EPS_MM выше — guard от
+// floating-point дребезга при сравнении вычисленного Math.hypot с типизированным
+// значением, а не snap/UI-допуск.
+const WALL_SET_LENGTH_EPS_MM = 1e-6;
+
+/**
+ * PHASE 1B-1A — изменяет длину существующей стены, сохраняя её направление и
+ * закрепляя один endpoint (fixedEndpoint). Anchor приходит ТОЛЬКО из payload —
+ * команда не читает UI selection. Мутация делегирована в
+ * applyNodeMoveGeometry (та же cascade-логика, что и у node.move — shared-node
+ * walls, глобальный mounted-item refresh, room sync остаётся централизованным
+ * в executeGeometryCommand и здесь не вызывается).
+ */
+function handleWallSetLength(plan, command) {
+  const { wallId, lengthMm, fixedEndpoint } = command;
+  if (!plan || !wallId) {
+    return rejected("wall.setLength", plan, WALL_SET_LENGTH_WALL_NOT_FOUND, "wall.setLength требует wallId существующей стены");
+  }
+  if (fixedEndpoint !== "a" && fixedEndpoint !== "b") {
+    return rejected("wall.setLength", plan, WALL_SET_LENGTH_INVALID_ANCHOR, 'wall.setLength требует fixedEndpoint: "a" | "b"');
+  }
+  if (!isFiniteNumber(lengthMm) || lengthMm <= 0 || lengthMm < WALL_SET_LENGTH_MIN_MM) {
+    return rejected("wall.setLength", plan, WALL_SET_LENGTH_INVALID_LENGTH, `lengthMm должен быть конечным числом не меньше ${WALL_SET_LENGTH_MIN_MM} мм`);
+  }
+  const wall = (plan.walls || []).find((w) => w.id === wallId);
+  if (!wall || !wall.a || !wall.b) {
+    return rejected("wall.setLength", plan, WALL_SET_LENGTH_WALL_NOT_FOUND, "Стена не найдена");
+  }
+  const nodeA = plan.nodes?.[wall.a];
+  const nodeB = plan.nodes?.[wall.b];
+  if (!isFinitePoint(nodeA) || !isFinitePoint(nodeB)) {
+    return rejected("wall.setLength", plan, WALL_SET_LENGTH_DEGENERATE_WALL, "Координаты концов стены недоступны");
+  }
+
+  const dx = nodeB.x - nodeA.x;
+  const dy = nodeB.y - nodeA.y;
+  const currentLength = Math.hypot(dx, dy);
+  if (!(currentLength > WALL_SET_LENGTH_EPS_MM)) {
+    return rejected("wall.setLength", plan, WALL_SET_LENGTH_DEGENERATE_WALL, "Стена имеет нулевую длину — направление не определено");
+  }
+  if (Math.abs(lengthMm - currentLength) <= WALL_SET_LENGTH_EPS_MM) {
+    return noop("wall.setLength", plan);
+  }
+
+  // Направление a->b сохраняется в обоих случаях: fixedEndpoint="a" продлевает/
+  // укорачивает ОТ a в текущую сторону b; fixedEndpoint="b" — от b в сторону,
+  // откуда пришёл исходный a (тот же единичный вектор ux/uy, с обратным знаком).
+  const ux = dx / currentLength;
+  const uy = dy / currentLength;
+  const movingNodeIdx = fixedEndpoint === "a" ? 1 : 0;
+  const point = fixedEndpoint === "a"
+    ? { x: nodeA.x + ux * lengthMm, y: nodeA.y + uy * lengthMm }
+    : { x: nodeB.x - ux * lengthMm, y: nodeB.y - uy * lengthMm };
+
+  const applied = applyNodeMoveGeometry(plan, { wallId, nodeIdx: movingNodeIdx, point });
+  if (!applied.changed) return noop("wall.setLength", plan);
+  return changedOk("wall.setLength", applied.plan, { entityChanges: applied.entityChanges });
+}
+
 // ── dispatch table ────────────────────────────────────────────────────────
 
 const HANDLERS = {
@@ -563,6 +651,7 @@ const HANDLERS = {
   "wall.alignToNeighbor": handleWallAlignToNeighbor,
   "wall.merge": handleWallMerge,
   "wall.moveSegment": handleWallMoveSegment,
+  "wall.setLength": handleWallSetLength,
   "node.move": handleNodeMove,
   "node.nudge": handleNodeNudge,
   // PHASE 1A-1 corrective pass: node.moveToWall УДАЛЁН — не существует
