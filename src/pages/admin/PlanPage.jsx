@@ -25,7 +25,6 @@ import {
   createWallDraftState, wallDraftStart, wallDraftContinueFrom,
   wallDraftAddSegment, wallDraftBackspace, wallDraftFinishPts, wallDraftFinishMeta,
 } from "../../planner/core/walls/wallDraft.js";
-import { commitWallChain } from "../../planner/core/walls/wallCommit.js";
 import { computeItemPlacement, placementZoneLabel } from "../../planner/placementPreview.js";
 import { PlacementGhost } from "../../planner/objectOverlays.jsx";
 import { itemOverlapsAnyWall } from "../../planner/wallCollision.js";
@@ -1023,27 +1022,46 @@ export default function PlanPage() {
   }, [labelDraft, plan.items, plan.room, sn]);
 
   const finishWallChain = () => {
-    const meta = wallDraftFinishMeta(wallDraftStateRef.current) || (
-      draft.length >= 2 ? { pts: draft, closed: false } : null
-    );
+    // PHASE 1A-2B2 corrective: wallDraftStateRef.current — единственный
+    // источник истины. Раньше здесь был fallback на render-closure `draft`
+    // (React state) — ref обновляется синхронно (clearWallChain присваивает
+    // wallDraftStateRef.current = createWallDraftState() немедленно), а
+    // `draft` обновляется только на следующем render. Если бы finish
+    // вызывался дважды подряд без промежуточного render (напр. два быстрых
+    // Enter), второй вызов через fallback мог прочитать СТАРЫЕ точки из ещё
+    // не перерендеренного `draft`, хотя ref уже пуст — риск дублирующей
+    // цепочки. Без fallback второй вызов видит уже очищенный ref и корректно
+    // не создаёт команду.
+    const meta = wallDraftFinishMeta(wallDraftStateRef.current);
     const pts = meta?.pts;
     const closed = meta?.closed === true;
     if (!pts || pts.length < 2) {
+      // Меньше 2 точек — как и раньше, тихий cancel: ни plan, ни history не
+      // трогаются, draft просто очищается (см. RESULT — PHASE 1A-2B2,
+      // "Draft state policy").
       clearWallChain();
       return;
     }
+    // PHASE 1A-2B2: через command boundary — вся цепочка одной командой
+    // (wall.create), а не commitPlan(updater) с безусловным checkpoint, как
+    // раньше. wallProps считается от живого plan.room (getCurrentPlan, не
+    // render-closure `plan`) — тот же снимок, что раньше читался как `p.room`
+    // внутри commitPlan(updater), просто взятый непосредственно перед
+    // вызовом, а не изнутри updater'а.
     const role = active === "room" ? "outer" : "partition";
-    commitPlan((p) => {
-      const toolFields = wallFieldsFromTool(activeToolId, role, p.room, wallThk);
-      const props = {
-        ...defaultWallFields(toolFields.role || role, p.room),
-        ...toolFields,
-        thk: toolFields.thk ?? (role === "outer" ? (p.room.wallThk || wallThk) : wallThk),
-      };
-      let next = commitWallChain(p, pts, props, uid, { closed });
-      return syncAutoZones(next);
-    });
-    clearWallChain();
+    const liveRoom = getCurrentPlan().room;
+    const toolFields = wallFieldsFromTool(activeToolId, role, liveRoom, wallThk);
+    const wallProps = {
+      ...defaultWallFields(toolFields.role || role, liveRoom),
+      ...toolFields,
+      thk: toolFields.thk ?? (role === "outer" ? (liveRoom.wallThk || wallThk) : wallThk),
+    };
+    const result = runGeometryCommand({ type: "wall.create", points: pts, wallProps, closed });
+    // success (changed:true) ИЛИ no-op (changed:false, напр. цепочка схлопнулась
+    // в <2 точек после dedup) — цепочку рисовать больше нечего, draft чистим.
+    // rejected (ok:false) — draft НЕ трогаем, чтобы пользователь мог
+    // исправить точки и повторить (см. секция 6 задания "Rejected/invalid").
+    if (result?.ok) clearWallChain();
   };
 
   const addWallDraftSegment = (from, to, fromOverride = null) => {
