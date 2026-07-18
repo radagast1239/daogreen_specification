@@ -16,6 +16,7 @@ const NAV = [
   { to: "/suppliers", label: "Поставщики", icon: "suppliers" },
   { to: "/reports", label: "Отчёты", icon: "reports" },
   { to: "/archive", label: "Архив", icon: "archive" },
+  { to: "/storage", label: "Файлы и хранилище", icon: "archive" },
   { to: "/settings", label: "Настройки", icon: "settings" },
   { to: "/new", label: "Новый проект", icon: "new" },
 ];

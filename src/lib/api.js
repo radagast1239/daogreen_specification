@@ -256,6 +256,18 @@ export const api = {
   getArchive: () => request("/api/admin/archive"),
   getSettings: () => request("/api/admin/settings"),
   saveSettings: (data) => request("/api/admin/settings", { method: "PATCH", body: data }),
+  getStorageInventory: (params = {}) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v != null && v !== "") q.set(k, String(v));
+    }
+    const qs = q.toString();
+    return request(`/api/admin/storage/inventory${qs ? `?${qs}` : ""}`);
+  },
+  scanStorageInventory: (body = {}) =>
+    request("/api/admin/storage/inventory/scan", { method: "POST", body }),
+  getStorageInventoryFile: (assetPath) =>
+    request(`/api/admin/storage/inventory/file?assetPath=${encodeURIComponent(assetPath)}`),
   downloadBackup: () =>
     fetch(`${API}/api/admin/backup`, { headers: { "X-Admin-Key": getAdminKey() } }).then(async (res) => {
       if (!res.ok) throw new Error("Backup failed");

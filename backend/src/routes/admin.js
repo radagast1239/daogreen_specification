@@ -19,6 +19,13 @@ import {
   assertCanDeleteOrOverwriteAsset,
   deleteLocalUploadFile,
 } from "../services/publishedAssetRetention.js";
+import {
+  runStorageInventoryScan,
+  queryStorageInventory,
+  isStorageInventoryScanning,
+  getLastStorageInventory,
+} from "../services/storageInventoryService.js";
+import { sanitizeInventoryFile } from "../../../shared/storageInventory.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, "../uploads");
@@ -333,6 +340,67 @@ router.patch("/settings", (req, res) => {
     ...brandSettingsResponse(obj),
     ...publishRulesSettingsPayload(obj),
   });
+});
+
+/** Read-only uploads inventory — never deletes or mutates files. */
+router.get("/storage/inventory", (req, res) => {
+  if (isStorageInventoryScanning()) {
+    return res.status(409).json({ error: "Scan in progress", code: "STORAGE_SCAN_IN_PROGRESS" });
+  }
+  const result = queryStorageInventory(req.query || {});
+  res.json(result);
+});
+
+router.post("/storage/inventory/scan", async (req, res) => {
+  try {
+    if (isStorageInventoryScanning()) {
+      return res.status(409).json({ error: "Scan in progress", code: "STORAGE_SCAN_IN_PROGRESS" });
+    }
+    const maxFiles = req.body?.maxFiles;
+    const timeoutMs = req.body?.timeoutMs;
+    const full = await runStorageInventoryScan({ maxFiles, timeoutMs });
+    // Return summary + first page by default (full list available via GET with filters)
+    const page = queryStorageInventory({ page: 1, pageSize: Number(req.body?.pageSize) || 50 });
+    res.json({
+      ok: true,
+      readOnly: true,
+      summary: full.summary,
+      scanMeta: {
+        scanStartedAt: full.summary?.scanStartedAt,
+        scanCompletedAt: full.summary?.scanCompletedAt,
+        durationMs: full.summary?.durationMs,
+        timedOut: full.timedOut,
+        truncated: full.truncated,
+      },
+      ...page,
+      files: page.files,
+      duplicateGroupDetails: full.summary?.duplicateGroupDetails || [],
+      lastScanAvailable: !!getLastStorageInventory(),
+    });
+  } catch (e) {
+    if (e.code === "STORAGE_SCAN_IN_PROGRESS") {
+      return res.status(409).json({ error: e.message, code: e.code });
+    }
+    res.status(500).json({ error: e.message || "Scan failed" });
+  }
+});
+
+router.get("/storage/inventory/file", (req, res) => {
+  const assetPath = String(req.query?.assetPath || req.query?.url || "").trim();
+  if (!assetPath.startsWith("/uploads/")) {
+    return res.status(400).json({ error: "assetPath must be a /uploads/ URL", code: "INVALID_ASSET_PATH" });
+  }
+  // Reject absolute / traversal attempts
+  if (assetPath.includes("..") || assetPath.includes("\\") || /^[A-Za-z]:/.test(assetPath)) {
+    return res.status(400).json({ error: "Invalid assetPath", code: "INVALID_ASSET_PATH" });
+  }
+  const last = getLastStorageInventory();
+  if (!last) {
+    return res.status(404).json({ error: "No scan result", code: "NEEDS_SCAN" });
+  }
+  const file = last.files.find((f) => f.assetPath === assetPath || f.url === assetPath);
+  if (!file) return res.status(404).json({ error: "Not found" });
+  res.json({ ok: true, readOnly: true, file: sanitizeInventoryFile(file) });
 });
 
 export default router;

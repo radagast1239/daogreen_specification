@@ -17,6 +17,7 @@ const ModulesPage = lazy(() => import("./pages/admin/ModulesPage.jsx"));
 const SuppliersPage = lazy(() => import("./pages/admin/SuppliersPage.jsx"));
 const ReportsPage = lazy(() => import("./pages/admin/ReportsPage.jsx"));
 const ArchivePage = lazy(() => import("./pages/admin/ArchivePage.jsx"));
+const StorageInventoryPage = lazy(() => import("./pages/admin/StorageInventoryPage.jsx"));
 const SettingsPage = lazy(() => import("./pages/admin/SettingsPage.jsx"));
 const PhotosPage = lazy(() => import("./pages/admin/PhotosPage.jsx"));
 const PlanPage = lazy(() => import("./pages/admin/PlanPage.jsx"));
@@ -75,6 +76,7 @@ export default function App() {
           <Route path="/import" element={<Navigate to="/materials?tab=import" replace />} />
           <Route path="/suppliers" element={<Lazy><SuppliersPage /></Lazy>} />
           <Route path="/archive" element={<Lazy><ArchivePage /></Lazy>} />
+          <Route path="/storage" element={<Lazy><StorageInventoryPage /></Lazy>} />
           <Route path="/reports" element={<Lazy><ReportsPage /></Lazy>} />
           <Route path="/settings" element={<Lazy><SettingsPage /></Lazy>} />
           <Route path="/new" element={<Lazy><ProjectBuilderPage /></Lazy>} />
