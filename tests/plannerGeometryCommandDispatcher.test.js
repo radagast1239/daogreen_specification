@@ -134,6 +134,35 @@ describe("PHASE 1A-2A — geometry command dispatcher contract", () => {
     expect(setSelection).toHaveBeenCalledWith({ coll: "walls", id: result.operationResult.childWallIds[1] });
   });
 
+  it("PHASE 1A-2B1 hardening: selection set by a successful command survives a following rejected/no-op command", () => {
+    const plan = singleWallPlan();
+    const { dispatcher, setSelection } = makeHarness(plan);
+    const first = dispatcher(
+      { type: "wall.split", wallId: "w1", point: { x: 3000, y: 0 } },
+      { selectAfter: (r) => ({ coll: "walls", id: r.operationResult.childWallIds[1] }) },
+    );
+    expect(setSelection).toHaveBeenCalledTimes(1);
+    const selectionAfterFirst = setSelection.mock.calls[0][0];
+    expect(selectionAfterFirst).toEqual({ coll: "walls", id: first.operationResult.childWallIds[1] });
+
+    // Rejected: missing wall — must not touch selection.
+    const second = dispatcher(
+      { type: "wall.straightenHorizontal", wallId: "does-not-exist" },
+      { selectAfter: () => ({ coll: "walls", id: "should-not-be-set" }) },
+    );
+    expect(second.ok).toBe(false);
+    expect(setSelection).toHaveBeenCalledTimes(1);
+
+    // No-op: the freshly split child wall is already horizontal — must not touch selection either.
+    const third = dispatcher(
+      { type: "wall.straightenHorizontal", wallId: selectionAfterFirst.id },
+      { selectAfter: () => ({ coll: "walls", id: "should-not-be-set" }) },
+    );
+    expect(third.ok).toBe(true);
+    expect(third.changed).toBe(false);
+    expect(setSelection).toHaveBeenCalledTimes(1);
+  });
+
   it("no-op does not invoke selectAfter", () => {
     const plan = rectPlan();
     const { dispatcher, setSelection } = makeHarness(plan);
