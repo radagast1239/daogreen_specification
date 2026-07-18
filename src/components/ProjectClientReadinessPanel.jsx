@@ -140,24 +140,27 @@ export default function ProjectClientReadinessPanel({
       </div>
 
       <div className="client-readiness__metrics">
-        {metrics.map((m) => (
-          <MetricChip
-            key={m.key}
-            {...m}
-            currency={currency}
-            tone={
-              m.key === "send_status"
-                ? checklist.tone
-                : m.tone === "warn"
-                  ? metricTone(m.value)
-                  : m.tone === "bad"
-                    ? metricTone(m.value, { badFrom: 1 })
-                    : m.tone
-            }
-            activeFilter={activeFilter}
-            onFilterSelect={onFilterSelect}
-          />
-        ))}
+        {metrics.map((m) => {
+          const { key, ...metricProps } = m;
+          return (
+            <MetricChip
+              key={key}
+              {...metricProps}
+              currency={currency}
+              tone={
+                key === "send_status"
+                  ? checklist.tone
+                  : m.tone === "warn"
+                    ? metricTone(m.value)
+                    : m.tone === "bad"
+                      ? metricTone(m.value, { badFrom: 1 })
+                      : m.tone
+              }
+              activeFilter={activeFilter}
+              onFilterSelect={onFilterSelect}
+            />
+          );
+        })}
       </div>
 
       {noLinkInfo.count > 0 ? (
