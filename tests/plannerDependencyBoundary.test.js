@@ -83,9 +83,10 @@ describe("PHASE 0A — dependency boundary baseline", () => {
  *   • command layer не импортирует React/ReactDOM/PlanPage/window/document;
  *   • core → React остаётся 0 (переиспользует тот же graph, что и выше).
  *
- * НЕ проверяет обратную сторону («PlanPage не импортирует низкоуровневые
- * geometry mutators напрямую») — PlanPage.jsx ещё не мигрирован на command
- * layer в этой фазе (см. RESULT — PHASE 1A, «Remaining direct mutations»).
+ * Обратная сторона («PlanPage не импортирует низкоуровневые geometry
+ * mutators напрямую для context-menu операций») — см. describe ниже,
+ * «PHASE 1A-2A — PlanPage boundary», после миграции wall.split/straighten/
+ * align/merge context-menu actions на command layer.
  */
 describe("PHASE 1A — geometry command layer boundary", () => {
   const graph = buildPlannerGraph(PLANNER_ROOT, CORE_ROOT);
@@ -127,5 +128,87 @@ describe("PHASE 1A — geometry command layer boundary", () => {
 
   it("core → React остаётся 0 после добавления command layer", () => {
     expect(graph.coreReactViolations).toEqual([]);
+  });
+});
+
+/**
+ * PHASE 1A-2A — PlanPage boundary.
+ *
+ * После миграции wall.split, wall.straighten (H/V), wall.alignToNeighbor и
+ * wall.merge context-menu actions на executeGeometryCommand, PlanPage.jsx не
+ * должен больше напрямую
+ * импортировать эти 4 конкретных low-level mutator'а — они существовали в
+ * PlanPage ИСКЛЮЧИТЕЛЬНО ради этих branches (подтверждено grep-аудитом перед
+ * миграцией: ни одного другого caller не было), поэтому проверка «не
+ * импортируется вовсе» здесь означает именно «эти production action
+ * branches больше не вызывают их напрямую», а не грубый запрет чтения кода.
+ *
+ * Не проверяет ВСЕ geometry-related imports PlanPage — drag/draft/nudge/
+ * delete/clearSheet остаются на старых low-level путях в этой фазе (см.
+ * RESULT — PHASE 1A-2A, «Remaining direct mutations») и продолжают законно
+ * импортировать movePlanNode/applyNetworkNodeAtWall/applyNetworkWallSegMove/
+ * nudgeWallInPlan/deleteWallEdge/commitWallEdge/refreshWallMountedItems.
+ */
+describe("PHASE 1A-2A — PlanPage boundary", () => {
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+
+  const MIGRATED_LOW_LEVEL_FNS = ["breakWallEdgeAt", "straightenWallEdge", "alignWallEdgeToNeighbor", "tryMergeWallEdge"];
+
+  it("does not import the 4 migrated low-level mutators from wallNetwork.js", () => {
+    const match = planPageSource.match(/import\s*\{([\s\S]*?)\}\s*from\s*["']\.\.\/\.\.\/planner\/wallNetwork\.js["']/);
+    expect(match, "wallNetwork.js import not found in PlanPage.jsx").toBeTruthy();
+    const importedNames = match[1];
+    for (const fn of MIGRATED_LOW_LEVEL_FNS) {
+      expect(importedNames, `${fn} should no longer be imported into PlanPage.jsx`).not.toMatch(new RegExp(`\\b${fn}\\b`));
+    }
+  });
+
+  it("does not call the 4 migrated low-level mutators anywhere in the file (function-call form)", () => {
+    for (const fn of MIGRATED_LOW_LEVEL_FNS) {
+      expect(planPageSource, `${fn}(...) should no longer be called in PlanPage.jsx`).not.toMatch(new RegExp(`\\b${fn}\\s*\\(`));
+    }
+  });
+
+  it("imports executeGeometryCommand only indirectly, via the UI orchestration dispatcher", () => {
+    expect(planPageSource).not.toMatch(/from\s*["'][^"']*commands\/geometryCommands\.js["']/);
+    expect(planPageSource).toMatch(/import\s*\{\s*createGeometryCommandDispatcher\s*\}\s*from\s*["'][^"']*ui\/geometryCommandDispatcher\.js["']/);
+  });
+
+  it("the 5 migrated context-menu branches route through runGeometryCommand", () => {
+    // Широкие окна (с запасом под многострочные комментарии) — тест ловит
+    // отсутствие миграции, а не точное форматирование соседнего кода.
+    const branches = [
+      /actionId === "wall-straight-h"[\s\S]{0,400}?runGeometryCommand/,
+      /actionId === "wall-straight-v"[\s\S]{0,400}?runGeometryCommand/,
+      /actionId === "wall-align"[\s\S]{0,400}?runGeometryCommand/,
+      /actionId === "wall-merge"[\s\S]{0,600}?runGeometryCommand/,
+      /actionId === "wall-break"[\s\S]{0,800}?runGeometryCommand/,
+    ];
+    for (const re of branches) {
+      expect(planPageSource, `expected to find runGeometryCommand near ${re}`).toMatch(re);
+    }
+  });
+});
+
+/**
+ * PHASE 1A-2A — geometryCommandDispatcher.js boundary (UI orchestration layer).
+ */
+describe("PHASE 1A-2A — geometry command dispatcher boundary", () => {
+  const DISPATCHER_FILE = join(PLANNER_ROOT, "ui", "geometryCommandDispatcher.js");
+  const dispatcherSource = readFileSync(DISPATCHER_FILE, "utf8");
+
+  it("does not import React/ReactDOM", () => {
+    expect(/from\s*["']react(-dom)?["']/.test(dispatcherSource)).toBe(false);
+  });
+
+  it("does not import PlanPage or backend", () => {
+    const codeOnly = dispatcherSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    expect(codeOnly).not.toMatch(/from\s*["'][^"']*PlanPage/);
+    expect(codeOnly).not.toMatch(/from\s*["'][^"']*backend/);
+  });
+
+  it("imports executeGeometryCommand directly from the command layer (the one legitimate caller)", () => {
+    expect(dispatcherSource).toMatch(/import\s*\{\s*executeGeometryCommand\s*\}\s*from\s*["'][^"']*commands\/geometryCommands\.js["']/);
   });
 });

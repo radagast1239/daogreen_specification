@@ -1264,3 +1264,209 @@ describe("PHASE 1A-1 corrective — performance (split: command overhead vs room
     if (process.env.PLANNER_PERF_LOG) console.log(`[perf] end-to-end incl. room engine, N=${N}, ${wid} walls: ${dt.toFixed(1)}ms`);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 1A-2A — P2 closure
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── §2 typed entity-change contract ────────────────────────────────────
+
+describe("PHASE 1A-2A — typed entityChanges contract", () => {
+  it("entityChanges is present on every result type (success/rejected/no-op/unknown)", () => {
+    const plan = rectPlan();
+    const success = executeGeometryCommand(plan, { type: "wall.delete", wallId: "w1" }, { makeId: ids() });
+    const rejectedR = executeGeometryCommand(plan, { type: "wall.delete", wallId: "missing" }, { makeId: ids() });
+    const noopR = executeGeometryCommand(plan, { type: "wall.straightenHorizontal", wallId: "w1" }, { makeId: ids() });
+    const unknownR = executeGeometryCommand(plan, { type: "wall.teleport" }, {});
+    for (const r of [success, rejectedR, noopR, unknownR]) {
+      expect(r).toHaveProperty("entityChanges");
+      for (const bucket of ["created", "changed", "deleted"]) {
+        for (const kind of ["walls", "nodes", "items", "dimensions"]) {
+          expect(Array.isArray(r.entityChanges[bucket][kind])).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("rejected/no-op/unknown have a fully empty typed contract", () => {
+    const plan = rectPlan();
+    const rejectedR = executeGeometryCommand(plan, { type: "wall.delete", wallId: "missing" }, { makeId: ids() });
+    const noopR = executeGeometryCommand(plan, { type: "wall.straightenHorizontal", wallId: "w1" }, { makeId: ids() });
+    const unknownR = executeGeometryCommand(plan, { type: "wall.teleport" }, {});
+    for (const r of [rejectedR, noopR, unknownR]) {
+      const flat = [...Object.values(r.entityChanges.created), ...Object.values(r.entityChanges.changed), ...Object.values(r.entityChanges.deleted)].flat();
+      expect(flat).toEqual([]);
+    }
+  });
+
+  it("typed lists have no duplicates and reflect only real changes", () => {
+    const plan = rectPlan();
+    const result = executeGeometryCommand(plan, { type: "wall.delete", wallId: "w1" }, { makeId: ids() });
+    for (const bucket of ["created", "changed", "deleted"]) {
+      for (const kind of ["walls", "nodes", "items", "dimensions"]) {
+        const list = result.entityChanges[bucket][kind];
+        expect(new Set(list).size).toBe(list.length);
+      }
+    }
+    expect(result.entityChanges.deleted.walls).toEqual(["w1"]);
+  });
+
+  it("flat createdEntityIds/changedEntityIds/deletedEntityIds remain a correct flattened summary", () => {
+    const plan = rectPlan();
+    plan.items = [{ id: "d1", kind: "door", x: 100, y: 0, w: 100, h: 100, wallId: "w1" }];
+    const result = executeGeometryCommand(plan, { type: "wall.delete", wallId: "w1" }, { makeId: ids() });
+    const flatDeleted = [...result.entityChanges.deleted.walls, ...result.entityChanges.deleted.nodes, ...result.entityChanges.deleted.items, ...result.entityChanges.deleted.dimensions];
+    const flatChanged = [...result.entityChanges.changed.walls, ...result.entityChanges.changed.nodes, ...result.entityChanges.changed.items, ...result.entityChanges.changed.dimensions];
+    expect(new Set(result.deletedEntityIds)).toEqual(new Set(flatDeleted));
+    expect(new Set(result.changedEntityIds)).toEqual(new Set(flatChanged));
+  });
+
+  it("typed contract is not written into plan", () => {
+    const plan = rectPlan();
+    const result = executeGeometryCommand(plan, { type: "wall.delete", wallId: "w1" }, { makeId: ids() });
+    expect(result.plan).not.toHaveProperty("entityChanges");
+  });
+
+  it("entityRemap remains a separate field from entityChanges", () => {
+    const plan = singleWallPlan();
+    const result = executeGeometryCommand(plan, { type: "wall.split", wallId: "w1", point: { x: 3000, y: 0 } }, { makeId: ids() });
+    expect(result).toHaveProperty("entityRemap");
+    expect(result).toHaveProperty("entityChanges");
+    expect(result.entityRemap).not.toBe(result.entityChanges);
+  });
+});
+
+// ── §3 wall.split changed entities (P2) ────────────────────────────────
+
+describe("PHASE 1A-2A — wall.split typed changed entities", () => {
+  function opening(id, kind, center, extra = {}) {
+    const w = extra.w || 600;
+    const h = extra.h || 100;
+    return { id, kind, x: center.x - w / 2, y: center.y - h / 2, w, h, wallId: "w1", ...extra };
+  }
+
+  it("before/after opening ids land in entityChanges.changed.items, taken from entityRemap.openings", () => {
+    const plan = singleWallPlan();
+    plan.items = [opening("before", "door", { x: 1000, y: 0 }), opening("after", "window", { x: 5000, y: 0 })];
+    const result = executeGeometryCommand(plan, { type: "wall.split", wallId: "w1", point: { x: 3000, y: 0 } }, { makeId: ids() });
+    expect([...result.entityChanges.changed.items].sort()).toEqual(["after", "before"]);
+    expect(result.entityChanges.changed.items).toEqual(result.entityRemap.openings.map((r) => r.entityId));
+  });
+
+  it("a reattached dimension id lands in entityChanges.changed.dimensions", () => {
+    const plan = singleWallPlan();
+    plan.dimensions = [{ id: "reattach1", p1: { x: 600, y: 0 }, p2: { x: 1200, y: 0 }, attachedTo: { type: "wall", wallId: "w1", t0: 0.1, t1: 0.2 } }];
+    const result = executeGeometryCommand(plan, { type: "wall.split", wallId: "w1", point: { x: 3000, y: 0 } }, { makeId: ids() });
+    expect(result.entityChanges.changed.dimensions).toEqual(["reattach1"]);
+    expect(result.plan.dimensions[0].attachedTo).not.toBeNull();
+  });
+
+  it("a detached (cross-split) dimension id also lands in entityChanges.changed.dimensions", () => {
+    const plan = singleWallPlan();
+    plan.dimensions = [{ id: "detach1", p1: { x: 1200, y: 0 }, p2: { x: 4800, y: 0 }, attachedTo: { type: "wall", wallId: "w1", t0: 0.2, t1: 0.8 } }];
+    const result = executeGeometryCommand(plan, { type: "wall.split", wallId: "w1", point: { x: 3000, y: 0 } }, { makeId: ids() });
+    expect(result.entityChanges.changed.dimensions).toEqual(["detach1"]);
+    expect(result.plan.dimensions[0].attachedTo).toBeNull();
+    expect(result.warnings.some((w) => w.entityId === "detach1")).toBe(true);
+  });
+
+  it("rejected split returns a fully empty entityChanges", () => {
+    const plan = singleWallPlan();
+    plan.items = [opening("d1", "door", { x: 3000, y: 0 }, { w: 900 })];
+    const result = executeGeometryCommand(plan, { type: "wall.split", wallId: "w1", point: { x: 3000, y: 0 } }, { makeId: ids() });
+    expect(result.ok).toBe(false);
+    const flat = [...Object.values(result.entityChanges.created), ...Object.values(result.entityChanges.changed), ...Object.values(result.entityChanges.deleted)].flat();
+    expect(flat).toEqual([]);
+  });
+
+  it("flat compatibility arrays also contain the same opening/dimension IDs", () => {
+    const plan = singleWallPlan();
+    plan.items = [opening("d1", "door", { x: 5000, y: 0 })];
+    plan.dimensions = [{ id: "dm1", p1: { x: 1200, y: 0 }, p2: { x: 4800, y: 0 }, attachedTo: { type: "wall", wallId: "w1", t0: 0.2, t1: 0.8 } }];
+    const result = executeGeometryCommand(plan, { type: "wall.split", wallId: "w1", point: { x: 3000, y: 0 } }, { makeId: ids() });
+    expect(result.changedEntityIds).toEqual(expect.arrayContaining(["d1", "dm1"]));
+  });
+});
+
+// ── §4 node.nudge shared-node refresh (P2) ──────────────────────────────
+
+describe("PHASE 1A-2A — node.nudge shared-node mounted-entity refresh", () => {
+  it("nudging a node shared by two walls refreshes mounted openings on BOTH walls", () => {
+    // w1: n1(0,0)-n2(3000,0), w2: n2(3000,0)-n3(3000,3000) — n2 shared (T-junction-ish corner).
+    const plan = {
+      room: { w: 6000, h: 3000 },
+      nodes: { n1: { x: 0, y: 0 }, n2: { x: 3000, y: 0 }, n3: { x: 3000, y: 3000 } },
+      walls: [{ id: "w1", a: "n1", b: "n2", thk: 100 }, { id: "w2", a: "n2", b: "n3", thk: 100 }],
+      items: [
+        { id: "d1", kind: "door", x: 1400, y: -50, w: 600, h: 100, wallId: "w1" }, // near n2 on w1
+        { id: "d2", kind: "door", x: 2950, y: 1200, w: 100, h: 600, wallId: "w2" }, // near n2 on w2
+      ],
+      dimensions: [],
+      rooms: [],
+      zones: [],
+    };
+    const result = executeGeometryCommand(plan, { type: "node.nudge", wallId: "w1", nodeIdx: 1, dx: 60, dy: 40 }, { makeId: ids() });
+    expect(result.ok).toBe(true);
+    expect(result.changed).toBe(true);
+    // n2 (shared) moved -> both walls' geometry changed.
+    expect(result.plan.nodes.n2).toEqual({ x: 3060, y: 40 });
+    const w2 = result.plan.walls.find((w) => w.id === "w2");
+    expect(result.plan.nodes[w2.a]).toEqual({ x: 3060, y: 40 });
+
+    // Both openings resolved against the moved geometry (wallSeg reflects the new endpoint).
+    const d1 = result.plan.items.find((it) => it.id === "d1");
+    const d2 = result.plan.items.find((it) => it.id === "d2");
+    expect(d1.wallSeg.b).toEqual({ x: 3060, y: 40 });
+    expect(d2.wallSeg.a).toEqual({ x: 3060, y: 40 });
+
+    expect(result.entityChanges.changed.walls.sort()).toEqual(["w1", "w2"]);
+    expect(result.entityChanges.changed.items.sort()).toEqual(["d1", "d2"]);
+
+    const diagnostics = validatePlanIntegrity(result.plan).diagnostics.filter((d) => d.entityType === "opening");
+    expect(diagnostics).toEqual([]);
+  });
+
+  it("free/item dimensions are not touched by a shared-node nudge", () => {
+    const plan = {
+      room: { w: 6000, h: 3000 },
+      nodes: { n1: { x: 0, y: 0 }, n2: { x: 3000, y: 0 }, n3: { x: 3000, y: 3000 } },
+      walls: [{ id: "w1", a: "n1", b: "n2", thk: 100 }, { id: "w2", a: "n2", b: "n3", thk: 100 }],
+      items: [],
+      dimensions: [{ id: "free1", p1: { x: 10, y: 10 }, p2: { x: 20, y: 20 }, attachedTo: null }],
+      rooms: [],
+      zones: [],
+    };
+    const result = executeGeometryCommand(plan, { type: "node.nudge", wallId: "w1", nodeIdx: 1, dx: 60, dy: 40 }, { makeId: ids() });
+    expect(result.plan.dimensions[0]).toEqual(plan.dimensions[0]);
+  });
+
+  it("wall-attached dimension on the non-nudged-wallId side still resolves correctly (self-healing)", () => {
+    const plan = {
+      room: { w: 6000, h: 3000 },
+      nodes: { n1: { x: 0, y: 0 }, n2: { x: 3000, y: 0 }, n3: { x: 3000, y: 3000 } },
+      walls: [{ id: "w1", a: "n1", b: "n2", thk: 100 }, { id: "w2", a: "n2", b: "n3", thk: 100 }],
+      items: [],
+      dimensions: [{ id: "dm1", attachedTo: { type: "wall", wallId: "w2", t0: 0, t1: 1 } }],
+      rooms: [],
+      zones: [],
+    };
+    const result = executeGeometryCommand(plan, { type: "node.nudge", wallId: "w1", nodeIdx: 1, dx: 60, dy: 40 }, { makeId: ids() });
+    // attachedTo unchanged (self-healing) — resolves against w2's NEW endpoint live.
+    expect(result.plan.dimensions[0].attachedTo).toEqual({ type: "wall", wallId: "w2", t0: 0, t1: 1 });
+    const w2 = result.plan.walls.find((w) => w.id === "w2");
+    expect(result.plan.nodes[w2.a]).toEqual({ x: 3060, y: 40 });
+  });
+
+  it("room sync runs exactly once for a shared-node nudge", () => {
+    const plan = {
+      room: { w: 6000, h: 3000 },
+      nodes: { n1: { x: 0, y: 0 }, n2: { x: 3000, y: 0 }, n3: { x: 3000, y: 3000 } },
+      walls: [{ id: "w1", a: "n1", b: "n2", thk: 100 }, { id: "w2", a: "n2", b: "n3", thk: 100 }],
+      items: [], dimensions: [], rooms: [], zones: [],
+    };
+    const roomSyncFn = vi.fn((p) => ({ rooms: p.rooms || [], zones: p.zones || [], validationWarnings: [] }));
+    const result = executeGeometryCommand(plan, { type: "node.nudge", wallId: "w1", nodeIdx: 1, dx: 60, dy: 40 }, { makeId: ids(), roomSyncFn });
+    expect(result.ok).toBe(true);
+    expect(roomSyncFn).toHaveBeenCalledTimes(1);
+  });
+});

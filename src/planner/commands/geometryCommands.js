@@ -53,16 +53,58 @@ export const DIMENSION_DETACHED_AFTER_WALL_REMOVED = "DIMENSION_DETACHED_AFTER_W
 
 // ── result helpers ──────────────────────────────────────────────────────
 
+function dedupe(ids) {
+  return [...new Set(ids.filter((id) => id != null))];
+}
+
+const ENTITY_KINDS = ["walls", "nodes", "items", "dimensions"];
+
+/**
+ * PHASE 1A-2A P2 — typed entity-change contract. Additive: старый flat
+ * createdEntityIds/changedEntityIds/deletedEntityIds сохраняется, но теперь
+ * ВЫВОДИТСЯ из typed contract (единственный источник правды — не может
+ * разойтись с ним). entityType сообщает caller'у (UI selection/diagnostics),
+ * какого рода сущность изменилась, не заставляя угадывать по префиксу id.
+ */
+function emptyEntityChanges() {
+  return {
+    created: { walls: [], nodes: [], items: [], dimensions: [] },
+    changed: { walls: [], nodes: [], items: [], dimensions: [] },
+    deleted: { walls: [], nodes: [], items: [], dimensions: [] },
+  };
+}
+
+function normalizeEntityChanges(patch = {}) {
+  const out = emptyEntityChanges();
+  for (const bucket of ["created", "changed", "deleted"]) {
+    for (const kind of ENTITY_KINDS) {
+      out[bucket][kind] = dedupe(patch?.[bucket]?.[kind] || []);
+    }
+  }
+  return out;
+}
+
+function flattenEntityChanges(entityChanges) {
+  const flat = { created: [], changed: [], deleted: [] };
+  for (const bucket of ["created", "changed", "deleted"]) {
+    flat[bucket] = dedupe(ENTITY_KINDS.flatMap((kind) => entityChanges[bucket][kind]));
+  }
+  return flat;
+}
+
 function baseResult(commandType, plan) {
+  const entityChanges = emptyEntityChanges();
+  const flat = flattenEntityChanges(entityChanges);
   return {
     ok: true,
     changed: false,
     commandType,
     plan,
     entityRemap: {},
-    createdEntityIds: [],
-    changedEntityIds: [],
-    deletedEntityIds: [],
+    entityChanges,
+    createdEntityIds: flat.created,
+    changedEntityIds: flat.changed,
+    deletedEntityIds: flat.deleted,
     diagnostics: [],
     warnings: [],
     error: null,
@@ -85,12 +127,25 @@ function noop(commandType, plan) {
   return baseResult(commandType, plan); // ok:true, changed:false, plan по той же ссылке
 }
 
+/**
+ * @param {object} patch — может содержать entityChanges (typed, предпочтительно)
+ *   и/или operation-specific поля (warnings, entityRemap, operationResult).
+ *   Flat createdEntityIds/changedEntityIds/deletedEntityIds в patch
+ *   ИГНОРИРУЮТСЯ — они всегда выводятся из entityChanges, чтобы не рассинхронизироваться.
+ */
 function changedOk(commandType, plan, patch = {}) {
-  return { ...baseResult(commandType, plan), changed: true, ...patch };
-}
-
-function dedupe(ids) {
-  return [...new Set(ids.filter((id) => id != null))];
+  const { entityChanges: rawEntityChanges, createdEntityIds, changedEntityIds, deletedEntityIds, ...rest } = patch;
+  const entityChanges = normalizeEntityChanges(rawEntityChanges);
+  const flat = flattenEntityChanges(entityChanges);
+  return {
+    ...baseResult(commandType, plan),
+    changed: true,
+    ...rest,
+    entityChanges,
+    createdEntityIds: flat.created,
+    changedEntityIds: flat.changed,
+    deletedEntityIds: flat.deleted,
+  };
 }
 
 // ── finite coordinate guards (section 8) ──────────────────────────────────
@@ -207,10 +262,20 @@ function handleWallSplit(plan, command, context) {
       ...(res.error.wallId ? { wallId: res.error.wallId } : {}),
     });
   }
+  // PHASE 1A-2A P2 §3: changed openings/dimensions приходят из РЕАЛЬНЫХ
+  // entityRemap-записей breakWallEdgeAt (openings/dimensions), не угадываются
+  // по геометрии. entityRemap.dimensions уже покрывает и reattached, и
+  // detached-cross-split записи (см. wallNetwork.js remapWallDimension).
   return changedOk("wall.split", res.plan, {
     entityRemap: res.entityRemap,
-    createdEntityIds: [res.splitNodeId, res.newWallId],
-    changedEntityIds: [res.originalWallId],
+    entityChanges: {
+      created: { nodes: [res.splitNodeId], walls: [res.newWallId] },
+      changed: {
+        walls: [res.originalWallId],
+        items: res.entityRemap.openings.map((r) => r.entityId),
+        dimensions: res.entityRemap.dimensions.map((r) => r.entityId),
+      },
+    },
     warnings: res.warnings || [],
     operationResult: {
       originalWallId: res.originalWallId,
@@ -280,8 +345,10 @@ function handleWallDelete(plan, command) {
 
   const nextPlan = { ...topologyPlan, items, dimensions };
   return changedOk("wall.delete", nextPlan, {
-    deletedEntityIds: dedupe([wallId, ...removedNodeIds, ...danglingItemIds]),
-    changedEntityIds: dedupe([...changedItemIds, ...changedDimensionIds]),
+    entityChanges: {
+      deleted: { walls: [wallId], nodes: removedNodeIds, items: danglingItemIds },
+      changed: { items: changedItemIds, dimensions: changedDimensionIds },
+    },
     warnings: dimensionWarnings,
   });
 }
@@ -323,7 +390,9 @@ function handleWallCreate(plan, command, context) {
   if (nextPlan === plan) return noop("wall.create", plan);
   const createdWallIds = (nextPlan.walls || []).map((w) => w.id).filter((id) => !wallsBefore.has(id));
   const createdNodeIds = Object.keys(nextPlan.nodes || {}).filter((id) => !nodesBefore.has(id));
-  return changedOk("wall.create", nextPlan, { createdEntityIds: [...createdNodeIds, ...createdWallIds] });
+  return changedOk("wall.create", nextPlan, {
+    entityChanges: { created: { nodes: createdNodeIds, walls: createdWallIds } },
+  });
 }
 
 function straightenMode(commandType) {
@@ -346,7 +415,9 @@ function handleWallStraighten(plan, command, context, commandType) {
   const changedItemIds = diffChangedItemIds(plan.items, items);
   const nextPlan = { ...geomPlan, items };
   return changedOk(commandType, nextPlan, {
-    changedEntityIds: dedupe([wallId, ...changedNodeIds, ...changedItemIds]),
+    entityChanges: {
+      changed: { walls: [wallId], nodes: changedNodeIds, items: changedItemIds },
+    },
   });
 }
 
@@ -366,7 +437,9 @@ function handleWallAlignToNeighbor(plan, command) {
   const changedItemIds = diffChangedItemIds(plan.items, items);
   const nextPlan = { ...geomPlan, items };
   return changedOk("wall.alignToNeighbor", nextPlan, {
-    changedEntityIds: dedupe([wallId, ...changedNodeIds, ...changedItemIds]),
+    entityChanges: {
+      changed: { walls: [wallId], nodes: changedNodeIds, items: changedItemIds },
+    },
   });
 }
 
@@ -391,8 +464,10 @@ function handleWallMerge(plan, command) {
   const changedDimensionIds = res.entityRemap.dimensions.map((r) => r.entityId);
   return changedOk("wall.merge", res.plan, {
     entityRemap: res.entityRemap,
-    deletedEntityIds: dedupe([res.removedWallId, ...res.removedNodeIds]),
-    changedEntityIds: dedupe([res.survivingWallId, ...changedItemIds, ...changedDimensionIds]),
+    entityChanges: {
+      deleted: { walls: [res.removedWallId], nodes: res.removedNodeIds },
+      changed: { walls: [res.survivingWallId], items: changedItemIds, dimensions: changedDimensionIds },
+    },
   });
 }
 
@@ -412,7 +487,9 @@ function handleWallMoveSegment(plan, command) {
   const otherWallIds = wallsUsingNodes(geomPlan.walls, changedNodeIds).filter((id) => id !== wallId);
   const nextPlan = { ...geomPlan, items };
   return changedOk("wall.moveSegment", nextPlan, {
-    changedEntityIds: dedupe([wallId, ...changedNodeIds, ...otherWallIds, ...changedItemIds]),
+    entityChanges: {
+      changed: { walls: [wallId, ...otherWallIds], nodes: changedNodeIds, items: changedItemIds },
+    },
   });
 }
 
@@ -434,7 +511,9 @@ function handleNodeMove(plan, command) {
   const wallIds = wallsUsingNodes(geomPlan.walls, changedNodeIds);
   const nextPlan = { ...geomPlan, items };
   return changedOk("node.move", nextPlan, {
-    changedEntityIds: dedupe([...changedNodeIds, ...wallIds, ...changedItemIds]),
+    entityChanges: {
+      changed: { nodes: changedNodeIds, walls: wallIds, items: changedItemIds },
+    },
   });
 }
 
@@ -451,14 +530,23 @@ function handleNodeNudge(plan, command) {
   const changedNodeIds = diffNodeIds(plan.nodes, geomPlan.nodes);
   if (changedNodeIds.length === 0) return noop("node.nudge", plan);
 
-  const items = refreshMountedItemsForCoordinateChange(geomPlan, wallId);
+  // PHASE 1A-2A P2 §4: nudge может двигать УЗЕЛ, общий с другой стеной
+  // (junction) — plan.nodes хранится по ссылке (id), а не копией per-wall, так
+  // что movePlanNode внутри nudgeWallInPlan сразу меняет геометрию ЛЮБОЙ
+  // стены, использующей этот node. Scoped-к-wallId refresh (как раньше)
+  // пропускал mounted items на ДРУГИХ стенах, которые визуально тоже
+  // сдвинулись. Глобальный refresh — тот же безопасный выбор, что уже
+  // применяется в node.move (см. выше) для того же класса риска.
+  const items = refreshMountedItemsForCoordinateChange(geomPlan, null);
   const changedItemIds = diffChangedItemIds(plan.items, items);
   const otherWallIds = wallsUsingNodes(geomPlan.walls, changedNodeIds).filter((id) => id !== wallId);
   const nextPlan = { ...geomPlan, items };
   return changedOk("node.nudge", nextPlan, {
     // Реально изменённый узел/стена, а не всегда весь wallId (nodeIdx может
     // адресовать только один конец).
-    changedEntityIds: dedupe([...changedNodeIds, wallId, ...otherWallIds, ...changedItemIds]),
+    entityChanges: {
+      changed: { nodes: changedNodeIds, walls: [wallId, ...otherWallIds], items: changedItemIds },
+    },
   });
 }
 

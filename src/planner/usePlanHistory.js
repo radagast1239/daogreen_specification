@@ -46,10 +46,18 @@ export function usePlanHistory(initialPlan) {
     bump();
   }, []);
 
+  /**
+   * Stable getter that always returns the *live* HistoryModel.current plan,
+   * even before the next React render. Used by command dispatchers so that
+   * rapid successive commands never read a stale render-captured plan.
+   */
+  const getCurrentPlan = useCallback(() => stackRef.current.current, []);
+
   const stack = stackRef.current;
 
   return {
     plan: stack.current,
+    getCurrentPlan,
     setPlan,
     replacePlan,
     commitPlan,
