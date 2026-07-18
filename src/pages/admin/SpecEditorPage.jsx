@@ -29,7 +29,14 @@ import {
 } from "../../store/helpers.js";
 import { useStore } from "../../store/StoreContext.jsx";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, Link, useSearchParams, useNavigate } from "react-router-dom";
+import { useParams, Link, useSearchParams, useNavigate, useLocation } from "react-router-dom";
+import ProjectWorkspaceTabs from "../../components/ProjectWorkspaceTabs.jsx";
+import {
+  parseProjectWorkspaceView,
+  buildProjectWorkspaceSearch,
+  normalizeProjectWorkspaceView,
+} from "../../lib/projectWorkspaceView.js";
+import "../../styles/project-workspace.css";
 import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
 import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient, buildClientVisibilityPatch } from "../../../shared/itemTypes.js";
 import { buildModuleSelectionFromIds } from "../../../shared/specLineSelection.js";
@@ -99,11 +106,24 @@ const TAB_LABELS = {
 export default function SpecEditorPage() {
   const { id } = useParams();
   const nav = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const highlightItemId = searchParams.get("item");
   const sectionParam = searchParams.get("section");
   const focusParam = searchParams.get("focus");
+  const workspaceView = parseProjectWorkspaceView(searchParams);
   const stellagesPanelRef = useRef(null);
+
+  const setWorkspaceView = useCallback(
+    (next, { replace = false } = {}) => {
+      const view = normalizeProjectWorkspaceView(next);
+      if (view === workspaceView && searchParams.get("view") === view) return;
+      if (view === workspaceView && view === "spec" && !searchParams.get("view") && next == null) return;
+      const search = buildProjectWorkspaceSearch(searchParams, view);
+      nav({ pathname: location.pathname, search: search ? `?${search}` : "" }, { replace });
+    },
+    [nav, location.pathname, searchParams, workspaceView]
+  );
   const { state, actions } = useStore();
   const { confirm, success, error } = useToast();
   const project = state.projects.find((p) => p.id === id);
@@ -246,21 +266,26 @@ export default function SpecEditorPage() {
   }, [refreshActivity, project?.updatedAt]);
 
   useEffect(() => {
-    if (highlightItemId) setTab("spec");
-  }, [highlightItemId]);
+    if (!highlightItemId) return;
+    setTab("spec");
+    if (workspaceView !== "spec") setWorkspaceView("spec", { replace: true });
+  }, [highlightItemId, workspaceView, setWorkspaceView]);
 
   useEffect(() => {
     if (sectionParam !== "stellages" || !project?.id) return;
     setTab("spec");
+    if (workspaceView !== "design") setWorkspaceView("design", { replace: true });
     const timer = window.setTimeout(() => {
       stellagesPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 120);
     return () => window.clearTimeout(timer);
-  }, [sectionParam, project?.id]);
+  }, [sectionParam, project?.id, workspaceView, setWorkspaceView]);
 
   useEffect(() => {
-    if (focusParam === "general") setTab("merged");
-  }, [focusParam]);
+    if (focusParam !== "general") return;
+    setTab("merged");
+    if (workspaceView !== "spec") setWorkspaceView("spec", { replace: true });
+  }, [focusParam, workspaceView, setWorkspaceView]);
 
   useEffect(() => {
     api.listSectionTemplates().then(setSectionTemplates).catch(() => setSectionTemplates([]));
@@ -753,339 +778,406 @@ export default function SpecEditorPage() {
           visible={showCreateOnboarding}
           onDismiss={dismissCreateOnboarding}
         />
-        <ProjectHqBar
-          project={project}
-          items={project.items || []}
-          materials={state.materials}
-          publishCheck={publishCheck}
-          publishCheckLoading={publishCheckLoading}
-          clientUrl={url}
-          onRefreshPublishCheck={refreshPublishCheck}
-          onOpenPrePublish={() => setPrePublishOpen(true)}
-          onOpenClientLink={requestClientLink}
-          onOpenClientPreview={() => url && window.open(url, "_blank", "noopener,noreferrer")}
-          onCopyClientLink={copyClientLink}
-          onExportPdf={exportClientPdf}
-          onExportExcel={exportClientExcel}
-          onFilterSelect={handleDashboardFilter}
-          onProjectStatusChange={handleProjectStatusChange}
-          statusSaving={statusSaving}
-          onOpenPlan={() => nav(`/project/${project.id}/plan`)}
-          onImportFromPast={() => setImportOpen(true)}
-          onCompare={() => setCompareOpen(true)}
-          onDuplicate={() => setDupOpen(true)}
-          onApproveAll={approveAll}
-          onResetLink={regenerateLink}
-          onInternalExcel={exportSpec}
-        />
 
-        {(() => {
-          const linkState = clientLinkActiveState(project);
-          if (!linkState.needsPublishBeforeClientLink) return null;
-          return (
-            <div className="card" style={{ marginBottom: 16, borderColor: "var(--warn)" }}>
-              <strong>Клиентская ссылка пока неактивна</strong>
+        <ProjectWorkspaceTabs value={workspaceView} onChange={(v) => setWorkspaceView(v)} />
+
+        {/* —— Клиентская выдача (keep mounted) —— */}
+        <div
+          className={workspaceView === "publish" ? undefined : "pw-pane--inactive"}
+          data-workspace-pane="publish"
+          aria-hidden={workspaceView !== "publish"}
+        >
+          <div className="pw-jump-row no-print">
+            <button type="button" className="btn btn-sm" onClick={() => setWorkspaceView("spec")}>
+              К спецификации
+            </button>
+            <button type="button" className="btn btn-sm" onClick={() => setWorkspaceView("design")}>
+              К проектированию
+            </button>
+          </div>
+          <ProjectHqBar
+            project={project}
+            items={project.items || []}
+            materials={state.materials}
+            publishCheck={publishCheck}
+            publishCheckLoading={publishCheckLoading}
+            clientUrl={url}
+            onRefreshPublishCheck={refreshPublishCheck}
+            onOpenPrePublish={() => setPrePublishOpen(true)}
+            onOpenClientLink={requestClientLink}
+            onOpenClientPreview={() => url && window.open(url, "_blank", "noopener,noreferrer")}
+            onCopyClientLink={copyClientLink}
+            onExportPdf={exportClientPdf}
+            onExportExcel={exportClientExcel}
+            onFilterSelect={handleDashboardFilter}
+            onProjectStatusChange={handleProjectStatusChange}
+            statusSaving={statusSaving}
+            onOpenPlan={() => nav(`/project/${project.id}/plan`)}
+            onImportFromPast={() => setImportOpen(true)}
+            onCompare={() => setCompareOpen(true)}
+            onDuplicate={() => setDupOpen(true)}
+            onApproveAll={approveAll}
+            onResetLink={regenerateLink}
+            onInternalExcel={exportSpec}
+          />
+
+          {(() => {
+            const linkState = clientLinkActiveState(project);
+            if (!linkState.needsPublishBeforeClientLink) return null;
+            return (
+              <div className="card" style={{ marginBottom: 16, borderColor: "var(--warn)" }}>
+                <strong>Клиентская ссылка пока неактивна</strong>
+                <p className="muted" style={{ margin: "8px 0 12px" }}>
+                  Токен клиента создан, но опубликованная версия отсутствует. Клиент увидит сообщение
+                  «Проект пока не опубликован», пока вы не опубликуете версию.
+                </p>
+                <button type="button" className="btn primary" onClick={() => setPrePublishOpen(true)}>
+                  Опубликовать версию
+                </button>
+              </div>
+            );
+          })()}
+
+          {project.publishedRelease && project.hasUnpublishedChanges && (
+            <div className="card" style={{ marginBottom: 16, borderColor: "var(--warn)", background: "var(--warn-bg, rgba(255, 193, 7, 0.08))" }}>
+              <strong>Есть неопубликованные изменения</strong>
               <p className="muted" style={{ margin: "8px 0 12px" }}>
-                Токен клиента создан, но опубликованная версия отсутствует. Клиент увидит сообщение
-                «Проект пока не опубликован», пока вы не опубликуете версию.
+                Клиент видит опубликованную версию {project.publishedRelease.versionNumber}.
+                Рабочая спецификация изменилась — опубликуйте новую версию перед отправкой.
               </p>
               <button type="button" className="btn primary" onClick={() => setPrePublishOpen(true)}>
-                Опубликовать версию
+                Опубликовать новую версию
               </button>
             </div>
-          );
-        })()}
-
-        {project.publishedRelease && project.hasUnpublishedChanges && (
-          <div className="card" style={{ marginBottom: 16, borderColor: "var(--warn)", background: "var(--warn-bg, rgba(255, 193, 7, 0.08))" }}>
-            <strong>Есть неопубликованные изменения</strong>
-            <p className="muted" style={{ margin: "8px 0 12px" }}>
-              Клиент видит опубликованную версию {project.publishedRelease.versionNumber}.
-              Рабочая спецификация изменилась — опубликуйте новую версию перед отправкой.
-            </p>
-            <button type="button" className="btn primary" onClick={() => setPrePublishOpen(true)}>
-              Опубликовать новую версию
-            </button>
-          </div>
-        )}
-
-        <ProjectClientReadinessPanel
-          items={project.items || []}
-          materials={state.materials}
-          currency={project.currency}
-          publishCheck={publishCheck}
-          activeFilter={specQuickFilter}
-          onFilterSelect={handleDashboardFilter}
-          selectedItemIds={specSelectedIds}
-          onSelectItems={(ids) => applySpecSelectionRef.current?.(ids)}
-          onBulkShowClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(true))}
-          onBulkHideClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(false))}
-          onBulkRefreshPrice={bulkDeliveryRefreshPrice}
-          onClearSelection={() => clearSpecSelectionRef.current?.()}
-          onRepairBomTwins={handleRepairBomTwins}
-          bomTwinRepairBusy={bomTwinRepairBusy}
-        />
-
-        <div className="print-header">
-          <h1>{project.name}</h1>
-          <p>
-            {project.client || "—"}
-            {project.city ? ` · ${project.city}` : ""} · спецификация · {new Date().toLocaleDateString("ru-RU")}
-          </p>
-        </div>
-
-        {clientSectionIssueCount > 0 && (
-          <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--danger)" }}>
-            <strong>Нет клиентского раздела/подраздела: {clientSectionIssueCount} поз.</strong>
-            <p className="muted" style={{ fontSize: 13, margin: "6px 0 10px" }}>
-              В материалах разделы заполнены, но в проекте — старый снимок. Подтяните из базы одной кнопкой.
-            </p>
-            <button type="button" className="btn btn-sm btn-primary" onClick={syncAllClientSections}>
-              Клиент. разделы из базы
-            </button>
-          </div>
-        )}
-
-        {catalogMaterialDiff.changedItemCount > 0 && (
-          <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--accent)" }}>
-            <strong>Проверить обновления материалов: {catalogMaterialDiff.changedItemCount} поз.</strong>
-            <p className="muted" style={{ fontSize: 13, margin: "6px 0 10px" }}>
-              Материалы в базе изменились. Проект показывает сохранённый снимок до явного обновления.
-            </p>
-            <ul style={{ fontSize: 12.5, margin: "0 0 10px", paddingLeft: 18 }}>
-              {catalogMaterialDiff.changes.slice(0, 5).map((ch) => (
-                <li key={ch.itemId}>
-                  {ch.name}
-                  {ch.diffs.slice(0, 2).map((d) => (
-                    <span key={d.field} className="muted">
-                      {" "}
-                      · {d.label}: {String(d.before ?? "—")} → {String(d.after ?? "—")}
-                    </span>
-                  ))}
-                </li>
-              ))}
-              {catalogMaterialDiff.changes.length > 5 && (
-                <li className="muted">…ещё {catalogMaterialDiff.changes.length - 5}</li>
-              )}
-            </ul>
-            <button type="button" className="btn btn-sm btn-primary" onClick={applyAllCatalogUpdates}>
-              Обновить всё из базы
-            </button>
-          </div>
-        )}
-
-        {stalePrices.length > 0 && (
-          <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--warn)" }}>
-            <strong>Цена в базе изменилась у {stalePrices.length} поз.</strong>
-            <p className="muted" style={{ fontSize: 13, margin: "6px 0 10px" }}>
-              Старые проекты не обновляются автоматически. Обновить цену в проекте из базы?
-            </p>
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              onClick={async () => {
-                await actions.refreshItemsFromMaterial(
-                  project.id,
-                  {
-                    itemIds: stalePrices.map((s) => s.itemId),
-                    fields: ["price"],
-                  },
-                  { items: project.items, materials: state.materials }
-                );
-                await actions.loadProject(project.id);
-                success("Цены обновлены из базы");
-              }}
-            >
-              Обновить {stalePrices.length} поз.
-            </button>
-          </div>
-        )}
-
-        {replacementPending.length > 0 && (
-          <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--accent)" }}>
-            <strong>Замены на проверке: {replacementPending.length}</strong>
-            <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
-              {replacementPending.slice(0, 6).map((it) => (
-                <button
-                  key={it.id}
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() => setReplacementReviewItem(it)}
-                >
-                  {it.name.slice(0, 40)}
-                  {it.name.length > 40 ? "…" : ""}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {project.version > 0 && (
-          <p className="muted no-print" style={{ fontSize: 12, margin: "0 0 12px" }}>
-            Версия {project.version} опубликована. Правки сохраняются без новой версии — для снимка нажмите «Утвердить версию».
-          </p>
-        )}
-
-        <div className="row wrap no-print view-mode-toggle" style={{ gap: 8, marginBottom: 14 }}>
-          <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>Режим:</span>
-          {[
-            ["designer", "Проектировщик"],
-            ["client", "Предпросмотр клиента"],
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`btn btn-sm${viewMode === id ? " btn-primary" : ""}`}
-              onClick={() => setViewMode(id)}
-            >
-              {label}
-            </button>
-          ))}
-          {viewMode === "client" && (
-            <span className="chip chip--amber" style={{ fontSize: 11 }}>
-              Только то, что увидит клиент
-            </span>
           )}
-        </div>
 
-        {sectionTemplates.length > 0 && (
-          <div className="row wrap no-print" style={{ gap: 8, marginBottom: 14, alignItems: "center" }}>
-            <span className="muted" style={{ fontSize: 12 }}>Шаблон раздела:</span>
-            <select
-              value={applyTplId}
-              onChange={(e) => setApplyTplId(e.target.value)}
-              style={{ width: "auto", minWidth: 220 }}
-            >
-              <option value="">— выберите —</option>
-              {sectionTemplates.map((t) => (
-                <option key={t.id} value={t.id}>{t.name} ({t.moduleName})</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn btn-sm"
-              disabled={!applyTplId}
-              onClick={async () => {
-                const tpl = sectionTemplates.find((t) => t.id === applyTplId);
-                await actions.applySectionTemplate(project.id, {
-                  templateId: applyTplId,
-                  targetModule: tpl?.moduleName,
-                });
-                await actions.loadProject(project.id);
-                success(`Шаблон «${tpl?.name}» добавлен`);
-              }}
-            >
-              Вставить шаблон
-            </button>
-          </div>
-        )}
-
-        <div ref={stellagesPanelRef}>
-          <StellageFrameDrawingsPanel
-            project={project}
+          <ProjectClientReadinessPanel
+            items={project.items || []}
+            materials={state.materials}
+            currency={project.currency}
+            publishCheck={publishCheck}
+            activeFilter={specQuickFilter}
+            onFilterSelect={handleDashboardFilter}
+            selectedItemIds={specSelectedIds}
+            onSelectItems={(ids) => applySpecSelectionRef.current?.(ids)}
+            onBulkShowClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(true))}
+            onBulkHideClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(false))}
+            onBulkRefreshPrice={bulkDeliveryRefreshPrice}
+            onClearSelection={() => clearSpecSelectionRef.current?.()}
+            onRepairBomTwins={handleRepairBomTwins}
+            bomTwinRepairBusy={bomTwinRepairBusy}
           />
-        </div>
-        <ProjectDocuments projectId={project.id} />
 
-        <Collapsible
-          title="История публикаций"
-          subtitle={project.version ? `v${project.version}` : "нет версий"}
-          defaultOpen={false}
+          {clientSectionIssueCount > 0 && (
+            <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--danger)" }}>
+              <strong>Нет клиентского раздела/подраздела: {clientSectionIssueCount} поз.</strong>
+              <p className="muted" style={{ fontSize: 13, margin: "6px 0 10px" }}>
+                В материалах разделы заполнены, но в проекте — старый снимок. Подтяните из базы одной кнопкой.
+              </p>
+              <button type="button" className="btn btn-sm btn-primary" onClick={syncAllClientSections}>
+                Клиент. разделы из базы
+              </button>
+            </div>
+          )}
+
+          {catalogMaterialDiff.changedItemCount > 0 && (
+            <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--accent)" }}>
+              <strong>Проверить обновления материалов: {catalogMaterialDiff.changedItemCount} поз.</strong>
+              <p className="muted" style={{ fontSize: 13, margin: "6px 0 10px" }}>
+                Материалы в базе изменились. Проект показывает сохранённый снимок до явного обновления.
+              </p>
+              <ul style={{ fontSize: 12.5, margin: "0 0 10px", paddingLeft: 18 }}>
+                {catalogMaterialDiff.changes.slice(0, 5).map((ch) => (
+                  <li key={ch.itemId}>
+                    {ch.name}
+                    {ch.diffs.slice(0, 2).map((d) => (
+                      <span key={d.field} className="muted">
+                        {" "}
+                        · {d.label}: {String(d.before ?? "—")} → {String(d.after ?? "—")}
+                      </span>
+                    ))}
+                  </li>
+                ))}
+                {catalogMaterialDiff.changes.length > 5 && (
+                  <li className="muted">…ещё {catalogMaterialDiff.changes.length - 5}</li>
+                )}
+              </ul>
+              <button type="button" className="btn btn-sm btn-primary" onClick={applyAllCatalogUpdates}>
+                Обновить всё из базы
+              </button>
+            </div>
+          )}
+
+          {stalePrices.length > 0 && (
+            <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--warn)" }}>
+              <strong>Цена в базе изменилась у {stalePrices.length} поз.</strong>
+              <p className="muted" style={{ fontSize: 13, margin: "6px 0 10px" }}>
+                Старые проекты не обновляются автоматически. Обновить цену в проекте из базы?
+              </p>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                onClick={async () => {
+                  await actions.refreshItemsFromMaterial(
+                    project.id,
+                    {
+                      itemIds: stalePrices.map((s) => s.itemId),
+                      fields: ["price"],
+                    },
+                    { items: project.items, materials: state.materials }
+                  );
+                  await actions.loadProject(project.id);
+                  success("Цены обновлены из базы");
+                }}
+              >
+                Обновить {stalePrices.length} поз.
+              </button>
+            </div>
+          )}
+
+          {replacementPending.length > 0 && (
+            <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--accent)" }}>
+              <strong>Замены на проверке: {replacementPending.length}</strong>
+              <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
+                {replacementPending.slice(0, 6).map((it) => (
+                  <button
+                    key={it.id}
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => setReplacementReviewItem(it)}
+                  >
+                    {it.name.slice(0, 40)}
+                    {it.name.length > 40 ? "…" : ""}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Collapsible
+            title="История публикаций"
+            subtitle={project.version ? `v${project.version}` : "нет версий"}
+            defaultOpen={false}
+          >
+            <ProjectReleaseHistory projectId={project.id} currency={project.currency} />
+          </Collapsible>
+
+          <Collapsible title="История: клиент и Daogreen" subtitle={`${activity.length} записей`} defaultOpen={false}>
+            <ActivityFeed activity={activity} title="" />
+          </Collapsible>
+
+          <Collapsible title="Сводка и прогресс" subtitle={`${stats.total} позиций`} defaultOpen={false}>
+            <div className="stat-grid" style={{ marginBottom: 0 }}>
+              <Stat k="Без НДС" v={money(totals.budgetNet, project.currency)} />
+              <Stat k="НДС" v={money(totals.vatAmount, project.currency)} />
+              <Stat k="Итого" v={money(totals.budget, project.currency)} />
+              <Stat k="Потрачено" v={money(totals.spent, project.currency)} />
+              <div className="card stat">
+                <div className="k">Прогресс</div>
+                <div className="v num">{totals.progress}%</div>
+                <div style={{ marginTop: 8 }}><Progress value={totals.progress} /></div>
+              </div>
+            </div>
+
+            <div className="row wrap" style={{ gap: 14, marginBottom: 14, fontSize: 12.5 }}>
+              <span className="muted">Позиций: <b className="num">{stats.total}</b></span>
+              <span className="muted">Для клиента: <b className="num">{stats.approved}</b></span>
+              <span className="muted">Скрыто: <b className="num">{stats.hidden}</b></span>
+              {stats.noPrice > 0 && <span className="chip chip--amber chip-dot">без цены: {stats.noPrice}</span>}
+              {stats.noLink > 0 && <span className="chip chip--neutral chip-dot">без ссылки: {stats.noLink}</span>}
+            </div>
+          </Collapsible>
+        </div>
+
+        {/* —— Проектирование (stellages + documents; SpecTab design section below) —— */}
+        <div
+          className={workspaceView === "design" ? undefined : "pw-pane--inactive"}
+          data-workspace-pane="design"
+          aria-hidden={workspaceView !== "design"}
+          ref={stellagesPanelRef}
         >
-          <ProjectReleaseHistory projectId={project.id} currency={project.currency} />
-        </Collapsible>
-
-        <Collapsible title="История: клиент и Daogreen" subtitle={`${activity.length} записей`} defaultOpen={false}>
-          <ActivityFeed activity={activity} title="" />
-        </Collapsible>
-
-        <Collapsible title="Сводка и прогресс" subtitle={`${stats.total} позиций`} defaultOpen={false}>
-        <div className="stat-grid" style={{ marginBottom: 0 }}>
-          <Stat k="Без НДС" v={money(totals.budgetNet, project.currency)} />
-          <Stat k="НДС" v={money(totals.vatAmount, project.currency)} />
-          <Stat k="Итого" v={money(totals.budget, project.currency)} />
-          <Stat k="Потрачено" v={money(totals.spent, project.currency)} />
-          <div className="card stat">
-            <div className="k">Прогресс</div>
-            <div className="v num">{totals.progress}%</div>
-            <div style={{ marginTop: 8 }}><Progress value={totals.progress} /></div>
-          </div>
-        </div>
-
-        <div className="row wrap" style={{ gap: 14, marginBottom: 14, fontSize: 12.5 }}>
-          <span className="muted">Позиций: <b className="num">{stats.total}</b></span>
-          <span className="muted">Для клиента: <b className="num">{stats.approved}</b></span>
-          <span className="muted">Скрыто: <b className="num">{stats.hidden}</b></span>
-          {stats.noPrice > 0 && <span className="chip chip--amber chip-dot">без цены: {stats.noPrice}</span>}
-          {stats.noLink > 0 && <span className="chip chip--neutral chip-dot">без ссылки: {stats.noLink}</span>}
-        </div>
-        </Collapsible>
-
-        {/* Tabs */}
-        <div className="toolbar toolbar--tabs" style={{ borderBottom: "1px solid var(--line)", paddingBottom: 0, gap: 0 }}>
-          {[
-            ["spec", "Спецификация"],
-            ["merged", "Общий список"],
-            ["spec_lists", "Специалисты"],
-            ["calc", "Расчёт охлаждения фермы"],
-          ].map(([k, label]) => (
-            <button
-              key={k}
-              onClick={() => setTab(k)}
-              className="btn btn-ghost"
-              style={{
-                borderRadius: "6px 6px 0 0",
-                borderBottom: tab === k ? "3px solid var(--brand)" : "3px solid transparent",
-                color: tab === k ? "var(--brand)" : "var(--muted)",
-                background: tab === k ? "var(--bg-light)" : "transparent",
-                fontWeight: tab === k ? 700 : 500,
-                padding: "10px 16px",
-                marginRight: 4,
-              }}
-            >
-              {label}
+          <div className="pw-jump-row no-print">
+            <button type="button" className="btn btn-sm" onClick={() => setWorkspaceView("spec")}>
+              К спецификации
             </button>
-          ))}
+            <button type="button" className="btn btn-sm" onClick={() => setWorkspaceView("publish")}>
+              К клиентской выдаче
+            </button>
+          </div>
+          <StellageFrameDrawingsPanel project={project} />
+          <ProjectDocuments projectId={project.id} />
         </div>
 
-        {versionMsg && <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>{versionMsg}</p>}
+        {/* —— Спецификация chrome —— */}
+        <div
+          className={workspaceView === "spec" ? undefined : "pw-pane--inactive"}
+          data-workspace-pane="spec-chrome"
+          aria-hidden={workspaceView !== "spec"}
+        >
+          <div className="print-header">
+            <h1>{project.name}</h1>
+            <p>
+              {project.client || "—"}
+              {project.city ? ` · ${project.city}` : ""} · спецификация · {new Date().toLocaleDateString("ru-RU")}
+            </p>
+          </div>
 
-        {tab === "spec" && (
-          <>
+          {project.version > 0 && (
+            <p className="muted no-print" style={{ fontSize: 12, margin: "0 0 12px" }}>
+              Версия {project.version} опубликована. Правки сохраняются без новой версии — для снимка нажмите «Утвердить версию».
+            </p>
+          )}
+
+          <div className="row wrap no-print view-mode-toggle" style={{ gap: 8, marginBottom: 14 }}>
+            <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>Режим:</span>
+            {[
+              ["designer", "Проектировщик"],
+              ["client", "Предпросмотр клиента"],
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={`btn btn-sm${viewMode === id ? " btn-primary" : ""}`}
+                onClick={() => setViewMode(id)}
+              >
+                {label}
+              </button>
+            ))}
+            {viewMode === "client" && (
+              <span className="chip chip--amber" style={{ fontSize: 11 }}>
+                Только то, что увидит клиент
+              </span>
+            )}
+          </div>
+
+          {sectionTemplates.length > 0 && (
+            <div className="row wrap no-print" style={{ gap: 8, marginBottom: 14, alignItems: "center" }}>
+              <span className="muted" style={{ fontSize: 12 }}>Шаблон раздела:</span>
+              <select
+                value={applyTplId}
+                onChange={(e) => setApplyTplId(e.target.value)}
+                style={{ width: "auto", minWidth: 220 }}
+              >
+                <option value="">— выберите —</option>
+                {sectionTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name} ({t.moduleName})</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={!applyTplId}
+                onClick={async () => {
+                  const tpl = sectionTemplates.find((t) => t.id === applyTplId);
+                  await actions.applySectionTemplate(project.id, {
+                    templateId: applyTplId,
+                    targetModule: tpl?.moduleName,
+                  });
+                  await actions.loadProject(project.id);
+                  success(`Шаблон «${tpl?.name}» добавлен`);
+                }}
+              >
+                Вставить шаблон
+              </button>
+            </div>
+          )}
+
+          {/* Tabs */}
+          <div className="toolbar toolbar--tabs" style={{ borderBottom: "1px solid var(--line)", paddingBottom: 0, gap: 0 }}>
+            {[
+              ["spec", "Спецификация"],
+              ["merged", "Общий список"],
+              ["spec_lists", "Специалисты"],
+              ["calc", "Расчёт охлаждения фермы"],
+            ].map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setTab(k)}
+                className="btn btn-ghost"
+                style={{
+                  borderRadius: "6px 6px 0 0",
+                  borderBottom: tab === k ? "3px solid var(--brand)" : "3px solid transparent",
+                  color: tab === k ? "var(--brand)" : "var(--muted)",
+                  background: tab === k ? "var(--bg-light)" : "transparent",
+                  fontWeight: tab === k ? 700 : 500,
+                  padding: "10px 16px",
+                  marginRight: 4,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {versionMsg && <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>{versionMsg}</p>}
+        </div>
+
+        {/* SpecTab keep-mounted for design + spec table state */}
+        <div
+          className={
+            workspaceView === "design" || (workspaceView === "spec" && tab === "spec")
+              ? undefined
+              : "pw-pane--inactive"
+          }
+          data-workspace-pane="spec-tab"
+          aria-hidden={!(workspaceView === "design" || (workspaceView === "spec" && tab === "spec"))}
+        >
+          <div className={workspaceView === "spec" && tab === "spec" ? undefined : "pw-pane--inactive"}>
             <ProjectCoolingSummary
               project={project}
-              onOpenCalc={() => setTab("calc")}
-            />
-            <SpecTab
-              project={project}
-              patchItem={patchItem}
-              actions={actions}
-              saveRooms={saveRooms}
-              floorPlanUrl={floorPlanUrl}
-              onFloorPlanChange={saveFloorPlanUrl}
-              manualParams={project.manualParams}
-              onManualParamsChange={(mp) => actions.projectUpdate(project.id, { manualParams: mp })}
-              highlightItemId={highlightItemId}
-              viewMode={viewMode}
-              quickFilter={specQuickFilter}
-              onQuickFilterChange={setSpecQuickFilter}
-              onSelectionChange={setSpecSelectedIds}
-              publishCheck={publishCheck}
-              onBulkShowClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(true))}
-              onBulkHideClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(false))}
-              onBulkRefreshPrice={bulkDeliveryRefreshPrice}
-              registerClearSelection={(fn) => {
-                clearSpecSelectionRef.current = fn;
-              }}
-              registerApplySelection={(fn) => {
-                applySpecSelectionRef.current = fn;
+              onOpenCalc={() => {
+                setTab("calc");
+                setWorkspaceView("spec");
               }}
             />
-          </>
-        )}
-        {tab === "merged" && <MergedTab project={project} />}
-        {tab === "spec_lists" && <SpecialistTab project={project} />}
-        {tab === "calc" && (
+          </div>
+          <SpecTab
+            project={project}
+            patchItem={patchItem}
+            actions={actions}
+            saveRooms={saveRooms}
+            floorPlanUrl={floorPlanUrl}
+            onFloorPlanChange={saveFloorPlanUrl}
+            manualParams={project.manualParams}
+            onManualParamsChange={(mp) => actions.projectUpdate(project.id, { manualParams: mp })}
+            highlightItemId={highlightItemId}
+            viewMode={viewMode}
+            quickFilter={specQuickFilter}
+            onQuickFilterChange={setSpecQuickFilter}
+            onSelectionChange={setSpecSelectedIds}
+            publishCheck={publishCheck}
+            onBulkShowClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(true))}
+            onBulkHideClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(false))}
+            onBulkRefreshPrice={bulkDeliveryRefreshPrice}
+            registerClearSelection={(fn) => {
+              clearSpecSelectionRef.current = fn;
+            }}
+            registerApplySelection={(fn) => {
+              applySpecSelectionRef.current = fn;
+            }}
+            workspaceView={workspaceView}
+          />
+        </div>
+
+        <div
+          className={workspaceView === "spec" && tab === "merged" ? undefined : "pw-pane--inactive"}
+          data-workspace-pane="merged"
+          aria-hidden={!(workspaceView === "spec" && tab === "merged")}
+        >
+          <MergedTab project={project} />
+        </div>
+        <div
+          className={workspaceView === "spec" && tab === "spec_lists" ? undefined : "pw-pane--inactive"}
+          data-workspace-pane="spec-lists"
+          aria-hidden={!(workspaceView === "spec" && tab === "spec_lists")}
+        >
+          <SpecialistTab project={project} />
+        </div>
+        <div
+          className={workspaceView === "spec" && tab === "calc" ? undefined : "pw-pane--inactive"}
+          data-workspace-pane="calc"
+          aria-hidden={!(workspaceView === "spec" && tab === "calc")}
+        >
           <CoolingFarmTab
             project={project}
             actions={actions}
@@ -1110,7 +1202,7 @@ export default function SpecEditorPage() {
             onDuplicateToNewRoom={duplicateCoolingToNewRoom}
             onClearRoomCooling={clearCoolingRoom}
           />
-        )}
+        </div>
       </div>
 
       {showFloorPlanPin && <FloorPlanPin schemes={uploadedSchemes} title="Схема помещения" />}
@@ -1213,6 +1305,7 @@ function SpecTab({
   onBulkRefreshPrice,
   registerClearSelection,
   registerApplySelection,
+  workspaceView = "spec",
 }) {
   const { confirm, success, error } = useToast();
   const { state } = useStore();
@@ -1461,6 +1554,11 @@ function SpecTab({
       )}
       {!clientPreview && (
       <>
+      <div
+        className={workspaceView === "design" ? undefined : "pw-pane--inactive"}
+        data-workspace-pane="spec-design"
+        aria-hidden={workspaceView !== "design"}
+      >
       <Collapsible title="Схема, комнаты и электропотребление" defaultOpen={hasFarmItems || rooms.length > 0 || !!floorPlanUrl}>
         <FloorPlanField value={floorPlanUrl || ""} onChange={onFloorPlanChange} />
         {(hasFarmItems || rooms.length > 0) && (
@@ -1499,7 +1597,13 @@ function SpecTab({
           }
         />
       </Collapsible>
+      </div>
 
+      <div
+        className={workspaceView === "spec" ? undefined : "pw-pane--inactive"}
+        data-workspace-pane="spec-table"
+        aria-hidden={workspaceView !== "spec"}
+      >
       <SpecQuickFilters
         items={project.items || []}
         materials={materials}
@@ -1517,9 +1621,15 @@ function SpecTab({
         onClearSelection={() => setModuleSelected({})}
         syncClientSections={syncClientSections}
       />
+      </div>
       </>
       )}
 
+      <div
+        className={workspaceView === "spec" ? undefined : "pw-pane--inactive"}
+        data-workspace-pane="spec-sections"
+        aria-hidden={workspaceView !== "spec"}
+      >
       {groups.map(([module, items]) => {
         const moduleFilter = moduleFilters[module] || "";
         const modSelected = moduleSelected[module] || new Set();
@@ -2050,6 +2160,7 @@ function SpecTab({
         </Collapsible>
       );
       })}
+      </div>
     </div>
   );
 }

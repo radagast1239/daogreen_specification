@@ -1,0 +1,69 @@
+/* Project workspace Phase A — tabs + keep-mounted panes */
+
+.pw-tabs {
+  margin: 0 0 14px;
+  border-bottom: 1px solid var(--line, #d8e0dc);
+  background: var(--bg-light, #f4f7f5);
+  border-radius: 10px 10px 0 0;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.pw-tabs__scroll {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 8px 0;
+  scrollbar-width: thin;
+}
+
+.pw-tabs__btn {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--muted, #5c6b64);
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 10px 14px;
+  border-radius: 8px 8px 0 0;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pw-tabs__btn:hover {
+  color: var(--text, #123028);
+  background: rgba(6, 41, 32, 0.04);
+}
+
+.pw-tabs__btn.is-active {
+  color: var(--brand, #0b5c45);
+  border-bottom-color: var(--brand, #0b5c45);
+  background: var(--bg, #fff);
+}
+
+/* Keep mounted; hide inactive panes without unmount */
+.pw-pane--inactive {
+  display: none !important;
+}
+
+.pw-jump-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+@media (max-width: 768px) {
+  .pw-tabs {
+    position: sticky;
+    top: 0;
+  }
+
+  .pw-tabs__btn {
+    font-size: 13px;
+    padding: 10px 12px;
+  }
+}
