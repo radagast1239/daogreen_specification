@@ -212,3 +212,75 @@ describe("PHASE 1A-2A — geometry command dispatcher boundary", () => {
     expect(dispatcherSource).toMatch(/import\s*\{\s*executeGeometryCommand\s*\}\s*from\s*["'][^"']*commands\/geometryCommands\.js["']/);
   });
 });
+
+/**
+ * PHASE 1A-2B1 — node-drag / wall-segment-drag / keyboard-nudge boundary.
+ *
+ * После перевода финального commit node/wall-segment drag и keyboard nudge
+ * на geometry command boundary, onUp's final-commit branches больше не
+ * должны напрямую вызывать низкоуровневые мутаторы geometry/room-sync —
+ * это теперь делает сам geometry command (см. PlanPage.jsx onUp,
+ * commitNodeDrag/commitWallSegDrag pattern в RESULT — PHASE 1A-2B1).
+ *
+ * Preview (onMove) НАМЕРЕННО не тронут в этом slice (см. "Scope decisions
+ * applied" в отчёте) — те же helpers там должны остаться, тест это
+ * подтверждает положительной проверкой, а не глобальным запретом на
+ * helpers как таковые.
+ */
+describe("PHASE 1A-2B1 — drag/nudge boundary", () => {
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  function extractBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    expect(start, `marker not found: ${startMarker}`).toBeGreaterThanOrEqual(0);
+    const end = source.indexOf(endMarker, start);
+    expect(end, `end marker not found: ${endMarker}`).toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  // code-only (comments stripped) — explanatory comments in this diff quote
+  // the old function names (e.g. "не commitFrom(preview-plan)"), which would
+  // otherwise false-positive against the same regexes used to detect real calls.
+  const onMoveSource = stripComments(extractBetween(planPageSource, "const onMove = (e) => {", "const onUp = (e) => {"));
+  const onUpSource = stripComments(extractBetween(planPageSource, "const onUp = (e) => {", "const onWheel = (e) => {"));
+
+  it("onUp's final-commit branches do not call the low-level preview mutators or commitFrom directly", () => {
+    for (const fn of ["applyNetworkNodeAtWall", "applyNetworkWallSegMove", "commitFrom"]) {
+      expect(onUpSource, `${fn}(...) should not be called from onUp`).not.toMatch(new RegExp(`\\b${fn}\\s*\\(`));
+    }
+  });
+
+  it("onUp does not call syncAutoZones/refreshWallMountedItems directly (room sync/refresh now belongs to the command)", () => {
+    expect(onUpSource).not.toMatch(/\bsyncAutoZones\s*\(/);
+    expect(onUpSource).not.toMatch(/\brefreshWallMountedItems\s*\(/);
+  });
+
+  it("onUp routes node-drag and wall-segment-drag final commit through node.move / wall.moveSegment", () => {
+    expect(onUpSource).toMatch(/runGeometryCommand\(\{\s*type:\s*["']node\.move["']/);
+    expect(onUpSource).toMatch(/runGeometryCommand\(\{\s*type:\s*["']wall\.moveSegment["']/);
+  });
+
+  it("preview (onMove) still uses the low-level mutators and eager refresh/sync directly — unchanged in this slice", () => {
+    expect(onMoveSource).toMatch(/\bapplyNetworkNodeAtWall\s*\(/);
+    expect(onMoveSource).toMatch(/\bapplyNetworkWallSegMove\s*\(/);
+    expect(onMoveSource).toMatch(/\bsyncAutoZones\s*\(/);
+    expect(onMoveSource).toMatch(/\brefreshWallMountedItems\s*\(/);
+  });
+
+  it("keyboard nudge (nudgeWallSelection) no longer calls nudgeWallInPlan directly and routes through node.nudge", () => {
+    const match = planPageSource.match(/const nudgeWallSelection = \(dx, dy\) => \{([\s\S]*?)\n {2}\};/);
+    expect(match, "nudgeWallSelection not found").toBeTruthy();
+    const codeOnly = stripComments(match[1]);
+    expect(codeOnly).not.toMatch(/\bnudgeWallInPlan\s*\(/);
+    expect(codeOnly).toMatch(/runGeometryCommand\(\{\s*type:\s*["']node\.nudge["']/);
+  });
+
+  it("does not reintroduce the stale getPlan: () => plan pattern (PHASE 1A-2A hardening follow-up)", () => {
+    expect(planPageSource).not.toMatch(/getPlan:\s*\(\)\s*=>\s*plan\b/);
+  });
+});

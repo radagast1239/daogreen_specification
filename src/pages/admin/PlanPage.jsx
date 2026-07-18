@@ -55,7 +55,7 @@ import { validateRooms } from "../../planner/core/rooms/validateRooms.js";
 import {
   resolvePlanWalls, commitWallEdge, deleteWallEdge, movePlanNode,
   wallNodeIdAt, isNetworkPlan, ensureWallNetwork,
-  applyNetworkNodeAtWall, applyNetworkWallSegMove, nudgeWallInPlan,
+  applyNetworkNodeAtWall, applyNetworkWallSegMove,
 } from "../../planner/wallNetwork.js";
 import { createGeometryCommandDispatcher } from "../../planner/ui/geometryCommandDispatcher.js";
 import { validateOpeningPlacement, nextDoorNumber, nextOpeningNumber } from "../../planner/doorGeometry.js";
@@ -181,7 +181,7 @@ export default function PlanPage() {
   };
 
   const {
-    plan, getCurrentPlan, setPlan, replacePlan, commitPlan, commitFrom, undo, redo, resetHistory,
+    plan, getCurrentPlan, setPlan, replacePlan, commitPlan, undo, redo, resetHistory,
   } = usePlanHistory(initialPlan);
   const [active, setActive] = useState("room");
   const [tool, setTool] = useState("select");
@@ -1164,14 +1164,11 @@ export default function PlanPage() {
     if (selection?.coll !== "walls" || selection.ids?.length !== 1) return;
     const wid = selection.ids[0];
     const nidx = selection.nodeIdx;
-    setPlan((p) => {
-      const plan = nudgeWallInPlan(p, wid, nidx, dx, dy, fineMm);
-      const resolved = resolvePlanWalls(plan);
-      return syncAutoZones({
-        ...plan,
-        items: refreshWallMountedItems(p.items, resolved, p.room, wid),
-      });
-    });
+    // PHASE 1A-2B1: через command boundary — node.nudge уже воспроизводит
+    // nudgeWallInPlan (включая whole-wall translate при nodeIdx == null) и
+    // сам гарантирует ноль checkpoint на zero-delta/no-op (см.
+    // geometryCommands.js handleNodeNudge).
+    runGeometryCommand({ type: "node.nudge", wallId: wid, nodeIdx: nidx, dx, dy, round: fineMm });
   };
 
   const finishDraft = (ptsOverride = null) => {
@@ -2858,6 +2855,11 @@ export default function PlanPage() {
       const move = dx * nx + dy * ny;
       const newA = { x: fineMm(a0.x + nx * move), y: fineMm(a0.y + ny * move) };
       const newB = { x: fineMm(b0.x + nx * move), y: fineMm(b0.y + ny * move) };
+      // PHASE 1A-2B1: финальный target (для commit на pointer up) считается
+      // от origPts + delta каждый кадр, а не накапливается — тот же newA/newB,
+      // что уже применяется в preview ниже, просто сохраняем последнее
+      // значение в dragRef для onUp.
+      dragRef.current = { ...d, finalA: newA, finalB: newB };
       replacePlan((p) => {
         const next = applyNetworkWallSegMove(p, d.id, newA, newB);
         const resolved = resolvePlanWalls(next);
@@ -2877,6 +2879,9 @@ export default function PlanPage() {
         }
         const resolved = resolvePlanWalls(plan);
         const snapped = snapWallPoint(pt, resolved, plan.room, view.zoom, snapOn && display.snapWalls !== false && !altSnapRef.current, snapStep);
+        // PHASE 1A-2B1: последняя абсолютная target-точка — для commit на
+        // pointer up (см. onUp), preview ниже не меняется.
+        dragRef.current = { ...d, finalPoint: { x: snapped.x, y: snapped.y } };
         replacePlan((p) => {
           const next = applyNetworkNodeAtWall(p, d.id, d.idx, { x: snapped.x, y: snapped.y });
           const rw = resolvePlanWalls(next);
@@ -2959,10 +2964,30 @@ export default function PlanPage() {
     } else if (d?.mode === "move" && d.coll === "labels") {
       const obj = plan.labels.find((o) => o.id === d.id);
       if (obj && !obj.pinned) updateObj("labels", obj.id, { pinned: true });
-    } else if (d?.mode === "move-wall-seg" && d.basePlan && d.basePlan !== plan) {
-      commitFrom(d.basePlan, plan);
-    } else if (d?.mode === "node" && d.coll === "walls" && d.basePlan && d.basePlan !== plan) {
-      commitFrom(d.basePlan, plan);
+    } else if (d?.mode === "move-wall-seg" && d.basePlan && d.finalA && d.finalB) {
+      // PHASE 1A-2B1: финальный commit — не commitFrom(preview-plan), а
+      // geometry command, пересчитанный от committed d.basePlan + final
+      // target. Preview мог накопить промежуточные side-effects
+      // (refreshWallMountedItems/syncAutoZones на каждый кадр) — commit
+      // должен считать заново, а не наследовать их. Restore синхронный:
+      // getCurrentPlan() внутри dispatcher сразу увидит basePlan.
+      //
+      // ВАЖНО: restore здесь делается через setPlan, а не replacePlan.
+      // HistoryModel.replace() выставляет skipNext=true и не сбрасывает его;
+      // preview (см. onMove) уже вызвал replace() как минимум один раз, так
+      // что skipNext уже true к этому моменту. Если восстановить basePlan
+      // ЕЩЁ одним replace(), skipNext останется true, и следующий
+      // commitPlan()->HistoryModel.mutate() решит, что чекпоинт уже сделан,
+      // и молча пропустит его — ноль checkpoint вместо одного (проверено
+      // тестом, см. tests/plannerGeometryDragDispatcher.test.js). setPlan
+      // (mutate) для restore, наоборот, УЖЕ checkpoint-free при skipNext=true
+      // (унаследованном от preview) и корректно сбрасывает флаг, так что
+      // последующий commitPlan честно создаёт один checkpoint.
+      if (getCurrentPlan() !== d.basePlan) setPlan(() => d.basePlan);
+      runGeometryCommand({ type: "wall.moveSegment", wallId: d.id, a: d.finalA, b: d.finalB });
+    } else if (d?.mode === "node" && d.coll === "walls" && d.basePlan && d.finalPoint) {
+      if (getCurrentPlan() !== d.basePlan) setPlan(() => d.basePlan);
+      runGeometryCommand({ type: "node.move", wallId: d.id, nodeIdx: d.idx, point: d.finalPoint });
     }
     dragRef.current = null;
     rackSnapStickyRef.current = { x: null, y: null, atX: null, atY: null };
