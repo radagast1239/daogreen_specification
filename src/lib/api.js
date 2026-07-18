@@ -163,6 +163,35 @@ export const api = {
   approveAll: (id, expectedRevision) => request(`/api/projects/${id}/approve-all`, { method: "POST", body: { expectedRevision } }),
   createVersion: (id, body, expectedRevision) => request(`/api/projects/${id}/versions`, { method: "POST", body: { ...(body || {}), expectedRevision } }),
   getVersions: (id) => request(`/api/projects/${id}/versions`),
+  getVersionClientPreview: (id, versionId) =>
+    request(`/api/projects/${id}/versions/${encodeURIComponent(versionId)}/client-preview`),
+  getVersionDiff: (id, versionId, compareTo) => {
+    const q = compareTo ? `?compareTo=${encodeURIComponent(compareTo)}` : "";
+    return request(`/api/projects/${id}/versions/${encodeURIComponent(versionId)}/diff${q}`);
+  },
+  getVersionPdfData: (id, versionId) =>
+    request(`/api/projects/${id}/versions/${encodeURIComponent(versionId)}/pdf`),
+  downloadVersionExcel: async (id, versionId) => {
+    const r = await fetch(`${API}/api/projects/${id}/versions/${encodeURIComponent(versionId)}/excel`, {
+      headers: { "X-Admin-Key": getAdminKey() },
+    });
+    if (!r.ok) {
+      const t = await r.text();
+      throw new Error(t || `Excel ${r.status}`);
+    }
+    const blob = await r.blob();
+    const cd = r.headers.get("Content-Disposition") || "";
+    const m = /filename="([^"]+)"/.exec(cd);
+    const filename = m?.[1] || `Daogreen_v_${versionId}.xlsx`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
   regenerateToken: (id, expectedRevision) => request(`/api/projects/${id}/regenerate-token`, { method: "POST", body: { expectedRevision } }),
   patchItem: (projectId, itemId, patch, expectedRevision) =>
     request(`/api/projects/${projectId}/items/${encodeURIComponent(itemId)}`, { method: "PATCH", body: { ...patch, expectedRevision } }),

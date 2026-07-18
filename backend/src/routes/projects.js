@@ -68,8 +68,10 @@ import {
 import { validateProjectItemsForSave, validateSingleProjectItem } from "../services/projectItemValidation.js";
 import {
   buildClientProjectFromRelease,
+  buildHistoricalClientPreview,
   buildReleaseSnapshotJson,
   getProjectReleaseInfo,
+  listVersionSummaries,
   loadLatestVersionRow,
   loadPublishedSnapshotItems,
   loadPublishedReleaseSnapshot,
@@ -78,6 +80,9 @@ import {
   resolveClientDocumentsForRelease,
   shouldPublishOnStatusChange,
 } from "../services/publishedReleaseService.js";
+import { diffReleaseSnapshots } from "../../../shared/releaseHistoryDiff.js";
+import { clientExportHeader } from "../../../shared/publishedClientMeta.js";
+import * as XLSX from "xlsx";
 import { assertCanDeleteOrOverwriteAsset } from "../services/publishedAssetRetention.js";
 
 const router = Router();
@@ -753,17 +758,9 @@ export function createVersion(id, createdBy = "admin", { force = false } = {}) {
 }
 
 export function listVersions(id) {
-  return db
-    .prepare("SELECT * FROM spec_versions WHERE project_id = ? ORDER BY version_number DESC")
-    .all(id)
-    .map((r) => ({
-      id: r.id,
-      projectId: r.project_id,
-      versionNumber: r.version_number,
-      createdAt: r.created_at,
-      createdBy: r.created_by,
-      summary: JSON.parse(r.summary || "{}"),
-    }));
+  const summaries = listVersionSummaries(id);
+  if (!summaries) return [];
+  return summaries;
 }
 
 function touchProject(projectId) {
@@ -1094,6 +1091,8 @@ api.get("/:id/publish-check", (req, res) => {
 });
 
 api.get("/:id/versions", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
   res.json(listVersions(req.params.id));
 });
 
@@ -1105,6 +1104,137 @@ api.get("/:id/versions/:versionId", (req, res) => {
     ...ver,
     snapshotItems,
     itemCount: snapshotItems.length,
+  });
+});
+
+/** Historical client DTO — admin only (router already behind adminAuth). Read-only. */
+api.get("/:id/versions/:versionId/client-preview", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const preview = buildHistoricalClientPreview(req.params.id, req.params.versionId, p);
+  if (!preview) return res.status(404).json({ error: "Not found", code: "VERSION_NOT_FOUND" });
+  const branding = loadBrandingSettings();
+  res.json({
+    ...preview,
+    branding,
+    brandingNote: "live_global_branding",
+  });
+});
+
+api.get("/:id/versions/:versionId/diff", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const versionId = req.params.versionId;
+  const otherId = String(req.query.compareTo || req.query.other || "").trim();
+  const verB = loadVersionRow(req.params.id, versionId);
+  if (!verB) return res.status(404).json({ error: "Not found", code: "VERSION_NOT_FOUND" });
+
+  let verA = null;
+  if (otherId) {
+    verA = loadVersionRow(req.params.id, otherId);
+    if (!verA) return res.status(404).json({ error: "Compare version not found", code: "VERSION_NOT_FOUND" });
+  } else {
+    // Default: previous version by number
+    const prev = db
+      .prepare(
+        `SELECT id FROM spec_versions
+         WHERE project_id = ? AND version_number < ?
+         ORDER BY version_number DESC, created_at DESC, id DESC LIMIT 1`
+      )
+      .get(req.params.id, verB.versionNumber);
+    if (prev) verA = loadVersionRow(req.params.id, prev.id);
+  }
+
+  if (!verA) {
+    return res.json({
+      versionA: null,
+      versionB: { id: verB.id, versionNumber: verB.versionNumber, createdAt: verB.createdAt },
+      diff: { hasChanges: false, empty: true, message: "Нет предыдущей версии для сравнения" },
+    });
+  }
+
+  let snapA;
+  let snapB;
+  try {
+    snapA = JSON.parse(verA.snapshot || "[]");
+    snapB = JSON.parse(verB.snapshot || "[]");
+  } catch {
+    return res.status(500).json({ error: "Invalid snapshot" });
+  }
+  const diff = diffReleaseSnapshots(snapA, snapB);
+  res.json({
+    versionA: { id: verA.id, versionNumber: verA.versionNumber, createdAt: verA.createdAt },
+    versionB: { id: verB.id, versionNumber: verB.versionNumber, createdAt: verB.createdAt },
+    diff,
+  });
+});
+
+/** Historical Excel — built from immutable snapshot DTO (not live draft). */
+api.get("/:id/versions/:versionId/excel", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const preview = buildHistoricalClientPreview(req.params.id, req.params.versionId, p);
+  if (!preview) return res.status(404).json({ error: "Not found", code: "VERSION_NOT_FOUND" });
+  const project = preview.project;
+  const header = clientExportHeader(project);
+  const items = project.items || [];
+  const rows = [
+    ["Версия", preview.versionNumber, "от", preview.publishedAt],
+    ["Проект", header.name],
+    ["Клиент", header.client],
+    ["Город", header.city],
+    ["Адрес", header.address || ""],
+    ["Валюта", header.currency],
+    ["НДС", header.vat ? "да" : "нет"],
+    [],
+    ["Название", "Кол-во", "Цена", "Сумма", "Раздел", "Ссылка"],
+    ...items.map((it) => [
+      it.name || "",
+      Number(it.qty) || 0,
+      Number(it.price) || 0,
+      Math.round((Number(it.qty) || 0) * (Number(it.price) || 0)),
+      [it.clientSection, it.clientSubsection].filter(Boolean).join(" / "),
+      it.link || "",
+    ]),
+  ];
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, "История");
+  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  const safe = String(header.name || "project").replace(/[^\w\-]+/g, "_").slice(0, 40);
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="Daogreen_v${preview.versionNumber}_${safe}.xlsx"`
+  );
+  res.send(buf);
+});
+
+/**
+ * Historical PDF export data — same immutable DTO used by client PDF builder.
+ * Returns JSON for admin UI to generate PDF without duplicating layout logic.
+ * Query ?format=json (default). Binary PDF generation stays in the frontend builder.
+ */
+api.get("/:id/versions/:versionId/pdf", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const preview = buildHistoricalClientPreview(req.params.id, req.params.versionId, p);
+  if (!preview) return res.status(404).json({ error: "Not found", code: "VERSION_NOT_FOUND" });
+  const branding = loadBrandingSettings();
+  const header = clientExportHeader(preview.project);
+  res.json({
+    historical: true,
+    versionId: preview.versionId,
+    versionNumber: preview.versionNumber,
+    publishedAt: preview.publishedAt,
+    schema: preview.schema,
+    assetsPinned: preview.assetsPinned,
+    header,
+    project: preview.project,
+    items: preview.project.items || [],
+    documents: preview.documents || [],
+    branding,
+    exportHint: "Use frontend generateClientPurchasePdf with this project DTO",
   });
 });
 

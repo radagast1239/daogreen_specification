@@ -44,6 +44,7 @@ import Collapsible from "../../components/Collapsible.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
 import { useToast } from "../../components/Toast.jsx";
 import StellageFrameDrawingsPanel from "../../components/StellageFrameDrawingsPanel.jsx";
+import ProjectReleaseHistory from "../../components/ProjectReleaseHistory.jsx";
 import RoomCoolingEditor from "../../components/RoomCoolingEditor.jsx";
 import { syncRoomAcSpecItems } from "../../../shared/roomAcSync.js";
 import ReplacementReviewModal from "../../components/ReplacementReviewModal.jsx";
@@ -962,6 +963,14 @@ export default function SpecEditorPage() {
           />
         </div>
         <ProjectDocuments projectId={project.id} />
+
+        <Collapsible
+          title="История публикаций"
+          subtitle={project.version ? `v${project.version}` : "нет версий"}
+          defaultOpen={false}
+        >
+          <ProjectReleaseHistory projectId={project.id} currency={project.currency} />
+        </Collapsible>
 
         <Collapsible title="История: клиент и Daogreen" subtitle={`${activity.length} записей`} defaultOpen={false}>
           <ActivityFeed activity={activity} title="" />
