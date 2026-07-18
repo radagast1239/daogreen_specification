@@ -1,0 +1,527 @@
+/**
+ * PHASE 1A (+ corrective pass) — единая command boundary для production-
+ * мутаций wall/node geometry.
+ *
+ * Чистый orchestration-слой поверх существующих low-level mutator'ов
+ * (wallNetwork.js, core/walls/wallOps.js) и safe room-sync pipeline
+ * (PHASE 0G, syncRoomsSafe). Повторяет РЕАЛЬНУЮ production-семантику
+ * PlanPage.jsx (mounted-item refresh scope, dimension self-healing через
+ * read-time resolver) — не изобретает новую, см. таблицу в RESULT —
+ * PHASE 1A-1 CORRECTIVE PASS, «Production post-processing audit».
+ *
+ * Гарантии:
+ *   • не импортирует React/DOM/window/PlanPage/backend;
+ *   • не вызывает setPlan — только вычисляет result-контракт, caller (UI
+ *     dispatcher) решает, что делать с ним дальше;
+ *   • не знает про autosave;
+ *   • rejected/no-op возвращают исходный plan по той же ссылке;
+ *   • не мутирует вход;
+ *   • result детерминирован при одинаковом context;
+ *   • ID generation передаётся через context.makeId (injectable для тестов);
+ *   • raw Error/stack не попадают в result — только structured error;
+ *   • неизвестная команда не бросает исключение наружу.
+ *
+ * Leaf imports только: wallNetwork.js, core/walls/wallOps.js,
+ * core/dimensions/model.js (dependency-free), core/rooms/syncRooms.js —
+ * НЕ core/rooms/index.js и НЕ wallGeometry.js (broad barrels, см. PHASE 0G
+ * import-order fragility). Этот модуль не входит в известный 15-файловый
+ * SCC — он лишь ЗАВИСИТ от его членов (wallNetwork.js, wallOps.js уже в
+ * цикле), но ничто из цикла не импортирует обратно этот модуль, поэтому
+ * новой strongly-connected компоненты не образуется.
+ */
+import {
+  resolvePlanWalls,
+  deleteWallEdge,
+  applyNetworkWallSegMove,
+  applyNetworkNodeAtWall,
+  nudgeWallInPlan,
+  tryMergeWallEdge,
+  breakWallEdgeAt,
+  straightenWallEdge,
+  alignWallEdgeToNeighbor,
+} from "../wallNetwork.js";
+import { commitWallChain } from "../core/walls/wallCommit.js";
+import { refreshWallMountedItems } from "../core/walls/wallOps.js";
+import { resolveAttachedDimension } from "../core/dimensions/model.js";
+import { syncRoomsSafe } from "../core/rooms/syncRooms.js";
+
+export const GEOMETRY_COMMAND_UNKNOWN = "GEOMETRY_COMMAND_UNKNOWN";
+export const GEOMETRY_COMMAND_INVALID = "GEOMETRY_COMMAND_INVALID";
+export const GEOMETRY_COMMAND_FAILED = "GEOMETRY_COMMAND_FAILED";
+export const GEOMETRY_COMMAND_NO_TARGET = "GEOMETRY_COMMAND_NO_TARGET";
+export const DIMENSION_DETACHED_AFTER_WALL_REMOVED = "DIMENSION_DETACHED_AFTER_WALL_REMOVED";
+
+// ── result helpers ──────────────────────────────────────────────────────
+
+function baseResult(commandType, plan) {
+  return {
+    ok: true,
+    changed: false,
+    commandType,
+    plan,
+    entityRemap: {},
+    createdEntityIds: [],
+    changedEntityIds: [],
+    deletedEntityIds: [],
+    diagnostics: [],
+    warnings: [],
+    error: null,
+    // operation-specific поля (напр. wall.split: splitT/childWallIds) —
+    // держим контракт единообразным для всех command types, см. секцию 10
+    // corrective pass.
+    operationResult: null,
+  };
+}
+
+function rejected(commandType, plan, code, message, extra = {}) {
+  return {
+    ...baseResult(commandType, plan),
+    ok: false,
+    error: { code, message, ...extra },
+  };
+}
+
+function noop(commandType, plan) {
+  return baseResult(commandType, plan); // ok:true, changed:false, plan по той же ссылке
+}
+
+function changedOk(commandType, plan, patch = {}) {
+  return { ...baseResult(commandType, plan), changed: true, ...patch };
+}
+
+function dedupe(ids) {
+  return [...new Set(ids.filter((id) => id != null))];
+}
+
+// ── finite coordinate guards (section 8) ──────────────────────────────────
+
+function isFiniteNumber(v) {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
+function isFinitePoint(p) {
+  return p != null && typeof p === "object" && isFiniteNumber(p.x) && isFiniteNumber(p.y);
+}
+
+// ── node/entity diff helpers (section 6) ──────────────────────────────────
+
+/** ID узлов, чьи координаты действительно отличаются между двумя nodes-объектами. */
+function diffNodeIds(before, after) {
+  const ids = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
+  const out = [];
+  for (const id of ids) {
+    const a = before?.[id];
+    const b = after?.[id];
+    if (!a || !b || a.x !== b.x || a.y !== b.y) out.push(id);
+  }
+  return out;
+}
+
+function nodesEqual(a, b) {
+  return diffNodeIds(a, b).length === 0;
+}
+
+/** ID стен, ссылающихся хотя бы на один из данных узлов (a или b). */
+function wallsUsingNodes(walls, nodeIds) {
+  const set = new Set(nodeIds);
+  return (walls || []).filter((w) => set.has(w.a) || set.has(w.b)).map((w) => w.id);
+}
+
+/** ID объектов (двери/окна), у которых wallId/wallSeg/x/y/angle реально изменились. */
+function diffChangedItemIds(before, after) {
+  const beforeById = new Map((before || []).map((it) => [it.id, it]));
+  const out = [];
+  for (const it of after || []) {
+    const prev = beforeById.get(it.id);
+    if (!prev) continue;
+    if (prev.wallId !== it.wallId || prev.x !== it.x || prev.y !== it.y || prev.angle !== it.angle) out.push(it.id);
+  }
+  return out;
+}
+
+// ── mounted-entity refresh (unified post-processing, section 2/5) ────────
+
+/**
+ * Production-семантика refreshWallMountedItems после coordinate-мутации:
+ * scopeWallId=null → глобальный refresh ВСЕХ wall-mounted items (как
+ * production для node.move/wall.merge — единственный узел/операция может
+ * затронуть несколько стен через общий узел); конкретный wallId → refresh
+ * только items этой стены (как production для straighten/align/moveSegment/
+ * nudge — одна геометрически изменённая стена).
+ *
+ * Dimensions НЕ обрабатываются здесь: wall-attached размеры — read-time view
+ * (resolveAttachedDimension пересчитывает p1/p2 из ЖИВОЙ геометрии стены по
+ * attachedTo.wallId+t0/t1 на каждый resolve), а t0/t1 остаются валидными
+ * параметрами, пока wallId не изменился — production НЕ делает для них
+ * никакого explicit refresh на coordinate-only операциях (подтверждено
+ * аудитом: ни один из этих call site в PlanPage.jsx не трогает dimensions).
+ * НЕ применять к wall.split — split уже полностью и явно мигрировал
+ * openings/dimensions внутри breakWallEdgeAt; повторный proximity-refresh
+ * может дать другой (proximity-based, не geometry-exact) результат.
+ */
+function refreshMountedItemsForCoordinateChange(plan, scopeWallId) {
+  const resolved = resolvePlanWalls(plan);
+  return refreshWallMountedItems(plan.items || [], resolved, plan.room, scopeWallId ?? null);
+}
+
+// ── room sync integration (единожды, централизованно) ───────────────────
+
+/**
+ * Применяет existing safe room-sync pipeline ровно один раз после успешной
+ * geometry mutation. На ok:false (сбой движка) geometry НЕ откатывается —
+ * rooms/zones остаются как были в nextPlan (safe policy PHASE 0G), diagnostic
+ * возвращается вызывающему коду, не пишется в plan.
+ */
+function applyRoomSync(nextPlan, context) {
+  const withResolved = { ...nextPlan, walls: resolvePlanWalls(nextPlan) };
+  const synced = context.roomSyncFn ? syncRoomsSafe(withResolved, context.roomSyncFn) : syncRoomsSafe(withResolved);
+  if (!synced.ok) {
+    return { plan: nextPlan, diagnostics: synced.diagnostics };
+  }
+  const dimWarnings = (nextPlan.validationWarnings || []).filter((w) => w.source === "dimensions");
+  return {
+    plan: {
+      ...nextPlan,
+      rooms: synced.rooms,
+      zones: synced.zones,
+      validationWarnings: [...dimWarnings, ...(synced.validationWarnings || [])],
+    },
+    diagnostics: [],
+  };
+}
+
+// ── command handlers ─────────────────────────────────────────────────────
+// handler(plan, command, context) → result БЕЗ room sync (room sync
+// применяется централизованно в executeGeometryCommand после changed:true).
+
+function handleWallSplit(plan, command, context) {
+  const { wallId, point } = command;
+  if (!wallId || !isFinitePoint(point)) {
+    return rejected("wall.split", plan, GEOMETRY_COMMAND_INVALID, "wall.split требует wallId и конечную точку point");
+  }
+  const res = breakWallEdgeAt(plan, wallId, point, context.makeId);
+  if (!res) return rejected("wall.split", plan, GEOMETRY_COMMAND_NO_TARGET, "Не удалось разорвать стену — кликните ближе к сегменту.");
+  if (res.ok === false) {
+    return rejected("wall.split", plan, res.error.code, res.error.message, {
+      entityId: res.error.entityId,
+      ...(res.error.wallId ? { wallId: res.error.wallId } : {}),
+    });
+  }
+  return changedOk("wall.split", res.plan, {
+    entityRemap: res.entityRemap,
+    createdEntityIds: [res.splitNodeId, res.newWallId],
+    changedEntityIds: [res.originalWallId],
+    warnings: res.warnings || [],
+    operationResult: {
+      originalWallId: res.originalWallId,
+      splitNodeId: res.splitNodeId,
+      splitT: res.splitT,
+      childWallIds: res.childWallIds,
+      sourceRange: res.sourceRange,
+      targetRange: res.targetRange,
+    },
+  });
+}
+
+function handleWallDelete(plan, command) {
+  const { wallId } = command;
+  if (!wallId) return rejected("wall.delete", plan, GEOMETRY_COMMAND_INVALID, "wall.delete требует wallId");
+  const targetResolved = resolvePlanWalls(plan).find((w) => w.id === wallId);
+  if (!(plan.walls || []).some((w) => w.id === wallId)) {
+    return rejected("wall.delete", plan, GEOMETRY_COMMAND_NO_TARGET, "Стена не найдена");
+  }
+
+  const beforeNodeIds = new Set(Object.keys(plan.nodes || {}));
+  const topologyPlan = deleteWallEdge(plan, wallId);
+  const removedNodeIds = [...beforeNodeIds].filter((id) => !topologyPlan.nodes[id]);
+
+  // Production-политика: refreshWallMountedItems, scoped к удаляемой стене.
+  const refreshedItems = refreshMountedItemsForCoordinateChange(topologyPlan, wallId);
+  const danglingItemIds = [];
+  const changedItemIds = [];
+  const items = refreshedItems.filter((item, i) => {
+    const original = plan.items[i];
+    if (!original || original.wallId !== wallId) return true; // этой стены не касалось
+    if (item.wallId === wallId) {
+      // Стена удалена, но переставить в радиусе 400мм не на что — dangling
+      // wallId недопустим (см. corrective pass §3): удаляем сам объект, а не
+      // оставляем повисшую ссылку.
+      danglingItemIds.push(item.id);
+      return false;
+    }
+    changedItemIds.push(item.id);
+    return true;
+  });
+
+  // Wall-attached MANUAL размеры на удаляемой стене — detach с сохранением
+  // ЖИВОГО (resolveAttachedDimension), а не потенциально устаревшего p1/p2.
+  // Auto/derived размеры не трогаем (та же политика, что и у split PHASE 0F —
+  // они регенерируются отдельным проходом и не читаются как authoritative).
+  const dimensionWarnings = [];
+  const changedDimensionIds = [];
+  const withResolvedForDims = { ...plan, walls: resolvePlanWalls(plan) };
+  const dimensions = (plan.dimensions || []).map((dim) => {
+    const at = dim?.attachedTo;
+    const attachedWallId = at?.wallId ?? at?.id;
+    if (at?.type !== "wall" || attachedWallId !== wallId) return dim;
+    if (dim.auto === true) return dim;
+    const resolved = resolveAttachedDimension(dim, withResolvedForDims);
+    changedDimensionIds.push(dim.id);
+    dimensionWarnings.push({ code: DIMENSION_DETACHED_AFTER_WALL_REMOVED, entityId: dim.id, wallId });
+    return {
+      ...dim,
+      p1: resolved.invalid ? dim.p1 : resolved.p1,
+      p2: resolved.invalid ? dim.p2 : resolved.p2,
+      attachedTo: null,
+      kind: "manual",
+      auto: false,
+    };
+  });
+
+  const nextPlan = { ...topologyPlan, items, dimensions };
+  return changedOk("wall.delete", nextPlan, {
+    deletedEntityIds: dedupe([wallId, ...removedNodeIds, ...danglingItemIds]),
+    changedEntityIds: dedupe([...changedItemIds, ...changedDimensionIds]),
+    warnings: dimensionWarnings,
+  });
+}
+
+function isFiniteConsecutivePoint(p) {
+  return isFinitePoint(p);
+}
+
+// Численный guard для de-dup соседних точек (НЕ snap tolerance — просто
+// схлопывает буквальные/почти-нулевые повторы, напр. двойной клик).
+const POINT_DEDUPE_EPS_MM = 1e-6;
+
+function dedupeConsecutivePoints(points) {
+  const out = [];
+  for (const p of points) {
+    const prev = out[out.length - 1];
+    if (prev && Math.hypot(p.x - prev.x, p.y - prev.y) <= POINT_DEDUPE_EPS_MM) continue;
+    out.push(p);
+  }
+  return out;
+}
+
+function handleWallCreate(plan, command, context) {
+  const { points, wallProps = {}, closed = false } = command;
+  if (!Array.isArray(points)) {
+    return rejected("wall.create", plan, GEOMETRY_COMMAND_INVALID, "wall.create требует points: массив точек");
+  }
+  if (!points.every(isFiniteConsecutivePoint)) {
+    return rejected("wall.create", plan, GEOMETRY_COMMAND_INVALID, "wall.create: точки должны быть конечными числами");
+  }
+  const deduped = dedupeConsecutivePoints(points);
+  // < 2 точек (в т.ч. после dedup) — как и commitWallChain, честный no-op
+  // (напр. один клик при рисовании стены), а не ошибка ввода.
+  if (deduped.length < 2) return noop("wall.create", plan);
+
+  const wallsBefore = new Set((plan.walls || []).map((w) => w.id));
+  const nodesBefore = new Set(Object.keys(plan.nodes || {}));
+  const nextPlan = commitWallChain(plan, deduped, wallProps, context.makeId, { closed });
+  if (nextPlan === plan) return noop("wall.create", plan);
+  const createdWallIds = (nextPlan.walls || []).map((w) => w.id).filter((id) => !wallsBefore.has(id));
+  const createdNodeIds = Object.keys(nextPlan.nodes || {}).filter((id) => !nodesBefore.has(id));
+  return changedOk("wall.create", nextPlan, { createdEntityIds: [...createdNodeIds, ...createdWallIds] });
+}
+
+function straightenMode(commandType) {
+  if (commandType === "wall.straightenHorizontal") return "h";
+  if (commandType === "wall.straightenVertical") return "v";
+  return null;
+}
+
+function handleWallStraighten(plan, command, context, commandType) {
+  const { wallId } = command;
+  const mode = command.mode || straightenMode(commandType) || "h";
+  if (!wallId) return rejected(commandType, plan, GEOMETRY_COMMAND_INVALID, "wall.straighten требует wallId");
+  const rw = resolvePlanWalls(plan).find((w) => w.id === wallId);
+  if (!rw) return rejected(commandType, plan, GEOMETRY_COMMAND_NO_TARGET, "Стена не найдена");
+  const geomPlan = straightenWallEdge(plan, wallId, mode);
+  const changedNodeIds = diffNodeIds(plan.nodes, geomPlan.nodes);
+  if (changedNodeIds.length === 0) return noop(commandType, plan);
+
+  const items = refreshMountedItemsForCoordinateChange(geomPlan, wallId);
+  const changedItemIds = diffChangedItemIds(plan.items, items);
+  const nextPlan = { ...geomPlan, items };
+  return changedOk(commandType, nextPlan, {
+    changedEntityIds: dedupe([wallId, ...changedNodeIds, ...changedItemIds]),
+  });
+}
+
+function handleWallAlignToNeighbor(plan, command) {
+  const { wallId } = command;
+  if (!wallId) return rejected("wall.alignToNeighbor", plan, GEOMETRY_COMMAND_INVALID, "wall.alignToNeighbor требует wallId");
+  const exists = (plan.walls || []).some((w) => w.id === wallId);
+  if (!exists) return rejected("wall.alignToNeighbor", plan, GEOMETRY_COMMAND_NO_TARGET, "Стена не найдена");
+  const geomPlan = alignWallEdgeToNeighbor(plan, wallId);
+  if (!geomPlan) {
+    return rejected("wall.alignToNeighbor", plan, GEOMETRY_COMMAND_FAILED, "Не найдена соседняя стена для выравнивания.");
+  }
+  const changedNodeIds = diffNodeIds(plan.nodes, geomPlan.nodes);
+  if (changedNodeIds.length === 0) return noop("wall.alignToNeighbor", plan);
+
+  const items = refreshMountedItemsForCoordinateChange(geomPlan, wallId);
+  const changedItemIds = diffChangedItemIds(plan.items, items);
+  const nextPlan = { ...geomPlan, items };
+  return changedOk("wall.alignToNeighbor", nextPlan, {
+    changedEntityIds: dedupe([wallId, ...changedNodeIds, ...changedItemIds]),
+  });
+}
+
+function handleWallMerge(plan, command) {
+  const { wallId } = command;
+  if (!wallId) return rejected("wall.merge", plan, GEOMETRY_COMMAND_INVALID, "wall.merge требует wallId");
+  const exists = (plan.walls || []).some((w) => w.id === wallId);
+  if (!exists) return rejected("wall.merge", plan, GEOMETRY_COMMAND_NO_TARGET, "Стена не найдена");
+
+  const res = tryMergeWallEdge(plan, wallId);
+  if (!res) {
+    return rejected("wall.merge", plan, GEOMETRY_COMMAND_FAILED, "Не найдена соседняя стена с общим узлом для объединения.");
+  }
+  if (res.blocked?.length) {
+    const first = res.blocked[0];
+    return rejected("wall.merge", plan, GEOMETRY_COMMAND_FAILED,
+      "Не удалось безопасно перенести проём или размер на объединённую стену.",
+      { entityId: first.entityId, entityType: first.entityType });
+  }
+
+  const changedItemIds = res.entityRemap.openings.map((r) => r.entityId);
+  const changedDimensionIds = res.entityRemap.dimensions.map((r) => r.entityId);
+  return changedOk("wall.merge", res.plan, {
+    entityRemap: res.entityRemap,
+    deletedEntityIds: dedupe([res.removedWallId, ...res.removedNodeIds]),
+    changedEntityIds: dedupe([res.survivingWallId, ...changedItemIds, ...changedDimensionIds]),
+  });
+}
+
+function handleWallMoveSegment(plan, command) {
+  const { wallId, a, b } = command;
+  if (!wallId || !isFinitePoint(a) || !isFinitePoint(b)) {
+    return rejected("wall.moveSegment", plan, GEOMETRY_COMMAND_INVALID, "wall.moveSegment требует wallId и конечные точки a, b");
+  }
+  const exists = (plan.walls || []).some((w) => w.id === wallId);
+  if (!exists) return rejected("wall.moveSegment", plan, GEOMETRY_COMMAND_NO_TARGET, "Стена не найдена");
+  const geomPlan = applyNetworkWallSegMove(plan, wallId, a, b);
+  const changedNodeIds = diffNodeIds(plan.nodes, geomPlan.nodes);
+  if (changedNodeIds.length === 0) return noop("wall.moveSegment", plan);
+
+  const items = refreshMountedItemsForCoordinateChange(geomPlan, wallId);
+  const changedItemIds = diffChangedItemIds(plan.items, items);
+  const otherWallIds = wallsUsingNodes(geomPlan.walls, changedNodeIds).filter((id) => id !== wallId);
+  const nextPlan = { ...geomPlan, items };
+  return changedOk("wall.moveSegment", nextPlan, {
+    changedEntityIds: dedupe([wallId, ...changedNodeIds, ...otherWallIds, ...changedItemIds]),
+  });
+}
+
+function handleNodeMove(plan, command) {
+  const { wallId, nodeIdx, point } = command;
+  if (!wallId || nodeIdx == null || !isFinitePoint(point)) {
+    return rejected("node.move", plan, GEOMETRY_COMMAND_INVALID, "node.move требует wallId, nodeIdx и конечную точку point");
+  }
+  const wall = (plan.walls || []).find((w) => w.id === wallId);
+  if (!wall) return rejected("node.move", plan, GEOMETRY_COMMAND_NO_TARGET, "Стена не найдена");
+  const geomPlan = applyNetworkNodeAtWall(plan, wallId, nodeIdx, point);
+  const changedNodeIds = diffNodeIds(plan.nodes, geomPlan.nodes);
+  if (changedNodeIds.length === 0) return noop("node.move", plan);
+
+  // Production: node.move refresh — ГЛОБАЛЬНЫЙ (узел может быть общим для
+  // нескольких стен — см. audit table, PlanPage.jsx onMove "node" branch).
+  const items = refreshMountedItemsForCoordinateChange(geomPlan, null);
+  const changedItemIds = diffChangedItemIds(plan.items, items);
+  const wallIds = wallsUsingNodes(geomPlan.walls, changedNodeIds);
+  const nextPlan = { ...geomPlan, items };
+  return changedOk("node.move", nextPlan, {
+    changedEntityIds: dedupe([...changedNodeIds, ...wallIds, ...changedItemIds]),
+  });
+}
+
+function handleNodeNudge(plan, command) {
+  const { wallId, nodeIdx = null, dx = 0, dy = 0, round } = command;
+  if (!wallId) return rejected("node.nudge", plan, GEOMETRY_COMMAND_INVALID, "node.nudge требует wallId");
+  if (!isFiniteNumber(dx) || !isFiniteNumber(dy)) {
+    return rejected("node.nudge", plan, GEOMETRY_COMMAND_INVALID, "node.nudge требует конечные dx/dy");
+  }
+  const exists = (plan.walls || []).some((w) => w.id === wallId);
+  if (!exists) return rejected("node.nudge", plan, GEOMETRY_COMMAND_NO_TARGET, "Стена не найдена");
+  if (dx === 0 && dy === 0) return noop("node.nudge", plan);
+  const geomPlan = nudgeWallInPlan(plan, wallId, nodeIdx, dx, dy, typeof round === "function" ? round : (v) => v);
+  const changedNodeIds = diffNodeIds(plan.nodes, geomPlan.nodes);
+  if (changedNodeIds.length === 0) return noop("node.nudge", plan);
+
+  const items = refreshMountedItemsForCoordinateChange(geomPlan, wallId);
+  const changedItemIds = diffChangedItemIds(plan.items, items);
+  const otherWallIds = wallsUsingNodes(geomPlan.walls, changedNodeIds).filter((id) => id !== wallId);
+  const nextPlan = { ...geomPlan, items };
+  return changedOk("node.nudge", nextPlan, {
+    // Реально изменённый узел/стена, а не всегда весь wallId (nodeIdx может
+    // адресовать только один конец).
+    changedEntityIds: dedupe([...changedNodeIds, wallId, ...otherWallIds, ...changedItemIds]),
+  });
+}
+
+// ── dispatch table ────────────────────────────────────────────────────────
+
+const HANDLERS = {
+  "wall.split": handleWallSplit,
+  "wall.delete": handleWallDelete,
+  "wall.create": handleWallCreate,
+  "wall.finishDraft": handleWallCreate,
+  "wall.straighten": handleWallStraighten,
+  "wall.straightenHorizontal": handleWallStraighten,
+  "wall.straightenVertical": handleWallStraighten,
+  "wall.alignToNeighbor": handleWallAlignToNeighbor,
+  "wall.merge": handleWallMerge,
+  "wall.moveSegment": handleWallMoveSegment,
+  "node.move": handleNodeMove,
+  "node.nudge": handleNodeNudge,
+  // PHASE 1A-1 corrective pass: node.moveToWall УДАЛЁН — не существует
+  // отдельного production action с этой семантикой (снап узла на тело другой
+  // стены/T-junction). Настоящий snap-to-wall — отдельная будущая фаза.
+  // Неизвестная команда с этим type корректно вернёт GEOMETRY_COMMAND_UNKNOWN.
+};
+
+/**
+ * Единственная публичная точка входа command boundary.
+ *
+ * @param {object} plan     текущий (актуальный) plan
+ * @param {object} command  { type, ...payload }
+ * @param {object} context  { makeId, roomSyncFn?, now? } — makeId обязателен
+ *                          для команд, создающих сущности (split/create).
+ * @returns {object} result-контракт (см. шапку файла)
+ */
+export function executeGeometryCommand(plan, command, context = {}) {
+  const commandType = command?.type;
+  if (!commandType || typeof commandType !== "string") {
+    return rejected(commandType || null, plan, GEOMETRY_COMMAND_INVALID, "Команда должна содержать поле type (строка).");
+  }
+  const handler = HANDLERS[commandType];
+  if (!handler) {
+    return rejected(commandType, plan, GEOMETRY_COMMAND_UNKNOWN, `Неизвестный тип команды: ${commandType}`);
+  }
+
+  let result;
+  try {
+    result = handler(plan, command, context, commandType);
+  } catch (err) {
+    console.error(`[geometry-command] ${commandType} failed`, err);
+    return rejected(commandType, plan, GEOMETRY_COMMAND_FAILED, "Не удалось выполнить операцию с геометрией.");
+  }
+
+  if (!result.ok || !result.changed) return result;
+
+  // Room sync — ровно один раз, только после успешной реальной мутации
+  // (включая mounted-item refresh, который уже применён внутри handler'а).
+  let synced;
+  try {
+    synced = applyRoomSync(result.plan, context);
+  } catch (err) {
+    console.error(`[geometry-command] ${commandType} room sync failed unexpectedly`, err);
+    return rejected(commandType, plan, GEOMETRY_COMMAND_FAILED, "Не удалось выполнить операцию с геометрией.");
+  }
+  return { ...result, plan: synced.plan, diagnostics: synced.diagnostics };
+}
+
+export const GEOMETRY_COMMAND_TYPES = Object.freeze(Object.keys(HANDLERS));

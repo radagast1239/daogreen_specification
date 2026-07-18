@@ -331,7 +331,22 @@ function collinear(A, S, C, eps = 8) {
   return len > 1 && cross / len < eps;
 }
 
-/** Объединить два смежных коллинеарных ребра. */
+/**
+ * Объединить два смежных коллинеарных ребра.
+ *
+ * Возвращает `null`, если mergeable-соседа не нашлось (как раньше — старый
+ * caller не меняется). На найденном кандидате ВСЕГДА выполняет геометрическое
+ * слияние и ДОПОЛНИТЕЛЬНО (аддитивно, не ломая старый `{plan, mergedId}`
+ * контракт) считает точный remap openings/dimensions, привязанных к любой из
+ * двух исходных стен, на выживший wallId. Если геометрия проёма/размера
+ * невычислима — сущность попадает в `blocked` (её id, НЕ мутируется), а
+ * решение «отклонить merge целиком» остаётся за caller'ом (command layer):
+ * `tryMergeWallEdge` сам НЕ отклоняет и НЕ мутирует исходный `plan`.
+ *
+ * Опорная точка каждого проёма/размера в мировых координатах не меняется при
+ * коллинеарном merge — меняется только его wallId/wallSeg/локальные t0/t1
+ * относительно НОВОЙ (расширенной) выжившей стены.
+ */
 export function tryMergeWallEdge(plan, wallId) {
   const w = (plan.walls || []).find((x) => x.id === wallId);
   if (!w?.a || !w?.b) return null;
@@ -350,13 +365,81 @@ export function tryMergeWallEdge(plan, wallId) {
       const S = nodes[shared];
       const C = nodes[freeC];
       if (!A || !S || !C || !collinear(A, S, C)) continue;
+
+      const removedWallId = other.id;
+      const oldEndpointsById = {
+        [wallId]: { a: nodes[w.a], b: nodes[w.b] },
+        [removedWallId]: { a: nodes[other.a], b: nodes[other.b] },
+      };
+
       const meta = pickWallMeta(w);
       const walls = (plan.walls || [])
-        .filter((x) => x.id !== other.id && x.id !== wallId)
+        .filter((x) => x.id !== removedWallId && x.id !== wallId)
         .concat([{ id: wallId, a: freeA, b: freeC, ...meta }]);
+      const nextNodes = pruneOrphanNodes(nodes, walls);
+      const removedNodeIds = Object.keys(nodes).filter((id) => !nextNodes[id]);
+
+      const blocked = [];
+      const openingRemap = [];
+      const items = (plan.items || []).map((item) => {
+        if (!isOpening(item) || (item.wallId !== wallId && item.wallId !== removedWallId)) return item;
+        const range = openingRange(item, A, C);
+        if (!range) {
+          blocked.push({ entityId: item.id, entityType: "opening", reason: "geometry" });
+          return item;
+        }
+        openingRemap.push({ entityId: item.id, fromWallId: item.wallId, toWallId: wallId });
+        return { ...item, wallId, wallSeg: { a: { ...A }, b: { ...C } } };
+      });
+
+      const dimensionRemap = [];
+      const dimensions = (plan.dimensions || []).map((dim) => {
+        const at = dim?.attachedTo;
+        const attachedWallId = at?.wallId ?? at?.id;
+        if (at?.type !== "wall" || (attachedWallId !== wallId && attachedWallId !== removedWallId)) return dim;
+        // Auto/derived размеры не трогаем — та же политика, что и у split (PHASE 0F).
+        if (dim.auto === true) return dim;
+        const old = oldEndpointsById[attachedWallId];
+        if (!old?.a || !old?.b) {
+          blocked.push({ entityId: dim.id, entityType: "dimension", reason: "geometry" });
+          return dim;
+        }
+        const t0 = Number.isFinite(at.t0) ? at.t0 : 0;
+        const t1 = Number.isFinite(at.t1) ? at.t1 : 1;
+        const p1 = pointAt(old.a, old.b, t0);
+        const p2 = pointAt(old.a, old.b, t1);
+        const newT0 = projectParam(p1, A, C);
+        const newT1 = projectParam(p2, A, C);
+        if (!Number.isFinite(newT0) || !Number.isFinite(newT1)) {
+          blocked.push({ entityId: dim.id, entityType: "dimension", reason: "geometry" });
+          return dim;
+        }
+        dimensionRemap.push({ entityId: dim.id, fromWallId: attachedWallId, toWallId: wallId });
+        return {
+          ...dim,
+          attachedTo: {
+            ...at,
+            ...(Object.prototype.hasOwnProperty.call(at, "id") ? { id: wallId } : {}),
+            wallId,
+            segIndex: 0,
+            t0: newT0,
+            t1: newT1,
+          },
+        };
+      });
+
       return {
-        plan: { ...plan, nodes: pruneOrphanNodes(nodes, walls), walls },
+        plan: { ...plan, nodes: nextNodes, walls, items, dimensions },
         mergedId: wallId,
+        survivingWallId: wallId,
+        removedWallId,
+        removedNodeIds,
+        entityRemap: {
+          walls: { originalWallId: removedWallId, survivingWallId: wallId },
+          openings: openingRemap,
+          dimensions: dimensionRemap,
+        },
+        blocked,
       };
     }
   }
