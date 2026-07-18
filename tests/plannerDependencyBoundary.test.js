@@ -284,3 +284,78 @@ describe("PHASE 1A-2B1 — drag/nudge boundary", () => {
     expect(planPageSource).not.toMatch(/getPlan:\s*\(\)\s*=>\s*plan\b/);
   });
 });
+
+/**
+ * PHASE 1A-2B2 — wall drawing / finish-draft boundary.
+ *
+ * finishWallChain() (the single canonical finish-draft path — Enter,
+ * double-click, context-menu "wall-draft-finish", and the close-loop branch
+ * in onUp all call it, directly or via finishDraft()) no longer builds the
+ * chain via a direct commitWallChain/commitWallEdge call inside a
+ * commitPlan(updater) — it now dispatches one wall.create command. Draft/
+ * preview construction (addWallDraftSegment, wallDraftAddSegment, etc.) is
+ * untouched and stays out of scope for this check.
+ */
+describe("PHASE 1A-2B2 — finish-draft boundary", () => {
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  it("finishWallChain no longer calls commitWallChain/commitWallEdge/commitPlan/setPlan/syncAutoZones/refreshWallMountedItems directly and routes through wall.create", () => {
+    const match = planPageSource.match(/const finishWallChain = \(\) => \{([\s\S]*?)\n {2}\};/);
+    expect(match, "finishWallChain not found").toBeTruthy();
+    const codeOnly = stripComments(match[1]);
+    for (const fn of ["commitWallChain", "commitWallEdge", "commitPlan", "setPlan", "syncAutoZones", "refreshWallMountedItems"]) {
+      expect(codeOnly, `${fn}(...) should no longer be called from finishWallChain`).not.toMatch(new RegExp(`\\b${fn}\\s*\\(`));
+    }
+    expect(codeOnly).toMatch(/runGeometryCommand\(\{\s*type:\s*["']wall\.create["']/);
+  });
+
+  it("finishWallChain reads draft state via ref-only assignment — no stale wallDraftStateRef/draft fallback (PHASE 1A-2B2 corrective regression guard)", () => {
+    const match = planPageSource.match(/const finishWallChain = \(\) => \{([\s\S]*?)\n {2}\};/);
+    expect(match, "finishWallChain not found").toBeTruthy();
+    const codeOnly = stripComments(match[1]);
+
+    expect(codeOnly).toMatch(
+      /const\s+meta\s*=\s*wallDraftFinishMeta\(\s*wallDraftStateRef\.current\s*\)\s*;/
+    );
+    expect(codeOnly).not.toMatch(
+      /wallDraftFinishMeta\(\s*wallDraftStateRef\.current\s*\)\s*\|\|/
+    );
+    expect(codeOnly).not.toMatch(/\bdraft\s*\.\s*length\b/);
+    expect(codeOnly).not.toMatch(/\bpts\s*:\s*draft\b/);
+  });
+
+  it("does not import commitWallChain (no other production caller left in PlanPage.jsx)", () => {
+    expect(planPageSource).not.toMatch(/from\s*["'][^"']*wallCommit\.js["']/);
+  });
+
+  it("never dispatches the wall.finishDraft alias as a second UI command path (wall.create is canonical)", () => {
+    const codeOnly = stripComments(planPageSource);
+    expect(codeOnly).not.toMatch(/type:\s*["']wall\.finishDraft["']/);
+  });
+
+  it("all production finish triggers converge on finishWallChain()", () => {
+    const codeOnly = stripComments(planPageSource);
+    const triggers = [
+      // Enter, tool==="wall", draft.length>=1
+      /e\.key === ["']Enter["'][\s\S]{0,300}?tool === ["']wall["'] && draft\.length >= 1[\s\S]{0,200}?finishWallChain\(\)/,
+      // double-click
+      /const onDblClick = \(e\) => \{[\s\S]{0,200}?finishWallChain\(\)/,
+      // context-menu "wall-draft-finish"
+      /actionId === ["']wall-draft-finish["'][\s\S]{0,100}?finishWallChain\(\)/,
+      // onUp close-loop snap branch
+      /snap\?\.kind === ["']close["'][\s\S]{0,400}?finishWallChain\(\)/,
+      // finishDraft() wrapper, tool==="wall" branch
+      /const finishDraft = \(ptsOverride = null\) => \{[\s\S]{0,300}?finishWallChain\(\)/,
+      // deprecated commitWallDraft() wrapper
+      /const commitWallDraft = \(pts\) => \{[\s\S]{0,200}?finishWallChain\(\)/,
+    ];
+    for (const re of triggers) {
+      expect(codeOnly, `expected to find finishWallChain() near ${re}`).toMatch(re);
+    }
+  });
+});
