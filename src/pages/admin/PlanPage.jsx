@@ -64,6 +64,7 @@ import {
 import { applyWallDelete } from "../../planner/ui/applyWallDelete.js";
 import { applyWallBulkDelete } from "../../planner/ui/applyWallBulkDelete.js";
 import { applyItemBulkDelete } from "../../planner/ui/applyItemBulkDelete.js";
+import { summarizeRoomClearItems, buildRoomClearConfirmMessage } from "../../planner/ui/roomClearSummary.js";
 import { applyWallLengthEdit, createWallLengthEditSession } from "../../planner/ui/applyWallLengthEdit.js";
 import { formatWallLengthMm } from "../../planner/ui/parseWallLengthInput.js";
 import { validateOpeningPlacement, nextDoorNumber, nextOpeningNumber } from "../../planner/doorGeometry.js";
@@ -1663,6 +1664,34 @@ export default function PlanPage() {
   };
 
   const clearSheet = () => {
+    if (active === "room") {
+      // PHASE 1A-2C2D3D2: canonical command boundary — item.bulkDelete
+      // already handles links cleanup and item-attached dimension detach/
+      // delete atomically for the whole delete set (see geometryCommands.js
+      // deleteItemsFromPlan) — not duplicated here. This clear is
+      // intentionally project-wide: layer:"room" items (doors/windows/
+      // openings/legacy-import) exist independently of which room the user
+      // is currently viewing, so a generic per-sheet confirm text would be
+      // misleading — see RESULT — PHASE 1A-2C2D3D2, "Product policy".
+      const roomItemsBeforeConfirm = getCurrentPlan().items.filter((it) => it.layer === "room");
+      if (roomItemsBeforeConfirm.length === 0) {
+        setSel(null);
+        return;
+      }
+      const counts = summarizeRoomClearItems(roomItemsBeforeConfirm);
+      if (!window.confirm(buildRoomClearConfirmMessage(counts))) return;
+      // Live-plan race: itemIds are recomputed from a fresh getCurrentPlan()
+      // read taken AFTER the confirm dialog closes, never from the
+      // pre-confirm snapshot used only for the displayed counts.
+      const itemIds = getCurrentPlan().items.filter((it) => it.layer === "room").map((it) => it.id);
+      const { status } = applyItemBulkDelete({ itemIds, runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        setSel(null);
+      }
+      // geometry-rejected / commit-failed: selection preserved, no
+      // false-success cleanup.
+      return;
+    }
     const name = layerById(active).name;
     if (!window.confirm(`Очистить объекты листа «${name}»?`)) return;
     if (active === "partitions") {
@@ -1698,8 +1727,7 @@ export default function PlanPage() {
     }
     setPlan((p) => {
       const next = { ...p };
-      if (active === "room") next.items = p.items.filter((i) => i.layer !== "room");
-      else if (LINE_LAYER_IDS.includes(active)) next.lines = p.lines.filter((l) => l.layer !== active && migrateLayerId(l.layer) !== active);
+      if (LINE_LAYER_IDS.includes(active)) next.lines = p.lines.filter((l) => l.layer !== active && migrateLayerId(l.layer) !== active);
       else if (ITEM_LAYER_IDS.includes(active)) next.items = p.items.filter((i) => i.layer !== active);
       return next;
     });

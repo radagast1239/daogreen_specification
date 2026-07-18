@@ -614,11 +614,14 @@ describe("PHASE 1A-2C2D2 — partitions clearSheet wall.bulkDelete convergence",
     expect(body.trim().replace(/\}\s*$/, "").trim().endsWith("return;")).toBe(true);
   });
 
-  it("room/line/item clearSheet branches are unmigrated legacy paths (still direct setPlan, not routed through a geometry command)", () => {
+  it("line/item clearSheet branches are unmigrated legacy paths (still direct setPlan, not routed through a geometry command)", () => {
+    // NOTE: originally also asserted `active === "room"` here — room was
+    // migrated to item.bulkDelete in PHASE 1A-2C2D3D2 and no longer reaches
+    // this trailing setPlan block at all (see that phase's dedicated
+    // boundary block for the room-specific proof).
     const body = stripComments(
       extractBetween(planPageSource, "setPlan((p) => {\r\n      const next = { ...p };", "  };")
     );
-    expect(body).toMatch(/active === "room"/);
     expect(body).toMatch(/LINE_LAYER_IDS\.includes\(active\)/);
     expect(body).toMatch(/ITEM_LAYER_IDS\.includes\(active\)/);
     expect(body).not.toMatch(/applyWallBulkDelete/);
@@ -757,11 +760,13 @@ describe("PHASE 1A-2C2D3B — item bulk delete UI trigger convergence", () => {
     expect(planPageSource).toMatch(/const MIGRATED_ITEM_CLEAR_LAYER_IDS = \["racks", "water", "sockets", "sanitary", "furn"\];/);
   });
 
-  it("room/line/disputed clearSheet branches are unmigrated legacy paths (still direct setPlan, not routed through a geometry command)", () => {
+  it("line/disputed clearSheet branches are unmigrated legacy paths (still direct setPlan, not routed through a geometry command)", () => {
+    // NOTE: originally also asserted `active === "room"` here — room was
+    // migrated to item.bulkDelete in PHASE 1A-2C2D3D2 (see that phase's
+    // dedicated boundary block below).
     const body = stripComments(
       extractBetween(planPageSource, "setPlan((p) => {\r\n      const next = { ...p };", "  };"),
     );
-    expect(body).toMatch(/active === "room"/);
     expect(body).toMatch(/LINE_LAYER_IDS\.includes\(active\)/);
     expect(body).toMatch(/ITEM_LAYER_IDS\.includes\(active\)/);
     expect(body).not.toMatch(/applyItemBulkDelete/);
@@ -796,5 +801,112 @@ describe("PHASE 1A-2C2D3B — item bulk delete UI trigger convergence", () => {
     expect(sharedHelperDefs.length).toBe(1);
     const handleItemBulkDeleteBody = extractBetween(codeOnly, "function handleItemBulkDelete(", "\nconst HANDLERS = {");
     expect(handleItemBulkDeleteBody).toMatch(/deleteItemsFromPlan\s*\(/);
+  });
+});
+
+/**
+ * PHASE 1A-2C2D3D2 — room-layer clear (item.bulkDelete) UI trigger
+ * convergence + boundary. Only clearSheet's "room" branch is migrated here,
+ * with its own project-wide destructive confirmation (distinct from the
+ * generic per-sheet confirm text used by every other branch). irrigation/
+ * power/light/vent/climate/staff/line-layer branches, legacy item-layer
+ * migration, label.targetId, and editor-session cleanup remain explicitly
+ * out of scope (see RESULT — PHASE 1A-2C2D3D2, "Unchanged clearSheet
+ * branches").
+ */
+describe("PHASE 1A-2C2D3D2 — room clearSheet item.bulkDelete convergence", () => {
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  function extractBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    expect(start, `marker not found: ${startMarker}`).toBeGreaterThanOrEqual(0);
+    const end = source.indexOf(endMarker, start);
+    expect(end, `end marker not found: ${endMarker}`).toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  function roomBranchBody() {
+    return extractBetween(planPageSource, 'if (active === "room") {', "const name = layerById(active).name;");
+  }
+
+  it("clearSheet checks active===\"room\" as its own early branch, before the generic per-sheet confirm", () => {
+    const start = planPageSource.indexOf("const clearSheet = () => {");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const roomIfIndex = planPageSource.indexOf('if (active === "room") {', start);
+    const genericConfirmIndex = planPageSource.indexOf("const name = layerById(active).name;", start);
+    expect(roomIfIndex).toBeGreaterThan(start);
+    expect(genericConfirmIndex).toBeGreaterThan(roomIfIndex);
+  });
+
+  it("the room branch reads getCurrentPlan() before confirmation to compute display counts, and early-returns with cleared selection when there is nothing to clear", () => {
+    const body = stripComments(roomBranchBody());
+    expect(body).toMatch(/const roomItemsBeforeConfirm = getCurrentPlan\(\)\.items\.filter\(\(it\) => it\.layer === "room"\)/);
+    expect(body).toMatch(/roomItemsBeforeConfirm\.length === 0/);
+    expect(body).toMatch(/setSel\(null\);\s*\n\s*return;/);
+  });
+
+  it("the room branch uses summarizeRoomClearItems/buildRoomClearConfirmMessage for an explicit destructive confirm, not the generic per-sheet confirm text", () => {
+    const body = stripComments(roomBranchBody());
+    expect(body).toMatch(/summarizeRoomClearItems\s*\(/);
+    expect(body).toMatch(/window\.confirm\(buildRoomClearConfirmMessage\(counts\)\)/);
+    expect(body).not.toMatch(/Очистить объекты листа/);
+  });
+
+  it("the room branch recomputes itemIds from a fresh getCurrentPlan() read AFTER the confirm (live-plan race safety), not from the pre-confirm snapshot", () => {
+    const body = stripComments(roomBranchBody());
+    const getCurrentPlanCalls = body.match(/getCurrentPlan\(\)\.items\.filter\(\(it\) => it\.layer === "room"\)/g) || [];
+    // one read for the pre-confirm counts, one independent read for the
+    // authoritative post-confirm delete set — never reused/cached between them.
+    expect(getCurrentPlanCalls.length).toBe(2);
+    const confirmIdx = body.indexOf("window.confirm(buildRoomClearConfirmMessage(counts))");
+    const secondReadIdx = body.indexOf('getCurrentPlan().items.filter((it) => it.layer === "room")', confirmIdx);
+    expect(secondReadIdx).toBeGreaterThan(confirmIdx);
+  });
+
+  it("the room branch routes through applyItemBulkDelete/runGeometryCommand, with no competing direct-mutation path", () => {
+    const body = stripComments(roomBranchBody());
+    expect(body).toMatch(/applyItemBulkDelete\s*\(/);
+    expect(body).toMatch(/runGeometryCommand/);
+    expect(body).not.toMatch(/\bsetPlan\s*\(/);
+    expect(body).not.toMatch(/\.filter\(\(i\)\s*=>\s*i\.layer\s*!==\s*"room"\)/);
+    expect(body).not.toMatch(/\bsyncEngineeringPlan\s*\(/);
+  });
+
+  it("selection cleanup in the room branch is result-status-based, not unconditional", () => {
+    const body = stripComments(roomBranchBody());
+    expect(body).toMatch(/status === "success"/);
+    expect(body).toMatch(/status === "noop"/);
+    expect(body).toMatch(/status === "no-target"/);
+  });
+
+  it("the generic legacy room-clear line no longer exists in the trailing setPlan updater (unreachable dead branch removed)", () => {
+    const codeOnly = stripComments(planPageSource);
+    expect(codeOnly).not.toMatch(/i\.layer\s*!==\s*"room"/);
+  });
+
+  it("imports summarizeRoomClearItems/buildRoomClearConfirmMessage from the leaf roomClearSummary helper", () => {
+    expect(planPageSource).toMatch(/from\s*["'][^"']*ui\/roomClearSummary\.js["']/);
+  });
+
+  it("roomClearSummary.js does not import React, DOM, HistoryModel, or geometryCommands", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "roomClearSummary.js"), "utf8");
+    expect(helperSource).not.toMatch(/from\s*["']react/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*historyModel\.js["']/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*commands\/geometryCommands\.js["']/);
+  });
+
+  it("disputed clearSheet branches (irrigation/power/light/vent/climate/staff/line layers) remain unmigrated legacy paths", () => {
+    const body = stripComments(
+      extractBetween(planPageSource, "setPlan((p) => {\r\n      const next = { ...p };", "  };"),
+    );
+    expect(body).toMatch(/LINE_LAYER_IDS\.includes\(active\)/);
+    expect(body).toMatch(/ITEM_LAYER_IDS\.includes\(active\)/);
+    expect(body).not.toMatch(/applyItemBulkDelete/);
+    expect(body).not.toMatch(/summarizeRoomClearItems/);
   });
 });
