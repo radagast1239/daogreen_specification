@@ -543,3 +543,118 @@ describe("PHASE 1A-2C2B — wall delete UI trigger convergence", () => {
     expect(helperSource).not.toMatch(/from\s*["'][^"']*commands\/geometryCommands\.js["']/);
   });
 });
+
+/**
+ * PHASE 1A-2C2D2 — atomic partitions clear (wall.bulkDelete) UI trigger
+ * convergence + boundary. Only clearSheet's "partitions" branch is migrated
+ * here. room/line/item clearSheet branches, item.delete, item-attached
+ * dimensions, general multi/mixed delete, and the no-selection Delete-key
+ * fallback remain explicitly out of scope (see RESULT — PHASE 1A-2C2D2,
+ * "Remaining clearSheet branches").
+ */
+describe("PHASE 1A-2C2D2 — partitions clearSheet wall.bulkDelete convergence", () => {
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+  const GEOMETRY_COMMANDS_FILE = join(PLANNER_ROOT, "commands", "geometryCommands.js");
+  const geometryCommandsSource = readFileSync(GEOMETRY_COMMANDS_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  function extractBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    expect(start, `marker not found: ${startMarker}`).toBeGreaterThanOrEqual(0);
+    const end = source.indexOf(endMarker, start);
+    expect(end, `end marker not found: ${endMarker}`).toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  function partitionsBranchBody() {
+    return extractBetween(planPageSource, 'if (active === "partitions") {', "setPlan((p) => {");
+  }
+
+  it("clearSheet keeps the original confirm text unconditionally, before branching on active", () => {
+    const body = extractBetween(planPageSource, "const clearSheet = () => {", 'if (active === "partitions") {');
+    expect(stripComments(body)).toMatch(/window\.confirm\(`Очистить объекты листа «\$\{name\}»\?`\)/);
+  });
+
+  it("the partitions branch routes through applyWallBulkDelete/runGeometryCommand, with no competing direct-mutation path", () => {
+    const body = stripComments(partitionsBranchBody());
+    expect(body).toMatch(/applyWallBulkDelete\s*\(/);
+    expect(body).toMatch(/runGeometryCommand/);
+    expect(body).not.toMatch(/\bsetPlan\s*\(/);
+    expect(body).not.toMatch(/\bdeleteWallEdge\s*\(/);
+    expect(body).not.toMatch(/\bpruneOrphanNodes\s*\(/);
+    expect(body).not.toMatch(/\brefreshWallMountedItems\s*\(/);
+    expect(body).not.toMatch(/\bsyncAutoZones\s*\(/);
+  });
+
+  it("the partitions branch computes wallIds from the live plan via role !== \"outer\", not a hardcoded/stale list", () => {
+    const body = stripComments(partitionsBranchBody());
+    expect(body).toMatch(/getCurrentPlan\(\)\.walls\.filter\(\(w\)\s*=>\s*w\.role\s*!==\s*"outer"\)/);
+  });
+
+  it("the partitions branch does not filter walls a second time inside a setPlan updater (single computation, no duplicate policy)", () => {
+    const body = stripComments(partitionsBranchBody());
+    expect(body).not.toMatch(/\(p\)\s*=>/);
+    expect(body).not.toMatch(/p\.walls\.filter/);
+  });
+
+  it("selection cleanup in the partitions branch is result-status-based, not unconditional", () => {
+    const body = stripComments(partitionsBranchBody());
+    expect(body).toMatch(/status === "success"/);
+    expect(body).toMatch(/status === "noop"/);
+    expect(body).toMatch(/status === "no-target"/);
+    expect(body).toMatch(/setSel\(null\)/);
+  });
+
+  it("the partitions branch returns early and never falls through to the legacy setPlan block", () => {
+    const body = stripComments(partitionsBranchBody());
+    expect(body.trim().replace(/\}\s*$/, "").trim().endsWith("return;")).toBe(true);
+  });
+
+  it("room/line/item clearSheet branches are unmigrated legacy paths (still direct setPlan, not routed through a geometry command)", () => {
+    const body = stripComments(
+      extractBetween(planPageSource, "setPlan((p) => {\r\n      const next = { ...p };", "  };")
+    );
+    expect(body).toMatch(/active === "room"/);
+    expect(body).toMatch(/LINE_LAYER_IDS\.includes\(active\)/);
+    expect(body).toMatch(/ITEM_LAYER_IDS\.includes\(active\)/);
+    expect(body).not.toMatch(/applyWallBulkDelete/);
+    expect(body).not.toMatch(/runGeometryCommand/);
+  });
+
+  it("imports the wall-bulk-delete apply helper, and still creates only one geometry command dispatcher", () => {
+    expect(planPageSource).toMatch(/from\s*["'][^"']*ui\/applyWallBulkDelete\.js["']/);
+    const dispatcherCalls = planPageSource.match(/createGeometryCommandDispatcher\s*\(/g) || [];
+    expect(dispatcherCalls.length).toBe(1);
+  });
+
+  it("applyWallBulkDelete dispatches the canonical wall.bulkDelete command type", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyWallBulkDelete.js"), "utf8");
+    expect(helperSource).toMatch(/type:\s*["']wall\.bulkDelete["']/);
+  });
+
+  it("applyWallBulkDelete does not import React, HistoryModel, or geometryCommands directly", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyWallBulkDelete.js"), "utf8");
+    expect(helperSource).not.toMatch(/from\s*["']react/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*historyModel\.js["']/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*commands\/geometryCommands\.js["']/);
+  });
+
+  it("wall.bulkDelete is registered in the command HANDLERS map alongside wall.delete", () => {
+    expect(geometryCommandsSource).toMatch(/"wall\.delete":\s*handleWallDelete,/);
+    expect(geometryCommandsSource).toMatch(/"wall\.bulkDelete":\s*handleWallBulkDelete,/);
+  });
+
+  it("wall.delete and wall.bulkDelete share one internal delete implementation (no duplicate cleanup policy)", () => {
+    const codeOnly = stripComments(geometryCommandsSource);
+    const sharedHelperDefs = codeOnly.match(/function\s+deleteWallsFromPlan\s*\(/g) || [];
+    expect(sharedHelperDefs.length).toBe(1);
+    const handleWallDeleteBody = extractBetween(codeOnly, "function handleWallDelete(", "\nfunction handleWallBulkDelete(");
+    const handleWallBulkDeleteBody = extractBetween(codeOnly, "function handleWallBulkDelete(", "\nfunction isFiniteConsecutivePoint(");
+    expect(handleWallDeleteBody).toMatch(/deleteWallsFromPlan\s*\(/);
+    expect(handleWallBulkDeleteBody).toMatch(/deleteWallsFromPlan\s*\(/);
+  });
+});

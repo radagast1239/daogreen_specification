@@ -62,6 +62,7 @@ import {
   WALL_PARTIAL_DIMENSION_MESSAGE, ITEM_DIMENSION_MESSAGE,
 } from "../../planner/ui/wallLengthDimensionMapping.js";
 import { applyWallDelete } from "../../planner/ui/applyWallDelete.js";
+import { applyWallBulkDelete } from "../../planner/ui/applyWallBulkDelete.js";
 import { applyWallLengthEdit, createWallLengthEditSession } from "../../planner/ui/applyWallLengthEdit.js";
 import { formatWallLengthMm } from "../../planner/ui/parseWallLengthInput.js";
 import { validateOpeningPlacement, nextDoorNumber, nextOpeningNumber } from "../../planner/doorGeometry.js";
@@ -1648,10 +1649,26 @@ export default function PlanPage() {
   const clearSheet = () => {
     const name = layerById(active).name;
     if (!window.confirm(`Очистить объекты листа «${name}»?`)) return;
+    if (active === "partitions") {
+      // PHASE 1A-2C2D2: canonical command boundary — wall.bulkDelete already
+      // handles orphan-node pruning, dangling-opening removal, link cleanup,
+      // and wall-attached dimension detach/delete atomically for the whole
+      // delete set (see geometryCommands.js deleteWallsFromPlan) — not
+      // duplicated here. Outer walls are excluded from the delete set below
+      // and never sent to the command at all, so they and their nodes/
+      // openings are untouched.
+      const wallIds = getCurrentPlan().walls.filter((w) => w.role !== "outer").map((w) => w.id);
+      const { status } = applyWallBulkDelete({ wallIds, runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        setSel(null);
+      }
+      // geometry-rejected / commit-failed: selection preserved, no
+      // false-success cleanup.
+      return;
+    }
     setPlan((p) => {
       const next = { ...p };
-      if (active === "partitions") next.walls = p.walls.filter((w) => w.role === "outer");
-      else if (active === "room") next.items = p.items.filter((i) => i.layer !== "room");
+      if (active === "room") next.items = p.items.filter((i) => i.layer !== "room");
       else if (LINE_LAYER_IDS.includes(active)) next.lines = p.lines.filter((l) => l.layer !== active && migrateLayerId(l.layer) !== active);
       else if (ITEM_LAYER_IDS.includes(active)) next.items = p.items.filter((i) => i.layer !== active);
       return next;
