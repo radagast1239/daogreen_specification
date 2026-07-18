@@ -3,7 +3,7 @@ import { applyResidualFrameBomTwinRepair } from "../../frameConstructor/frameBom
 import { buildBuilderDraftPath, isDraftProject, resolveBuilderWizardStep } from "../../../shared/projectLifecycle.js";
 import SaveSectionTemplateModal from "../../components/SaveSectionTemplateModal.jsx";
 import AddMaterialToSpecModal from "../../components/AddMaterialToSpecModal.jsx";
-import { buildProjectItemFromMaterial } from "../../lib/addProjectItemFromMaterial.js";
+import { buildProjectItemFromMaterial, findDuplicateMaterialInModule } from "../../lib/addProjectItemFromMaterial.js";
 import { api } from "../../lib/api.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
@@ -1367,7 +1367,14 @@ function SpecTab({
   const addItemFromMaterial = async (module, mat) => {
     try {
       const sortOrder = (project.items || []).length;
-      const item = buildProjectItemFromMaterial(mat, module, { sortOrder, qty: 1 });
+      const asManualDuplicate = Boolean(
+        findDuplicateMaterialInModule(project.items || [], mat.id, module),
+      );
+      const item = buildProjectItemFromMaterial(mat, module, {
+        sortOrder,
+        qty: 1,
+        asManualDuplicate,
+      });
       await actions.itemAdd(project.id, item);
       success(`Добавлено: ${mat.name}`);
     } catch (e) {

@@ -1,7 +1,7 @@
 /** Published client release — pure helpers (frontend + backend). */
 
 import { lineVisibleToClient } from "./itemTypes.js";
-import { projectItemMatchKey } from "./projectItemKey.js";
+import { projectItemIdentityKey, projectItemMaterialMatchKey } from "./projectItemKey.js";
 import { buildClientImageManifest, normalizeClientImageManifest, clientImageManifestFingerprint } from "./clientImageManifest.js";
 import { buildFarmPowerSnapshot, farmPowerFingerprint, normalizeFarmPower } from "./farmPower.js";
 
@@ -230,7 +230,7 @@ export function detectUnpublishedChanges(
 export function workingItemsPublishFingerprint(items = []) {
   return (items || [])
     .filter((it) => lineVisibleToClient(it))
-    .map((it) => `${it.id}|${projectItemMatchKey(it)}|${Number(it.qty) || 0}|${Number(it.price) || 0}|${Number(it.actualPrice) || 0}`)
+    .map((it) => `${projectItemIdentityKey(it)}|${projectItemMaterialMatchKey(it)}|${Number(it.qty) || 0}|${Number(it.price) || 0}|${Number(it.actualPrice) || 0}`)
     .sort()
     .join("\n");
 }

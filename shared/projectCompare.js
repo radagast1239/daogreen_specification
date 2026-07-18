@@ -1,6 +1,6 @@
 /** Сравнение двух проектов по materialId и purchaseKey */
 
-import { projectItemMatchKey } from "./projectItemKey.js";
+import { projectItemCompareKey } from "./projectItemKey.js";
 
 const TRACK_FIELDS = [
   { key: "qty", label: "Количество", type: "number" },
@@ -28,7 +28,7 @@ function itemSummary(it) {
     module: it.module,
     materialId: it.materialId || "",
     purchaseKey: it.purchaseKey || it.purchase_key || "",
-    matchKey: projectItemMatchKey(it),
+    matchKey: projectItemCompareKey(it),
   };
 }
 
@@ -40,8 +40,8 @@ export function compareProjectItems(baseItems, otherItems) {
   const baseMap = new Map();
   const otherMap = new Map();
 
-  for (const it of baseItems || []) baseMap.set(projectItemMatchKey(it), it);
-  for (const it of otherItems || []) otherMap.set(projectItemMatchKey(it), it);
+  for (const it of baseItems || []) baseMap.set(projectItemCompareKey(it), it);
+  for (const it of otherItems || []) otherMap.set(projectItemCompareKey(it), it);
 
   const added = [];
   const removed = [];

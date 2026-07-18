@@ -81,17 +81,42 @@ function applyFrameBomOverlayToCatalogLine(catalogLine, bomLine) {
   };
 }
 
+function pushBomMultiMap(map, key, value) {
+  if (!key) return;
+  if (!map.has(key)) map.set(key, []);
+  map.get(key).push(value);
+}
+
+function takeBomMultiMap(map, key) {
+  const list = map.get(key);
+  if (!list?.length) return null;
+  return list.shift();
+}
+
 function overlayFrameBomOnLines(lines, frameBomItems, { stCount = 1, materials = null } = {}) {
   if (!frameBomItems?.length) return lines || [];
   const bomByMaterial = new Map();
   const bomByName = new Map();
+  const bomById = new Map();
   for (const it of frameBomItems) {
-    if (it.materialId) bomByMaterial.set(it.materialId, it);
-    if (it.name) bomByName.set(it.name, it);
+    if (it.id) bomById.set(it.id, it);
+    if (it.materialId) pushBomMultiMap(bomByMaterial, String(it.materialId), it);
+    if (it.name) pushBomMultiMap(bomByName, String(it.name), it);
   }
   const usedBomIds = new Set();
   const merged = (lines || []).map((ln) => {
-    const bom = (ln.materialId && bomByMaterial.get(ln.materialId)) || bomByName.get(ln.name);
+    let bom = null;
+    if (ln.id && bomById.has(ln.id)) bom = bomById.get(ln.id);
+    // Catalog / editor lines receive Frame BOM overlay by materialId (existing UX).
+    // Explicit manual rows must not absorb BOM purchase fields — leave for append.
+    const lineSource = String(ln.source || ln.sourceType || "").trim();
+    const isExplicitManual = lineSource === "manual";
+    if (!bom && !isExplicitManual && ln.materialId) {
+      bom = takeBomMultiMap(bomByMaterial, String(ln.materialId));
+    }
+    if (!bom && !isExplicitManual && ln.name) {
+      bom = takeBomMultiMap(bomByName, String(ln.name));
+    }
     if (!bom) return ln;
     usedBomIds.add(bom.id);
     const bomLine = frameBomProjectItemToBuilderLine(bom, { materials });
@@ -103,9 +128,15 @@ function overlayFrameBomOnLines(lines, frameBomItems, { stCount = 1, materials =
   const usedMaterialIds = new Set(merged.map((ln) => ln.materialId).filter(Boolean));
   for (const bom of frameBomItems) {
     if (usedBomIds.has(bom.id)) continue;
-    if (bom.materialId && usedMaterialIds.has(bom.materialId)) continue;
     if (materials?.length && bom.materialId && !materialExistsInCatalog(bom.materialId, materials)) {
       continue;
+    }
+    // Append unused BOM when materialId is only on an explicit manual line (keep separate).
+    if (bom.materialId && usedMaterialIds.has(bom.materialId)) {
+      const onlyManual = merged
+        .filter((ln) => String(ln.materialId || "") === String(bom.materialId))
+        .every((ln) => String(ln.source || ln.sourceType || "").trim() === "manual");
+      if (!onlyManual) continue;
     }
     merged.push(frameBomProjectItemToBuilderLine(bom, { materials }));
     if (bom.materialId) usedMaterialIds.add(bom.materialId);
@@ -181,6 +212,9 @@ export function projectItemToBuilderLine(item, { stCount = 1, materials = null }
     clientSubsection: item.clientSubsection || "",
     purchaseKey: item.purchaseKey || "",
     responsible: item.responsible || "",
+    source: item.source || item.sourceType || "",
+    sourceType: item.sourceType || item.source || "",
+    sourceKey: item.sourceKey || item.source_key || "",
   };
 }
 
@@ -268,27 +302,111 @@ function isStellageProjectItem(item, configs = []) {
   return configs.some((cfg) => cfg.name === section || cfg.moduleName === section);
 }
 
+function sortSavedByStableId(a, b) {
+  return String(a?.id || "").localeCompare(String(b?.id || ""));
+}
+
+function pushSavedQueue(map, key, value) {
+  if (!key) return;
+  if (!map.has(key)) map.set(key, []);
+  map.get(key).push(value);
+}
+
+/**
+ * Match catalog line → saved project item (each saved row claimed at most once).
+ * Priority: exact id → sourceKey → section/rack → unique materialId → deterministic zip.
+ */
+function claimSavedForCatalogLine(ln, pools, used) {
+  const unused = (it) => it && it.id && !used.has(it.id);
+
+  if (ln?.id) {
+    const byExact = pools.byId.get(ln.id);
+    if (unused(byExact)) return byExact;
+    // Stellage-prefixed project id ↔ short catalog line id
+    for (const it of pools.all) {
+      if (!unused(it)) continue;
+      if (String(it.id).endsWith(`__${ln.id}`) || String(it.id) === String(ln.id)) return it;
+    }
+  }
+
+  const materialId = String(ln?.materialId || "").trim();
+  let candidates = materialId
+    ? (pools.byMaterial.get(materialId) || []).filter(unused)
+    : [];
+
+  const sourceKey = String(ln?.sourceKey || ln?.source_key || "").trim();
+  if (sourceKey && candidates.length) {
+    const bySk = candidates.filter(
+      (it) => String(it.sourceKey || it.source_key || "").trim() === sourceKey,
+    );
+    if (bySk.length === 1) return bySk[0];
+    if (bySk.length > 1) return [...bySk].sort(sortSavedByStableId)[0];
+  }
+
+  const rack =
+    String(ln?.moduleRackKey || ln?.module_rack_key || "").trim() ||
+    String(ln?.stellageId || ln?.rackId || "").trim();
+  if (rack && candidates.length) {
+    const byRack = candidates.filter((it) => {
+      const itRack =
+        String(it.moduleRackKey || it.module_rack_key || "").trim() ||
+        String(it.stellageId || it.rackId || "").trim();
+      return itRack === rack;
+    });
+    if (byRack.length === 1) return byRack[0];
+    if (byRack.length > 1) candidates = byRack;
+  }
+
+  const section = String(ln?.section || ln?.module || "").trim();
+  if (section && candidates.length) {
+    const bySec = candidates.filter(
+      (it) => String(it.section || it.module || "").trim() === section,
+    );
+    if (bySec.length === 1) return bySec[0];
+    if (bySec.length > 1) candidates = bySec;
+  }
+
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length > 1) return [...candidates].sort(sortSavedByStableId)[0];
+
+  const name = String(ln?.name || "").trim();
+  if (name) {
+    const byName = (pools.byName.get(name) || []).filter(unused);
+    if (byName.length === 1) return byName[0];
+    if (byName.length > 1) return [...byName].sort(sortSavedByStableId)[0];
+  }
+  return null;
+}
+
 function applySavedItemsToCatalogLines(catalogLines, savedItems, { stCount = 1, materials = null } = {}) {
-  const savedByMaterial = new Map();
-  const savedByName = new Map();
-  for (const it of savedItems) {
-    if (it.materialId) savedByMaterial.set(it.materialId, it);
-    if (it.name) savedByName.set(it.name, it);
+  const all = [...(savedItems || [])].sort(sortSavedByStableId);
+  const pools = {
+    all,
+    byId: new Map(),
+    byMaterial: new Map(),
+    byName: new Map(),
+  };
+  for (const it of all) {
+    if (it?.id) pools.byId.set(it.id, it);
+    if (it?.materialId) pushSavedQueue(pools.byMaterial, String(it.materialId), it);
+    if (it?.name) pushSavedQueue(pools.byName, String(it.name), it);
   }
   const used = new Set();
   const merged = (catalogLines || []).map((ln) => {
-    const saved = (ln.materialId && savedByMaterial.get(ln.materialId)) || savedByName.get(ln.name);
+    const saved = claimSavedForCatalogLine(ln, pools, used);
     if (!saved) return { ...ln, included: false };
     used.add(saved.id);
+    const asLine = projectItemToBuilderLine(saved, { stCount, materials });
     return {
       ...ln,
-      ...projectItemToBuilderLine(saved, { stCount, materials }),
-      included: projectItemToBuilderLine(saved, { stCount, materials }).included,
+      ...asLine,
+      included: asLine.included,
     };
   });
-  for (const it of savedItems) {
+  for (const it of all) {
     if (used.has(it.id)) continue;
-    merged.push({ ...projectItemToBuilderLine(it, { stCount, materials }), included: projectItemToBuilderLine(it, { stCount, materials }).included });
+    const asLine = projectItemToBuilderLine(it, { stCount, materials });
+    merged.push({ ...asLine, included: asLine.included });
   }
   return merged;
 }

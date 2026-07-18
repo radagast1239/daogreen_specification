@@ -5,6 +5,7 @@
 import { lineFromMaterial } from "./specLineCore.js";
 import { lineToProjectItem } from "./projectBuilder.js";
 import { lineVisibleToClient } from "../../shared/itemTypes.js";
+import { uid } from "./ids.js";
 
 /** Active materials matching free-text query (name / category / supplier / notes). */
 export function filterMaterialsForSpecAdd(materials, query = "") {
@@ -49,8 +50,16 @@ export function findDuplicateMaterialInModule(items, materialId, module) {
 /**
  * Full project item snapshot from material defaults.
  * qty=1, included, visibility from material (or visible if no default).
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.asManualDuplicate] — confirmed second+ add of same materialId
+ *   in the same section: new id, source=manual, independent overrides (no purchase copy).
  */
-export function buildProjectItemFromMaterial(mat, module, { sortOrder = 0, qty = 1 } = {}) {
+export function buildProjectItemFromMaterial(
+  mat,
+  module,
+  { sortOrder = 0, qty = 1, asManualDuplicate = false } = {},
+) {
   if (!mat?.id) throw new Error("material required");
   const section = String(module || "").trim() || "Прочее";
   const visibleToClient = mat.clientVisibleDefault !== false;
@@ -60,8 +69,10 @@ export function buildProjectItemFromMaterial(mat, module, { sortOrder = 0, qty =
     includedInProject: true,
     visibleToClient,
   });
+  // Fresh line id so lineToProjectItem never reuses another row's identity.
+  line.id = uid("ln");
   const item = lineToProjectItem(line, section, sortOrder);
-  return {
+  const built = {
     ...item,
     qty: qty,
     includedInProject: true,
@@ -72,6 +83,20 @@ export function buildProjectItemFromMaterial(mat, module, { sortOrder = 0, qty =
     // Never create as internal_note — that permanently hides from client filters.
     itemType: item.itemType || "material",
   };
+  if (asManualDuplicate) {
+    built.id = uid("it");
+    built.source = "manual";
+    built.status = "not_bought";
+    built.actualPrice = null;
+    built.clientComment = "";
+    built.replacementPrice = null;
+    built.replacementComment = "";
+    built.replacementProposedAt = null;
+    built.priceOverridden = false;
+    built.linkOverridden = false;
+    built.linkAltOverridden = false;
+  }
+  return built;
 }
 
 /** Regression helpers for visibility / filters. */

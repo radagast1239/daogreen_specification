@@ -51,10 +51,12 @@ const BUILDER_REWRITE_FIELD_KEYS = new Set([
 /**
  * Catalog/geometry from generated; purchase / notes stay from existing project item.
  * Prevents wizard regenerate from wiping status/actualPrice/clientNote.
+ * Persistent project_items.id is never rewritten.
  */
 function mergeProjectOwnedFields(existing, generated) {
   const merged = { ...existing };
   for (const [key, val] of Object.entries(generated || {})) {
+    if (key === "id") continue;
     if (PROJECT_OWNED_FIELD_KEYS.includes(key) && !BUILDER_REWRITE_FIELD_KEYS.has(key)) {
       continue;
     }
@@ -68,6 +70,21 @@ function mergeProjectOwnedFields(existing, generated) {
   }
   if (existing.purchaseStatus !== undefined && merged.purchaseStatus === undefined) {
     merged.purchaseStatus = existing.purchaseStatus;
+  }
+  // Exact persistent identity — never adopt a new generated id for an existing row.
+  merged.id = existing.id;
+  // Project-local commercial overrides stay on this row (never borrow from a peer).
+  if (existing.priceOverridden) {
+    merged.price = existing.price;
+    merged.priceOverridden = true;
+  }
+  if (existing.linkOverridden) {
+    merged.link = existing.link;
+    merged.linkOverridden = true;
+  }
+  if (existing.linkAltOverridden) {
+    merged.linkAlt = existing.linkAlt;
+    merged.linkAltOverridden = true;
   }
   return merged;
 }
@@ -103,9 +120,20 @@ function sameBuilderSectionMaterial(a, b) {
   return Boolean(secA) && secA === secB;
 }
 
+function sectionMaterialGroupKey(item) {
+  const materialId = String(item?.materialId || "").trim();
+  const section = String(item?.section || item?.module || "").trim();
+  if (!materialId || !section) return "";
+  return `${section}::${materialId}`;
+}
+
+function sortByStableId(a, b) {
+  return String(a?.id || "").localeCompare(String(b?.id || ""));
+}
+
 /**
- * One-to-one match: never return a generated row already claimed in `usedGenerated`.
- * @param {Set<object>} usedGenerated — identity set of claimed generated items
+ * Match existing → generated with one-to-one claims.
+ * Priority: exact id → logical key → unique section+materialId → deterministic zip of remaining group.
  */
 function findGeneratedMatch(existing, { byId, byKey }, generated = [], ctx = {}, usedGenerated = new Set()) {
   const claimable = (g) => g && !usedGenerated.has(g);
@@ -119,11 +147,41 @@ function findGeneratedMatch(existing, { byId, byKey }, generated = [], ctx = {},
     const g = byKey.get(key);
     if (claimable(g)) return g;
   }
-  // Builder farm/stellage re-save: line ids often change; match section+materialId once.
-  if (classifyProjectItemOwnership(existing, ctx) === PROJECT_ITEM_OWNERSHIP.BUILDER) {
-    return generated.find((g) => claimable(g) && sameBuilderSectionMaterial(existing, g)) || null;
+  if (classifyProjectItemOwnership(existing, ctx) !== PROJECT_ITEM_OWNERSHIP.BUILDER) {
+    return null;
   }
-  return null;
+  const candidates = generated.filter((g) => claimable(g) && sameBuilderSectionMaterial(existing, g));
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length === 0) return null;
+
+  // Ambiguous group: pair remaining existing peers with remaining candidates by sorted id.
+  // Caller must process existing in stable order for this to stay deterministic.
+  const groupKey = sectionMaterialGroupKey(existing);
+  const peerExistingIds = (ctx._pendingBuilderByGroup?.get(groupKey) || [])
+    .filter((id) => id === existing.id || !ctx._claimedExistingIds?.has(id));
+  const rank = peerExistingIds.indexOf(existing.id);
+  if (rank < 0) return null;
+  const sortedCandidates = [...candidates].sort(sortByStableId);
+  return sortedCandidates[rank] || null;
+}
+
+/**
+ * Build map: section::materialId → existing builder item ids (sorted) for deterministic pairing.
+ */
+function buildPendingBuilderGroups(existing, ctx) {
+  const map = new Map();
+  for (const ex of existing) {
+    if (classifyProjectItemOwnership(ex, ctx) !== PROJECT_ITEM_OWNERSHIP.BUILDER) continue;
+    const gk = sectionMaterialGroupKey(ex);
+    if (!gk) continue;
+    if (!map.has(gk)) map.set(gk, []);
+    map.get(gk).push(ex.id);
+  }
+  for (const [gk, ids] of map) {
+    ids.sort((a, b) => String(a).localeCompare(String(b)));
+    map.set(gk, ids);
+  }
+  return map;
 }
 
 /**
@@ -143,6 +201,8 @@ export function buildProjectItemsAfterBuilderSave({
   const generated = Array.isArray(generatedBuilderItems) ? generatedBuilderItems : [];
   const ctx = buildContext(builderContext, existing);
   const { byId, byKey, keys: generatedKeys } = indexGenerated(generated);
+  ctx._pendingBuilderByGroup = buildPendingBuilderGroups(existing, ctx);
+  ctx._claimedExistingIds = new Set();
 
   const updatedBuilderIds = [];
   const addedBuilderIds = [];
@@ -158,7 +218,17 @@ export function buildProjectItemsAfterBuilderSave({
   /** Claimed generated row objects — enforces one-to-one section+material fallback. */
   const usedGenerated = new Set();
 
-  for (const ex of existing) {
+  // Process builder-owned existing in stable id order so ambiguous zip pairing is deterministic.
+  const orderedExisting = [...existing].sort((a, b) => {
+    const oa = classifyProjectItemOwnership(a, ctx);
+    const ob = classifyProjectItemOwnership(b, ctx);
+    if (oa === PROJECT_ITEM_OWNERSHIP.BUILDER && ob === PROJECT_ITEM_OWNERSHIP.BUILDER) {
+      return sortByStableId(a, b);
+    }
+    return 0;
+  });
+
+  for (const ex of orderedExisting) {
     const ownership = classifyProjectItemOwnership(ex, ctx);
 
     if (ownership === PROJECT_ITEM_OWNERSHIP.SPEC_MANUAL) {
@@ -183,6 +253,7 @@ export function buildProjectItemsAfterBuilderSave({
       resultIds.add(ex.id);
       if (gen) {
         usedGenerated.add(gen);
+        ctx._claimedExistingIds.add(ex.id);
         updatedBuilderIds.push(ex.id);
         if (gen.id) matchedGeneratedIds.add(gen.id);
       }
@@ -192,25 +263,30 @@ export function buildProjectItemsAfterBuilderSave({
     const gen = findGeneratedMatch(ex, { byId, byKey }, generated, ctx, usedGenerated);
     if (gen) {
       usedGenerated.add(gen);
+      ctx._claimedExistingIds.add(ex.id);
       items.push(mergeBuilderOwnedItem(ex, gen));
       resultIds.add(ex.id);
       updatedBuilderIds.push(ex.id);
       if (gen.id) matchedGeneratedIds.add(gen.id);
     } else {
-      removedBuilderIds.push(ex.id);
+      // No match: preserve existing rather than dropping when generated still has
+      // same-section material peers (extra duplicate left over after pairing).
+      const peers = generated.filter((g) => sameBuilderSectionMaterial(ex, g));
+      if (peers.length > 0) {
+        items.push(ex);
+        resultIds.add(ex.id);
+      } else {
+        removedBuilderIds.push(ex.id);
+      }
     }
   }
 
   for (const gen of generated) {
     if (usedGenerated.has(gen) || resultIds.has(gen.id) || matchedGeneratedIds.has(gen.id)) continue;
     const key = builderProjectItemLogicalKey(gen);
+    // Exact identity only — never treat same materialId+section as a duplicate of an existing row.
     const dup = existing.some(
-      (ex) =>
-        ex.id === gen.id ||
-        builderProjectItemLogicalKey(ex) === key ||
-        (classifyProjectItemOwnership(ex, ctx) === PROJECT_ITEM_OWNERSHIP.BUILDER &&
-          sameBuilderSectionMaterial(ex, gen) &&
-          resultIds.has(ex.id)),
+      (ex) => ex.id === gen.id || (key && builderProjectItemLogicalKey(ex) === key),
     );
     if (dup) continue;
     const row = gen.materialId
