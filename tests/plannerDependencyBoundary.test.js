@@ -359,3 +359,35 @@ describe("PHASE 1A-2B2 — finish-draft boundary", () => {
     }
   });
 });
+
+/**
+ * PHASE 1B-1A — wall.setLength boundary (core-only command, no UI wiring in
+ * this phase — see RESULT — PHASE 1B-1A). node.move's own public contract is
+ * verified unchanged by the full existing plannerGeometryCommands.test.js
+ * regression suite (127 tests, all green after the applyNodeMoveGeometry
+ * extraction) — not re-asserted statically here.
+ */
+describe("PHASE 1B-1A — wall.setLength boundary", () => {
+  const COMMAND_FILE = join(PLANNER_ROOT, "commands", "geometryCommands.js");
+  const commandSource = readFileSync(COMMAND_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  it("wall.setLength is registered in the command table", () => {
+    expect(commandSource).toMatch(/["']wall\.setLength["']\s*:\s*handleWallSetLength/);
+  });
+
+  it("handleWallSetLength does not call executeGeometryCommand recursively", () => {
+    const match = commandSource.match(/function handleWallSetLength\(plan, command\) \{([\s\S]*?)\n\}/);
+    expect(match, "handleWallSetLength not found").toBeTruthy();
+    const codeOnly = stripComments(match[1]);
+    expect(codeOnly).not.toMatch(/\bexecuteGeometryCommand\s*\(/);
+  });
+
+  it("geometryCommands.js does not import the UI dispatcher or HistoryModel (command layer stays dispatcher/history-agnostic)", () => {
+    expect(commandSource).not.toMatch(/from\s*["'][^"']*ui\/geometryCommandDispatcher\.js["']/);
+    expect(commandSource).not.toMatch(/from\s*["'][^"']*historyModel\.js["']/);
+  });
+});
