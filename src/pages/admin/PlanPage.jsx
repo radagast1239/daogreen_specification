@@ -52,8 +52,8 @@ import {
 import { syncRoomsSafe } from "../../planner/core/rooms/index.js";
 import { validateRooms } from "../../planner/core/rooms/validateRooms.js";
 import {
-  resolvePlanWalls, commitWallEdge, deleteWallEdge, movePlanNode,
-  wallNodeIdAt, isNetworkPlan, ensureWallNetwork,
+  resolvePlanWalls, commitWallEdge, movePlanNode,
+  wallNodeIdAt, ensureWallNetwork,
   applyNetworkNodeAtWall, applyNetworkWallSegMove,
 } from "../../planner/wallNetwork.js";
 import { createGeometryCommandDispatcher } from "../../planner/ui/geometryCommandDispatcher.js";
@@ -61,6 +61,7 @@ import {
   classifyWallLengthDimension, resolveFixedEndpointForPoint,
   WALL_PARTIAL_DIMENSION_MESSAGE, ITEM_DIMENSION_MESSAGE,
 } from "../../planner/ui/wallLengthDimensionMapping.js";
+import { applyWallDelete } from "../../planner/ui/applyWallDelete.js";
 import { applyWallLengthEdit, createWallLengthEditSession } from "../../planner/ui/applyWallLengthEdit.js";
 import { formatWallLengthMm } from "../../planner/ui/parseWallLengthInput.js";
 import { validateOpeningPlacement, nextDoorNumber, nextOpeningNumber } from "../../planner/doorGeometry.js";
@@ -753,21 +754,25 @@ export default function PlanPage() {
       clearSelection();
       return true;
     }
+    if (coll === "walls") {
+      // PHASE 1A-2C2B: canonical command boundary — wall.delete already
+      // handles orphan-node pruning, dangling-opening removal (400mm
+      // re-place or delete), and wall-attached manual-dimension detach (see
+      // geometryCommands.js handleWallDelete) — not duplicated here.
+      const { status } = applyWallDelete({ wallId: ids[0], runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        clearSelection();
+      }
+      // geometry-rejected / commit-failed: selection preserved for
+      // analysis/retry, geometry unchanged — no false-success cleanup.
+      return status === "success";
+    }
     setPlan((p) => {
       let next = { ...p };
       if (coll === "items") {
         const idSet = new Set(ids);
         next.items = p.items.filter((o) => !idSet.has(o.id));
         next.links = (p.links || []).filter((l) => !idSet.has(l.fromId) && !idSet.has(l.toId));
-      } else if (coll === "walls") {
-        const id = ids[0];
-        if (isNetworkPlan(p)) {
-          next = deleteWallEdge(p, id);
-        } else {
-          next.walls = p.walls.filter((o) => o.id !== id);
-        }
-        next.items = refreshWallMountedItems(next.items, resolvePlanWalls(next), next.room, id);
-        next = syncAutoZones(next);
       } else if (coll === "rulers") {
         const idSet = new Set(ids);
         next.rulers = (p.rulers || []).filter((r) => !idSet.has(r.id));
@@ -796,7 +801,7 @@ export default function PlanPage() {
     });
     clearSelection();
     return true;
-  }, [plan.zones]);
+  }, [plan.zones, runGeometryCommand]);
 
   const delSel = () => {
     if (!selection?.ids?.length) return;
