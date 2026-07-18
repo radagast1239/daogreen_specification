@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { uid } from "../../store/helpers.js";
@@ -56,8 +56,8 @@ import {
   resolvePlanWalls, commitWallEdge, deleteWallEdge, movePlanNode,
   wallNodeIdAt, isNetworkPlan, ensureWallNetwork,
   applyNetworkNodeAtWall, applyNetworkWallSegMove, nudgeWallInPlan,
-  tryMergeWallEdge, breakWallEdgeAt, straightenWallEdge, alignWallEdgeToNeighbor,
 } from "../../planner/wallNetwork.js";
+import { createGeometryCommandDispatcher } from "../../planner/ui/geometryCommandDispatcher.js";
 import { validateOpeningPlacement, nextDoorNumber, nextOpeningNumber } from "../../planner/doorGeometry.js";
 import { attachItemZoneFields } from "../../planner/roomZones.js";
 import {
@@ -181,7 +181,7 @@ export default function PlanPage() {
   };
 
   const {
-    plan, setPlan, replacePlan, commitPlan, commitFrom, undo, redo, resetHistory,
+    plan, getCurrentPlan, setPlan, replacePlan, commitPlan, commitFrom, undo, redo, resetHistory,
   } = usePlanHistory(initialPlan);
   const [active, setActive] = useState("room");
   const [tool, setTool] = useState("select");
@@ -643,6 +643,22 @@ export default function PlanPage() {
     if (!changed) return;
     setPlan(() => result.plan);
   };
+
+  // PHASE 1A-2A — единая UI orchestration граница для geometry commands
+  // (executeGeometryCommand). getPlan берёт живой HistoryModel.current через
+  // usePlanHistory.getCurrentPlan, а не замыкание `plan` этого рендера.
+  // Это гарантирует, что две быстрые команды в одном JS tick читают актуальный
+  // committed plan. commitPlan вызывается ДИСПЕТЧЕРОМ ровно один раз при
+  // changed:true — room sync уже выполнен внутри executeGeometryCommand и
+  // здесь повторно не запускается (см. src/planner/ui/geometryCommandDispatcher.js).
+  const runGeometryCommand = createGeometryCommandDispatcher({
+    getPlan: getCurrentPlan,
+    commitPlan: (nextPlan) => setPlan(() => nextPlan),
+    setSelection: setSel,
+    setRuntimeDiagnostic: setRoomDetectionDiagnostic,
+    showMessage: (text) => window.alert(text),
+    makeId: uid,
+  });
 
   const applyTypedLength = () => {
     const len = parseInt(typedLengthRef.current, 10);
@@ -2029,73 +2045,41 @@ export default function PlanPage() {
       updateObj("walls", obj.id, { role: "partition", kind: obj.kind || "new" });
     }
     else if (actionId === "wall-straight-h" && sel.coll === "walls") {
-      setPlan((p) => {
-        const next = straightenWallEdge(p, obj.id, "h");
-        const resolved = resolvePlanWalls(next);
-        return syncAutoZones({
-          ...next,
-          items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
-        });
-      });
+      // PHASE 1A-2A: через command boundary — selection исходной стены
+      // сохраняется (selectAfter не передан), как и в старом коде.
+      runGeometryCommand({ type: "wall.straightenHorizontal", wallId: obj.id });
     }
     else if (actionId === "wall-straight-v" && sel.coll === "walls") {
-      setPlan((p) => {
-        const next = straightenWallEdge(p, obj.id, "v");
-        const resolved = resolvePlanWalls(next);
-        return syncAutoZones({
-          ...next,
-          items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
-        });
-      });
+      runGeometryCommand({ type: "wall.straightenVertical", wallId: obj.id });
     }
     else if (actionId === "wall-align" && sel.coll === "walls") {
-      setPlan((p) => {
-        const next = alignWallEdgeToNeighbor(p, obj.id);
-        if (!next) {
-          window.alert("Нет соседней стены с общим узлом для выравнивания.");
-          return p;
-        }
-        const resolved = resolvePlanWalls(next);
-        return syncAutoZones({
-          ...next,
-          items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
-        });
-      });
+      runGeometryCommand({ type: "wall.alignToNeighbor", wallId: obj.id });
     }
     else if (actionId === "wall-merge" && sel.coll === "walls") {
-      setPlan((p) => {
-        const res = tryMergeWallEdge(p, obj.id);
-        if (!res) {
-          window.alert("Не найдена соседняя стена с общим узлом для объединения.");
-          return p;
-        }
-        const resolved = resolvePlanWalls(res.plan);
-        return syncAutoZones({
-          ...res.plan,
-          items: refreshWallMountedItems(p.items, resolved, p.room),
-        });
-      });
-      setSel({ coll: "walls", id: obj.id });
+      // Surviving wall id берётся из typed entityRemap, а не угадывается —
+      // для этого способа вызова (merge всегда стартует от obj.id) он и так
+      // всегда совпадает с obj.id, но контракт остаётся явным и корректным
+      // на случай будущих caller'ов с другой семантикой выбора.
+      runGeometryCommand(
+        { type: "wall.merge", wallId: obj.id },
+        { selectAfter: (result) => ({ coll: "walls", id: result.entityRemap.walls.survivingWallId }) },
+      );
     }
     else if (actionId === "wall-break" && sel.coll === "walls") {
       const mm = ctxMenuRef.current?.mm;
       if (!mm) return;
-      // Split вычисляется ДО setPlan: заблокированный split не должен создавать
-      // history checkpoint, менять selection или запускать autosave.
-      const res = breakWallEdgeAt(plan, obj.id, mm, uid);
-      if (!res) {
-        window.alert("Не удалось разорвать стену — кликните ближе к сегменту.");
-        return;
-      }
-      if (res.ok === false) {
-        window.alert(res.error?.message || "Не удалось разорвать стену.");
-        return;
-      }
-      setPlan(() => syncAutoZones(res.plan));
-      setSel({ coll: "walls", id: res.newWallId });
-      if (res.warnings?.length) {
-        window.alert("Стена разделена. Часть размеров пересекала линию разрыва и была откреплена.");
-      }
+      // PHASE 1A-2A: через command boundary — dispatcher сам гарантирует, что
+      // rejected/no-op split не вызывает commitPlan (см. PHASE 0F/1A-1: ранее
+      // это обеспечивалось вручную здесь же, теперь — структурно в
+      // geometryCommandDispatcher.js). newWallId выбирается через typed
+      // operationResult.childWallIds[1] (тот же PHASE 0F newWallId).
+      runGeometryCommand(
+        { type: "wall.split", wallId: obj.id, point: mm },
+        {
+          selectAfter: (result) => ({ coll: "walls", id: result.operationResult.childWallIds[1] }),
+          warningMessage: () => "Стена разделена. Часть размеров пересекала линию разрыва и была откреплена.",
+        },
+      );
     }
     else if (actionId === "rename" && sel.coll === "zones") {
       const name = prompt("Название помещения:", obj.name || "Помещение");
