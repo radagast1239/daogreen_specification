@@ -391,3 +391,78 @@ describe("PHASE 1B-1A — wall.setLength boundary", () => {
     expect(commandSource).not.toMatch(/from\s*["'][^"']*historyModel\.js["']/);
   });
 });
+
+/**
+ * PHASE 1B-1B — wall-length dimension editor boundary (PlanPage wiring for
+ * wall.setLength). node.move/geometryCommands.js themselves are untouched by
+ * this phase; only the double-click classification + apply glue in
+ * PlanPage.jsx is new.
+ */
+describe("PHASE 1B-1B — wall-length dimension editor boundary", () => {
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  const submitMatch = planPageSource.match(/const submitWallLengthEdit = \(entry\) => \{([\s\S]*?)\n {2}\};/);
+  const submitBody = submitMatch ? stripComments(submitMatch[1]) : "";
+
+  it("submitWallLengthEdit exists", () => {
+    expect(submitMatch, "submitWallLengthEdit not found").toBeTruthy();
+    expect(submitBody.length).toBeGreaterThan(0);
+  });
+
+  it("canonical apply path does not call setPlan/commitPlan/applyNetworkNodeAtWall/refreshWallMountedItems/syncAutoZones directly", () => {
+    for (const fn of ["setPlan", "commitPlan", "applyNetworkNodeAtWall", "refreshWallMountedItems", "syncAutoZones"]) {
+      expect(submitBody, `${fn}(...) should not be called from submitWallLengthEdit`).not.toMatch(new RegExp(`\\b${fn}\\s*\\(`));
+    }
+  });
+
+  it("canonical apply path does not dispatch node.move directly", () => {
+    expect(submitBody).not.toMatch(/type:\s*["']node\.move["']/);
+  });
+
+  it("canonical apply path does not call HistoryModel methods directly", () => {
+    for (const fn of ["mutate", "checkpoint", "commitFrom"]) {
+      expect(submitBody).not.toMatch(new RegExp(`\\.${fn}\\s*\\(`));
+    }
+  });
+
+  it("canonical apply path routes through applyWallLengthEdit with an explicit fixedEndpoint and the synchronous session guard", () => {
+    expect(submitBody).toMatch(/applyWallLengthEdit\(/);
+    expect(submitBody).toMatch(/fixedEndpoint:\s*entry\.fixedEndpoint/);
+    expect(submitBody).toMatch(/dimensionEditSessionRef\.current\.tryConsume\(/);
+  });
+
+  it("wall.setLength is the canonical command type dispatched by the apply helper", () => {
+    const applyHelperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyWallLengthEdit.js"), "utf8");
+    expect(applyHelperSource).toMatch(/type:\s*["']wall\.setLength["']/);
+  });
+
+  it("imports the wall-length apply helper and mapping helper, and does not create a second geometry command dispatcher", () => {
+    expect(planPageSource).toMatch(/from\s*["'][^"']*ui\/applyWallLengthEdit\.js["']/);
+    expect(planPageSource).toMatch(/from\s*["'][^"']*ui\/wallLengthDimensionMapping\.js["']/);
+    const dispatcherCalls = planPageSource.match(/createGeometryCommandDispatcher\s*\(/g) || [];
+    expect(dispatcherCalls.length).toBe(1);
+  });
+
+  it("the wall-attached double-click branch no longer contains the old TODO alert stub", () => {
+    const codeOnly = stripComments(planPageSource);
+    expect(codeOnly).not.toMatch(/Изменение геометрии по связанному размеру будет добавлено следующим шагом/);
+  });
+
+  it("partial/item dimensions still show an unsupported message (via window.alert)", () => {
+    expect(planPageSource).toMatch(/window\.alert\(ITEM_DIMENSION_MESSAGE\)/);
+    expect(planPageSource).toMatch(/window\.alert\(WALL_PARTIAL_DIMENSION_MESSAGE\)/);
+  });
+
+  it("manual dimension labelOverride path no longer contains the stub alert", () => {
+    const match = planPageSource.match(/const applyDimensionEdit = \(dimId, value\) => \{([\s\S]*?)\n {2}\};/);
+    expect(match, "applyDimensionEdit not found").toBeTruthy();
+    const codeOnly = stripComments(match[1]);
+    expect(codeOnly).toMatch(/labelOverride:\s*value/);
+    expect(codeOnly).not.toMatch(/window\.alert/);
+  });
+});

@@ -57,6 +57,12 @@ import {
   applyNetworkNodeAtWall, applyNetworkWallSegMove,
 } from "../../planner/wallNetwork.js";
 import { createGeometryCommandDispatcher } from "../../planner/ui/geometryCommandDispatcher.js";
+import {
+  classifyWallLengthDimension, resolveFixedEndpointForPoint,
+  WALL_PARTIAL_DIMENSION_MESSAGE, ITEM_DIMENSION_MESSAGE,
+} from "../../planner/ui/wallLengthDimensionMapping.js";
+import { applyWallLengthEdit, createWallLengthEditSession } from "../../planner/ui/applyWallLengthEdit.js";
+import { formatWallLengthMm } from "../../planner/ui/parseWallLengthInput.js";
 import { validateOpeningPlacement, nextDoorNumber, nextOpeningNumber } from "../../planner/doorGeometry.js";
 import { attachItemZoneFields } from "../../planner/roomZones.js";
 import {
@@ -245,6 +251,9 @@ export default function PlanPage() {
   const structuralDrawRef = useRef(null);
   const measureDrawRef = useRef(null);
   const [dimensionEdit, setDimensionEdit] = useState(null);
+  // PHASE 1B-1B — synchronous submit guard against duplicate Enter/blur
+  // dispatch for the wall-length editor (see applyWallLengthEdit.js).
+  const dimensionEditSessionRef = useRef(createWallLengthEditSession());
   const [ctrlSnapFine, setCtrlSnapFine] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [activeSheetId, setActiveSheetId] = useState("base_plan");
@@ -1111,18 +1120,38 @@ export default function PlanPage() {
     }));
   };
 
+  /** Manual/free dimension only — wall-attached full-wall edits go through submitWallLengthEdit below. */
   const applyDimensionEdit = (dimId, value) => {
-    const dim = (plan.dimensions || []).find((d) => d.id === dimId);
-    if (!dim) return;
-    if (dim.attachedTo?.type === "wall" || dim.attachedTo?.type === "item") {
-      // TODO: change attached geometry/object by typed dimension value.
-      window.alert("Изменение геометрии по связанному размеру будет добавлено следующим шагом.");
-      return;
-    }
     setPlan((p) => ({
       ...p,
       dimensions: (p.dimensions || []).map((d) => (d.id === dimId ? { ...d, labelOverride: value } : d)),
     }));
+  };
+
+  // PHASE 1B-1B — canonical apply path for the full-wall-length editor. The
+  // session guard makes a trailing native blur (fired when the input unmounts
+  // after a successful Enter) a safe no-op, regardless of React render timing.
+  const submitWallLengthEdit = (entry) => {
+    if (!entry || !dimensionEditSessionRef.current.tryConsume(entry.token)) return;
+    const result = applyWallLengthEdit({
+      rawValue: entry.value,
+      wallId: entry.wallId,
+      fixedEndpoint: entry.fixedEndpoint,
+      runGeometryCommand,
+    });
+    if (result.status === "parse-rejected") {
+      dimensionEditSessionRef.current.reopen(entry.token);
+      setDimensionEdit((d) => (d && d.id === entry.id ? { ...d, error: result.message } : d));
+      return;
+    }
+    if (result.status === "geometry-rejected" || result.status === "commit-failed") {
+      // result.result?.error?.message (if any) is already surfaced via
+      // showMessage by the dispatcher itself — nothing further to show here.
+      dimensionEditSessionRef.current.reopen(entry.token);
+      setDimensionEdit((d) => (d && d.id === entry.id ? { ...d, error: null } : d));
+      return;
+    }
+    setDimensionEdit(null); // success or no-op
   };
 
   /** @deprecated старый инструмент линейки. */
@@ -4216,7 +4245,41 @@ export default function PlanPage() {
                   onDoubleClick={(e, dim, pos) => {
                     if (dim.auto || dim.locked) return;
                     setSelection({ coll: "dimensions", ids: [dim.id] });
+                    // PHASE 1B-1B — classify BEFORE opening any editor: only a
+                    // dimension that provably spans one whole network-wall
+                    // gets the geometry-editing UI; partial/item dimensions
+                    // never open an editor at all (see RESULT — PHASE 1B-1B).
+                    const classification = classifyWallLengthDimension(dim, getCurrentPlan());
+                    if (classification.kind === "item") {
+                      window.alert(ITEM_DIMENSION_MESSAGE);
+                      return;
+                    }
+                    if (classification.kind === "wall-partial") {
+                      window.alert(WALL_PARTIAL_DIMENSION_MESSAGE);
+                      return;
+                    }
+                    if (classification.kind === "wall-full") {
+                      const token = dimensionEditSessionRef.current.open();
+                      setDimensionEdit({
+                        kind: "wall-full",
+                        id: dim.id,
+                        wallId: classification.wallId,
+                        value: formatWallLengthMm(classification.currentLengthMm),
+                        error: null,
+                        point1: dim.p1,
+                        point2: dim.p2,
+                        point1Endpoint: classification.point1Endpoint,
+                        point2Endpoint: classification.point2Endpoint,
+                        fixedEndpoint: classification.defaultFixedEndpoint,
+                        token,
+                        x: pos.x,
+                        y: pos.y,
+                      });
+                      return;
+                    }
+                    // classification.kind === "manual" — unchanged existing UX.
                     setDimensionEdit({
+                      kind: "manual",
                       id: dim.id,
                       value: dim.labelOverride || "",
                       x: pos.x,
@@ -4373,7 +4436,7 @@ export default function PlanPage() {
                     snapPt={rulerSnap}
                   />
                 )}
-                {dimensionEdit && (
+                {dimensionEdit && (!dimensionEdit.kind || dimensionEdit.kind === "manual") && (
                   <foreignObject
                     x={dimensionEdit.x - 80 * k}
                     y={dimensionEdit.y - 16 * k}
@@ -4409,6 +4472,108 @@ export default function PlanPage() {
                       }}
                     />
                   </foreignObject>
+                )}
+                {dimensionEdit && dimensionEdit.kind === "wall-full" && (
+                  <React.Fragment>
+                    <g data-ui="wall-length-badges" pointerEvents="none">
+                      {[
+                        { n: 1, pt: dimensionEdit.point1, endpoint: dimensionEdit.point1Endpoint },
+                        { n: 2, pt: dimensionEdit.point2, endpoint: dimensionEdit.point2Endpoint },
+                      ].map(({ n, pt, endpoint }) => {
+                        if (!pt) return null;
+                        const isFixed = endpoint === dimensionEdit.fixedEndpoint;
+                        return (
+                          <g key={n}>
+                            <circle cx={pt.x} cy={pt.y} r={9 * k} fill={isFixed ? "#116355" : "#ffffff"} stroke="#116355" strokeWidth={1.5 * k} />
+                            <text x={pt.x} y={pt.y} textAnchor="middle" dominantBaseline="central" fontSize={10 * k} fontFamily="var(--mono)" fill={isFixed ? "#ffffff" : "#116355"}>
+                              {n}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </g>
+                    <foreignObject
+                      x={dimensionEdit.x - 95 * k}
+                      y={dimensionEdit.y - 40 * k}
+                      width={190 * k}
+                      height={(dimensionEdit.error ? 92 : 74) * k}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: `${4 * k}px`,
+                          background: "#fff",
+                          border: "1px solid #d9e0dc",
+                          borderRadius: "6px",
+                          padding: `${5 * k}px ${7 * k}px`,
+                          fontFamily: "var(--mono)",
+                          boxSizing: "border-box",
+                        }}
+                      >
+                        <input
+                          autoFocus
+                          value={dimensionEdit.value}
+                          onChange={(e) => setDimensionEdit((d) => (d ? { ...d, value: e.target.value, error: null } : d))}
+                          onBlur={() => submitWallLengthEdit(dimensionEdit)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              submitWallLengthEdit(dimensionEdit);
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              dimensionEditSessionRef.current.close();
+                              setDimensionEdit(null);
+                            }
+                          }}
+                          style={{
+                            width: "100%",
+                            border: "1px solid #d9e0dc",
+                            borderRadius: "5px",
+                            padding: "2px 6px",
+                            fontSize: `${11 * k}px`,
+                            fontFamily: "var(--mono)",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                        <div style={{ display: "flex", gap: `${4 * k}px` }}>
+                          {[1, 2].map((pointNumber) => {
+                            const endpoint = pointNumber === 1 ? dimensionEdit.point1Endpoint : dimensionEdit.point2Endpoint;
+                            const isActive = dimensionEdit.fixedEndpoint === endpoint;
+                            return (
+                              <button
+                                key={pointNumber}
+                                type="button"
+                                // Keep DOM focus on the input — the toggle must
+                                // never trigger a "leaving the editor" blur
+                                // (PHASE 1B-1B §10, anchor toggle policy).
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => setDimensionEdit((d) => (d ? { ...d, fixedEndpoint: resolveFixedEndpointForPoint(pointNumber, d) } : d))}
+                                style={{
+                                  flex: 1,
+                                  fontSize: `${9 * k}px`,
+                                  fontFamily: "var(--mono)",
+                                  border: "1px solid #d9e0dc",
+                                  borderRadius: "4px",
+                                  padding: "2px 4px",
+                                  background: isActive ? "#116355" : "#fff",
+                                  color: isActive ? "#fff" : "#111",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                {`Закрепить точку ${pointNumber}`}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {dimensionEdit.error && (
+                          <div style={{ fontSize: `${9 * k}px`, color: "#c0392b", fontFamily: "var(--mono)" }}>
+                            {dimensionEdit.error}
+                          </div>
+                        )}
+                      </div>
+                    </foreignObject>
+                  </React.Fragment>
                 )}
                 {tool === "structural" && draft.length >= 1 && (
                   <StructuralDraft
