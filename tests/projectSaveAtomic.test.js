@@ -16,6 +16,7 @@ import path from "path";
 const testId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const tempDir = path.join(os.tmpdir(), `daogreen-atomic-${testId}`);
 const tempDbPath = path.join(tempDir, "daogreen-test.db");
+const tempUploads = path.join(tempDir, "uploads");
 
 let db;
 let initDb;
@@ -82,8 +83,12 @@ function snapshot(id = "p1") {
 
 beforeAll(async () => {
   fs.mkdirSync(tempDir, { recursive: true });
+  fs.mkdirSync(tempUploads, { recursive: true });
+  fs.writeFileSync(path.join(tempUploads, "project-scheme.png"), Buffer.from("scheme"));
+  fs.writeFileSync(path.join(tempUploads, "rack-client.png"), Buffer.from("rack"));
   process.env.DATABASE_PATH = tempDbPath;
   process.env.DB_PATH = tempDbPath;
+  process.env.UPLOAD_ROOT = tempUploads;
   process.env.NODE_ENV = "test";
   vi.resetModules();
   const dbMod = await import("../backend/src/db.js");
@@ -140,7 +145,7 @@ describe("1. успешное полное сохранение", () => {
     expect(items.find((i) => i.id === "it2").qty).toBe(5);
   });
 
-  it("один atomic PATCH публикует новые items, metadata и client-visible изображения в release_v2", () => {
+  it("один atomic PATCH публикует новые items, metadata и client-visible изображения в release_v3", () => {
     const projectScheme = {
       id: "scheme-client",
       title: "Схема клиента",
@@ -168,12 +173,14 @@ describe("1. успешное полное сохранение", () => {
     });
 
     const release = loadPublishedReleaseSnapshot(saved);
-    expect(release.schema).toBe("release_v2");
+    expect(release.schema).toBe("release_v3");
+    expect(release.assetsPinned).toBe(true);
     expect(release.projectMeta.name).toBe("Опубликованный проект");
     expect(release.items).toMatchObject([{ id: "published-item", qty: 3, price: 8500 }]);
     expect(release.imageManifest.projectSchemes).toMatchObject([
       { id: "scheme-client", url: "/uploads/project-scheme.png" },
     ]);
+    expect(release.imageManifest.projectSchemes[0].contentHash).toMatch(/^[a-f0-9]{64}$/);
     expect(release.imageManifest.rackImages).toMatchObject([
       { id: "rack-client", rackId: "rack-1", url: "/uploads/rack-client.png" },
     ]);
@@ -181,6 +188,7 @@ describe("1. успешное полное сохранение", () => {
     const clientProject = buildClientProjectFromRelease(saved, release, { overlayLive: false });
     expect(clientProject.clientImages).toEqual(release.imageManifest);
     expect(clientProject.manualParams).toBeUndefined();
+    expect(clientProject.name).toBe("Опубликованный проект");
   });
 });
 

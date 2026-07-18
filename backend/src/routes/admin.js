@@ -15,6 +15,10 @@ import { brandSettingsResponse } from "../services/clientBrand.js";
 import { publishRulesSettingsPayload } from "../services/publishRules.js";
 import { multerFileFilter } from "../services/uploadFilter.js";
 import { saveFile } from "../storage/index.js";
+import {
+  assertCanDeleteOrOverwriteAsset,
+  deleteLocalUploadFile,
+} from "../services/publishedAssetRetention.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, "../uploads");
@@ -252,8 +256,45 @@ router.post("/projects/:id/documents", docUpload.single("file"), async (req, res
 });
 
 router.delete("/documents/:id", (req, res) => {
+  const row = db.prepare("SELECT id, url FROM files WHERE id = ?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: "Not found" });
+  try {
+    assertCanDeleteOrOverwriteAsset({ url: row.url });
+  } catch (e) {
+    if (e.code === "ASSET_PINNED_BY_RELEASE") {
+      return res.status(409).json({ error: e.message, code: e.code, details: e.details });
+    }
+    throw e;
+  }
+  // Remove DB row; delete binary only when not pinned (already asserted).
+  try {
+    deleteLocalUploadFile(row.url);
+  } catch (e) {
+    if (e.code === "ASSET_PINNED_BY_RELEASE") {
+      return res.status(409).json({ error: e.message, code: e.code, details: e.details });
+    }
+    if (e.code !== "INVALID_UPLOAD_URL") throw e;
+  }
   db.prepare("DELETE FROM files WHERE id = ?").run(req.params.id);
   res.status(204).end();
+});
+
+/** Delete a local /uploads asset by URL (scheme/rack images not tracked in files table). */
+router.delete("/uploads", (req, res) => {
+  const url = String(req.query.url || req.body?.url || "").trim();
+  if (!url) return res.status(400).json({ error: "url required" });
+  try {
+    const result = deleteLocalUploadFile(url);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    if (e.code === "ASSET_PINNED_BY_RELEASE") {
+      return res.status(409).json({ error: e.message, code: e.code, details: e.details });
+    }
+    if (e.code === "INVALID_UPLOAD_URL") {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    throw e;
+  }
 });
 
 router.patch("/settings", (req, res) => {

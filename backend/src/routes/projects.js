@@ -74,8 +74,11 @@ import {
   loadPublishedSnapshotItems,
   loadPublishedReleaseSnapshot,
   loadVersionRow,
+  prepareReleaseSnapshotPayload,
+  resolveClientDocumentsForRelease,
   shouldPublishOnStatusChange,
 } from "../services/publishedReleaseService.js";
+import { assertCanDeleteOrOverwriteAsset } from "../services/publishedAssetRetention.js";
 
 const router = Router();
 
@@ -652,7 +655,7 @@ export function approveAll(id) {
   return loadProject(id);
 }
 
-function createVersionRecord(projectId, project, { force = false, createdBy = "admin" } = {}) {
+function createVersionRecord(projectId, project, { force = false, createdBy = "admin", snapshotPayload = null } = {}) {
   if (!force) {
     const check = validateProjectForPublish(projectId);
     if (check.status === "blocked") {
@@ -662,13 +665,16 @@ function createVersionRecord(projectId, project, { force = false, createdBy = "a
       throw err;
     }
   }
+  // Hash/read assets BEFORE any DB write. Failure must leave no partial version.
+  const payload = snapshotPayload || prepareReleaseSnapshotPayload(project);
+  const snapshotJson = JSON.stringify(payload);
+
   const prev = db
     .prepare("SELECT * FROM spec_versions WHERE project_id = ? ORDER BY version_number DESC LIMIT 1")
     .get(projectId);
   const prevItems = prev ? releaseSnapshotItemsFromRow(prev) : [];
   const summary = compareVersions(prevItems, project.items || []);
   const versionNumber = prev ? Number(prev.version_number) + 1 : 1;
-  const snapshotJson = buildReleaseSnapshotJson(project);
 
   const versionId = uid("v");
   db.prepare(`
@@ -688,6 +694,8 @@ function createVersionRecord(projectId, project, { force = false, createdBy = "a
     summary,
     createdAt: new Date().toISOString(),
     createdBy,
+    schema: payload.schema,
+    assetsPinned: !!payload.assetsPinned,
   };
 }
 
@@ -734,7 +742,11 @@ function persistPublishedRelease(projectId, publishedRelease) {
 export function createVersion(id, createdBy = "admin", { force = false } = {}) {
   const p = loadProject(id);
   if (!p) return null;
-  const version = createVersionRecord(id, p, { force, createdBy });
+  // Prepare snapshot (may throw PUBLISH_ASSET_MISSING) before mutating DB / revision.
+  // Do not open a nested transaction here — callers (mutateWithRevision, updateProject,
+  // backfill) already wrap writes. Opening BEGIN inside an active txn fails on node:sqlite.
+  const snapshotPayload = prepareReleaseSnapshotPayload(p);
+  const version = createVersionRecord(id, p, { force, createdBy, snapshotPayload });
   const publishedRelease = buildPublishedReleaseMeta(version, p.status);
   persistPublishedRelease(id, publishedRelease);
   return version;
@@ -1070,6 +1082,9 @@ api.post("/:id/versions", (req, res) => {
     if (e.code === "PUBLISH_VALIDATION") {
       return res.status(422).json({ error: e.message, problems: e.problems });
     }
+    if (e.code === "PUBLISH_ASSET_MISSING") {
+      return res.status(422).json({ error: e.message, code: e.code, details: e.details });
+    }
     throw e;
   }
 });
@@ -1324,10 +1339,13 @@ function serveClientProject(req, res) {
     });
   }
 
-  const clientProject = buildClientProjectFromRelease(p, loadPublishedReleaseSnapshot(p), { overlayLive: true });
+  const publishedSnapshot = loadPublishedReleaseSnapshot(p);
+  const clientProject = buildClientProjectFromRelease(p, publishedSnapshot, { overlayLive: true });
   const versions = listVersions(p.id);
   const versionInfo = versions.find((v) => v.id === release.versionId) || versions[0] || null;
-  const documents = getClientProjectDocuments(p.id);
+  // release_v3: pinned drawings only. Legacy: latest visible (compatibility).
+  const pinnedDocuments = resolveClientDocumentsForRelease(p.id, publishedSnapshot);
+  const documents = pinnedDocuments != null ? pinnedDocuments : getClientProjectDocuments(p.id);
   const activity = listActivity(p.id, { clientOnly: true });
 
   res.json({
@@ -1336,7 +1354,9 @@ function serveClientProject(req, res) {
     revision: Number(p.revision) || 1,
     versionInfo,
     publishedRelease: release,
+    // Intentional live global branding (non-commercial overlay) — see publishedLiveOverlays.js
     branding: loadBrandingSettings(),
+    brandingSource: "live_global_settings",
     purchaseStatuses: clientPurchaseStatuses(),
     documents,
     activity,

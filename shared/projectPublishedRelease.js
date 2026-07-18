@@ -2,8 +2,21 @@
 
 import { lineVisibleToClient } from "./itemTypes.js";
 import { projectItemIdentityKey, projectItemMaterialMatchKey } from "./projectItemKey.js";
-import { buildClientImageManifest, normalizeClientImageManifest, clientImageManifestFingerprint } from "./clientImageManifest.js";
+import {
+  buildClientImageManifest,
+  normalizeClientImageManifest,
+  clientImageManifestFingerprint,
+} from "./clientImageManifest.js";
 import { buildFarmPowerSnapshot, farmPowerFingerprint, normalizeFarmPower } from "./farmPower.js";
+import { buildPublishedProjectMeta } from "./publishedClientMeta.js";
+import {
+  normalizePinnedFrameDrawings,
+  pinnedFrameDrawingsFingerprint,
+} from "./publishedAssetPin.js";
+import { CLIENT_LIVE_PURCHASE_OVERLAY_FIELDS } from "./publishedLiveOverlays.js";
+
+export const RELEASE_SCHEMA_V2 = "release_v2";
+export const RELEASE_SCHEMA_V3 = "release_v3";
 
 function cloneJson(value, fallback) {
   try {
@@ -85,46 +98,81 @@ export function buildPublishedReleaseMeta(versionRow, workflowStatus = "") {
 
 /**
  * Full release snapshot payload stored in spec_versions.snapshot.
- * Backward compatible: legacy rows may be a bare items[] array.
+ * release_v3 adds assetsPinned + pinnedFrameDrawings + hashed imageManifest.
+ * Backward compatible: legacy rows may be a bare items[] array; release_v2 still readable.
  */
-export function buildReleaseSnapshotPayload(project, items = project?.items || []) {
+export function buildReleaseSnapshotPayload(project, items = project?.items || [], extras = {}) {
   const list = Array.isArray(items) ? items : [];
+  const schema = extras.schema || RELEASE_SCHEMA_V3;
+  const assetsPinned = extras.assetsPinned != null ? !!extras.assetsPinned : schema === RELEASE_SCHEMA_V3;
+  const imageManifest = extras.imageManifest != null
+    ? normalizeClientImageManifest(extras.imageManifest)
+    : buildClientImageManifest(project);
+  const pinnedFrameDrawings = normalizePinnedFrameDrawings(extras.pinnedFrameDrawings || []);
   return {
-    schema: "release_v2",
-    publishedAt: new Date().toISOString(),
-    projectMeta: {
-      id: project?.id || "",
-      name: project?.name || "",
-      client: project?.client || "",
-      city: project?.city || "",
-      currency: project?.currency || "₽",
-      vat: !!project?.vat,
-      versionNumber: Number(project?.version) || 0,
-    },
+    schema,
+    assetsPinned,
+    publishedAt: extras.publishedAt || new Date().toISOString(),
+    projectMeta: extras.projectMeta || buildPublishedProjectMeta(project),
     items: list.map((it) => ({ ...it })),
-    imageManifest: buildClientImageManifest(project),
+    imageManifest,
     coolingRooms: buildPublishedCoolingRooms(project?.rooms),
     farmPower: buildFarmPowerSnapshot(project?.manualParams?.farmPower, project?.rooms),
+    pinnedFrameDrawings,
   };
 }
 
 export function parseReleaseSnapshot(raw) {
-  if (!raw) return { items: [], projectMeta: null, imageManifest: normalizeClientImageManifest(), coolingRooms: [], farmPower: normalizeFarmPower(), schema: null };
+  const empty = {
+    items: [],
+    projectMeta: null,
+    imageManifest: normalizeClientImageManifest(),
+    coolingRooms: [],
+    farmPower: normalizeFarmPower(),
+    pinnedFrameDrawings: [],
+    assetsPinned: false,
+    schema: null,
+    publishedAt: "",
+  };
+  if (!raw) return empty;
   if (Array.isArray(raw)) {
-    return { items: raw, projectMeta: null, imageManifest: normalizeClientImageManifest(), coolingRooms: [], farmPower: normalizeFarmPower(), schema: "legacy_items_array" };
+    return {
+      ...empty,
+      items: raw,
+      schema: "legacy_items_array",
+      assetsPinned: false,
+    };
   }
   if (typeof raw === "object" && Array.isArray(raw.items)) {
+    const schema = raw.schema || RELEASE_SCHEMA_V2;
+    const assetsPinned = raw.assetsPinned === true || schema === RELEASE_SCHEMA_V3;
     return {
       items: raw.items,
       projectMeta: raw.projectMeta || null,
-      schema: raw.schema || "release_v1",
+      schema,
       publishedAt: raw.publishedAt || "",
       imageManifest: normalizeClientImageManifest(raw.imageManifest),
       coolingRooms: buildPublishedCoolingRooms(raw.coolingRooms),
       farmPower: normalizeFarmPower(raw.farmPower),
+      pinnedFrameDrawings: normalizePinnedFrameDrawings(raw.pinnedFrameDrawings || []),
+      assetsPinned,
     };
   }
-  return { items: [], projectMeta: null, imageManifest: normalizeClientImageManifest(), coolingRooms: [], farmPower: normalizeFarmPower(), schema: null };
+  return empty;
+}
+
+/** True when client must use pinned drawings (not latest live). */
+export function releaseHasPinnedAssets(snapshot) {
+  const parsed = typeof snapshot === "string"
+    ? parseReleaseSnapshot(JSON.parse(snapshot || "[]"))
+    : Array.isArray(snapshot)
+      ? parseReleaseSnapshot(snapshot)
+      : snapshot?.items
+        ? snapshot
+        : parseReleaseSnapshot(snapshot);
+  if (!parsed) return false;
+  if (parsed.assetsPinned === true) return true;
+  return parsed.schema === RELEASE_SCHEMA_V3;
 }
 
 export function releaseSnapshotItems(rawSnapshot) {
@@ -150,15 +198,15 @@ export function clientItemsFromReleaseSnapshot(items = []) {
  */
 export function mergeLivePurchaseOverlay(snapshotItems = [], liveItems = []) {
   const liveById = new Map((liveItems || []).map((it) => [it.id, it]));
+  const fields = CLIENT_LIVE_PURCHASE_OVERLAY_FIELDS;
   return (snapshotItems || []).map((snap) => {
     const live = liveById.get(snap.id);
     if (!live) return { ...snap };
-    return {
-      ...snap,
-      status: live.status ?? snap.status,
-      actualPrice: live.actualPrice ?? snap.actualPrice,
-      clientComment: live.clientComment ?? snap.clientComment,
-    };
+    const next = { ...snap };
+    for (const key of fields) {
+      if (live[key] !== undefined) next[key] = live[key];
+    }
+    return next;
   });
 }
 
@@ -187,6 +235,8 @@ export function detectUnpublishedChanges(
   publishedCoolingRooms = null,
   workingFarmPower = null,
   publishedFarmPower = null,
+  workingPinnedDrawings = null,
+  publishedPinnedDrawings = null,
 ) {
   const pubMap = new Map((publishedItems || []).map((it) => [it.id, it]));
   const workMap = new Map((workingItems || []).map((it) => [it.id, it]));
@@ -215,14 +265,25 @@ export function detectUnpublishedChanges(
   const farmPowerChanged = workingFarmPower != null && publishedFarmPower != null
     ? farmPowerFingerprint(workingFarmPower) !== farmPowerFingerprint(publishedFarmPower)
     : false;
+  const drawingsChanged = workingPinnedDrawings != null && publishedPinnedDrawings != null
+    ? pinnedFrameDrawingsFingerprint(workingPinnedDrawings) !== pinnedFrameDrawingsFingerprint(publishedPinnedDrawings)
+    : false;
   return {
-    hasChanges: changedCount > 0 || addedCount > 0 || removedCount > 0 || imagesChanged || coolingChanged || farmPowerChanged,
+    hasChanges:
+      changedCount > 0 ||
+      addedCount > 0 ||
+      removedCount > 0 ||
+      imagesChanged ||
+      coolingChanged ||
+      farmPowerChanged ||
+      drawingsChanged,
     changedCount,
     addedCount,
     removedCount,
     imagesChanged,
     coolingChanged,
     farmPowerChanged,
+    drawingsChanged,
   };
 }
 

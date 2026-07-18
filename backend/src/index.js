@@ -59,7 +59,8 @@ app.use(
   })
 );
 app.use(express.json({ limit: "10mb" }));
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+const { localUploadDir } = await import("./storage/index.js");
+app.use("/uploads", express.static(localUploadDir()));
 
 function adminAuth(req, res, next) {
   adminAuthMiddleware(req, res, next);

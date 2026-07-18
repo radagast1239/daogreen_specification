@@ -148,7 +148,8 @@ describe("published release snapshot", () => {
 
     const row = loadVersionRow("p1", version.id);
     const parsed = parseReleaseSnapshot(JSON.parse(row.snapshot));
-    expect(parsed.schema).toBe("release_v2");
+    expect(parsed.schema).toBe("release_v3");
+    expect(parsed.assetsPinned).toBe(true);
     expect(parsed.items).toHaveLength(1);
     expect(parsed.items[0].supplier).toBe("Supplier A");
     expect(parsed.items[0].link).toBe("https://shop.example/a");
@@ -390,7 +391,8 @@ describe("buildReleaseSnapshotPayload (pure)", () => {
       { id: "p1", name: "Proj", currency: "₽", vat: true, version: 3 },
       [clientItem("it1", "mat1", { visibleToClient: true })],
     );
-    expect(payload.schema).toBe("release_v2");
+    expect(payload.schema).toBe("release_v3");
+    expect(payload.assetsPinned).toBe(true);
     expect(payload.items.every((it) => lineVisibleToClient(it) || true)).toBe(true);
     expect(payload.projectMeta.versionNumber).toBe(3);
   });

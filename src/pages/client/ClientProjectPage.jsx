@@ -311,8 +311,9 @@ export default function ClientProjectPage() {
 
   const exportPdf = async (mode = "client_full") => {
     const { generateClientPurchasePdf } = await import("../../lib/clientPdfExport.js");
+    const { projectForClientPdfExport } = await import("../../lib/clientExportProject.js");
     generateClientPurchasePdf({
-      project,
+      project: projectForClientPdfExport(project),
       items: visibleItems,
       branding,
       purchaseStatuses,
@@ -324,7 +325,8 @@ export default function ClientProjectPage() {
 
   const exportExcel = async () => {
     const { downloadClientWorkbook } = await import("../../lib/clientExcelExport.js");
-    downloadClientWorkbook(project, visibleItems, {
+    const { projectForClientExcelExport } = await import("../../lib/clientExportProject.js");
+    downloadClientWorkbook(projectForClientExcelExport(project), visibleItems, {
       purchaseStatuses,
       branding,
       versionInfo,
