@@ -30,7 +30,7 @@ import {
 import { useStore } from "../../store/StoreContext.jsx";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useSearchParams, useNavigate, useLocation } from "react-router-dom";
-import ProjectWorkspaceTabs from "../../components/ProjectWorkspaceTabs.jsx";
+import ProjectWorkspaceHeader from "../../components/ProjectWorkspaceHeader.jsx";
 import {
   parseProjectWorkspaceView,
   buildProjectWorkspaceSearch,
@@ -150,6 +150,7 @@ export default function SpecEditorPage() {
   const [specQuickFilter, setSpecQuickFilter] = useState("");
   const [specSelectedIds, setSpecSelectedIds] = useState([]);
   const [statusSaving, setStatusSaving] = useState(false);
+  const [specModalOpen, setSpecModalOpen] = useState(false);
   const [createOnboardingDismissed, setCreateOnboardingDismissed] = useState(false);
   const clearSpecSelectionRef = useRef(null);
   const applySpecSelectionRef = useRef(null);
@@ -171,6 +172,13 @@ export default function SpecEditorPage() {
     const by = publishCheck?.counts?.byIssue || {};
     return (by.no_client_section || 0) + (by.no_client_subsection || 0);
   }, [publishCheck]);
+  const headerReadiness = useMemo(() => {
+    if (!project) return null;
+    const checklist = buildProjectPreSendChecklist(project.items || [], state.materials, {
+      publishCheck,
+    });
+    return buildProjectSendReadiness(checklist);
+  }, [project, state.materials, publishCheck]);
 
   const applyAllCatalogUpdates = async () => {
     const changes = catalogMaterialDiff?.changes || [];
@@ -385,7 +393,7 @@ export default function SpecEditorPage() {
     () => listUploadedSchemes(project.manualParams),
     [project.manualParams]
   );
-  const showFloorPlanPin = uploadedSchemes.length > 0 && (tab === "spec" || tab === "calc");
+  const showFloorPlanPin = uploadedSchemes.length > 0 && workspaceView === "design";
 
   const saveFloorPlanUrl = (url) => {
     const mp = project.manualParams && typeof project.manualParams === "object" ? project.manualParams : {};
@@ -666,6 +674,18 @@ export default function SpecEditorPage() {
     />
   );
 
+  const handleWorkspaceViewChange = (next) => {
+    if (specModalOpen && next !== workspaceView) {
+      error("Сначала завершите или закройте открытое окно");
+      return;
+    }
+    setWorkspaceView(next);
+  };
+
+  const headerReadinessLabel = publishCheckLoading
+    ? "обновляется…"
+    : headerReadiness?.shortTitle || null;
+
   return (
     <>
       {linkOpen && url && (
@@ -764,13 +784,24 @@ export default function SpecEditorPage() {
           proceedLabel="Утвердить версию"
         />
       )}
-      <PageHeader
-        title={project.name}
+      <ProjectWorkspaceHeader
+        project={project}
         breadcrumbs={breadcrumbs}
-        back={{ to: "/", label: "Проекты" }}
-        sub={`${project.client || "—"}${project.city ? " · " + project.city : ""}${
-          project.area ? " · " + project.area + " м²" : ""
-        } · ${project.type}`}
+        workspaceView={workspaceView}
+        onWorkspaceViewChange={handleWorkspaceViewChange}
+        statusLabel={getProjectStatusLabel(project.status)}
+        workingTotal={totals.budget}
+        publishedTotal={project.publishedRelease?.plannedTotal}
+        readinessLabel={headerReadinessLabel}
+        formatMoney={(value) => money(value, project.currency)}
+        publishActions={{
+          clientUrl: url,
+          onOpenClientLink: requestClientLink,
+          onCopyClientLink: copyClientLink,
+          onExportPdf: exportClientPdf,
+          onExportExcel: exportClientExcel,
+          onPublish: () => setPrePublishOpen(true),
+        }}
       />
 
       <div className="content">
@@ -779,22 +810,13 @@ export default function SpecEditorPage() {
           onDismiss={dismissCreateOnboarding}
         />
 
-        <ProjectWorkspaceTabs value={workspaceView} onChange={(v) => setWorkspaceView(v)} />
-
         {/* —— Клиентская выдача (keep mounted) —— */}
         <div
           className={workspaceView === "publish" ? undefined : "pw-pane--inactive"}
           data-workspace-pane="publish"
           aria-hidden={workspaceView !== "publish"}
+          hidden={workspaceView !== "publish"}
         >
-          <div className="pw-jump-row no-print">
-            <button type="button" className="btn btn-sm" onClick={() => setWorkspaceView("spec")}>
-              К спецификации
-            </button>
-            <button type="button" className="btn btn-sm" onClick={() => setWorkspaceView("design")}>
-              К проектированию
-            </button>
-          </div>
           <ProjectHqBar
             project={project}
             items={project.items || []}
@@ -819,6 +841,7 @@ export default function SpecEditorPage() {
             onApproveAll={approveAll}
             onResetLink={regenerateLink}
             onInternalExcel={exportSpec}
+            hidePrimaryActions
           />
 
           {(() => {
@@ -994,16 +1017,9 @@ export default function SpecEditorPage() {
           className={workspaceView === "design" ? undefined : "pw-pane--inactive"}
           data-workspace-pane="design"
           aria-hidden={workspaceView !== "design"}
+          hidden={workspaceView !== "design"}
           ref={stellagesPanelRef}
         >
-          <div className="pw-jump-row no-print">
-            <button type="button" className="btn btn-sm" onClick={() => setWorkspaceView("spec")}>
-              К спецификации
-            </button>
-            <button type="button" className="btn btn-sm" onClick={() => setWorkspaceView("publish")}>
-              К клиентской выдаче
-            </button>
-          </div>
           <StellageFrameDrawingsPanel project={project} />
           <ProjectDocuments projectId={project.id} />
         </div>
@@ -1013,6 +1029,7 @@ export default function SpecEditorPage() {
           className={workspaceView === "spec" ? undefined : "pw-pane--inactive"}
           data-workspace-pane="spec-chrome"
           aria-hidden={workspaceView !== "spec"}
+          hidden={workspaceView !== "spec"}
         >
           <div className="print-header">
             <h1>{project.name}</h1>
@@ -1121,6 +1138,7 @@ export default function SpecEditorPage() {
           }
           data-workspace-pane="spec-tab"
           aria-hidden={!(workspaceView === "design" || (workspaceView === "spec" && tab === "spec"))}
+          hidden={!(workspaceView === "design" || (workspaceView === "spec" && tab === "spec"))}
         >
           <div className={workspaceView === "spec" && tab === "spec" ? undefined : "pw-pane--inactive"}>
             <ProjectCoolingSummary
@@ -1156,6 +1174,7 @@ export default function SpecEditorPage() {
               applySpecSelectionRef.current = fn;
             }}
             workspaceView={workspaceView}
+            onModalOpenChange={setSpecModalOpen}
           />
         </div>
 
@@ -1163,6 +1182,7 @@ export default function SpecEditorPage() {
           className={workspaceView === "spec" && tab === "merged" ? undefined : "pw-pane--inactive"}
           data-workspace-pane="merged"
           aria-hidden={!(workspaceView === "spec" && tab === "merged")}
+          hidden={!(workspaceView === "spec" && tab === "merged")}
         >
           <MergedTab project={project} />
         </div>
@@ -1170,6 +1190,7 @@ export default function SpecEditorPage() {
           className={workspaceView === "spec" && tab === "spec_lists" ? undefined : "pw-pane--inactive"}
           data-workspace-pane="spec-lists"
           aria-hidden={!(workspaceView === "spec" && tab === "spec_lists")}
+          hidden={!(workspaceView === "spec" && tab === "spec_lists")}
         >
           <SpecialistTab project={project} />
         </div>
@@ -1177,6 +1198,7 @@ export default function SpecEditorPage() {
           className={workspaceView === "spec" && tab === "calc" ? undefined : "pw-pane--inactive"}
           data-workspace-pane="calc"
           aria-hidden={!(workspaceView === "spec" && tab === "calc")}
+          hidden={!(workspaceView === "spec" && tab === "calc")}
         >
           <CoolingFarmTab
             project={project}
@@ -1306,6 +1328,7 @@ function SpecTab({
   registerClearSelection,
   registerApplySelection,
   workspaceView = "spec",
+  onModalOpenChange,
 }) {
   const { confirm, success, error } = useToast();
   const { state } = useStore();
@@ -1330,6 +1353,11 @@ function SpecTab({
   const [commentExpandId, setCommentExpandId] = useState(null);
   const [addMaterialModule, setAddMaterialModule] = useState(null);
   const moduleScrollRefs = useRef({});
+
+  useEffect(() => {
+    onModalOpenChange?.(Boolean(saveTplModule || addMaterialModule));
+    return () => onModalOpenChange?.(false);
+  }, [saveTplModule, addMaterialModule, onModalOpenChange]);
 
   useEffect(() => {
     api.getSuppliers().then(setSuppliers).catch(() => setSuppliers([]));
@@ -1558,6 +1586,7 @@ function SpecTab({
         className={workspaceView === "design" ? undefined : "pw-pane--inactive"}
         data-workspace-pane="spec-design"
         aria-hidden={workspaceView !== "design"}
+        hidden={workspaceView !== "design"}
       >
       <Collapsible title="Схема, комнаты и электропотребление" defaultOpen={hasFarmItems || rooms.length > 0 || !!floorPlanUrl}>
         <FloorPlanField value={floorPlanUrl || ""} onChange={onFloorPlanChange} />
@@ -1603,6 +1632,7 @@ function SpecTab({
         className={workspaceView === "spec" ? undefined : "pw-pane--inactive"}
         data-workspace-pane="spec-table"
         aria-hidden={workspaceView !== "spec"}
+        hidden={workspaceView !== "spec"}
       >
       <SpecQuickFilters
         items={project.items || []}
@@ -1629,6 +1659,7 @@ function SpecTab({
         className={workspaceView === "spec" ? undefined : "pw-pane--inactive"}
         data-workspace-pane="spec-sections"
         aria-hidden={workspaceView !== "spec"}
+        hidden={workspaceView !== "spec"}
       >
       {groups.map(([module, items]) => {
         const moduleFilter = moduleFilters[module] || "";

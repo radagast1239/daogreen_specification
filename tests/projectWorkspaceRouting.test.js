@@ -61,10 +61,12 @@ describe("project workspace view routing", () => {
 describe("project workspace Phase A source contracts", () => {
   const page = fs.readFileSync(path.join(root, "src/pages/admin/SpecEditorPage.jsx"), "utf8");
   const tabs = fs.readFileSync(path.join(root, "src/components/ProjectWorkspaceTabs.jsx"), "utf8");
+  const header = fs.readFileSync(path.join(root, "src/components/ProjectWorkspaceHeader.jsx"), "utf8");
   const css = fs.readFileSync(path.join(root, "src/styles/project-workspace.css"), "utf8");
 
   it("wires tabs + keep-mounted panes", () => {
-    expect(page).toContain("ProjectWorkspaceTabs");
+    expect(page).toContain("ProjectWorkspaceHeader");
+    expect(header).toContain("ProjectWorkspaceTabs");
     expect(page).toContain("parseProjectWorkspaceView");
     expect(page).toContain("buildProjectWorkspaceSearch");
     expect(page).toContain("pw-pane--inactive");
@@ -80,7 +82,8 @@ describe("project workspace Phase A source contracts", () => {
   });
 
   it("does not use replace for user tab clicks (push via navigate default)", () => {
-    expect(page).toMatch(/setWorkspaceView\(v\)/);
+    expect(page).toMatch(/onWorkspaceViewChange=\{handleWorkspaceViewChange\}/);
+    expect(page).toMatch(/setWorkspaceView\(next\)/);
     expect(page).toMatch(/nav\(\{ pathname: location\.pathname[\s\S]*replace \}/);
   });
 

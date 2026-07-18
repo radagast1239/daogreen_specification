@@ -61,6 +61,7 @@ export default function ProjectHqBar({
   onInternalExcel,
   pdfDisabled = false,
   excelDisabled = false,
+  hidePrimaryActions = false,
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -175,6 +176,8 @@ export default function ProjectHqBar({
         </div>
 
         <div className="project-hq__compact-actions">
+          {!hidePrimaryActions && (
+            <>
           <button
             type="button"
             className="btn btn-sm btn-primary"
@@ -197,6 +200,8 @@ export default function ProjectHqBar({
           <button type="button" className="btn btn-sm" disabled={excelDisabled} onClick={onExportExcel}>
             {PROJECT_HEADER_PRIMARY_ACTIONS[3].label}
           </button>
+            </>
+          )}
           <details
             className="project-hq__more"
             open={moreOpen}
