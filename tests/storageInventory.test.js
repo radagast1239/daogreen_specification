@@ -332,6 +332,6 @@ describe("storage inventory service + API", () => {
     expect(src).toContain("storage-filters");
     expect(src).toContain("storage-file-detail");
     expect(src).not.toMatch(/Удалить все|delete orphan|очистить сирот/i);
-    expect(src).toContain("Только просмотр");
+    expect(src).toMatch(/Окончательное удаление|карантин/i);
   });
 });

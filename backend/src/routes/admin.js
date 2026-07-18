@@ -25,6 +25,12 @@ import {
   isStorageInventoryScanning,
   getLastStorageInventory,
 } from "../services/storageInventoryService.js";
+import {
+  previewQuarantine,
+  executeQuarantine,
+  listQuarantine,
+  restoreQuarantinedFile,
+} from "../services/storageQuarantineService.js";
 import { sanitizeInventoryFile } from "../../../shared/storageInventory.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -401,6 +407,67 @@ router.get("/storage/inventory/file", (req, res) => {
   const file = last.files.find((f) => f.assetPath === assetPath || f.url === assetPath);
   if (!file) return res.status(404).json({ error: "Not found" });
   res.json({ ok: true, readOnly: true, file: sanitizeInventoryFile(file) });
+});
+
+function quarantineHttpError(res, e) {
+  const status = e.status || (e.code === "NOT_FOUND" ? 404 : 400);
+  return res.status(status).json({
+    error: e.message || "Quarantine error",
+    code: e.code || "STORAGE_QUARANTINE_ERROR",
+    details: e.details || undefined,
+  });
+}
+
+/** Preview eligible pure ORPHANs for quarantine (no move). */
+router.post("/storage/quarantine/preview", async (req, res) => {
+  try {
+    const assetPaths = req.body?.assetPaths || req.body?.paths || [];
+    const actor = req.adminUser?.id || req.adminUser?.login || "admin";
+    const result = await previewQuarantine({ assetPaths, actor });
+    res.json(result);
+  } catch (e) {
+    quarantineHttpError(res, e);
+  }
+});
+
+/** Move confirmed pure ORPHANs into quarantine (all-or-nothing). */
+router.post("/storage/quarantine", async (req, res) => {
+  try {
+    const actor = req.adminUser?.id || req.adminUser?.login || "admin";
+    const result = await executeQuarantine({
+      assetPaths: req.body?.assetPaths || req.body?.paths || [],
+      confirmationToken: req.body?.confirmationToken,
+      confirmationPhrase: req.body?.confirmationPhrase,
+      actor,
+      reason: req.body?.reason || "pure ORPHAN",
+    });
+    res.json(result);
+  } catch (e) {
+    quarantineHttpError(res, e);
+  }
+});
+
+router.get("/storage/quarantine", (req, res) => {
+  try {
+    const result = listQuarantine({
+      status: req.query?.status || "QUARANTINED",
+      page: req.query?.page,
+      pageSize: req.query?.pageSize,
+    });
+    res.json(result);
+  } catch (e) {
+    quarantineHttpError(res, e);
+  }
+});
+
+router.post("/storage/quarantine/:id/restore", async (req, res) => {
+  try {
+    const actor = req.adminUser?.id || req.adminUser?.login || "admin";
+    const result = await restoreQuarantinedFile(req.params.id, { actor });
+    res.json(result);
+  } catch (e) {
+    quarantineHttpError(res, e);
+  }
 });
 
 export default router;

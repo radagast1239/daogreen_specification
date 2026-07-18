@@ -364,6 +364,42 @@ function migrateDb() {
     ON frame_drawings(module_id, module_rack_key);
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS storage_quarantine (
+      id TEXT PRIMARY KEY,
+      original_asset_path TEXT NOT NULL,
+      quarantine_relative_path TEXT NOT NULL UNIQUE,
+      filename TEXT NOT NULL DEFAULT '',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      content_hash TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL DEFAULT '',
+      quarantined_at TEXT NOT NULL,
+      quarantined_by TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL DEFAULT '',
+      inventory_scan_id TEXT NOT NULL DEFAULT '',
+      original_modified_at TEXT,
+      restored_at TEXT,
+      status TEXT NOT NULL DEFAULT 'QUARANTINED'
+    );
+    CREATE INDEX IF NOT EXISTS idx_storage_quarantine_status ON storage_quarantine(status);
+    CREATE INDEX IF NOT EXISTS idx_storage_quarantine_hash ON storage_quarantine(content_hash);
+    CREATE INDEX IF NOT EXISTS idx_storage_quarantine_original ON storage_quarantine(original_asset_path);
+
+    CREATE TABLE IF NOT EXISTS storage_quarantine_events (
+      id TEXT PRIMARY KEY,
+      action TEXT NOT NULL,
+      actor TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      asset_path TEXT NOT NULL DEFAULT '',
+      quarantine_id TEXT,
+      content_hash TEXT NOT NULL DEFAULT '',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      result TEXT NOT NULL DEFAULT '',
+      detail_json TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_storage_quarantine_events_created ON storage_quarantine_events(created_at);
+  `);
+
   const visibleDefaultMigrated = db
     .prepare("SELECT 1 FROM settings WHERE key = 'migration_client_visible_default_v2'")
     .get();

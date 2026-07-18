@@ -268,6 +268,20 @@ export const api = {
     request("/api/admin/storage/inventory/scan", { method: "POST", body }),
   getStorageInventoryFile: (assetPath) =>
     request(`/api/admin/storage/inventory/file?assetPath=${encodeURIComponent(assetPath)}`),
+  previewStorageQuarantine: (body = {}) =>
+    request("/api/admin/storage/quarantine/preview", { method: "POST", body }),
+  executeStorageQuarantine: (body = {}) =>
+    request("/api/admin/storage/quarantine", { method: "POST", body }),
+  listStorageQuarantine: (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.status) q.set("status", params.status);
+    if (params.page) q.set("page", String(params.page));
+    if (params.pageSize) q.set("pageSize", String(params.pageSize));
+    const qs = q.toString();
+    return request(`/api/admin/storage/quarantine${qs ? `?${qs}` : ""}`);
+  },
+  restoreStorageQuarantine: (id) =>
+    request(`/api/admin/storage/quarantine/${encodeURIComponent(id)}/restore`, { method: "POST", body: {} }),
   downloadBackup: () =>
     fetch(`${API}/api/admin/backup`, { headers: { "X-Admin-Key": getAdminKey() } }).then(async (res) => {
       if (!res.ok) throw new Error("Backup failed");

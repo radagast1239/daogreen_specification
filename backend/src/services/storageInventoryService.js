@@ -83,7 +83,12 @@ function streamSha256(absPath) {
  * Walk UPLOAD_ROOT. Do not follow symlinks that escape the root (realpath check).
  */
 export function walkUploadRootFiles(rootDir, { maxFiles = DEFAULT_MAX_FILES, deadlineMs = 0 } = {}) {
-  const root = path.resolve(rootDir);
+  let root = path.resolve(rootDir);
+  try {
+    root = fs.realpathSync(root);
+  } catch {
+    /* keep resolved path if realpath fails */
+  }
   const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
   const out = [];
 
@@ -645,6 +650,40 @@ export function queryStorageInventory(query = {}) {
     duplicateGroupDetails: lastScanResult.summary?.duplicateGroupDetails || [],
   };
 }
+
+/**
+ * Fresh reference counts for a single /uploads/ asset (no filesystem mutation).
+ */
+export function getAssetReferenceSnapshot(assetPath) {
+  const url = normalizeUploadUrl(assetPath);
+  const refsByUrl = mergeRefMaps(
+    collectPublishedReferences(),
+    collectLiveProjectReferences(),
+    collectFilesTableReferences(),
+    collectFrameDrawingTableReferences(),
+    collectMaterialReferences(),
+    collectBrandingReferences()
+  );
+  const refs = dedupeReferences(refsByUrl.get(url) || []);
+  const pinnedReferenceCount = refs.filter((r) => r.pinned).length;
+  const liveReferenceCount = refs.filter((r) => !r.pinned).length;
+  const status = classifyInventoryStatus({
+    physicalExists: true,
+    pinnedReferenceCount,
+    liveReferenceCount,
+    isDuplicate: false,
+  });
+  return {
+    assetPath: url,
+    references: refs,
+    pinnedReferenceCount,
+    liveReferenceCount,
+    referenceCount: refs.length,
+    status,
+  };
+}
+
+export { streamSha256 };
 
 /** Test helpers */
 export const __test = {
