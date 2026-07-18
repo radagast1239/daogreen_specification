@@ -658,3 +658,143 @@ describe("PHASE 1A-2C2D2 — partitions clearSheet wall.bulkDelete convergence",
     expect(handleWallBulkDeleteBody).toMatch(/deleteWallsFromPlan\s*\(/);
   });
 });
+
+/**
+ * PHASE 1A-2C2D3B — atomic item delete (item.bulkDelete) UI trigger
+ * convergence + boundary. deleteHits' "items" branch (covering delSel,
+ * deleteHit, handleDeleteAction, context-menu delete, multi-item selection)
+ * and clearSheet's five simple item layers (racks/water/sockets/sanitary/
+ * furn) are migrated here. room/line/disputed (mode:"both"/climate/staff)
+ * clearSheet branches, legacy item-layer migration, label.targetId, and
+ * editor-session cleanup remain explicitly out of scope (see RESULT —
+ * PHASE 1A-2C2D3B, "Remaining item-layer branches").
+ */
+describe("PHASE 1A-2C2D3B — item bulk delete UI trigger convergence", () => {
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+  const GEOMETRY_COMMANDS_FILE = join(PLANNER_ROOT, "commands", "geometryCommands.js");
+  const geometryCommandsSource = readFileSync(GEOMETRY_COMMANDS_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  function extractBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    expect(start, `marker not found: ${startMarker}`).toBeGreaterThanOrEqual(0);
+    const end = source.indexOf(endMarker, start);
+    expect(end, `end marker not found: ${endMarker}`).toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  function deleteHitsItemsBranchBody() {
+    return extractBetween(
+      planPageSource,
+      'if (coll === "items") {\r\n      // PHASE 1A-2C2D3B (deleteHits):',
+      "setPlan((p) => {",
+    );
+  }
+
+  function clearSheetItemsBranchBody() {
+    return extractBetween(
+      planPageSource,
+      "if (MIGRATED_ITEM_CLEAR_LAYER_IDS.includes(active)) {",
+      'setPlan((p) => {\r\n      const next = { ...p };',
+    );
+  }
+
+  it("delSel/deleteHit/handleDeleteAction all converge on deleteHits (same trigger-convergence proof as wall delete)", () => {
+    const delSelBody = extractBetween(planPageSource, "const delSel = () => {", "const deleteHit = useCallback");
+    expect(stripComments(delSelBody)).toMatch(/\bdeleteHits\s*\(/);
+    const deleteHitBody = extractBetween(planPageSource, "const deleteHit = useCallback((hit) => {", "const pickPlanHit");
+    expect(stripComments(deleteHitBody)).toMatch(/\bdeleteHits\s*\(/);
+    const handleDeleteActionBody = extractBetween(planPageSource, "const handleDeleteAction = useCallback(() => {", "const createLink = ");
+    expect(stripComments(handleDeleteActionBody)).toMatch(/\bdeleteHits\s*\(/);
+  });
+
+  it("the items branch inside deleteHits routes through applyItemBulkDelete/runGeometryCommand, with no competing direct-mutation path", () => {
+    const body = stripComments(deleteHitsItemsBranchBody());
+    expect(body).toMatch(/applyItemBulkDelete\s*\(/);
+    expect(body).toMatch(/runGeometryCommand/);
+    expect(body).not.toMatch(/\bsetPlan\s*\(/);
+    expect(body).not.toMatch(/\bsyncEngineeringPlan\s*\(/);
+    expect(body).not.toMatch(/\.filter\(\(o\)\s*=>\s*!idSet\.has\(o\.id\)\)/);
+    expect(body).not.toMatch(/\.filter\(\(l\)\s*=>\s*!idSet\.has\(l\.fromId\)/);
+  });
+
+  it("the deleteHits items branch dispatches item.bulkDelete with the full explicit ids array", () => {
+    const body = stripComments(deleteHitsItemsBranchBody());
+    expect(body).toMatch(/itemIds:\s*ids/);
+  });
+
+  it("selection cleanup in the deleteHits items branch is result-status-based, not unconditional", () => {
+    const body = stripComments(deleteHitsItemsBranchBody());
+    expect(body).toMatch(/status === "success"/);
+    expect(body).toMatch(/status === "noop"/);
+    expect(body).toMatch(/status === "no-target"/);
+    expect(body).toMatch(/clearSelection\s*\(/);
+  });
+
+  it("the clearSheet five-layer branch routes through applyItemBulkDelete/runGeometryCommand, with no competing direct-mutation path", () => {
+    const body = stripComments(clearSheetItemsBranchBody());
+    expect(body).toMatch(/applyItemBulkDelete\s*\(/);
+    expect(body).toMatch(/runGeometryCommand/);
+    expect(body).not.toMatch(/\bsetPlan\s*\(/);
+    expect(body).not.toMatch(/\bsyncEngineeringPlan\s*\(/);
+  });
+
+  it("the clearSheet five-layer branch computes itemIds from the live plan via item.layer === active, not a hardcoded/stale list", () => {
+    const body = stripComments(clearSheetItemsBranchBody());
+    expect(body).toMatch(/getCurrentPlan\(\)\.items\.filter\(\(it\)\s*=>\s*it\.layer === active\)/);
+  });
+
+  it("the clearSheet five-layer branch returns early and never falls through to the legacy setPlan block", () => {
+    const body = stripComments(clearSheetItemsBranchBody());
+    expect(body.trim().replace(/\}\s*$/, "").trim().endsWith("return;")).toBe(true);
+  });
+
+  it("MIGRATED_ITEM_CLEAR_LAYER_IDS is exactly the five proven-working simple item layers, not the full ITEM_LAYER_IDS set", () => {
+    expect(planPageSource).toMatch(/const MIGRATED_ITEM_CLEAR_LAYER_IDS = \["racks", "water", "sockets", "sanitary", "furn"\];/);
+  });
+
+  it("room/line/disputed clearSheet branches are unmigrated legacy paths (still direct setPlan, not routed through a geometry command)", () => {
+    const body = stripComments(
+      extractBetween(planPageSource, "setPlan((p) => {\r\n      const next = { ...p };", "  };"),
+    );
+    expect(body).toMatch(/active === "room"/);
+    expect(body).toMatch(/LINE_LAYER_IDS\.includes\(active\)/);
+    expect(body).toMatch(/ITEM_LAYER_IDS\.includes\(active\)/);
+    expect(body).not.toMatch(/applyItemBulkDelete/);
+    expect(body).not.toMatch(/runGeometryCommand/);
+  });
+
+  it("imports the item-bulk-delete apply helper, and still creates only one geometry command dispatcher", () => {
+    expect(planPageSource).toMatch(/from\s*["'][^"']*ui\/applyItemBulkDelete\.js["']/);
+    const dispatcherCalls = planPageSource.match(/createGeometryCommandDispatcher\s*\(/g) || [];
+    expect(dispatcherCalls.length).toBe(1);
+  });
+
+  it("applyItemBulkDelete dispatches the canonical item.bulkDelete command type", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyItemBulkDelete.js"), "utf8");
+    expect(helperSource).toMatch(/type:\s*["']item\.bulkDelete["']/);
+  });
+
+  it("applyItemBulkDelete does not import React, HistoryModel, or geometryCommands directly", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyItemBulkDelete.js"), "utf8");
+    expect(helperSource).not.toMatch(/from\s*["']react/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*historyModel\.js["']/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*commands\/geometryCommands\.js["']/);
+  });
+
+  it("item.bulkDelete is registered in the command HANDLERS map", () => {
+    expect(geometryCommandsSource).toMatch(/"item\.bulkDelete":\s*handleItemBulkDelete,/);
+  });
+
+  it("deleteItemsFromPlan is the single internal item-delete implementation used by item.bulkDelete", () => {
+    const codeOnly = stripComments(geometryCommandsSource);
+    const sharedHelperDefs = codeOnly.match(/function\s+deleteItemsFromPlan\s*\(/g) || [];
+    expect(sharedHelperDefs.length).toBe(1);
+    const handleItemBulkDeleteBody = extractBetween(codeOnly, "function handleItemBulkDelete(", "\nconst HANDLERS = {");
+    expect(handleItemBulkDeleteBody).toMatch(/deleteItemsFromPlan\s*\(/);
+  });
+});
