@@ -57,6 +57,16 @@ function rack(id, x, y, extra = {}) {
   };
 }
 
+// PHASE 1A-2C2D3D2 — real room-layer catalog kinds (door/window/opening),
+// matching catalog.js's actual { layer: "room" } entries, not a generic
+// "rack" stand-in — proves item.bulkDelete works for the real room-clear
+// item shapes, not just an arbitrary fixture kind.
+function roomItem(id, kind, x, y, extra = {}) {
+  return {
+    id, kind, layer: "room", x, y, w: 900, h: 120, ...extra,
+  };
+}
+
 function basePlan() {
   return {
     room: { w: 8000, h: 6000 },
@@ -598,5 +608,97 @@ describe("PHASE 1A-2C2D3B — history matrix", () => {
     expect(h.history.current).toBe(committed);
     expect(h.history.current.items.map((it) => it.id)).toEqual(["r2"]);
     expect(h.history.current.links).toEqual([]);
+  });
+});
+
+// ── room-layer item kinds [PHASE 1A-2C2D3D2] ─────────────────────────────
+
+describe("PHASE 1A-2C2D3D2 — room-layer item kinds through item.bulkDelete", () => {
+  it("a door (layer:\"room\") is deleted the same as any other item", () => {
+    const plan = basePlan();
+    plan.items = [roomItem("d1", "door", 0, 0)];
+    const result = executeGeometryCommand(plan, { type: "item.bulkDelete", itemIds: ["d1"] }, { makeId: ids() });
+    expect(result.ok).toBe(true);
+    expect(result.plan.items).toEqual([]);
+    expect(result.entityChanges.deleted.items).toEqual(["d1"]);
+  });
+
+  it("a window (layer:\"room\") is deleted the same as any other item", () => {
+    const plan = basePlan();
+    plan.items = [roomItem("w1", "window", 0, 0)];
+    const result = executeGeometryCommand(plan, { type: "item.bulkDelete", itemIds: ["w1"] }, { makeId: ids() });
+    expect(result.ok).toBe(true);
+    expect(result.plan.items).toEqual([]);
+    expect(result.entityChanges.deleted.items).toEqual(["w1"]);
+  });
+
+  it("a technical opening (opening_tech, layer:\"room\") is deleted the same as any other item", () => {
+    const plan = basePlan();
+    plan.items = [roomItem("o1", "opening_tech", 0, 0)];
+    const result = executeGeometryCommand(plan, { type: "item.bulkDelete", itemIds: ["o1"] }, { makeId: ids() });
+    expect(result.ok).toBe(true);
+    expect(result.plan.items).toEqual([]);
+    expect(result.entityChanges.deleted.items).toEqual(["o1"]);
+  });
+
+  it("several mixed room kinds (door/window/opening/legacy-unknown) are all deleted atomically in one command", () => {
+    const plan = basePlan();
+    plan.items = [
+      roomItem("d1", "door", 0, 0),
+      roomItem("d2", "door_gate", 500, 0),
+      roomItem("w1", "window", 1000, 0),
+      roomItem("o1", "opening_vent", 1500, 0),
+      roomItem("legacy1", "some_future_unknown_kind", 2000, 0),
+      rack("survivor", 4000, 4000), // different layer — must NOT be touched
+    ];
+    const roomIds = plan.items.filter((it) => it.layer === "room").map((it) => it.id);
+    const result = executeGeometryCommand(plan, { type: "item.bulkDelete", itemIds: roomIds }, { makeId: ids() });
+    expect(result.ok).toBe(true);
+    expect(result.plan.items.map((it) => it.id)).toEqual(["survivor"]);
+    expect(result.entityChanges.deleted.items.sort()).toEqual(["d1", "d2", "legacy1", "o1", "w1"]);
+  });
+
+  it("combined: room item with a link, a persisted auto item-dimension, and a manual item-dimension — all cleaned up atomically; walls/nodes unchanged; validator clean; undo/redo exact references", () => {
+    const plan = basePlan();
+    const door = roomItem("d1", "door", 1000, 500, { w: 900, h: 120 });
+    const survivor = { id: "s1", kind: "rack", layer: "racks", x: 4000, y: 4000, w: 500, h: 500 };
+    plan.items = [door, survivor];
+    plan.links = [{ id: "lk1", type: "power", fromId: "d1", toId: "s1" }];
+    plan.dimensions = [
+      { id: "auto1", auto: true, kind: "opening", attachedTo: { type: "item", id: "d1" } },
+      {
+        id: "manual1", auto: false, kind: "manual", p1: { x: 1, y: 1 }, p2: { x: 2, y: 2 }, attachedTo: { type: "item", id: "d1", mode: "bbox-width" },
+      },
+    ];
+    const wallsBefore = plan.walls;
+    const nodesBefore = plan.nodes;
+
+    const h = makeHarness(plan);
+    const original = h.history.current;
+    const { status } = applyItemBulkDelete({ itemIds: ["d1"], runGeometryCommand: h.dispatcher });
+    expect(status).toBe("success");
+
+    const committed = h.history.current;
+    expect(committed.items.map((it) => it.id)).toEqual(["s1"]);
+    expect(committed.links).toEqual([]);
+    expect(committed.walls).toEqual(wallsBefore);
+    expect(committed.nodes).toEqual(nodesBefore);
+
+    const manualDim = committed.dimensions.find((d) => d.id === "manual1");
+    expect(manualDim.attachedTo).toBeNull();
+    expect(manualDim.p1).toEqual({ x: 1000, y: 500 });
+    expect(manualDim.p2).toEqual({ x: 1000 + 900, y: 500 });
+    expect(committed.dimensions.find((d) => d.id === "auto1")).toBeUndefined();
+
+    const diagnostics = validatePlanIntegrity(committed).diagnostics.filter((d) => d.severity === "error");
+    expect(diagnostics).toEqual([]);
+
+    h.history.undo();
+    expect(h.history.current).toBe(original);
+    expect(h.history.current.items.map((it) => it.id)).toEqual(["d1", "s1"]);
+    expect(h.history.current.links).toEqual([{ id: "lk1", type: "power", fromId: "d1", toId: "s1" }]);
+
+    h.history.redo();
+    expect(h.history.current).toBe(committed);
   });
 });
