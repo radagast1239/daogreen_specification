@@ -1,4 +1,8 @@
 import { db } from "./db.js";
+import {
+  getAdminAccessMode,
+  readAdminSessionFromRequest,
+} from "./adminSession.js";
 
 const ENV_KEY = process.env.ADMIN_KEY || "";
 const IP_ALLOWLIST = (process.env.ADMIN_IP_ALLOWLIST || "")
@@ -38,9 +42,8 @@ export function validateAdminKey(key) {
 }
 
 export function clientIp(req) {
-  const fwd = req.headers["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
-  return req.socket?.remoteAddress || "";
+  const ip = String(req.ip || req.socket?.remoteAddress || "");
+  return ip.startsWith("::ffff:") ? ip.slice(7) : ip;
 }
 
 export function ipAllowed(req) {
@@ -54,10 +57,21 @@ export function adminAuthMiddleware(req, res, next) {
     return res.status(403).json({ error: "IP not allowed" });
   }
   const key = req.headers["x-admin-key"];
-  if (!validateAdminKey(key)) {
-    return res.status(401).json({ error: "Unauthorized" });
+  if (validateAdminKey(key)) {
+    req.adminAuth = { via: "key" };
+    return next();
   }
-  next();
+  if (getAdminAccessMode() === "magic-link") {
+    const session = readAdminSessionFromRequest(req);
+    if (session) {
+      req.adminAuth = { via: "session", session };
+      if (!req.adminUser) {
+        req.adminUser = { id: "admin-session", login: "admin-session" };
+      }
+      return next();
+    }
+  }
+  return res.status(401).json({ error: "Unauthorized" });
 }
 
 export function listAdminUsers() {

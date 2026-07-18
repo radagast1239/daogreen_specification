@@ -41,6 +41,9 @@ export default function LoginPage() {
         <p className="muted" style={{ fontSize: 13, marginBottom: 20 }}>
           Ключ из <code>backend/.env</code> (ADMIN_KEY).
         </p>
+        <p className="muted" style={{ fontSize: 13, marginBottom: 20 }}>
+          Для автоматического входа откройте персональную ссылку доступа.
+        </p>
         <div className="field">
           <label>Ключ доступа</label>
           <input type="password" value={key} onChange={(e) => setKey(e.target.value)} autoFocus />

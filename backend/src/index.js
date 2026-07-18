@@ -41,16 +41,12 @@ const { default: frameDrawingsApi } = await import("./routes/frameDrawings.js");
 
 const isProd = process.env.NODE_ENV === "production";
 const corsOrigins = process.env.CORS_ORIGIN?.split(",").map((s) => s.trim()).filter(Boolean);
-const defaultProdOrigins = [
-  "http://62.233.35.206",
-  "https://62.233.35.206",
-  "http://spec.nikita-daogreen.ru",
-  "https://spec.nikita-daogreen.ru",
-];
-const corsOriginList = corsOrigins?.length ? corsOrigins : isProd ? defaultProdOrigins : ["http://localhost:5173", "http://localhost:4173"];
+const defaultProdOrigins = ["https://spec.nikita-daogreen.ru"];
+const defaultDevOrigins = ["http://localhost:5173", "http://localhost:4173", "http://127.0.0.1:5173", "http://127.0.0.1:4173"];
+const corsOriginList = isProd ? defaultProdOrigins : corsOrigins?.length ? corsOrigins : defaultDevOrigins;
 
 const app = express();
-if (isProd) app.set("trust proxy", 1);
+if (isProd) app.set("trust proxy", "loopback");
 applySecurityMiddleware(app, { isProd });
 app.use(
   cors({
@@ -78,6 +74,9 @@ app.get("/api/health", (_req, res) => {
     backup,
   });
 });
+
+const { default: authApi } = await import("./routes/authApi.js");
+app.use("/api/auth", authApi);
 
 app.use("/api/materials", adminAuth, materialsApi);
 app.use("/api/projects", adminAuth, projectsApi);

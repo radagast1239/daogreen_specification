@@ -1,29 +1,27 @@
 import React, { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { getAdminKey, api } from "../lib/api.js";
+import { api } from "../lib/api.js";
 import { clearClientScope } from "./ClientGuard.jsx";
 import { isUnauthorizedError, loginErrorMessage } from "../lib/requestErrors.js";
 
 export default function AdminGuard() {
   const loc = useLocation();
-  const key = getAdminKey();
-  const [ok, setOk] = useState(!!key ? null : false);
+  const [ok, setOk] = useState(null);
   const [checkError, setCheckError] = useState("");
   const [retry, setRetry] = useState(0);
 
   useEffect(() => {
-    if (!key) {
-      setOk(false);
-      return;
-    }
+    let cancelled = false;
     setCheckError("");
     api
       .getSettings()
       .then(() => {
+        if (cancelled) return;
         clearClientScope();
         setOk(true);
       })
       .catch((error) => {
+        if (cancelled) return;
         if (isUnauthorizedError(error)) {
           setOk(false);
           return;
@@ -31,7 +29,10 @@ export default function AdminGuard() {
         setCheckError(loginErrorMessage(error));
         setOk(null);
       });
-  }, [key, retry]);
+    return () => {
+      cancelled = true;
+    };
+  }, [retry]);
 
   if (ok === false) {
     return <Navigate to="/login" replace state={{ from: loc.pathname }} />;

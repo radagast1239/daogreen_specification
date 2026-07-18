@@ -40,9 +40,16 @@ export function setAdminKey(key) {
   localStorage.setItem(ADMIN_KEY_STORAGE, key);
 }
 
+export function clearAdminKey() {
+  localStorage.removeItem(ADMIN_KEY_STORAGE);
+}
+
 async function request(path, { method = "GET", body, admin = true, token } = {}) {
   const headers = { "Content-Type": "application/json" };
-  if (admin) headers["X-Admin-Key"] = getAdminKey();
+  if (admin) {
+    const key = getAdminKey();
+    if (key) headers["X-Admin-Key"] = key;
+  }
   if (token) headers["X-Client-Token"] = token;
 
   const projectId = projectIdFromPath(path);
@@ -57,6 +64,7 @@ async function request(path, { method = "GET", body, admin = true, token } = {})
     method,
     headers,
     body: effectiveBody != null ? JSON.stringify(effectiveBody) : undefined,
+    credentials: admin ? "include" : "same-origin",
   });
 
   if (res.status === 204) return null;
@@ -81,6 +89,13 @@ async function request(path, { method = "GET", body, admin = true, token } = {})
   return data;
 }
 
+function adminFetchHeaders(extra = {}) {
+  const headers = { ...extra };
+  const key = getAdminKey();
+  if (key) headers["X-Admin-Key"] = key;
+  return headers;
+}
+
 export const api = {
   health: () => request("/api/health", { admin: false }),
 
@@ -99,8 +114,9 @@ export const api = {
     if (mode) fd.append("mode", mode);
     const res = await fetch(`${API}/api/materials/import/excel`, {
       method: "POST",
-      headers: { "X-Admin-Key": getAdminKey() },
+      headers: adminFetchHeaders(),
       body: fd,
+      credentials: "include",
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Import failed");
@@ -111,8 +127,9 @@ export const api = {
     fd.append("file", file);
     const res = await fetch(`${API}/api/materials/upload-photo`, {
       method: "POST",
-      headers: { "X-Admin-Key": getAdminKey() },
+      headers: adminFetchHeaders(),
       body: fd,
+      credentials: "include",
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Upload failed");
@@ -123,8 +140,9 @@ export const api = {
     for (const f of files) fd.append("files", f);
     const res = await fetch(`${API}/api/materials/bulk-photos`, {
       method: "POST",
-      headers: { "X-Admin-Key": getAdminKey() },
+      headers: adminFetchHeaders(),
       body: fd,
+      credentials: "include",
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Upload failed");
@@ -137,8 +155,9 @@ export const api = {
     if (module) fd.append("module", module);
     const res = await fetch(`${API}/api/materials/import/excel-photos`, {
       method: "POST",
-      headers: { "X-Admin-Key": getAdminKey() },
+      headers: adminFetchHeaders(),
       body: fd,
+      credentials: "include",
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Import failed");
@@ -173,7 +192,8 @@ export const api = {
     request(`/api/projects/${id}/versions/${encodeURIComponent(versionId)}/pdf`),
   downloadVersionExcel: async (id, versionId) => {
     const r = await fetch(`${API}/api/projects/${id}/versions/${encodeURIComponent(versionId)}/excel`, {
-      headers: { "X-Admin-Key": getAdminKey() },
+      headers: adminFetchHeaders(),
+      credentials: "include",
     });
     if (!r.ok) {
       const t = await r.text();
@@ -255,6 +275,42 @@ export const api = {
   reorderPresets: (ids) => request("/api/presets/reorder", { method: "POST", body: { ids } }),
   getArchive: () => request("/api/admin/archive"),
   getSettings: () => request("/api/admin/settings"),
+  exchangeMagicLink: async (token) => {
+    const res = await fetch(`${API}/api/auth/magic-link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: String(token || "") }),
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.error || `HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    if (data && typeof data === "object" && "token" in data) {
+      const err = new Error("Invalid auth response");
+      err.status = 500;
+      throw err;
+    }
+    return data;
+  },
+  logoutAdmin: async () => {
+    const res = await fetch(`${API}/api/auth/logout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      credentials: "include",
+    });
+    clearAdminKey();
+    if (!res.ok && res.status !== 404) {
+      const data = await res.json().catch(() => ({}));
+      const err = new Error(data.error || `HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return { ok: true };
+  },
   saveSettings: (data) => request("/api/admin/settings", { method: "PATCH", body: data }),
   getStorageInventory: (params = {}) => {
     const q = new URLSearchParams();
@@ -283,7 +339,7 @@ export const api = {
   restoreStorageQuarantine: (id) =>
     request(`/api/admin/storage/quarantine/${encodeURIComponent(id)}/restore`, { method: "POST", body: {} }),
   downloadBackup: () =>
-    fetch(`${API}/api/admin/backup`, { headers: { "X-Admin-Key": getAdminKey() } }).then(async (res) => {
+    fetch(`${API}/api/admin/backup`, { headers: adminFetchHeaders(), credentials: "include" }).then(async (res) => {
       if (!res.ok) throw new Error("Backup failed");
       const blob = await res.blob();
       const a = document.createElement("a");
@@ -309,8 +365,9 @@ export const api = {
     fd.append("type", type || "other");
     const res = await fetch(`${API}/api/admin/projects/${projectId}/documents`, {
       method: "POST",
-      headers: { "X-Admin-Key": getAdminKey() },
+      headers: adminFetchHeaders(),
       body: fd,
+      credentials: "include",
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Upload failed");
@@ -353,8 +410,9 @@ export const api = {
     if (replace) fd.append("replace", "true");
     const res = await fetch(`${API}/api/frame-drawings`, {
       method: "POST",
-      headers: { "X-Admin-Key": getAdminKey() },
+      headers: adminFetchHeaders(),
       body: fd,
+      credentials: "include",
     });
     const data = await res.json();
     if (!res.ok) {

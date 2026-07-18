@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { berryCalculatorUrl, economicCalculatorUrl, saladEconomicsUrl } from "../lib/calcUrls.js";
+import { api } from "../lib/api.js";
 import GlobalSearch from "./GlobalSearch.jsx";
 import { getCompactMode, setCompactMode } from "../lib/compactMode.js";
 import { getSidebarCollapsed, setSidebarCollapsed } from "../lib/sidebarPrefs.js";
@@ -59,7 +60,7 @@ function ExtNavItem({ href, label, icon, onNavigate, collapsed }) {
   );
 }
 
-function SidebarNav({ compact, collapsed, onToggleCompact, onToggleCollapse, onNavigate }) {
+function SidebarNav({ compact, collapsed, onToggleCompact, onToggleCollapse, onNavigate, onLogout }) {
   return (
     <>
       <div className="sidebar__head">
@@ -104,6 +105,15 @@ function SidebarNav({ compact, collapsed, onToggleCompact, onToggleCollapse, onN
       >
         <NavIcon name="compact" />
         <span className="navlink__label">{compact ? "Обычные таблицы" : "Компактные таблицы"}</span>
+      </button>
+      <button
+        type="button"
+        className="navlink navlink--toggle"
+        onClick={onLogout}
+        title={collapsed ? "Выйти" : undefined}
+      >
+        <NavIcon name="settings" />
+        <span className="navlink__label">Выйти</span>
       </button>
       <div className="foot">Спецификации v1</div>
     </>
@@ -153,6 +163,16 @@ export default function Layout() {
 
   const closeMenu = () => setMenuOpen(false);
 
+  const handleLogout = async () => {
+    try {
+      await api.logoutAdmin();
+    } catch {
+      /* still leave the session UI */
+    }
+    const base = (import.meta.env.BASE_URL || "/").replace(/\/?$/, "/");
+    window.location.assign(`${base}login`);
+  };
+
   return (
     <div className={"shell" + (collapsed ? " shell--sidebar-collapsed" : "")}>
       <button
@@ -171,6 +191,7 @@ export default function Layout() {
           onToggleCompact={toggleCompact}
           onToggleCollapse={toggleCollapse}
           onNavigate={closeMenu}
+          onLogout={handleLogout}
         />
       </aside>
       <div className="main">
