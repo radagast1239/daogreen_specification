@@ -31,7 +31,7 @@
  */
 import {
   resolvePlanWalls,
-  deleteWallEdge,
+  pruneOrphanNodes,
   applyNetworkWallSegMove,
   applyNetworkNodeAtWall,
   nudgeWallInPlan,
@@ -301,29 +301,66 @@ function handleWallSplit(plan, command, context) {
   });
 }
 
-function handleWallDelete(plan, command) {
-  const { wallId } = command;
-  if (!wallId) return rejected("wall.delete", plan, GEOMETRY_COMMAND_INVALID, "wall.delete требует wallId");
-  const targetResolved = resolvePlanWalls(plan).find((w) => w.id === wallId);
-  if (!(plan.walls || []).some((w) => w.id === wallId)) {
-    return rejected("wall.delete", plan, GEOMETRY_COMMAND_NO_TARGET, "Стена не найдена");
-  }
+/**
+ * PHASE 1A-2C2D2 — shared bulk-safe wall-deletion mutation. Used by both
+ * wall.delete (single ID) and wall.bulkDelete (N IDs) — the single source of
+ * this cleanup policy, not duplicated between them. Computes the FINAL
+ * surviving wall/node set ONCE, before any mounted-item/link/dimension
+ * cleanup runs — critical for bulk deletes, where an opening must resolve
+ * directly against the final surviving walls and never "hop" through an
+ * intermediate wall that is also being deleted in the same call (see
+ * RESULT — PHASE 1A-2C2D2, "Order independence").
+ *
+ * @param {object} plan
+ * @param {string[]} wallIds — may contain duplicates and/or IDs absent from
+ *   plan.walls (both silently normalized away) — matches wall.delete's own
+ *   "operate only on what actually exists" policy.
+ * @returns {object|null} internal result, or null if none of wallIds exist.
+ */
+function deleteWallsFromPlan(plan, wallIds) {
+  const existingWallIdSet = new Set((plan.walls || []).map((w) => w.id));
+  const deletedWallIds = [...new Set(wallIds)].filter((id) => existingWallIdSet.has(id));
+  if (deletedWallIds.length === 0) return null;
+  const deletedWallIdSet = new Set(deletedWallIds);
 
   const beforeNodeIds = new Set(Object.keys(plan.nodes || {}));
-  const topologyPlan = deleteWallEdge(plan, wallId);
+  const remainingWalls = (plan.walls || []).filter((w) => !deletedWallIdSet.has(w.id));
+  const nodes = pruneOrphanNodes(plan.nodes || {}, remainingWalls);
+  const topologyPlan = { ...plan, walls: remainingWalls, nodes };
   const removedNodeIds = [...beforeNodeIds].filter((id) => !topologyPlan.nodes[id]);
 
-  // Production-политика: refreshWallMountedItems, scoped к удаляемой стене.
-  const refreshedItems = refreshMountedItemsForCoordinateChange(topologyPlan, wallId);
+  // Production-политика: single-wall delete keeps the exact prior scoped
+  // refresh call (byte-for-byte unchanged). Bulk delete (>1 wall) must NOT
+  // run a blanket global refresh: refreshWallMountedItems(..., null) has no
+  // filter at all in that mode, so an UNRELATED item mounted on a surviving
+  // wall would also go through placeOnWall's 400mm proximity search and
+  // could re-snap onto a different nearby surviving wall — silently
+  // changing wallId/x/y/angle without ever being reported in changed.items
+  // (CORRECTIVE PASS F3). Only items whose ORIGINAL wallId is itself in the
+  // delete set are recomputed, resolved against the final surviving wall set
+  // (topologyPlan/resolvedWalls already exclude every deleted wall — same
+  // order-independence guarantee as before); every other item is carried
+  // over as the exact same reference, untouched.
+  let refreshedItems;
+  if (deletedWallIds.length === 1) {
+    refreshedItems = refreshMountedItemsForCoordinateChange(topologyPlan, deletedWallIds[0]);
+  } else {
+    const resolvedWalls = resolvePlanWalls(topologyPlan);
+    refreshedItems = (plan.items || []).map((it) => {
+      if (!deletedWallIdSet.has(it.wallId)) return it;
+      const [refreshed] = refreshWallMountedItems([it], resolvedWalls, topologyPlan.room, null);
+      return refreshed;
+    });
+  }
   const danglingItemIds = [];
   const changedItemIds = [];
   const items = refreshedItems.filter((item, i) => {
     const original = plan.items[i];
-    if (!original || original.wallId !== wallId) return true; // этой стены не касалось
-    if (item.wallId === wallId) {
-      // Стена удалена, но переставить в радиусе 400мм не на что — dangling
-      // wallId недопустим (см. corrective pass §3): удаляем сам объект, а не
-      // оставляем повисшую ссылку.
+    if (!original || !deletedWallIdSet.has(original.wallId)) return true; // этих стен не касалось
+    if (deletedWallIdSet.has(item.wallId)) {
+      // Стена(ы) удалена(ы), но переставить в радиусе 400мм не на что —
+      // dangling wallId недопустим (см. corrective pass §3): удаляем сам
+      // объект, а не оставляем повисшую ссылку.
       danglingItemIds.push(item.id);
       return false;
     }
@@ -346,21 +383,19 @@ function handleWallDelete(plan, command) {
     return true;
   });
 
-  // Wall-attached MANUAL размеры на удаляемой стене — detach с сохранением
-  // ЖИВОГО (resolveAttachedDimension), а не потенциально устаревшего p1/p2.
+  // Wall-attached MANUAL размеры на любой удаляемой стене — detach с
+  // сохранением ЖИВОГО (resolveAttachedDimension), а не потенциально
+  // устаревшего p1/p2.
   //
-  // PHASE 1A-2C2B corrective F-01: persisted auto/derived размеры на
+  // PHASE 1A-2C2B corrective F-01: persisted auto/derived размеры на любой
   // удаляемой стене — УДАЛЯЮТСЯ, а не detach-ятся и не оставляются как есть.
   // resolvePlanDimensions (core/dimensions/runtime.js) всегда явно
   // ИГНОРИРУЕТ persisted auto-записи для отображения (`.filter(d => d.auto
   // !== true)`) и генерирует auto-набор заново из живой геометрии — то есть
   // persisted auto-запись никогда не читается как authoritative уже сегодня.
-  // Если её оставить нетронутой после удаления стены, на которую она
-  // указывает, validatePlanIntegrity корректно ловит настоящий dangling
-  // reference (DIMENSION_WALL_NOT_FOUND, severity:error) — оставлять её было
-  // ошибкой, а не намеренной policy. Detach-ить в manual тоже неверно: это
-  // превратило бы машинно-сгенерированную запись в фантомную
-  // пользовательскую. Убираем её из plan.dimensions полностью.
+  // Detach-ить в manual тоже неверно: это превратило бы машинно-
+  // сгенерированную запись в фантомную пользовательскую. Убираем её из
+  // plan.dimensions полностью.
   const dimensionWarnings = [];
   const changedDimensionIds = [];
   const deletedDimensionIds = [];
@@ -368,14 +403,14 @@ function handleWallDelete(plan, command) {
   const dimensions = (plan.dimensions || []).flatMap((dim) => {
     const at = dim?.attachedTo;
     const attachedWallId = at?.wallId ?? at?.id;
-    if (at?.type !== "wall" || attachedWallId !== wallId) return [dim];
+    if (at?.type !== "wall" || !deletedWallIdSet.has(attachedWallId)) return [dim];
     if (dim.auto === true) {
       deletedDimensionIds.push(dim.id);
       return [];
     }
     const resolved = resolveAttachedDimension(dim, withResolvedForDims);
     changedDimensionIds.push(dim.id);
-    dimensionWarnings.push({ code: DIMENSION_DETACHED_AFTER_WALL_REMOVED, entityId: dim.id, wallId });
+    dimensionWarnings.push({ code: DIMENSION_DETACHED_AFTER_WALL_REMOVED, entityId: dim.id, wallId: attachedWallId });
     return [{
       ...dim,
       p1: resolved.invalid ? dim.p1 : resolved.p1,
@@ -387,18 +422,68 @@ function handleWallDelete(plan, command) {
   });
 
   const nextPlan = { ...topologyPlan, items, dimensions, links };
-  return changedOk("wall.delete", nextPlan, {
+  return {
+    plan: nextPlan,
+    deletedWallIds,
+    removedNodeIds,
+    danglingItemIds,
+    changedItemIds,
+    deletedLinkIds,
+    deletedDimensionIds,
+    changedDimensionIds,
+    dimensionWarnings,
+  };
+}
+
+function handleWallDelete(plan, command) {
+  const { wallId } = command;
+  if (!wallId) return rejected("wall.delete", plan, GEOMETRY_COMMAND_INVALID, "wall.delete требует wallId");
+  if (!(plan.walls || []).some((w) => w.id === wallId)) {
+    return rejected("wall.delete", plan, GEOMETRY_COMMAND_NO_TARGET, "Стена не найдена");
+  }
+  const result = deleteWallsFromPlan(plan, [wallId]);
+  return changedOk("wall.delete", result.plan, {
     entityChanges: {
       deleted: {
-        walls: [wallId],
-        nodes: removedNodeIds,
-        items: danglingItemIds,
-        dimensions: deletedDimensionIds,
-        links: deletedLinkIds,
+        walls: result.deletedWallIds,
+        nodes: result.removedNodeIds,
+        items: result.danglingItemIds,
+        dimensions: result.deletedDimensionIds,
+        links: result.deletedLinkIds,
       },
-      changed: { items: changedItemIds, dimensions: changedDimensionIds },
+      changed: { items: result.changedItemIds, dimensions: result.changedDimensionIds },
     },
-    warnings: dimensionWarnings,
+    warnings: result.dimensionWarnings,
+  });
+}
+
+/**
+ * PHASE 1A-2C2D2 — atomic multi-wall delete. Payload carries only explicit
+ * canonical wallIds — no UI layer/label/outer-wall policy is known here; the
+ * caller (UI) is responsible for computing which wallIds to send (e.g. "every
+ * non-outer wall" for a partitions-sheet clear).
+ */
+function handleWallBulkDelete(plan, command) {
+  const { wallIds } = command;
+  if (!Array.isArray(wallIds) || wallIds.length === 0) {
+    return rejected("wall.bulkDelete", plan, GEOMETRY_COMMAND_INVALID, "wall.bulkDelete требует непустой массив wallIds");
+  }
+  const result = deleteWallsFromPlan(plan, wallIds);
+  if (!result) {
+    return rejected("wall.bulkDelete", plan, GEOMETRY_COMMAND_NO_TARGET, "Ни одна из указанных стен не найдена");
+  }
+  return changedOk("wall.bulkDelete", result.plan, {
+    entityChanges: {
+      deleted: {
+        walls: result.deletedWallIds,
+        nodes: result.removedNodeIds,
+        items: result.danglingItemIds,
+        dimensions: result.deletedDimensionIds,
+        links: result.deletedLinkIds,
+      },
+      changed: { items: result.changedItemIds, dimensions: result.changedDimensionIds },
+    },
+    warnings: result.dimensionWarnings,
   });
 }
 
@@ -684,6 +769,7 @@ function handleWallSetLength(plan, command) {
 const HANDLERS = {
   "wall.split": handleWallSplit,
   "wall.delete": handleWallDelete,
+  "wall.bulkDelete": handleWallBulkDelete,
   "wall.create": handleWallCreate,
   "wall.finishDraft": handleWallCreate,
   "wall.straighten": handleWallStraighten,

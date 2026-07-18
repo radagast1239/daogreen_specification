@@ -541,7 +541,11 @@ describe("PHASE 1A — room sync integration", () => {
 describe("PHASE 1A — controlled low-level exception", () => {
   it("an unexpected exception from a handler is converted to GEOMETRY_COMMAND_FAILED, original plan preserved", () => {
     const plan = rectPlan();
-    const spy = vi.spyOn(wallNetworkMod, "deleteWallEdge").mockImplementation(() => { throw new Error("controlled low-level failure"); });
+    // PHASE 1A-2C2D2: handleWallDelete now goes through the shared
+    // deleteWallsFromPlan helper, which calls pruneOrphanNodes directly
+    // rather than deleteWallEdge — same "a low-level exception during
+    // deletion becomes a structured rejection" guarantee, updated mock target.
+    const spy = vi.spyOn(wallNetworkMod, "pruneOrphanNodes").mockImplementation(() => { throw new Error("controlled low-level failure"); });
     try {
       const result = executeGeometryCommand(plan, { type: "wall.delete", wallId: "w1" }, { makeId: ids() });
       expect(result.ok).toBe(false);
@@ -1136,7 +1140,9 @@ describe("PHASE 1A-1 corrective — deep-freeze immutability per family", () => 
 
   it("low-level exception: plan === originalPlan (deep-frozen input)", () => {
     const plan = deepFreeze(rectPlan());
-    const spy = vi.spyOn(wallNetworkMod, "deleteWallEdge").mockImplementation(() => { throw new Error("boom"); });
+    // PHASE 1A-2C2D2: same mock-target update as above (pruneOrphanNodes is
+    // the low-level function the shared deleteWallsFromPlan helper now calls).
+    const spy = vi.spyOn(wallNetworkMod, "pruneOrphanNodes").mockImplementation(() => { throw new Error("boom"); });
     try {
       const result = executeGeometryCommand(plan, { type: "wall.delete", wallId: "w1" }, { makeId: ids() });
       expect(result.ok).toBe(false);
