@@ -49,5 +49,17 @@ describe("release history UI contracts", () => {
     const cmp = read("src/components/ReleaseVersionCompareModal.jsx");
     expect(cmp).toContain("getVersionDiff");
     expect(cmp).toContain("release-diff-body");
+    expect(cmp).toContain("release-compare-comments");
+  });
+
+  it("publish modal and history expose release comments", () => {
+    const pub = read("src/components/PublishVersionModal.jsx");
+    expect(pub).toContain("publish-version-modal");
+    expect(pub).toContain("publish-release-comment");
+    const hist = read("src/components/ProjectReleaseHistory.jsx");
+    expect(hist).toContain("releaseComment");
+    expect(hist).toContain("Комментарий:");
+    const preview = read("src/components/HistoricalReleasePreviewModal.jsx");
+    expect(preview).toContain("historical-release-comment");
   });
 });

@@ -94,6 +94,19 @@ export default function HistoricalReleasePreviewModal({ projectId, versionId, on
           <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
             Рабочий проект и текущая клиентская ссылка не изменяются. Брендинг страницы — текущий глобальный.
           </p>
+          {data?.releaseComment ? (
+            <p
+              data-testid="historical-release-comment"
+              style={{ margin: "8px 0 0", fontSize: 13, whiteSpace: "pre-wrap" }}
+            >
+              <strong>Комментарий:</strong> {data.releaseComment}
+            </p>
+          ) : null}
+          {data?.summaryText ? (
+            <p data-testid="historical-auto-summary" style={{ margin: "6px 0 0", fontSize: 13 }}>
+              {data.summaryText}
+            </p>
+          ) : null}
         </div>
 
         <div style={{ padding: 16 }}>

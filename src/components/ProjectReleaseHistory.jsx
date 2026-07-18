@@ -143,20 +143,47 @@ export default function ProjectReleaseHistory({ projectId, currency = "₽" }) {
               <span className="muted" style={{ fontSize: 13 }}>
                 {formatWhen(v.createdAt)}
               </span>
+              {v.createdBy ? (
+                <span className="muted" style={{ fontSize: 13 }}>
+                  · {v.createdBy}
+                </span>
+              ) : null}
             </div>
             <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
               {[v.clientName, v.projectName].filter(Boolean).join(" · ") || "—"}
               {v.workflowStatus ? ` · статус: ${v.workflowStatus}` : ""}
               {" · "}
               {money(v.plannedTotal, v.currency || currency)}
+              {v.totalDelta != null && Number(v.totalDelta) !== 0 ? (
+                <>
+                  {" "}
+                  <span data-testid={`release-total-delta-${v.versionNumber}`}>
+                    ({Number(v.totalDelta) > 0 ? "+" : ""}
+                    {money(v.totalDelta, v.currency || currency)})
+                  </span>
+                </>
+              ) : null}
               {" · "}
               {v.itemCount} поз.
               {v.imageCount ? ` · схем: ${v.imageCount}` : ""}
               {v.drawingCount ? ` · чертежей: ${v.drawingCount}` : ""}
             </div>
-            {v.summaryText && (
-              <p style={{ margin: "0 0 10px", fontSize: 13 }}>{v.summaryText}</p>
-            )}
+            {v.releaseComment ? (
+              <p
+                data-testid={`release-comment-${v.versionNumber}`}
+                style={{ margin: "0 0 8px", fontSize: 13, whiteSpace: "pre-wrap" }}
+              >
+                <strong>Комментарий:</strong> {v.releaseComment}
+              </p>
+            ) : null}
+            {v.summaryText ? (
+              <p
+                data-testid={`release-auto-summary-${v.versionNumber}`}
+                style={{ margin: "0 0 10px", fontSize: 13 }}
+              >
+                {v.summaryText}
+              </p>
+            ) : null}
             <div className="row wrap" style={{ gap: 8 }}>
               <button
                 type="button"

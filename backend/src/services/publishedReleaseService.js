@@ -28,18 +28,32 @@ import {
   listLatestClientVisibleFrameDrawings,
 } from "./publishedAssetRetention.js";
 
+function parseSummaryColumn(raw) {
+  if (raw && typeof raw === "object") return raw;
+  try {
+    return JSON.parse(raw || "{}");
+  } catch {
+    return {};
+  }
+}
+
 export function loadVersionRow(projectId, versionId) {
   const row = db
     .prepare("SELECT * FROM spec_versions WHERE id = ? AND project_id = ?")
     .get(versionId, projectId);
   if (!row) return null;
+  const releaseComment =
+    row.release_comment != null && String(row.release_comment).trim()
+      ? String(row.release_comment)
+      : null;
   return {
     id: row.id,
     projectId: row.project_id,
     versionNumber: row.version_number,
     createdAt: row.created_at,
     createdBy: row.created_by,
-    summary: JSON.parse(row.summary || "{}"),
+    summary: parseSummaryColumn(row.summary),
+    releaseComment,
     snapshot: row.snapshot,
   };
 }
@@ -215,6 +229,7 @@ export function buildHistoricalClientPreview(projectId, versionId, workingProjec
   if (releaseHasPinnedAssets(parsed)) {
     documents = documentsFromPinnedFrameDrawings(parsed.pinnedFrameDrawings || []);
   }
+  const currency = String(parsed.projectMeta?.currency || clientProject?.currency || "₽");
   return {
     historical: true,
     versionId: ver.id,
@@ -224,6 +239,9 @@ export function buildHistoricalClientPreview(projectId, versionId, workingProjec
     schema: parsed.schema || null,
     assetsPinned: releaseHasPinnedAssets(parsed),
     summary: ver.summary,
+    summaryText: formatReleaseSummaryText(ver.summary || {}, currency),
+    // Admin-only; never copied onto clientProject DTO.
+    releaseComment: ver.releaseComment || null,
     project: clientProject,
     documents,
     brandingNote: "live_global_branding",
@@ -247,10 +265,14 @@ export function summarizeVersionRow(row, publishedVersionId = null) {
   const schema = parsed.schema || "legacy_items_array";
   const isLegacy = schema === "legacy_items_array" || (!assetsPinned && schema !== RELEASE_SCHEMA_V3);
   const isCurrent = !!publishedVersionId && row.id === publishedVersionId;
-  const summaryObj = typeof row.summary === "string"
-    ? (() => { try { return JSON.parse(row.summary || "{}"); } catch { return {}; } })()
-    : (row.summary || {});
+  const summaryObj = parseSummaryColumn(row.summary);
   const currency = String(meta.currency || "₽");
+  const plannedTotal = publishedPlannedTotal(items);
+  const delta = Number(summaryObj.delta);
+  const releaseComment =
+    row.release_comment != null && String(row.release_comment).trim()
+      ? String(row.release_comment)
+      : null;
   return {
     id: row.id,
     versionId: row.id,
@@ -261,6 +283,7 @@ export function summarizeVersionRow(row, publishedVersionId = null) {
     workflowStatus: String(meta.status || summaryObj.workflowStatus || ""),
     summary: summaryObj,
     summaryText: formatReleaseSummaryText(summaryObj, currency),
+    releaseComment,
     schema,
     assetsPinned,
     isLegacy,
@@ -270,7 +293,10 @@ export function summarizeVersionRow(row, publishedVersionId = null) {
     clientName: String(meta.client || ""),
     currency,
     vat: !!meta.vat,
-    plannedTotal: publishedPlannedTotal(items),
+    plannedTotal,
+    totalDelta: Number.isFinite(delta) ? delta : null,
+    sumBefore: Number.isFinite(Number(summaryObj.sumBefore)) ? Number(summaryObj.sumBefore) : null,
+    sumAfter: Number.isFinite(Number(summaryObj.sumAfter)) ? Number(summaryObj.sumAfter) : plannedTotal,
     itemCount: items.length,
     imageCount,
     drawingCount,
@@ -285,7 +311,7 @@ export function listVersionSummaries(projectId) {
   const publishedId = parsePublishedRelease(manual)?.versionId || null;
   const rows = db
     .prepare(
-      `SELECT id, project_id, version_number, created_at, created_by, summary, snapshot
+      `SELECT id, project_id, version_number, created_at, created_by, summary, snapshot, release_comment
        FROM spec_versions
        WHERE project_id = ?
        ORDER BY version_number DESC, created_at DESC, id DESC`
@@ -337,11 +363,21 @@ export function getProjectReleaseInfo(project) {
         publishedSnapshot?.pinnedFrameDrawings || null,
       )
     : { hasChanges: false, changedCount: 0, addedCount: 0, removedCount: 0 };
+  const plannedTotalCurrent = publishedPlannedTotal(project?.items || []);
+  const plannedTotalPublished = publishedItems.length
+    ? publishedPlannedTotal(publishedItems)
+    : null;
   return {
     publishedRelease: release,
     publishedSnapshotItems: publishedItems,
     hasUnpublishedChanges: unpublished.hasChanges,
-    unpublishedSummary: unpublished,
+    unpublishedSummary: {
+      ...unpublished,
+      plannedTotalCurrent,
+      plannedTotalPublished,
+      totalDelta:
+        plannedTotalPublished != null ? plannedTotalCurrent - plannedTotalPublished : plannedTotalCurrent,
+    },
   };
 }
 

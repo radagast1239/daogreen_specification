@@ -80,10 +80,12 @@ import {
   resolveClientDocumentsForRelease,
   shouldPublishOnStatusChange,
 } from "../services/publishedReleaseService.js";
-import { diffReleaseSnapshots } from "../../../shared/releaseHistoryDiff.js";
+import { diffReleaseSnapshots, buildPublishAutoSummaryText } from "../../../shared/releaseHistoryDiff.js";
+import { normalizeReleaseComment } from "../../../shared/releaseComment.js";
 import { clientExportHeader } from "../../../shared/publishedClientMeta.js";
 import * as XLSX from "xlsx";
 import { assertCanDeleteOrOverwriteAsset } from "../services/publishedAssetRetention.js";
+import { publishedPlannedTotal } from "../../../shared/publishedPurchaseTotals.js";
 
 const router = Router();
 
@@ -660,7 +662,15 @@ export function approveAll(id) {
   return loadProject(id);
 }
 
-function createVersionRecord(projectId, project, { force = false, createdBy = "admin", snapshotPayload = null } = {}) {
+function createVersionRecord(projectId, project, {
+  force = false,
+  createdBy = "admin",
+  snapshotPayload = null,
+  releaseComment = null,
+} = {}) {
+  // Validate comment before any DB write so failed publish leaves no row.
+  const comment = normalizeReleaseComment(releaseComment);
+
   if (!force) {
     const check = validateProjectForPublish(projectId);
     if (check.status === "blocked") {
@@ -678,14 +688,83 @@ function createVersionRecord(projectId, project, { force = false, createdBy = "a
     .prepare("SELECT * FROM spec_versions WHERE project_id = ? ORDER BY version_number DESC LIMIT 1")
     .get(projectId);
   const prevItems = prev ? releaseSnapshotItemsFromRow(prev) : [];
-  const summary = compareVersions(prevItems, project.items || []);
+  const itemSummary = compareVersions(prevItems, project.items || []);
+  let autoSummaryText;
+  let imagesAdded = 0;
+  let imagesRemoved = 0;
+  let imagesChanged = 0;
+  let drawingsAdded = 0;
+  let drawingsRemoved = 0;
+  let drawingsReplaced = 0;
+  let coolingChanged = false;
+  let farmPowerChanged = false;
+  const currency = String(project.currency || "₽");
+  if (prev?.snapshot) {
+    let prevSnap;
+    try {
+      prevSnap = JSON.parse(prev.snapshot);
+    } catch {
+      prevSnap = [];
+    }
+    const diff = diffReleaseSnapshots(prevSnap, payload);
+    autoSummaryText = buildPublishAutoSummaryText(diff, currency);
+    imagesAdded = diff.images?.added?.length || 0;
+    imagesRemoved = diff.images?.removed?.length || 0;
+    imagesChanged = diff.images?.changed?.length || 0;
+    drawingsAdded = diff.drawings?.added?.length || 0;
+    drawingsRemoved = diff.drawings?.removed?.length || 0;
+    drawingsReplaced = diff.drawings?.replaced?.length || 0;
+    coolingChanged = !!(
+      diff.cooling?.powerChanged ||
+      (diff.cooling?.roomsAdded?.length || 0) ||
+      (diff.cooling?.roomsRemoved?.length || 0)
+    );
+    farmPowerChanged = !!(
+      diff.farmPower?.tariffChanged ||
+      diff.farmPower?.devicesChanged ||
+      diff.farmPower?.costChanged
+    );
+    // Prefer snapshot totals (client-planned) when available
+    if (diff.totals && Number.isFinite(diff.totals.delta)) {
+      itemSummary.sumBefore = diff.totals.from;
+      itemSummary.sumAfter = diff.totals.to;
+      itemSummary.delta = diff.totals.delta;
+    }
+  } else {
+    const total = publishedPlannedTotal(payload.items || project.items || []);
+    itemSummary.sumBefore = 0;
+    itemSummary.sumAfter = total;
+    itemSummary.delta = total;
+    autoSummaryText = "Первая публикация проекта.";
+  }
+
+  const summary = {
+    ...itemSummary,
+    autoSummaryText,
+    imagesAdded,
+    imagesRemoved,
+    imagesChanged,
+    drawingsAdded,
+    drawingsRemoved,
+    drawingsReplaced,
+    coolingChanged,
+    farmPowerChanged,
+  };
   const versionNumber = prev ? Number(prev.version_number) + 1 : 1;
 
   const versionId = uid("v");
   db.prepare(`
-    INSERT INTO spec_versions (id, project_id, version_number, created_by, summary, snapshot)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(versionId, projectId, versionNumber, createdBy, JSON.stringify(summary), snapshotJson);
+    INSERT INTO spec_versions (id, project_id, version_number, created_by, summary, snapshot, release_comment)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    versionId,
+    projectId,
+    versionNumber,
+    createdBy,
+    JSON.stringify(summary),
+    snapshotJson,
+    comment,
+  );
 
   db.prepare("UPDATE projects SET version = ?, updated_at = datetime('now') WHERE id = ?").run(
     versionNumber,
@@ -697,6 +776,8 @@ function createVersionRecord(projectId, project, { force = false, createdBy = "a
     projectId,
     versionNumber,
     summary,
+    summaryText: autoSummaryText,
+    releaseComment: comment,
     createdAt: new Date().toISOString(),
     createdBy,
     schema: payload.schema,
@@ -744,14 +825,16 @@ function persistPublishedRelease(projectId, publishedRelease) {
   );
 }
 
-export function createVersion(id, createdBy = "admin", { force = false } = {}) {
+export function createVersion(id, createdBy = "admin", { force = false, releaseComment = null } = {}) {
   const p = loadProject(id);
   if (!p) return null;
   // Prepare snapshot (may throw PUBLISH_ASSET_MISSING) before mutating DB / revision.
   // Do not open a nested transaction here — callers (mutateWithRevision, updateProject,
   // backfill) already wrap writes. Opening BEGIN inside an active txn fails on node:sqlite.
+  // Normalize comment early so validation errors happen before snapshot work when possible.
+  normalizeReleaseComment(releaseComment);
   const snapshotPayload = prepareReleaseSnapshotPayload(p);
-  const version = createVersionRecord(id, p, { force, createdBy, snapshotPayload });
+  const version = createVersionRecord(id, p, { force, createdBy, snapshotPayload, releaseComment });
   const publishedRelease = buildPublishedReleaseMeta(version, p.status);
   persistPublishedRelease(id, publishedRelease);
   return version;
@@ -1064,7 +1147,12 @@ api.post("/:id/approve-all", (req, res) => {
 
 api.post("/:id/versions", (req, res) => {
   try {
-    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => createVersion(req.params.id, req.body?.createdBy, { force: !!req.body?.force }));
+    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () =>
+      createVersion(req.params.id, req.body?.createdBy, {
+        force: !!req.body?.force,
+        releaseComment: req.body?.releaseComment,
+      })
+    );
     const v = changed?.value;
     if (!v) return res.status(404).json({ error: "Not found" });
     logProjectEvent({
@@ -1076,6 +1164,9 @@ api.post("/:id/versions", (req, res) => {
     res.status(201).json({ ...v, revision: changed.revision });
   } catch (e) {
     if (revisionErrorResponse(res, e)) return;
+    if (e.code === "RELEASE_COMMENT_TOO_LONG") {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
     if (e.code === "PUBLISH_VALIDATION") {
       return res.status(422).json({ error: e.message, problems: e.problems });
     }
@@ -1163,8 +1254,20 @@ api.get("/:id/versions/:versionId/diff", (req, res) => {
   }
   const diff = diffReleaseSnapshots(snapA, snapB);
   res.json({
-    versionA: { id: verA.id, versionNumber: verA.versionNumber, createdAt: verA.createdAt },
-    versionB: { id: verB.id, versionNumber: verB.versionNumber, createdAt: verB.createdAt },
+    versionA: {
+      id: verA.id,
+      versionNumber: verA.versionNumber,
+      createdAt: verA.createdAt,
+      releaseComment: verA.releaseComment || null,
+      summaryText: verA.summary?.autoSummaryText || null,
+    },
+    versionB: {
+      id: verB.id,
+      versionNumber: verB.versionNumber,
+      createdAt: verB.createdAt,
+      releaseComment: verB.releaseComment || null,
+      summaryText: verB.summary?.autoSummaryText || null,
+    },
     diff,
   });
 });
@@ -1472,7 +1575,11 @@ function serveClientProject(req, res) {
   const publishedSnapshot = loadPublishedReleaseSnapshot(p);
   const clientProject = buildClientProjectFromRelease(p, publishedSnapshot, { overlayLive: true });
   const versions = listVersions(p.id);
-  const versionInfo = versions.find((v) => v.id === release.versionId) || versions[0] || null;
+  const versionInfoRaw = versions.find((v) => v.id === release.versionId) || versions[0] || null;
+  // Admin-only fields must never reach the client DTO.
+  const versionInfo = versionInfoRaw
+    ? (({ releaseComment: _rc, ...safe }) => safe)(versionInfoRaw)
+    : null;
   // release_v3: pinned drawings only. Legacy: latest visible (compatibility).
   const pinnedDocuments = resolveClientDocumentsForRelease(p.id, publishedSnapshot);
   const documents = pinnedDocuments != null ? pinnedDocuments : getClientProjectDocuments(p.id);

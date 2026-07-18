@@ -69,6 +69,7 @@ import { shouldShowCreateOnboarding } from "../../../shared/projectCreation.js";
 import ProjectCoolingSummary from "../../components/ProjectCoolingSummary.jsx";
 import SpecQuickFilters from "../../components/SpecQuickFilters.jsx";
 import PrePublishCheckModal from "../../components/PrePublishCheckModal.jsx";
+import PublishVersionModal from "../../components/PublishVersionModal.jsx";
 import ImportFromProjectModal from "../../components/ImportFromProjectModal.jsx";
 import CompareProjectsModal from "../../components/CompareProjectsModal.jsx";
 import DuplicateProjectModal from "../../components/DuplicateProjectModal.jsx";
@@ -117,6 +118,7 @@ export default function SpecEditorPage() {
   const [publishCheckLoading, setPublishCheckLoading] = useState(false);
   const [gateModal, setGateModal] = useState(null);
   const [prePublishOpen, setPrePublishOpen] = useState(false);
+  const [publishConfirm, setPublishConfirm] = useState(null); // { force: boolean } | null
   const [viewMode, setViewMode] = useState("designer");
   const [importOpen, setImportOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -364,12 +366,22 @@ export default function SpecEditorPage() {
     const mp = project.manualParams && typeof project.manualParams === "object" ? project.manualParams : {};
     return actions.projectUpdate(project.id, { manualParams: setFloorPlanUrl(mp, url) });
   };
-  const doPublishVersion = async (force = false) => {
+  const doPublishVersion = async (force = false, releaseComment = "") => {
     try {
-      const v = await actions.createVersion(project.id, force ? { force: true } : {});
-      setVersionMsg(`Опубликована версия ${v.versionNumber}: Δ ${v.summary.delta} ₽`);
+      const body = force ? { force: true } : {};
+      if (releaseComment != null && String(releaseComment).length) {
+        body.releaseComment = releaseComment;
+      }
+      const v = await actions.createVersion(project.id, body);
+      setVersionMsg(
+        `Опубликована версия ${v.versionNumber}${
+          v.summary?.delta != null ? `: Δ ${v.summary.delta} ₽` : ""
+        }`
+      );
       success(force ? "Версия опубликована (принудительно)" : "Версия опубликована");
+      setPublishConfirm(null);
       await refreshPublishCheck();
+      await actions.loadProject(project.id);
     } catch (e) {
       if (e.problems?.length) {
         error(`Не хватает данных: ${e.problems.length} замечаний`);
@@ -377,12 +389,13 @@ export default function SpecEditorPage() {
       } else {
         error(e.message);
       }
+      throw e;
     }
   };
 
   const requestPublishVersion = () => {
     if (publishCheck?.status === "blocked") setGateModal({ action: "version" });
-    else doPublishVersion(false);
+    else setPublishConfirm({ force: false });
   };
 
   const requestClientLink = () => {
@@ -659,7 +672,17 @@ export default function SpecEditorPage() {
           onProceed={async () => {
             setGateModal(null);
             if (gateModal.action === "link") setLinkOpen(true);
-            else await doPublishVersion(true);
+            else setPublishConfirm({ force: true });
+          }}
+        />
+      )}
+      {publishConfirm && (
+        <PublishVersionModal
+          project={project}
+          force={!!publishConfirm.force}
+          onClose={() => setPublishConfirm(null)}
+          onPublish={async (comment, force) => {
+            await doPublishVersion(!!force, comment);
           }}
         />
       )}
@@ -704,12 +727,12 @@ export default function SpecEditorPage() {
             publishCheck?.status !== "blocked"
               ? async () => {
                   setPrePublishOpen(false);
-                  await doPublishVersion(false);
+                  setPublishConfirm({ force: false });
                 }
               : publishCheck?.allowForcePublish
                 ? async () => {
                     setPrePublishOpen(false);
-                    await doPublishVersion(true);
+                    setPublishConfirm({ force: true });
                   }
                 : undefined
           }

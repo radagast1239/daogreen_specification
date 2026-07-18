@@ -269,24 +269,6 @@ export function diffReleaseSnapshots(snapshotA, snapshotB) {
   };
 }
 
-/** Human-readable one-line summary from a stored compareVersions summary + optional diff. */
-export function formatReleaseSummaryText(summary = {}, currency = "₽") {
-  const parts = [];
-  const added = Number(summary.added) || 0;
-  const removed = Number(summary.removed) || 0;
-  const changed = Number(summary.changed) || 0;
-  if (changed) parts.push(`изменено ${changed} ${pluralPos(changed)}`);
-  if (added) parts.push(`добавлено ${added}`);
-  if (removed) parts.push(`удалено ${removed}`);
-  const delta = Number(summary.delta);
-  if (Number.isFinite(delta) && delta !== 0) {
-    const sign = delta > 0 ? "выросла" : "снизилась";
-    parts.push(`сумма ${sign} на ${Math.abs(Math.round(delta)).toLocaleString("ru-RU")} ${currency}`);
-  }
-  if (!parts.length) return "Публикация без изменений позиций";
-  return parts.join(", ").replace(/^./, (c) => c.toUpperCase());
-}
-
 function pluralPos(n) {
   const m = Math.abs(n) % 100;
   const m1 = m % 10;
@@ -294,6 +276,125 @@ function pluralPos(n) {
   if (m1 === 1) return "позиция";
   if (m1 >= 2 && m1 <= 4) return "позиции";
   return "позиций";
+}
+
+function pluralScheme(n) {
+  const m = Math.abs(n) % 100;
+  const m1 = m % 10;
+  if (m > 10 && m < 20) return "схем";
+  if (m1 === 1) return "схема";
+  if (m1 >= 2 && m1 <= 4) return "схемы";
+  return "схем";
+}
+
+function pluralDrawing(n) {
+  const m = Math.abs(n) % 100;
+  const m1 = m % 10;
+  if (m > 10 && m < 20) return "чертежей";
+  if (m1 === 1) return "чертёж";
+  if (m1 >= 2 && m1 <= 4) return "чертежа";
+  return "чертежей";
+}
+
+function formatMoneyDelta(delta, currency) {
+  return `${Math.abs(Math.round(delta)).toLocaleString("ru-RU")} ${currency}`;
+}
+
+/**
+ * Deterministic human-readable auto summary from a business release diff.
+ * Max 2–4 short sentences. No AI. No technical field names.
+ */
+export function buildPublishAutoSummaryText(diff, currency = "₽") {
+  if (!diff || diff.empty) {
+    return "Повторная публикация без изменений состава";
+  }
+  const sentences = [];
+  const added = diff.items?.added?.length || 0;
+  const removed = diff.items?.removed?.length || 0;
+  const changed = diff.items?.changed?.length || 0;
+  if (added || removed || changed) {
+    const bits = [];
+    if (added) bits.push(`добавлено ${added} ${pluralPos(added)}`);
+    if (removed) bits.push(`удалено ${removed} ${pluralPos(removed)}`);
+    if (changed) bits.push(`изменено ${changed} ${pluralPos(changed)}`);
+    sentences.push(bits.join(", ").replace(/^./, (c) => c.toUpperCase()) + ".");
+  }
+
+  const delta = Number(diff.totals?.delta);
+  const cur = String(diff.totals?.currency || currency || "₽");
+  if (Number.isFinite(delta) && delta !== 0) {
+    const verb = delta > 0 ? "выросла" : "снизилась";
+    sentences.push(`Сумма ${verb} на ${formatMoneyDelta(delta, cur)}.`);
+  }
+
+  const imgN =
+    (diff.images?.added?.length || 0) +
+    (diff.images?.removed?.length || 0) +
+    (diff.images?.changed?.length || 0);
+  const drawN =
+    (diff.drawings?.added?.length || 0) +
+    (diff.drawings?.removed?.length || 0) +
+    (diff.drawings?.replaced?.length || 0);
+  if (imgN || drawN) {
+    const bits = [];
+    if (imgN) bits.push(`${imgN} ${pluralScheme(imgN)}`);
+    if (drawN) bits.push(`${drawN} ${pluralDrawing(drawN)}`);
+    sentences.push(`Обновлены ${bits.join(" и ")}.`);
+  }
+
+  if (diff.cooling?.powerChanged || (diff.cooling?.roomsAdded?.length || 0) || (diff.cooling?.roomsRemoved?.length || 0)) {
+    sentences.push("Изменены параметры охлаждения.");
+  }
+  if (diff.farmPower?.tariffChanged || diff.farmPower?.devicesChanged || diff.farmPower?.costChanged) {
+    sentences.push("Изменено энергопотребление.");
+  }
+
+  if (!sentences.length) {
+    if (diff.hasChanges) return "Изменены данные проекта.";
+    return "Повторная публикация без изменений состава";
+  }
+  return sentences.slice(0, 4).join(" ");
+}
+
+/**
+ * Human-readable summary from a stored compareVersions/summary object.
+ * Prefers persisted autoSummaryText when present.
+ */
+export function formatReleaseSummaryText(summary = {}, currency = "₽") {
+  const stored = String(summary?.autoSummaryText || "").trim();
+  if (stored) return stored;
+
+  const parts = [];
+  const added = Number(summary.added) || 0;
+  const removed = Number(summary.removed) || 0;
+  const changed = Number(summary.changed) || 0;
+  if (added) parts.push(`добавлено ${added} ${pluralPos(added)}`);
+  if (removed) parts.push(`удалено ${removed} ${pluralPos(removed)}`);
+  if (changed) parts.push(`изменено ${changed} ${pluralPos(changed)}`);
+  const delta = Number(summary.delta);
+  const cur = String(currency || "₽");
+  if (Number.isFinite(delta) && delta !== 0) {
+    const sign = delta > 0 ? "выросла" : "снизилась";
+    parts.push(`сумма ${sign} на ${formatMoneyDelta(delta, cur)}`);
+  }
+  const imgN =
+    (Number(summary.imagesAdded) || 0) +
+    (Number(summary.imagesRemoved) || 0) +
+    (Number(summary.imagesChanged) || 0);
+  const drawN =
+    (Number(summary.drawingsAdded) || 0) +
+    (Number(summary.drawingsRemoved) || 0) +
+    (Number(summary.drawingsReplaced) || 0);
+  if (imgN || drawN) {
+    const bits = [];
+    if (imgN) bits.push(`${imgN} ${pluralScheme(imgN)}`);
+    if (drawN) bits.push(`${drawN} ${pluralDrawing(drawN)}`);
+    parts.push(`обновлены ${bits.join(" и ")}`);
+  }
+  if (summary.coolingChanged) parts.push("изменены параметры охлаждения");
+  if (summary.farmPowerChanged) parts.push("изменено энергопотребление");
+  if (!parts.length) return "Повторная публикация без изменений состава";
+  return parts.join(". ").replace(/^./, (c) => c.toUpperCase()) + (parts.length ? "." : "");
 }
 
 export function snapshotItemCount(snapshot) {

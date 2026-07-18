@@ -82,6 +82,23 @@ export default function ReleaseVersionCompareModal({
         {loading && <p className="muted">Считаем различия…</p>}
         {error && <p style={{ color: "var(--danger)" }}>{error}</p>}
 
+        {!loading && (payload?.versionA || payload?.versionB) && (
+          <div data-testid="release-compare-comments" style={{ marginBottom: 12, fontSize: 13 }}>
+            {payload?.versionA?.releaseComment ? (
+              <p style={{ margin: "0 0 6px", whiteSpace: "pre-wrap" }}>
+                <strong>Комментарий версии {aNum != null ? `№${aNum}` : "A"}:</strong>{" "}
+                {payload.versionA.releaseComment}
+              </p>
+            ) : null}
+            {payload?.versionB?.releaseComment ? (
+              <p style={{ margin: "0 0 6px", whiteSpace: "pre-wrap" }}>
+                <strong>Комментарий версии {bNum != null ? `№${bNum}` : "B"}:</strong>{" "}
+                {payload.versionB.releaseComment}
+              </p>
+            ) : null}
+          </div>
+        )}
+
         {!loading && diff?.empty && (
           <p className="muted">{diff.message || "Нет предыдущей версии для сравнения"}</p>
         )}

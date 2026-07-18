@@ -280,6 +280,8 @@ function migrateDb() {
   // Technical optimistic-lock revision. Adding the column is non-destructive:
   // SQLite assigns the DEFAULT to existing rows without rewriting project data.
   addCol("projects", "revision", "INTEGER NOT NULL DEFAULT 1");
+  // Optional admin-only note for a published version; null for legacy rows.
+  addCol("spec_versions", "release_comment", "TEXT");
   addCol("material_price_history", "changed_by", "TEXT DEFAULT ''");
 
   const needsItemFlagBackfill = db
