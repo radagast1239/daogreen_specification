@@ -65,7 +65,12 @@ function dedupe(ids) {
   return [...new Set(ids.filter((id) => id != null))];
 }
 
-const ENTITY_KINDS = ["walls", "nodes", "items", "dimensions"];
+// PHASE 1A-2C2B corrective — "links" добавлен минимально и последовательно:
+// emptyEntityChanges/normalizeEntityChanges/flattenEntityChanges все
+// итерируют по этому списку, так что добавление одного элемента здесь даёт
+// links полноценный typed-contract bucket (created/changed/deleted) без
+// отдельного shape.
+const ENTITY_KINDS = ["walls", "nodes", "items", "dimensions", "links"];
 
 /**
  * PHASE 1A-2A P2 — typed entity-change contract. Additive: старый flat
@@ -326,35 +331,71 @@ function handleWallDelete(plan, command) {
     return true;
   });
 
+  // PHASE 1A-2C2B corrective F-02: links, ссылающиеся (fromId/toId) на
+  // удалённый dangling item, теряют смысл вместе с ним — оставлять их значило
+  // бы дать surviving link ссылаться на несуществующий объект
+  // (ROUTE_ENDPOINT_REFERENCE_NOT_FOUND). Re-placed items не в этом списке —
+  // их links продолжают резолвиться нормально и не трогаются.
+  const danglingItemIdSet = new Set(danglingItemIds);
+  const deletedLinkIds = [];
+  const links = (plan.links || []).filter((l) => {
+    if (danglingItemIdSet.has(l.fromId) || danglingItemIdSet.has(l.toId)) {
+      deletedLinkIds.push(l.id);
+      return false;
+    }
+    return true;
+  });
+
   // Wall-attached MANUAL размеры на удаляемой стене — detach с сохранением
   // ЖИВОГО (resolveAttachedDimension), а не потенциально устаревшего p1/p2.
-  // Auto/derived размеры не трогаем (та же политика, что и у split PHASE 0F —
-  // они регенерируются отдельным проходом и не читаются как authoritative).
+  //
+  // PHASE 1A-2C2B corrective F-01: persisted auto/derived размеры на
+  // удаляемой стене — УДАЛЯЮТСЯ, а не detach-ятся и не оставляются как есть.
+  // resolvePlanDimensions (core/dimensions/runtime.js) всегда явно
+  // ИГНОРИРУЕТ persisted auto-записи для отображения (`.filter(d => d.auto
+  // !== true)`) и генерирует auto-набор заново из живой геометрии — то есть
+  // persisted auto-запись никогда не читается как authoritative уже сегодня.
+  // Если её оставить нетронутой после удаления стены, на которую она
+  // указывает, validatePlanIntegrity корректно ловит настоящий dangling
+  // reference (DIMENSION_WALL_NOT_FOUND, severity:error) — оставлять её было
+  // ошибкой, а не намеренной policy. Detach-ить в manual тоже неверно: это
+  // превратило бы машинно-сгенерированную запись в фантомную
+  // пользовательскую. Убираем её из plan.dimensions полностью.
   const dimensionWarnings = [];
   const changedDimensionIds = [];
+  const deletedDimensionIds = [];
   const withResolvedForDims = { ...plan, walls: resolvePlanWalls(plan) };
-  const dimensions = (plan.dimensions || []).map((dim) => {
+  const dimensions = (plan.dimensions || []).flatMap((dim) => {
     const at = dim?.attachedTo;
     const attachedWallId = at?.wallId ?? at?.id;
-    if (at?.type !== "wall" || attachedWallId !== wallId) return dim;
-    if (dim.auto === true) return dim;
+    if (at?.type !== "wall" || attachedWallId !== wallId) return [dim];
+    if (dim.auto === true) {
+      deletedDimensionIds.push(dim.id);
+      return [];
+    }
     const resolved = resolveAttachedDimension(dim, withResolvedForDims);
     changedDimensionIds.push(dim.id);
     dimensionWarnings.push({ code: DIMENSION_DETACHED_AFTER_WALL_REMOVED, entityId: dim.id, wallId });
-    return {
+    return [{
       ...dim,
       p1: resolved.invalid ? dim.p1 : resolved.p1,
       p2: resolved.invalid ? dim.p2 : resolved.p2,
       attachedTo: null,
       kind: "manual",
       auto: false,
-    };
+    }];
   });
 
-  const nextPlan = { ...topologyPlan, items, dimensions };
+  const nextPlan = { ...topologyPlan, items, dimensions, links };
   return changedOk("wall.delete", nextPlan, {
     entityChanges: {
-      deleted: { walls: [wallId], nodes: removedNodeIds, items: danglingItemIds },
+      deleted: {
+        walls: [wallId],
+        nodes: removedNodeIds,
+        items: danglingItemIds,
+        dimensions: deletedDimensionIds,
+        links: deletedLinkIds,
+      },
       changed: { items: changedItemIds, dimensions: changedDimensionIds },
     },
     warnings: dimensionWarnings,

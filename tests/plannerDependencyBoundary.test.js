@@ -466,3 +466,80 @@ describe("PHASE 1B-1B — wall-length dimension editor boundary", () => {
     expect(codeOnly).not.toMatch(/window\.alert/);
   });
 });
+
+/**
+ * PHASE 1A-2C2B — single-wall delete UI trigger convergence + boundary.
+ * item delete, item-attached dimensions, multi/mixed delete, clearSheet, and
+ * the no-selection Delete-key fallback are explicitly out of scope for this
+ * phase (see RESULT — PHASE 1A-2C2B, "Remaining direct destructive paths").
+ */
+describe("PHASE 1A-2C2B — wall delete UI trigger convergence", () => {
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  function extractBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    expect(start, `marker not found: ${startMarker}`).toBeGreaterThanOrEqual(0);
+    const end = source.indexOf(endMarker, start);
+    expect(end, `end marker not found: ${endMarker}`).toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  it("delSel converges on deleteHits", () => {
+    const body = extractBetween(planPageSource, "const delSel = () => {", "const deleteHit = useCallback");
+    expect(stripComments(body)).toMatch(/\bdeleteHits\s*\(/);
+  });
+
+  it("deleteHit converges on deleteHits", () => {
+    const body = extractBetween(planPageSource, "const deleteHit = useCallback((hit) => {", "const pickPlanHit");
+    expect(stripComments(body)).toMatch(/\bdeleteHits\s*\(/);
+  });
+
+  it("handleDeleteAction converges on deleteHits for the selected-entity branch", () => {
+    const body = extractBetween(planPageSource, "const handleDeleteAction = useCallback(() => {", "const createLink = ");
+    expect(stripComments(body)).toMatch(/\bdeleteHits\s*\(/);
+  });
+
+  it("the wall branch inside deleteHits routes through applyWallDelete/runGeometryCommand, with no competing direct-mutation path", () => {
+    const body = stripComments(extractBetween(planPageSource, "// PHASE 1A-2C2B: canonical command boundary", "setPlan((p) => {"));
+    expect(body).toMatch(/applyWallDelete\s*\(/);
+    expect(body).toMatch(/runGeometryCommand/);
+    expect(body).not.toMatch(/\bsetPlan\s*\(/);
+    expect(body).not.toMatch(/\bdeleteWallEdge\s*\(/);
+    expect(body).not.toMatch(/\brefreshWallMountedItems\s*\(/);
+    expect(body).not.toMatch(/\bsyncAutoZones\s*\(/);
+    expect(body).not.toMatch(/\bpruneOrphanNodes\s*\(/);
+  });
+
+  it("the wall branch dispatches wall.delete with an explicit wallId", () => {
+    const body = stripComments(extractBetween(planPageSource, "// PHASE 1A-2C2B: canonical command boundary", "setPlan((p) => {"));
+    expect(body).toMatch(/wallId:\s*ids\[0\]/);
+  });
+
+  it("selection cleanup in the wall branch is result-status-based, not unconditional", () => {
+    const body = stripComments(extractBetween(planPageSource, "// PHASE 1A-2C2B: canonical command boundary", "setPlan((p) => {"));
+    expect(body).toMatch(/status === "success"/);
+    expect(body).toMatch(/clearSelection\s*\(/);
+  });
+
+  it("PlanPage.jsx no longer imports deleteWallEdge or isNetworkPlan (no remaining direct wall-delete path)", () => {
+    expect(planPageSource).not.toMatch(/\bdeleteWallEdge\b/);
+    expect(planPageSource).not.toMatch(/\bisNetworkPlan\b/);
+  });
+
+  it("applyWallDelete dispatches the canonical wall.delete command type", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyWallDelete.js"), "utf8");
+    expect(helperSource).toMatch(/type:\s*["']wall\.delete["']/);
+  });
+
+  it("applyWallDelete does not import React, HistoryModel, or geometryCommands directly", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyWallDelete.js"), "utf8");
+    expect(helperSource).not.toMatch(/from\s*["']react/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*historyModel\.js["']/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*commands\/geometryCommands\.js["']/);
+  });
+});
