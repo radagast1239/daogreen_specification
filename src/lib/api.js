@@ -349,6 +349,7 @@ export const api = {
       URL.revokeObjectURL(a.href);
     }),
   getAnalytics: () => request("/api/admin/analytics"),
+  getReportsR1: () => request("/api/admin/reports"),
   getAdminUsers: () => request("/api/admin/admin-users"),
   createAdminUser: (data) => request("/api/admin/admin-users", { method: "POST", body: data }),
   deleteAdminUser: (id) => request(`/api/admin/admin-users/${id}`, { method: "DELETE" }),

@@ -10,6 +10,7 @@ import { materialInModule } from "../../../shared/materialModules.js";
 import { loadProject, loadProjectItems, rowToProject } from "../db.js";
 import { projectTotals } from "../services/buildItems.js";
 import { getAnalytics } from "../services/analytics.js";
+import { getReportsR1Payload } from "../services/reportsR1.js";
 import { listAdminUsers, upsertAdminUser, deactivateAdminUser } from "../auth.js";
 import { brandSettingsResponse } from "../services/clientBrand.js";
 import { publishRulesSettingsPayload } from "../services/publishRules.js";
@@ -227,6 +228,10 @@ router.get("/backup", (_req, res) => {
 
 router.get("/analytics", (_req, res) => {
   res.json(getAnalytics());
+});
+
+router.get("/reports", (_req, res) => {
+  res.json(getReportsR1Payload());
 });
 
 router.get("/admin-users", (_req, res) => {
