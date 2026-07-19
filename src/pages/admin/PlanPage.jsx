@@ -155,12 +155,21 @@ const LINE_LAYER_IDS = ["drain", "irrigation", "supply", "power", "vent", "clima
 const ITEM_LAYER_IDS = LAYERS.map((l) => l.id).filter(
   (id) => !["room", "zones", "partitions", "client", "install", "spec"].includes(id)
 );
-// PHASE 1A-2C2D3B — только эти пять item-слоёв уже сегодня реально очищают
+// PHASE 1A-2C2D3B — только эти item-слои уже сегодня реально очищают
 // items через clearSheet (не перехватываются LINE_LAYER_IDS раньше по
 // цепочке if/else-if, см. RESULT — AUDIT PHASE 1A-2C2D3A). Намеренно не
-// весь ITEM_LAYER_IDS — irrigation/power/light/vent (mode:"both"), climate
-// и staff остаются legacy-путём до отдельной фазы.
-const MIGRATED_ITEM_CLEAR_LAYER_IDS = ["racks", "water", "sockets", "sanitary", "furn"];
+// весь ITEM_LAYER_IDS — irrigation/power/light/vent (mode:"both") и staff
+// остаются legacy-путём до отдельной combined item+line clear фазы.
+// PHASE 1A-2C2D3E3 — climate добавлен: LAYERS.mode для climate уже "items"
+// (17 реальных catalog kinds, ни одного line tool в LAYER_TOOLS.climate), но
+// climate ошибочно состоит в LINE_LAYER_IDS, из-за чего legacy fallback
+// перехватывал его как line-layer и чистил (почти всегда 0) lines, оставляя
+// все climate items нетронутыми (см. AUDIT PHASE 1A-2C2D3E1, Risk R1). Здесь
+// исправляется только routing — climate остаётся в LINE_LAYER_IDS
+// (не тронут в этой фазе), но clearSheet теперь достигает item-путь раньше
+// по цепочке if/else, так что legacy line-fallback для climate больше не
+// достижим.
+const MIGRATED_ITEM_CLEAR_LAYER_IDS = ["racks", "water", "sockets", "sanitary", "furn", "climate"];
 // PHASE 1A-2C2D3E2 — только эти два фактически line-only слоя мигрируют на
 // line.bulkDelete в clearSheet (см. AUDIT PHASE 1A-2C2D3E1: drain и
 // irrigation — единственные LINE_LAYER_IDS-слои с нулём catalog item kinds
