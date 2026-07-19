@@ -159,8 +159,9 @@ const ITEM_LAYER_IDS = LAYERS.map((l) => l.id).filter(
 // PHASE 1A-2C2D3B — только эти item-слои уже сегодня реально очищают
 // items через clearSheet (не перехватываются LINE_LAYER_IDS раньше по
 // цепочке if/else-if, см. RESULT — AUDIT PHASE 1A-2C2D3A). Намеренно не
-// весь ITEM_LAYER_IDS — irrigation/power/light/vent (mode:"both") и staff
-// остаются legacy-путём до отдельной combined item+line clear фазы.
+// весь ITEM_LAYER_IDS — irrigation/power/light/vent/staff (реальные item+line
+// слои) очищаются через MIGRATED_COMBINED_CLEAR_LAYER_IDS ниже, а не через
+// этот item-only набор.
 // PHASE 1A-2C2D3E3 — climate добавлен: LAYERS.mode для climate уже "items"
 // (17 реальных catalog kinds, ни одного line tool в LAYER_TOOLS.climate), но
 // climate ошибочно состоит в LINE_LAYER_IDS, из-за чего legacy fallback
@@ -175,19 +176,24 @@ const MIGRATED_ITEM_CLEAR_LAYER_IDS = ["racks", "water", "sockets", "sanitary", 
 // line.bulkDelete в clearSheet (см. AUDIT PHASE 1A-2C2D3E1: drain и
 // irrigation — единственные LINE_LAYER_IDS-слои с нулём catalog item kinds
 // сегодня, так что line-only clear здесь ничего не оставляет позади).
-// Намеренно НЕ весь LINE_LAYER_IDS — power/light/vent (mode:"both"), climate
-// и staff содержат реальные item kinds и остаются legacy-путём (см. Risks R1-R3
-// того же аудита) до отдельной combined item+line clear фазы.
+// Намеренно НЕ весь LINE_LAYER_IDS — power/light/vent/staff (реальные item+
+// line слои) очищаются через MIGRATED_COMBINED_CLEAR_LAYER_IDS ниже; climate
+// уже item-only (PHASE 1A-2C2D3E3).
 const MIGRATED_LINE_CLEAR_LAYER_IDS = ["drain", "irrigation"];
-// PHASE 1A-2C2D3E4D — только эти три mode:"both" слоя мигрируют на
-// itemLine.bulkDelete (см. AUDIT PHASE 1A-2C2D3E4A: power/light/vent —
-// единственные LINE_LAYER_IDS-слои с реальными catalog item kinds, у
-// которых до этой фазы «Очистить лист» удалял только lines, оставляя все
-// items нетронутыми). Намеренно НЕ строится динамически из LINE_LAYER_IDS/
-// ITEM_LAYER_IDS — staff (mode:"lines", но с person item kind) и climate
-// (уже item-only с PHASE 1A-2C2D3E3) сознательно исключены до отдельных
-// будущих фаз; drain/irrigation остаются line-only (PHASE 1A-2C2D3E2).
-const MIGRATED_COMBINED_CLEAR_LAYER_IDS = ["power", "light", "vent"];
+// PHASE 1A-2C2D3E4D — power/light/vent (mode:"both") мигрируют на
+// itemLine.bulkDelete (см. AUDIT PHASE 1A-2C2D3E4A: единственные на тот
+// момент LINE_LAYER_IDS-слои с реальными catalog item kinds, у которых
+// «Очистить лист» удалял только lines, оставляя все items нетронутыми).
+// PHASE 1A-2C2D3E5B — staff добавлен: AUDIT PHASE 1A-2C2D3E5A (verdict C)
+// подтвердил, что staff (LAYERS.mode ошибочно "lines") реально хранит и
+// items (kind:"person"), и lines (любой lineTag: staff/raw/product/waste/
+// отсутствует) — тот же item+line профиль, что и power/light/vent, так что
+// staff переиспользует тот же канонический combined-путь без изменений в
+// applyCombinedLayerClear/applyItemLineBulkDelete/geometryCommands. Намеренно
+// НЕ строится динамически из LINE_LAYER_IDS/ITEM_LAYER_IDS — climate
+// (уже item-only с PHASE 1A-2C2D3E3) остаётся исключён; drain/irrigation
+// остаются line-only (PHASE 1A-2C2D3E2).
+const MIGRATED_COMBINED_CLEAR_LAYER_IDS = ["power", "light", "vent", "staff"];
 
 function draftPt(from, to, opts) {
   const { point, angleSnap } = resolveDraftPoint(from, to, opts);
@@ -1737,18 +1743,26 @@ export default function PlanPage() {
       // itemLine.bulkDelete already runs one merged item+line structural
       // cleanup and one engineering sync for the whole delete set (see
       // geometryCommands.js deleteItemsAndLinesFromPlan) — not duplicated
-      // here. power/light/vent (mode:"both") get their own honest
-      // equipment+lines count confirm instead of the generic per-sheet
-      // text below, since a bare "Очистить объекты листа X?" historically
-      // only cleared lines while implying everything (see AUDIT PHASE
-      // 1A-2C2D3E4A, Risk R2). Orchestration (pre-confirm summary/empty
-      // check/confirm/live-plan-race re-read/dispatch) is factored out into
-      // applyCombinedLayerClear so it's directly unit-testable without
-      // rendering this component.
+      // here. power/light/vent/staff (real item+line layers) get their own
+      // honest equipment+lines count confirm instead of the generic
+      // per-sheet text below, since a bare "Очистить объекты листа X?"
+      // historically only cleared lines while implying everything (see
+      // AUDIT PHASE 1A-2C2D3E4A, Risk R2). Orchestration (pre-confirm
+      // summary/empty check/confirm/live-plan-race re-read/dispatch) is
+      // factored out into applyCombinedLayerClear so it's directly
+      // unit-testable without rendering this component.
+      // PHASE 1A-2C2D3E5B — staff gets its own confirm terminology
+      // ("Персонал"/"Маршруты" instead of "Оборудование"/"Линии и трассы")
+      // since calling a person "equipment" is misleading (see AUDIT PHASE
+      // 1A-2C2D3E5A, "Confirmation terminology"). Computed here in PlanPage,
+      // not inside applyCombinedLayerClear/combinedLayerClearSummary, which
+      // stay layer-agnostic — power/light/vent pass no override and keep
+      // the existing default text byte-for-byte.
       const status = applyCombinedLayerClear({
         getCurrentPlan,
         layerId: active,
         layerLabel: layerById(active).name,
+        ...(active === "staff" ? { itemLabel: "Персонал", lineLabel: "Маршруты" } : {}),
         confirmFn: (message) => window.confirm(message),
         runGeometryCommand,
       });

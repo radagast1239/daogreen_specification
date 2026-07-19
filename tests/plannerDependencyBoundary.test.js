@@ -1424,12 +1424,10 @@ describe("PHASE 1A-2C2D3E4D — combined power/light/vent clearSheet wiring", ()
     );
   }
 
-  it("MIGRATED_COMBINED_CLEAR_LAYER_IDS is exactly power/light/vent, not built dynamically from LINE_LAYER_IDS/ITEM_LAYER_IDS", () => {
-    expect(planPageSource).toMatch(/const MIGRATED_COMBINED_CLEAR_LAYER_IDS = \["power", "light", "vent"\];/);
-  });
-
-  it("staff is absent from MIGRATED_COMBINED_CLEAR_LAYER_IDS (no staff migration in this phase)", () => {
-    expect(planPageSource).not.toMatch(/MIGRATED_COMBINED_CLEAR_LAYER_IDS = \[[^\]]*"staff"/);
+  it("MIGRATED_COMBINED_CLEAR_LAYER_IDS is a hardcoded literal array, not built dynamically from LINE_LAYER_IDS/ITEM_LAYER_IDS (staff added in PHASE 1A-2C2D3E5B — see that phase's own boundary block below for the exact current set)", () => {
+    expect(planPageSource).toMatch(/const MIGRATED_COMBINED_CLEAR_LAYER_IDS = \[[^\]]*"power"[^\]]*\];/);
+    expect(planPageSource).not.toMatch(/MIGRATED_COMBINED_CLEAR_LAYER_IDS = LINE_LAYER_IDS/);
+    expect(planPageSource).not.toMatch(/MIGRATED_COMBINED_CLEAR_LAYER_IDS = ITEM_LAYER_IDS/);
   });
 
   it("climate remains item-only migrated (MIGRATED_ITEM_CLEAR_LAYER_IDS unchanged); drain/irrigation remain line-only migrated (MIGRATED_LINE_CLEAR_LAYER_IDS unchanged)", () => {
@@ -1531,5 +1529,131 @@ describe("PHASE 1A-2C2D3E4D — combined power/light/vent clearSheet wiring", ()
     // would be a layer-classification change out of scope for this phase).
     expect(legacyBody).toMatch(/LINE_LAYER_IDS\.includes\(active\)/);
     expect(legacyBody).toMatch(/ITEM_LAYER_IDS\.includes\(active\)/);
+  });
+});
+
+/**
+ * PHASE 1A-2C2D3E5B — staff joins the combined power/light/vent clearSheet
+ * path. AUDIT PHASE 1A-2C2D3E5A (verdict C) proved staff holds a real item
+ * kind (person) and real lines across every lineTag variant — the same
+ * item+line profile as power/light/vent — so staff reuses the existing
+ * applyCombinedLayerClear/applyItemLineBulkDelete pipeline unchanged.
+ * Confirm-message terminology ("Персонал"/"Маршруты" instead of
+ * "Оборудование"/"Линии и трассы") is computed in PlanPage and passed
+ * through as optional labels — applyCombinedLayerClear/
+ * combinedLayerClearSummary stay layer-agnostic, no "staff" literal inside
+ * either file. No new production helper file, no geometryCommands change,
+ * no catalog/plannerSheets/plannerTools change (see AUDIT PHASE
+ * 1A-2C2D3E5A findings F1/F2/F4 — explicitly out of scope for this phase).
+ */
+describe("PHASE 1A-2C2D3E5B — staff combined clearSheet wiring", () => {
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  function extractBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    expect(start, `marker not found: ${startMarker}`).toBeGreaterThanOrEqual(0);
+    const end = source.indexOf(endMarker, start);
+    expect(end, `end marker not found: ${endMarker}`).toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  function combinedBranchBody() {
+    return extractBetween(
+      planPageSource,
+      "if (MIGRATED_COMBINED_CLEAR_LAYER_IDS.includes(active)) {",
+      "const name = layerById(active).name;",
+    );
+  }
+
+  it("MIGRATED_COMBINED_CLEAR_LAYER_IDS is exactly power/light/vent/staff", () => {
+    expect(planPageSource).toMatch(/const MIGRATED_COMBINED_CLEAR_LAYER_IDS = \["power", "light", "vent", "staff"\];/);
+  });
+
+  it("staff is absent from MIGRATED_ITEM_CLEAR_LAYER_IDS and MIGRATED_LINE_CLEAR_LAYER_IDS", () => {
+    expect(planPageSource).not.toMatch(/MIGRATED_ITEM_CLEAR_LAYER_IDS = \[[^\]]*"staff"/);
+    expect(planPageSource).not.toMatch(/MIGRATED_LINE_CLEAR_LAYER_IDS = \[[^\]]*"staff"/);
+  });
+
+  it("the stale claim that staff is 'сознательно исключён' from the combined set no longer exists (comment updated in PHASE 1A-2C2D3E5B)", () => {
+    expect(planPageSource).not.toMatch(/staff \(mode:"lines", но с person item kind\)[\s\S]{0,80}сознательно исключен/);
+  });
+
+  it("the combined branch (which staff now belongs to) is checked before the generic per-sheet confirm and before the legacy fallback — same structural proof as power/light/vent, now covering staff by array membership alone since no staff-specific branch exists anywhere in clearSheet", () => {
+    const combinedIdx = planPageSource.indexOf("if (MIGRATED_COMBINED_CLEAR_LAYER_IDS.includes(active)) {");
+    const genericConfirmIdx = planPageSource.indexOf("const name = layerById(active).name;");
+    const legacyFallbackIdx = planPageSource.indexOf("if (LINE_LAYER_IDS.includes(active)) next.lines");
+    expect(combinedIdx).toBeGreaterThan(-1);
+    expect(genericConfirmIdx).toBeGreaterThan(combinedIdx);
+    expect(legacyFallbackIdx).toBeGreaterThan(genericConfirmIdx);
+    expect(planPageSource).not.toMatch(/active === "staff"\s*\)\s*\{/);
+  });
+
+  it("the legacy LINE_LAYER_IDS fallback text still generically mentions staff (LINE_LAYER_IDS itself is untouched) but is no longer the actual route for staff — reachability is proven by the branch-ordering test above, not by removing staff from LINE_LAYER_IDS", () => {
+    const legacyBody = stripComments(
+      extractBetween(planPageSource, "setPlan((p) => {\r\n      const next = { ...p };", "  };"),
+    );
+    expect(legacyBody).toMatch(/LINE_LAYER_IDS\.includes\(active\)/);
+    expect(planPageSource).toMatch(/const LINE_LAYER_IDS = \["drain", "irrigation", "supply", "power", "vent", "climate", "ac", "light", "staff"\];/);
+  });
+
+  it("PlanPage passes staff-specific confirm terminology (Персонал/Маршруты) only for the staff layer, via a conditional spread", () => {
+    const body = stripComments(combinedBranchBody());
+    expect(body).toMatch(/active === "staff"/);
+    expect(body).toMatch(/itemLabel:\s*"Персонал"/);
+    expect(body).toMatch(/lineLabel:\s*"Маршруты"/);
+  });
+
+  it("power/light/vent pass no itemLabel/lineLabel override — the staff conditional spread is the only source of custom terminology in the combined branch", () => {
+    const body = stripComments(combinedBranchBody());
+    const itemLabelOccurrences = (body.match(/itemLabel:/g) || []).length;
+    const lineLabelOccurrences = (body.match(/lineLabel:/g) || []).length;
+    expect(itemLabelOccurrences).toBe(1);
+    expect(lineLabelOccurrences).toBe(1);
+  });
+
+  it("applyCombinedLayerClear.js stays layer-agnostic: no \"staff\"/\"power\"/\"light\"/\"vent\" string literal in code (comments stripped before checking, since the JSDoc uses \"power\" only as a generic docstring example)", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyCombinedLayerClear.js"), "utf8");
+    const codeOnly = stripComments(helperSource);
+    for (const layer of ["staff", "power", "light", "vent"]) {
+      expect(codeOnly).not.toMatch(new RegExp(`["']${layer}["']`));
+    }
+  });
+
+  it("combinedLayerClearSummary.js stays layer-agnostic: no \"staff\"/\"power\"/\"light\"/\"vent\" string literal in code (comments may reference \"power\" only as a docstring example)", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "combinedLayerClearSummary.js"), "utf8");
+    const codeOnly = stripComments(helperSource);
+    for (const layer of ["staff", "power", "light", "vent"]) {
+      expect(codeOnly).not.toMatch(new RegExp(`["']${layer}["']`));
+    }
+  });
+
+  it("geometryCommands.js core helpers still contain zero \"staff\" references (no layer semantics leaked into core by this phase)", () => {
+    const geometryCommandsSource = readFileSync(join(PLANNER_ROOT, "commands", "geometryCommands.js"), "utf8");
+    const codeOnly = stripComments(geometryCommandsSource);
+    const itemBody = extractBetween(codeOnly, "function computeItemRemoval(", "\nfunction deleteItemsFromPlan(");
+    const lineBody = extractBetween(codeOnly, "function computeLineRemoval(", "\nfunction deleteLinesFromPlan(");
+    expect(itemBody).not.toMatch(/["']staff["']/);
+    expect(lineBody).not.toMatch(/["']staff["']/);
+  });
+
+  it("applyItemLineBulkDelete.js contains zero \"staff\" references", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyItemLineBulkDelete.js"), "utf8");
+    expect(stripComments(helperSource)).not.toMatch(/["']staff["']/);
+  });
+
+  it("the combined branch (now covering staff) still has no direct setPlan call", () => {
+    const body = stripComments(combinedBranchBody());
+    expect(body).not.toMatch(/\bsetPlan\s*\(/);
+  });
+
+  it("no new production helper file was introduced for staff — only PlanPage.jsx, applyCombinedLayerClear.js, and combinedLayerClearSummary.js changed", () => {
+    expect(planPageSource).toMatch(/from\s*["'][^"']*ui\/applyCombinedLayerClear\.js["']/);
+    expect(planPageSource).not.toMatch(/from\s*["'][^"']*ui\/staffClear/i);
+    expect(planPageSource).not.toMatch(/from\s*["'][^"']*ui\/applyStaffBulkDelete/i);
   });
 });
