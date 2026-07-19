@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { CATEGORIES } from "../../data/modules.js";
 import { resolveCategories } from "../../lib/categories.js";
@@ -7,6 +7,7 @@ import { isFlowSpecName } from "../../lib/materialSpecs.js";
 import { api, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { Modal, Empty } from "../../components/ui.jsx";
+import { RowActionsMenu } from "../../components/modulesUi.jsx";
 import { useToast } from "../../components/Toast.jsx";
 import ImportPanel from "../../components/ImportPanel.jsx";
 import CompactTableToggle from "../../components/CompactTableToggle.jsx";
@@ -35,10 +36,26 @@ import {
   isSubsectionValid,
   getClientSectionLabel,
 } from "../../../shared/clientSections.js";
+import { buildBulkPatchPayload, formatBulkActionConfirmation } from "../../../shared/materialBulkActions.js";
+import { materialShownToClientByDefault } from "../../../shared/materialQualityCheck.js";
 import { MaterialsQualityPanel } from "./MaterialsQualityPage.jsx";
 import MaterialsSubnav from "../../components/MaterialsSubnav.jsx";
 import { resolveFarmSections } from "../../lib/farmSectionsConfig.js";
 import { DEFAULT_RESPONSIBLE_ROLES } from "../../lib/responsibleRoles.js";
+import {
+  CATALOG_COLUMN_PRESETS,
+  CATALOG_QUICK_FILTERS,
+  CATALOG_SORT_OPTIONS,
+  buildQualityEntryMap,
+  catalogColumnVisibility,
+  catalogHasActiveFilters,
+  filterMaterialsCatalog,
+  materialCatalogStatusChips,
+  materialHasPhoto,
+  materialPriceMissing,
+  materialsEmptyMessage,
+  sortMaterialsCatalog,
+} from "../../lib/materialsCatalogView.js";
 const blank = {
   name: "",
   unit: "шт.",
@@ -90,6 +107,14 @@ export default function MaterialsPage() {
   const setTab = (t) => setSearchParams(t === "base" ? {} : { tab: t });
   const [q, setQ] = useState("");
   const [catF, setCatF] = useState("");
+  const [quickF, setQuickF] = useState("all");
+  const [sortF, setSortF] = useState("name");
+  const [colPreset, setColPreset] = useState("main");
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkAction, setBulkAction] = useState("");
+  const [bulkValue, setBulkValue] = useState("");
+  const [bulkSubValue, setBulkSubValue] = useState("");
+  const [bulkApplying, setBulkApplying] = useState(false);
   const [editing, setEditing] = useState(null);
   const [priceDraft, setPriceDraft] = useState({});
   const [suppliers, setSuppliers] = useState([]);
@@ -113,16 +138,80 @@ export default function MaterialsPage() {
     [state.modules]
   );
 
-  const filtered = useMemo(() => {
-    const ql = q.trim().toLowerCase();
-    return state.materials
-      .filter(
-        (m) =>
-          (!ql || m.name.toLowerCase().includes(ql)) && (!catF || m.category === catF)
-      )
-      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
-  }, [state.materials, q, catF]);
+  const { entriesById } = useMemo(
+    () => buildQualityEntryMap(state.materials, state.modules),
+    [state.materials, state.modules]
+  );
 
+  const colVis = useMemo(() => catalogColumnVisibility(colPreset), [colPreset]);
+
+  const filtersActive = catalogHasActiveFilters({ q, category: catF, quick: quickF });
+
+  const filtered = useMemo(() => {
+    const list = filterMaterialsCatalog(state.materials, {
+      q,
+      category: catF,
+      quick: quickF,
+      entriesById,
+    });
+    return sortMaterialsCatalog(list, sortF);
+  }, [state.materials, q, catF, quickF, sortF, entriesById]);
+
+  const emptyMsg = materialsEmptyMessage({
+    sourceCount: state.materials.length,
+    visibleCount: filtered.length,
+    hasFilters: filtersActive,
+  });
+
+  const resetFilters = () => {
+    setQ("");
+    setCatF("");
+    setQuickF("all");
+    setSortF("name");
+  };
+
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectVisible = () => {
+    setSelectedIds(new Set(filtered.map((m) => m.id)));
+  };
+
+  const applyCatalogBulk = async () => {
+    if (!bulkAction || selectedIds.size === 0) return;
+    const msg = formatBulkActionConfirmation(bulkAction, bulkValue, bulkSubValue, selectedIds.size);
+    if (!(await confirm({ title: "Применить массовое действие?", message: msg }))) return;
+    setBulkApplying(true);
+    const payload = buildBulkPatchPayload(bulkAction, bulkValue, bulkSubValue);
+    let ok = 0;
+    for (const id of selectedIds) {
+      try {
+        await actions.materialUpdate(id, payload);
+        ok += 1;
+      } catch {
+        /* continue */
+      }
+    }
+    setBulkApplying(false);
+    if (ok > 0) {
+      success(`Успешно обновлено: ${ok}`);
+      setSelectedIds(new Set());
+      setBulkAction("");
+      setBulkValue("");
+      setBulkSubValue("");
+    }
+  };
+
+  const patchMaterialFlags = async (id, patch) => {
+    await actions.materialUpdate(id, patch);
+    success("Сохранено");
+  };
   const clientSectionOptions = useMemo(() => {
     const fromRef = state.reference?.clientSections?.filter((s) => !s.hidden);
     if (fromRef?.length) return fromRef;
@@ -216,16 +305,19 @@ export default function MaterialsPage() {
     <div className="materials-page">
       <PageHeader
         title="Материалы"
-        sub="Справочник позиций, цен и импорт из Excel"
+        sub={`База материалов, цены, поставщики и готовность к проектам · ${state.materials.length} поз.`}
         back={{ to: "/", label: "Проекты" }}
         actions={
           tab === "base" ? (
             <>
               <CompactTableToggle />
-              <button className="btn" onClick={exportAll}>
+              <Link className="btn btn-sm" to="/materials?tab=quality">
+                Проверка качества
+              </Link>
+              <button type="button" className="btn" onClick={exportAll}>
                 Excel ↓
               </button>
-              <button className="btn btn-primary" onClick={() => setEditing({ ...blank })}>
+              <button type="button" className="btn btn-primary" onClick={() => setEditing({ ...blank })}>
                 ＋ Позиция
               </button>
             </>
@@ -253,32 +345,190 @@ export default function MaterialsPage() {
           </div>
         ) : (
           <>
-        <div className="toolbar" style={{ marginTop: 16 }}>
-          <input placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />
-          <select value={catF} onChange={(e) => setCatF(e.target.value)} style={{ width: "auto" }}>
+        <div className="materials-catalog-filters no-print">
+          <input
+            placeholder="Поиск…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="materials-catalog-filters__search"
+          />
+          <select value={catF} onChange={(e) => setCatF(e.target.value)}>
             <option value="">Все категории</option>
             {categories.map((c) => (
-              <option key={c}>{c}</option>
+              <option key={c} value={c}>
+                {c}
+              </option>
             ))}
           </select>
-          <span className="muted" style={{ marginLeft: "auto" }}>
-            {filtered.length} найдено
+          <select value={sortF} onChange={(e) => setSortF(e.target.value)}>
+            {CATALOG_SORT_OPTIONS.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <select value={colPreset} onChange={(e) => setColPreset(e.target.value)}>
+            {CATALOG_COLUMN_PRESETS.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <div className="materials-catalog-filters__quick">
+            {CATALOG_QUICK_FILTERS.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                className={"btn btn-sm" + (quickF === f.id ? " btn-primary" : " btn-ghost")}
+                onClick={() => setQuickF(f.id)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <span className="muted materials-catalog-filters__count">
+            {filtersActive
+              ? `Найдено: ${filtered.length} из ${state.materials.length}`
+              : `${filtered.length} из ${state.materials.length}`}
           </span>
+          {filtersActive && (
+            <button type="button" className="btn btn-sm" onClick={resetFilters}>
+              Сбросить фильтры
+            </button>
+          )}
         </div>
 
-        {filtered.length === 0 ? (
-          <Empty title="Ничего не найдено" />
+        {selectedIds.size > 0 && (
+          <div className="materials-bulk-bar no-print">
+            <strong>Выбрано: {selectedIds.size}</strong>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={selectVisible}>
+              Выбрать видимые
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Снять выбор
+            </button>
+            <select
+              value={bulkAction}
+              onChange={(e) => {
+                setBulkAction(e.target.value);
+                setBulkValue("");
+                setBulkSubValue("");
+              }}
+              disabled={bulkApplying}
+            >
+              <option value="">— Действие —</option>
+              <option value="responsible">Ответственный</option>
+              <option value="supplier">Поставщик</option>
+              <option value="clientSection">Раздел клиента</option>
+              <option value="showClient">Показать клиенту</option>
+              <option value="hideClient">Скрыть от клиента</option>
+              <option value="setReview">На проверку</option>
+              <option value="clearReview">Снять проверку</option>
+            </select>
+            {bulkAction === "responsible" && (
+              <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} disabled={bulkApplying}>
+                <option value="">Общий</option>
+                {DEFAULT_RESPONSIBLE_ROLES.filter((r) => r.id !== "general").map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            {bulkAction === "supplier" && (
+              <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} disabled={bulkApplying}>
+                <option value="">Без поставщика</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.name}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {bulkAction === "clientSection" && (
+              <>
+                <select
+                  value={bulkValue}
+                  onChange={(e) => {
+                    setBulkValue(e.target.value);
+                    setBulkSubValue("");
+                  }}
+                  disabled={bulkApplying}
+                >
+                  <option value="">— Раздел —</option>
+                  {clientSectionOptions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+                {bulkValue && subsectionsForSection(bulkValue).length > 0 && (
+                  <select
+                    value={bulkSubValue}
+                    onChange={(e) => setBulkSubValue(e.target.value)}
+                    disabled={bulkApplying}
+                  >
+                    <option value="">— Подраздел —</option>
+                    {subsectionsForSection(bulkValue).map((sub) => (
+                      <option key={sub} value={sub}>
+                        {sub}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </>
+            )}
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              disabled={!bulkAction || bulkApplying}
+              onClick={applyCatalogBulk}
+            >
+              {bulkApplying ? "…" : "Применить"}
+            </button>
+          </div>
+        )}
+
+        {emptyMsg ? (
+          <Empty title={emptyMsg.title} hint={emptyMsg.hint}>
+            {emptyMsg.cta === "reset" ? (
+              <button type="button" className="btn" onClick={resetFilters}>
+                Сбросить фильтры
+              </button>
+            ) : emptyMsg.cta === "create" ? (
+              <button type="button" className="btn btn-primary" onClick={() => setEditing({ ...blank })}>
+                Добавить первый материал
+              </button>
+            ) : null}
+          </Empty>
         ) : (
           <div className="card table-scroll-wrap materials-table-wrap">
             <table className="spec materials-table">
               <thead className="materials-table-head">
                 <tr>
+                  <th className="materials-col-check">
+                    <input
+                      type="checkbox"
+                      checked={filtered.length > 0 && filtered.every((m) => selectedIds.has(m.id))}
+                      onChange={(e) => {
+                        if (e.target.checked) selectVisible();
+                        else setSelectedIds(new Set());
+                      }}
+                      aria-label="Выбрать все видимые"
+                    />
+                  </th>
                   <th>Фото</th>
                   <th>Наименование</th>
                   <th>Категория</th>
                   <th>Ед</th>
-                  <th className="right">Цена, ₽</th>
-                  <th>Ссылка</th>
+                  <th className="right">Цена</th>
+                  {colVis.supplier && <th>Поставщик</th>}
+                  {colVis.state && <th>Состояние</th>}
+                  {colVis.link && <th>Ссылка</th>}
                   <th></th>
                 </tr>
               </thead>
@@ -287,10 +537,15 @@ export default function MaterialsPage() {
                   <MaterialRow
                     key={m.id}
                     m={m}
+                    entry={entriesById.get(m.id)}
+                    colVis={colVis}
+                    selected={selectedIds.has(m.id)}
+                    onToggleSelect={() => toggleSelected(m.id)}
                     priceDraft={priceDraft}
                     setPriceDraft={setPriceDraft}
                     patchPrice={patchPrice}
                     onEdit={() => openMaterialEdit(m.id)}
+                    onPatch={patchMaterialFlags}
                     onDelete={async () => {
                       if (
                         await confirm({
@@ -547,60 +802,130 @@ export default function MaterialsPage() {
   );
 }
 
-const MaterialRow = function MaterialRow({ m, priceDraft, setPriceDraft, patchPrice, onEdit, onDelete }) {
+const MaterialRow = function MaterialRow({
+  m,
+  entry,
+  colVis,
+  selected,
+  onToggleSelect,
+  priceDraft,
+  setPriceDraft,
+  patchPrice,
+  onEdit,
+  onPatch,
+  onDelete,
+}) {
+  const nav = useNavigate();
+  const hasPhoto = materialHasPhoto(m);
+  const priceWarn = materialPriceMissing(m);
+  const statusChips = materialCatalogStatusChips(entry, m);
+  const shown = materialShownToClientByDefault(m);
+  const menuItems = [
+    {
+      id: "client-vis",
+      label: shown ? "Скрыть от клиента" : "Показать клиенту",
+      onClick: () => onPatch(m.id, buildBulkPatchPayload(shown ? "hideClient" : "showClient")),
+    },
+    {
+      id: "review",
+      label: "Пометить на проверку",
+      onClick: () => onPatch(m.id, buildBulkPatchPayload("setReview")),
+    },
+    m.supplier
+      ? {
+          id: "supplier",
+          label: "Открыть поставщиков",
+          onClick: () => nav("/suppliers"),
+        }
+      : null,
+    { id: "sep", separator: true },
+    {
+      id: "delete",
+      label: "Удалить",
+      danger: true,
+      onClick: onDelete,
+    },
+  ];
+
   return (
-    <tr className="material-row">
+    <tr className={"material-row" + (selected ? " material-row--selected" : "")}>
+      <td className="materials-col-check">
+        <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Выбрать ${m.name}`} />
+      </td>
       <td className="spec-photo">
-        {m.imageUrl || m.photoUrl ? (
-          <img src={photoSrc(m.imageUrl || m.photoUrl)} alt="" className="thumb-img" />
+        {hasPhoto ? (
+          <img src={photoSrc(m.imageUrl || m.photoUrl)} alt="" className="thumb-img materials-thumb" />
         ) : (
-          <span className="muted" style={{ fontSize: 11 }}>
-            нет фото
-          </span>
+          <span className="materials-photo-placeholder muted">Нет фото</span>
         )}
       </td>
-      <td style={{ minWidth: 220 }} className="material-name">
-        {m.name}
+      <td className="material-name">
+        <div className="materials-name-title">{m.name}</div>
         {materialSpecSubtitle(m) && (
-          <div className="muted" style={{ fontSize: 11, marginTop: 4, fontWeight: 400 }}>
-            {materialSpecSubtitle(m)}
-          </div>
+          <div className="muted materials-name-sub">{materialSpecSubtitle(m)}</div>
         )}
+        <div className="materials-name-badges">
+          {statusChips
+            .filter((c) => c.id !== "ready")
+            .slice(0, 3)
+            .map((c) => (
+              <span key={c.id} className={`chip chip--${c.kind}`}>
+                {c.label}
+              </span>
+            ))}
+        </div>
       </td>
-      <td className="muted" style={{ fontSize: 12 }}>
-        {m.category || "Прочее"}
-      </td>
+      <td className="muted materials-cell-cat">{m.category || "Прочее"}</td>
       <td>{m.unit}</td>
       <td className="right">
-        <input
-          className="spec-cell-input spec-cell-input--num"
-          style={{ maxWidth: 110, marginLeft: "auto" }}
-          type="number"
-          min={0}
-          value={priceDraft[m.id] ?? m.basePrice}
-          onChange={(e) => setPriceDraft((d) => ({ ...d, [m.id]: e.target.value }))}
-          onBlur={() => {
-            if (priceDraft[m.id] == null) return;
-            patchPrice(m.id, priceDraft[m.id]);
-          }}
-        />
+        <div className={"materials-price" + (priceWarn ? " materials-price--warn" : "")}>
+          <input
+            className="spec-cell-input spec-cell-input--num"
+            type="number"
+            min={0}
+            value={priceDraft[m.id] ?? m.basePrice}
+            onChange={(e) => setPriceDraft((d) => ({ ...d, [m.id]: e.target.value }))}
+            onBlur={() => {
+              if (priceDraft[m.id] == null) return;
+              patchPrice(m.id, priceDraft[m.id]);
+            }}
+          />
+          <span className="muted materials-price-unit">₽ / {m.unit || "ед."}</span>
+          {priceWarn && <span className="materials-price-hint">Нет цены</span>}
+        </div>
       </td>
-      <td>
-        {m.link ? (
-          <a href={m.link} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
-            ↗
-          </a>
-        ) : (
-          <span className="muted">—</span>
-        )}
-      </td>
-      <td className="row" style={{ gap: 2 }}>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onEdit}>
-          ✎
+      {colVis.supplier && (
+        <td className="materials-cell-supplier">
+          {m.supplier ? m.supplier : <span className="muted">Не указан</span>}
+        </td>
+      )}
+      {colVis.state && (
+        <td className="materials-cell-state">
+          <div className="materials-state-chips">
+            {statusChips.map((c) => (
+              <span key={c.id} className={`chip chip--${c.kind}`}>
+                {c.label}
+              </span>
+            ))}
+          </div>
+        </td>
+      )}
+      {colVis.link && (
+        <td>
+          {m.link ? (
+            <a href={m.link} target="_blank" rel="noreferrer" className="materials-link">
+              ↗
+            </a>
+          ) : (
+            <span className="muted">—</span>
+          )}
+        </td>
+      )}
+      <td className="materials-row-actions">
+        <button type="button" className="btn btn-sm" onClick={onEdit}>
+          Редактировать
         </button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onDelete}>
-          ✕
-        </button>
+        <RowActionsMenu items={menuItems} label="Действия материала" />
       </td>
     </tr>
   );
