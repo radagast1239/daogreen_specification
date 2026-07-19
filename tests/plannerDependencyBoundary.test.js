@@ -910,3 +910,164 @@ describe("PHASE 1A-2C2D3D2 — room clearSheet item.bulkDelete convergence", () 
     expect(body).not.toMatch(/summarizeRoomClearItems/);
   });
 });
+
+/**
+ * PHASE 1A-2C2D3E2 — atomic line delete (line.bulkDelete) UI trigger
+ * convergence + boundary. deleteHits' "lines" branch (covering delSel,
+ * deleteHit, handleDeleteAction, context-menu delete) and clearSheet's two
+ * proven line-only layers (drain/irrigation — zero catalog item kinds today,
+ * see AUDIT PHASE 1A-2C2D3E1) are migrated here. power/light/vent/climate/
+ * staff clearSheet branches (mode:"both"/disputed item+line layers) remain
+ * explicitly out of scope until a combined item+line clear command exists.
+ */
+describe("PHASE 1A-2C2D3E2 — line bulk delete UI trigger convergence", () => {
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+  const GEOMETRY_COMMANDS_FILE = join(PLANNER_ROOT, "commands", "geometryCommands.js");
+  const geometryCommandsSource = readFileSync(GEOMETRY_COMMANDS_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  function extractBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    expect(start, `marker not found: ${startMarker}`).toBeGreaterThanOrEqual(0);
+    const end = source.indexOf(endMarker, start);
+    expect(end, `end marker not found: ${endMarker}`).toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  function deleteHitsLinesBranchBody() {
+    return extractBetween(
+      planPageSource,
+      'if (coll === "lines") {\r\n      // PHASE 1A-2C2D3E2 (deleteHits):',
+      "setPlan((p) => {",
+    );
+  }
+
+  function clearSheetLineBranchBody() {
+    return extractBetween(
+      planPageSource,
+      "if (MIGRATED_LINE_CLEAR_LAYER_IDS.includes(active)) {",
+      'setPlan((p) => {\r\n      const next = { ...p };',
+    );
+  }
+
+  it("delSel/deleteHit/handleDeleteAction all converge on deleteHits (same trigger-convergence proof as wall/item delete)", () => {
+    const delSelBody = extractBetween(planPageSource, "const delSel = () => {", "const deleteHit = useCallback");
+    expect(stripComments(delSelBody)).toMatch(/\bdeleteHits\s*\(/);
+    const deleteHitBody = extractBetween(planPageSource, "const deleteHit = useCallback((hit) => {", "const pickPlanHit");
+    expect(stripComments(deleteHitBody)).toMatch(/\bdeleteHits\s*\(/);
+    const handleDeleteActionBody = extractBetween(planPageSource, "const handleDeleteAction = useCallback(() => {", "const createLink = ");
+    expect(stripComments(handleDeleteActionBody)).toMatch(/\bdeleteHits\s*\(/);
+  });
+
+  it("the lines branch inside deleteHits routes through applyLineBulkDelete/runGeometryCommand, with no competing direct-mutation path", () => {
+    const body = stripComments(deleteHitsLinesBranchBody());
+    expect(body).toMatch(/applyLineBulkDelete\s*\(/);
+    expect(body).toMatch(/runGeometryCommand/);
+    expect(body).not.toMatch(/\bsetPlan\s*\(/);
+    expect(body).not.toMatch(/\bsyncEngineeringPlan\s*\(/);
+    expect(body).not.toMatch(/\.filter\(\(o\)\s*=>\s*!idSet\.has\(o\.id\)\)/);
+  });
+
+  it("the deleteHits lines branch dispatches line.bulkDelete with the full explicit ids array (not just ids[0])", () => {
+    const body = stripComments(deleteHitsLinesBranchBody());
+    expect(body).toMatch(/lineIds:\s*ids/);
+  });
+
+  it("selection cleanup in the deleteHits lines branch is result-status-based, not unconditional", () => {
+    const body = stripComments(deleteHitsLinesBranchBody());
+    expect(body).toMatch(/status === "success"/);
+    expect(body).toMatch(/status === "noop"/);
+    expect(body).toMatch(/status === "no-target"/);
+    expect(body).toMatch(/clearSelection\s*\(/);
+  });
+
+  it("the deleteHits fallback setPlan updater no longer special-cases coll===\"lines\" with a direct syncEngineeringPlan call (dead code removed, not left as a second competing path)", () => {
+    const body = stripComments(
+      extractBetween(planPageSource, 'setPlan((p) => {\r\n      let next = { ...p };', "clearSelection();\r\n    return true;"),
+    );
+    expect(body).not.toMatch(/coll === "lines"/);
+    expect(body).not.toMatch(/\bsyncEngineeringPlan\s*\(/);
+  });
+
+  it("the clearSheet drain/irrigation branch routes through applyLineBulkDelete/runGeometryCommand, with no competing direct-mutation path", () => {
+    const body = stripComments(clearSheetLineBranchBody());
+    expect(body).toMatch(/applyLineBulkDelete\s*\(/);
+    expect(body).toMatch(/runGeometryCommand/);
+    expect(body).not.toMatch(/\bsetPlan\s*\(/);
+  });
+
+  it("the clearSheet drain/irrigation branch computes lineIds from the live plan via layer/migrateLayerId match, not a hardcoded/stale list", () => {
+    const body = stripComments(clearSheetLineBranchBody());
+    expect(body).toMatch(/getCurrentPlan\(\)\.lines/);
+    expect(body).toMatch(/line\.layer === active/);
+    expect(body).toMatch(/migrateLayerId\(line\.layer\) === active/);
+  });
+
+  it("the clearSheet drain/irrigation branch returns early and never falls through to the legacy setPlan block", () => {
+    const body = stripComments(clearSheetLineBranchBody());
+    expect(body.trim().replace(/\}\s*$/, "").trim().endsWith("return;")).toBe(true);
+  });
+
+  it("MIGRATED_LINE_CLEAR_LAYER_IDS is exactly the two proven-working line-only layers (drain/irrigation), not the full LINE_LAYER_IDS set", () => {
+    expect(planPageSource).toMatch(/const MIGRATED_LINE_CLEAR_LAYER_IDS = \["drain", "irrigation"\];/);
+  });
+
+  it("power/light/vent/climate/staff clearSheet branches remain unmigrated legacy paths (still direct setPlan, not routed through a geometry command)", () => {
+    const body = stripComments(
+      extractBetween(planPageSource, "setPlan((p) => {\r\n      const next = { ...p };", "  };"),
+    );
+    expect(body).toMatch(/LINE_LAYER_IDS\.includes\(active\)/);
+    expect(body).toMatch(/ITEM_LAYER_IDS\.includes\(active\)/);
+    expect(body).not.toMatch(/applyLineBulkDelete/);
+  });
+
+  it("imports the line-bulk-delete apply helper, and still creates only one geometry command dispatcher", () => {
+    expect(planPageSource).toMatch(/from\s*["'][^"']*ui\/applyLineBulkDelete\.js["']/);
+    const dispatcherCalls = planPageSource.match(/createGeometryCommandDispatcher\s*\(/g) || [];
+    expect(dispatcherCalls.length).toBe(1);
+  });
+
+  it("applyLineBulkDelete dispatches the canonical line.bulkDelete command type", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyLineBulkDelete.js"), "utf8");
+    expect(helperSource).toMatch(/type:\s*["']line\.bulkDelete["']/);
+  });
+
+  it("applyLineBulkDelete does not import React, HistoryModel, or geometryCommands directly", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyLineBulkDelete.js"), "utf8");
+    expect(helperSource).not.toMatch(/from\s*["']react/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*historyModel\.js["']/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*commands\/geometryCommands\.js["']/);
+  });
+
+  it("line.bulkDelete is registered in the command HANDLERS map", () => {
+    expect(geometryCommandsSource).toMatch(/"line\.bulkDelete":\s*handleLineBulkDelete,/);
+  });
+
+  it("deleteLinesFromPlan is the single internal line-delete implementation used by line.bulkDelete", () => {
+    const codeOnly = stripComments(geometryCommandsSource);
+    const sharedHelperDefs = codeOnly.match(/function\s+deleteLinesFromPlan\s*\(/g) || [];
+    expect(sharedHelperDefs.length).toBe(1);
+    const handleLineBulkDeleteBody = extractBetween(codeOnly, "function handleLineBulkDelete(", "\nconst HANDLERS = {");
+    expect(handleLineBulkDeleteBody).toMatch(/deleteLinesFromPlan\s*\(/);
+  });
+
+  it("ENTITY_KINDS includes \"lines\" (typed entityChanges contract, additive to walls/nodes/items/dimensions/links)", () => {
+    expect(geometryCommandsSource).toMatch(/const ENTITY_KINDS = \["walls", "nodes", "items", "dimensions", "links", "lines"\];/);
+  });
+
+  it("REQUIRED FIX F-01: emptyEntityChanges derives each bucket from ENTITY_KINDS via a shared helper, not a hand-maintained literal that could fall behind it", () => {
+    const codeOnly = stripComments(geometryCommandsSource);
+    expect(codeOnly).toMatch(/function\s+emptyEntityBucket\s*\(\)\s*\{\s*return\s+Object\.fromEntries\(ENTITY_KINDS\.map/);
+    const emptyEntityChangesBody = extractBetween(codeOnly, "function emptyEntityChanges() {", "\nfunction normalizeEntityChanges");
+    expect(emptyEntityChangesBody).toMatch(/created:\s*emptyEntityBucket\(\)/);
+    expect(emptyEntityChangesBody).toMatch(/changed:\s*emptyEntityBucket\(\)/);
+    expect(emptyEntityChangesBody).toMatch(/deleted:\s*emptyEntityBucket\(\)/);
+    // No leftover hand-maintained partial literal (walls/nodes/items/
+    // dimensions only, missing links/lines) anywhere in the file.
+    expect(codeOnly).not.toMatch(/\{\s*walls:\s*\[\],\s*nodes:\s*\[\],\s*items:\s*\[\],\s*dimensions:\s*\[\]\s*\}/);
+  });
+});

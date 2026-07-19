@@ -569,14 +569,16 @@ describe("PHASE 1A-2C2D2 — entityChanges contract", () => {
     expect(result.entityChanges.deleted.links).toEqual(["lk1"]);
     expect(result.entityChanges.changed.dimensions).toEqual(["manual1"]);
     expect(result.entityChanges.changed.items).toEqual([]);
-    expect(result.entityChanges.created).toEqual({ walls: [], nodes: [], items: [], dimensions: [], links: [] });
+    expect(result.entityChanges.created).toEqual({
+      walls: [], nodes: [], items: [], dimensions: [], links: [], lines: [],
+    });
 
     for (const bucket of ["created", "changed", "deleted"]) {
       const flat = Object.values(result.entityChanges[bucket]).flat();
       expect(flat.length).toBe(new Set(flat).size);
     }
     // No single ID should appear in both changed and deleted of the same kind.
-    for (const kind of ["walls", "nodes", "items", "dimensions", "links"]) {
+    for (const kind of ["walls", "nodes", "items", "dimensions", "links", "lines"]) {
       const overlap = result.entityChanges.changed[kind].filter((id) => result.entityChanges.deleted[kind].includes(id));
       expect(overlap).toEqual([]);
     }

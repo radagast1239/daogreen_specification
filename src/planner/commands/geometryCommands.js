@@ -80,7 +80,25 @@ function dedupe(ids) {
 // итерируют по этому списку, так что добавление одного элемента здесь даёт
 // links полноценный typed-contract bucket (created/changed/deleted) без
 // отдельного shape.
-const ENTITY_KINDS = ["walls", "nodes", "items", "dimensions", "links"];
+// PHASE 1A-2C2D3E2 — "lines" добавлен тем же способом для line.bulkDelete:
+// normalizeEntityChanges/flattenEntityChanges выводят пустой lines:[] bucket
+// для ЛЮБОЙ команды (не только line.bulkDelete) через generic iteration
+// ниже — существующие wall.bulkDelete/item.bulkDelete consumers должны
+// допускать этот новый пустой bucket (см. обновлённые exhaustive
+// entityChanges.created-проверки в тестах).
+const ENTITY_KINDS = ["walls", "nodes", "items", "dimensions", "links", "lines"];
+
+/**
+ * PHASE 1A-2C2D3E2 REQUIRED FIX F-01 — fresh per-call bucket derived from
+ * ENTITY_KINDS (single source of truth), not a hand-maintained literal that
+ * can silently fall behind when a new kind is added. Each call returns a
+ * brand-new object with brand-new arrays — no bucket/array reference is ever
+ * shared between created/changed/deleted, nor between separate
+ * emptyEntityChanges() calls (see fresh-reference regression tests).
+ */
+function emptyEntityBucket() {
+  return Object.fromEntries(ENTITY_KINDS.map((kind) => [kind, []]));
+}
 
 /**
  * PHASE 1A-2A P2 — typed entity-change contract. Additive: старый flat
@@ -91,9 +109,9 @@ const ENTITY_KINDS = ["walls", "nodes", "items", "dimensions", "links"];
  */
 function emptyEntityChanges() {
   return {
-    created: { walls: [], nodes: [], items: [], dimensions: [] },
-    changed: { walls: [], nodes: [], items: [], dimensions: [] },
-    deleted: { walls: [], nodes: [], items: [], dimensions: [] },
+    created: emptyEntityBucket(),
+    changed: emptyEntityBucket(),
+    deleted: emptyEntityBucket(),
   };
 }
 
@@ -886,6 +904,63 @@ function handleItemBulkDelete(plan, command) {
   });
 }
 
+// ── line deletion (PHASE 1A-2C2D3E2) ──────────────────────────────────────
+
+/**
+ * PHASE 1A-2C2D3E2 — shared bulk-safe line-deletion mutation. Used by
+ * line.bulkDelete (single ID or many) — the single source of this cleanup
+ * policy, mirroring deleteItemsFromPlan's contract for lines. Computes the
+ * FINAL surviving line set ONCE, then runs the same engineering-derived
+ * sync production already runs once per item delete (see runEngineeringSync
+ * above) — exactly once, not per line.
+ *
+ * No attached-dimension type exists for lines today (dimensions attach only
+ * to attachedTo.type "item"/"wall" — see validatePlanIntegrity.js), and
+ * plan.links reference items (fromId/toId), never lines — so there is
+ * nothing to detach/prune directly here. Deleting a line never changes
+ * plan.items, plan.walls, or plan.nodes: no mounted-item refresh, no wall/
+ * node mutation is performed here. Any derived item.connections / line
+ * fromItemId-toItemId recompute is left entirely to runEngineeringSync's
+ * own existing policy (unchanged by this command).
+ *
+ * @param {object} plan
+ * @param {string[]} lineIds — may contain duplicates and/or IDs absent from
+ *   plan.lines (both silently normalized away) — matches item.bulkDelete's
+ *   own "operate only on what actually exists" policy.
+ * @returns {object|null} internal result, or null if none of lineIds exist.
+ */
+function deleteLinesFromPlan(plan, lineIds) {
+  const existingLineIdSet = new Set((plan.lines || []).map((l) => l.id));
+  const deletedLineIds = [...new Set(lineIds)].filter((id) => existingLineIdSet.has(id));
+  if (deletedLineIds.length === 0) return null;
+  const deletedLineIdSet = new Set(deletedLineIds);
+
+  const lines = (plan.lines || []).filter((l) => !deletedLineIdSet.has(l.id));
+
+  const nextPlan = runEngineeringSync({ ...plan, lines });
+
+  return {
+    plan: nextPlan,
+    deletedLineIds,
+  };
+}
+
+function handleLineBulkDelete(plan, command) {
+  const { lineIds } = command;
+  if (!Array.isArray(lineIds) || lineIds.length === 0) {
+    return rejected("line.bulkDelete", plan, GEOMETRY_COMMAND_INVALID, "line.bulkDelete требует непустой массив lineIds");
+  }
+  const result = deleteLinesFromPlan(plan, lineIds);
+  if (!result) {
+    return rejected("line.bulkDelete", plan, GEOMETRY_COMMAND_NO_TARGET, "Ни одна из указанных линий не найдена");
+  }
+  return changedOk("line.bulkDelete", result.plan, {
+    entityChanges: {
+      deleted: { lines: result.deletedLineIds },
+    },
+  });
+}
+
 // ── dispatch table ────────────────────────────────────────────────────────
 
 const HANDLERS = {
@@ -893,6 +968,7 @@ const HANDLERS = {
   "wall.delete": handleWallDelete,
   "wall.bulkDelete": handleWallBulkDelete,
   "item.bulkDelete": handleItemBulkDelete,
+  "line.bulkDelete": handleLineBulkDelete,
   "wall.create": handleWallCreate,
   "wall.finishDraft": handleWallCreate,
   "wall.straighten": handleWallStraighten,
