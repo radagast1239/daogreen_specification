@@ -24,14 +24,20 @@ export function TechDetails({ children, summary = "Техническая инф
 }
 
 /**
- * Compact ⋯ menu. Items: { id, label, onClick, disabled?, danger? }
+ * Compact ⋯ menu.
+ * Items: { id, label, onClick, disabled?, danger?, separator?, children? }
+ * children: nested actions (e.g. copy variants) under a parent label.
  */
 export function RowActionsMenu({ items, label = "Действия" }) {
   const [open, setOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
   const root = useRef(null);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open) {
+      setExpandedId(null);
+      return undefined;
+    }
     const onDoc = (e) => {
       if (!root.current?.contains(e.target)) setOpen(false);
     };
@@ -64,23 +70,73 @@ export function RowActionsMenu({ items, label = "Действия" }) {
       </button>
       {open && (
         <div className="row-actions__menu" role="menu">
-          {visible.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="menuitem"
-              disabled={item.disabled}
-              className={
-                "row-actions__item" + (item.danger ? " row-actions__item--danger" : "")
-              }
-              onClick={() => {
-                setOpen(false);
-                item.onClick?.();
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
+          {visible.map((item, index) => {
+            if (item.separator) {
+              return (
+                <div
+                  key={item.id || `sep-${index}`}
+                  className="row-actions__sep"
+                  role="separator"
+                />
+              );
+            }
+            const nested = (item.children || []).filter(Boolean);
+            if (nested.length) {
+              const expanded = expandedId === item.id;
+              return (
+                <div key={item.id} className="row-actions__group">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="row-actions__item row-actions__item--parent"
+                    aria-expanded={expanded}
+                    onClick={() => setExpandedId(expanded ? null : item.id)}
+                  >
+                    <span>{item.label}</span>
+                    <span className="row-actions__chevron" aria-hidden>
+                      {expanded ? "▾" : "▸"}
+                    </span>
+                  </button>
+                  {expanded &&
+                    nested.map((child) => (
+                      <button
+                        key={child.id}
+                        type="button"
+                        role="menuitem"
+                        disabled={child.disabled}
+                        className={
+                          "row-actions__item row-actions__item--nested" +
+                          (child.danger ? " row-actions__item--danger" : "")
+                        }
+                        onClick={() => {
+                          setOpen(false);
+                          child.onClick?.();
+                        }}
+                      >
+                        {child.label}
+                      </button>
+                    ))}
+                </div>
+              );
+            }
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="menuitem"
+                disabled={item.disabled}
+                className={
+                  "row-actions__item" + (item.danger ? " row-actions__item--danger" : "")
+                }
+                onClick={() => {
+                  setOpen(false);
+                  item.onClick?.();
+                }}
+              >
+                {item.label}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
