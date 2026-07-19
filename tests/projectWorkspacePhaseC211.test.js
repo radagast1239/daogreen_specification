@@ -28,7 +28,7 @@ describe("C2.1.1 real row wiring and rename flow", () => {
 
   it("persists both API flag spellings and hydrates the optimistic badge", () => {
     expect(page).toContain("nameOverridden: true");
-    expect(page).toContain("Название изменено в проекте");
+    expect(page).toContain("Изменено в проекте");
     expect(routes).toContain("patch.name_overridden !== undefined");
     expect(db).toContain("name_overridden: !!row.name_overridden");
     expect(store).toContain('case "PROJECT_ITEM_UPDATE"');

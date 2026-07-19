@@ -55,6 +55,7 @@ export default function SpecQuickFilters({
 
   return (
     <div className="spec-quick-filters no-print">
+      <span className="spec-columns__label muted" style={{ width: "100%" }}>Фильтры</span>
       {activeFilters.length ? (
         <div className="spec-active-filter" aria-label="Активные фильтры">
           {activeFilters.map((filterId) => <button key={filterId} type="button" className="chip chip--brand spec-active-filter__chip" onClick={() => toggleFilter(filterId)} aria-label={`Удалить фильтр: ${resolveDashboardFilterLabel(filterId)}`}>

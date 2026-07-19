@@ -1693,6 +1693,7 @@ function SpecTab({
         aria-hidden={workspaceView !== "spec"}
         hidden={workspaceView !== "spec"}
       >
+      <div className="spec-table-controls">
       <SpecQuickFilters
         items={project.items || []}
         materials={materials}
@@ -1712,7 +1713,7 @@ function SpecTab({
       />
       {!clientPreview && (
         <div className="spec-columns" role="group" aria-label="Набор колонок спецификации">
-          <span className="spec-columns__label muted">Колонки:</span>
+          <span className="spec-columns__label muted">Колонки</span>
           {Object.entries(SPECIFICATION_COLUMN_PRESETS).map(([id, preset]) => (
             <button
               key={id}
@@ -1726,6 +1727,7 @@ function SpecTab({
           ))}
         </div>
       )}
+      </div>
       </div>
       </>
       )}
@@ -1772,7 +1774,7 @@ function SpecTab({
                     className={((it.includedInProject === false ? "row-hidden " : "") + (highlightItemId === it.id ? "spec-row--highlight " : "") + (inspectedItemId === it.id ? "spec-row--inspected" : ""))}
                   >
                     {!clientPreview && (
-                    <td data-spec-column="select" hidden={!specificationPresetHasColumn(columnPreset, "select")} style={{ width: 36, textAlign: "center" }}>
+                    <td data-spec-column="select" hidden={!specificationPresetHasColumn(columnPreset, "select")} className="spec-select-cell" style={{ width: 36 }}>
                       <input
                         type="checkbox"
                         checked={modSelected.has(it.id)}
@@ -1800,23 +1802,24 @@ function SpecTab({
                         </div>
                       )}
                     </td>
-                    <td data-spec-column="name" hidden={!specificationPresetHasColumn(columnPreset, "name")} style={{ minWidth: 240 }}>
+                    <td data-spec-column="name" hidden={!specificationPresetHasColumn(columnPreset, "name")} className="spec-name-cell" style={{ minWidth: 200 }}>
                       {readOnly ? (
                         <div>
-                          <strong style={{ fontSize: 13 }}>{it.name}</strong>
+                          <strong className="spec-name-text" title={it.name || ""}>{it.name}</strong>
                           {it.clientNote && (
-                            <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{it.clientNote}</div>
+                            <div className="spec-name-meta muted">{it.clientNote}</div>
                           )}
                         </div>
                       ) : (
                         <>
                       <input
-                        className="input-inline"
+                        className="input-inline spec-name-input"
                         value={it.name}
+                        title={it.name || ""}
                         onChange={(e) => editItem(it.id, { name: e.target.value, ...(it.materialId ? { nameOverridden: true } : {}) })}
                       />
                       {it.comment && !hasStructuredSpecEditor(it.name) && (
-                        <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{it.comment}</div>
+                        <div className="spec-name-meta muted">{it.comment}</div>
                       )}
                       {it.source === "planner" && (
                         <div className="chip" style={{ fontSize: 10, marginTop: 4 }}>
@@ -1902,12 +1905,18 @@ function SpecTab({
                     </td>
                     <td data-spec-column="supplier" hidden={!specificationPresetHasColumn(columnPreset, "supplier")} style={{ width: 100 }}>
                       {readOnly || it.materialId ? (
-                        <span title={it.materialId ? "Поставщик закреплён в базе материалов" : undefined}>{it.supplier || "—"}</span>
+                        <span
+                          className={`spec-supplier${it.materialId ? " spec-supplier--catalog" : ""}`}
+                          title={it.supplier ? `${it.supplier}${it.materialId ? " · поставщик из базы материалов" : ""}` : (it.materialId ? "Поставщик закреплён в базе материалов" : undefined)}
+                        >
+                          {it.supplier || "—"}
+                        </span>
                       ) : (
                       <input
-                        className="input-inline"
+                        className="input-inline spec-supplier-input"
                         value={it.supplier || ""}
                         placeholder="поставщик"
+                        title={it.supplier || ""}
                         onChange={(e) => editItem(it.id, { supplier: e.target.value })}
                       />
                       )}
@@ -2150,7 +2159,7 @@ function SpecTab({
                           if (await confirm({ title: "Удалить позицию?", message: it.name, confirmLabel: "Удалить" })) actions.itemDelete(project.id, it.id);
                         }}
                       />
-                      {it.nameOverridden && <div className="chip chip--neutral spec-name-override" style={{ fontSize: 10, marginTop: 4 }}>Название изменено в проекте</div>}
+                      {it.nameOverridden && <div className="chip chip--neutral spec-name-override" title="Название изменено вручную в этом проекте">Изменено в проекте</div>}
                       </span>
                     </td>
                     </>

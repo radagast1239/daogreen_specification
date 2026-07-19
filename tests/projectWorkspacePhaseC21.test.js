@@ -25,7 +25,7 @@ describe("Project Workspace C2.1", () => {
     const inspector = read("src/components/SpecificationItemInspector.jsx");
     expect(db).toContain("name_overridden");
     expect(routes).toContain("effectivePatch.nameOverridden = true");
-    expect(inspector).toContain("Название изменено в проекте");
+    expect(inspector).toContain("Изменено в проекте");
     expect(inspector).toContain("nameOverridden: false");
   });
 
