@@ -406,14 +406,14 @@ describe("PHASE 1A-2C2D3B — combined scenario", () => {
     expect(result.entityChanges.deleted.dimensions).toEqual(["auto1"]);
     expect(result.entityChanges.changed.dimensions).toEqual(["manual1"]);
     expect(result.entityChanges.created).toEqual({
-      walls: [], nodes: [], items: [], dimensions: [], links: [],
+      walls: [], nodes: [], items: [], dimensions: [], links: [], lines: [],
     });
 
     for (const bucket of ["created", "changed", "deleted"]) {
       const flat = Object.values(result.entityChanges[bucket]).flat();
       expect(flat.length).toBe(new Set(flat).size);
     }
-    for (const kind of ["walls", "nodes", "items", "dimensions", "links"]) {
+    for (const kind of ["walls", "nodes", "items", "dimensions", "links", "lines"]) {
       const overlap = result.entityChanges.changed[kind].filter((id) => result.entityChanges.deleted[kind].includes(id));
       expect(overlap).toEqual([]);
     }

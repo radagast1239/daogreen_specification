@@ -64,6 +64,7 @@ import {
 import { applyWallDelete } from "../../planner/ui/applyWallDelete.js";
 import { applyWallBulkDelete } from "../../planner/ui/applyWallBulkDelete.js";
 import { applyItemBulkDelete } from "../../planner/ui/applyItemBulkDelete.js";
+import { applyLineBulkDelete } from "../../planner/ui/applyLineBulkDelete.js";
 import { summarizeRoomClearItems, buildRoomClearConfirmMessage } from "../../planner/ui/roomClearSummary.js";
 import { applyWallLengthEdit, createWallLengthEditSession } from "../../planner/ui/applyWallLengthEdit.js";
 import { formatWallLengthMm } from "../../planner/ui/parseWallLengthInput.js";
@@ -160,6 +161,14 @@ const ITEM_LAYER_IDS = LAYERS.map((l) => l.id).filter(
 // весь ITEM_LAYER_IDS — irrigation/power/light/vent (mode:"both"), climate
 // и staff остаются legacy-путём до отдельной фазы.
 const MIGRATED_ITEM_CLEAR_LAYER_IDS = ["racks", "water", "sockets", "sanitary", "furn"];
+// PHASE 1A-2C2D3E2 — только эти два фактически line-only слоя мигрируют на
+// line.bulkDelete в clearSheet (см. AUDIT PHASE 1A-2C2D3E1: drain и
+// irrigation — единственные LINE_LAYER_IDS-слои с нулём catalog item kinds
+// сегодня, так что line-only clear здесь ничего не оставляет позади).
+// Намеренно НЕ весь LINE_LAYER_IDS — power/light/vent (mode:"both"), climate
+// и staff содержат реальные item kinds и остаются legacy-путём (см. Risks R1-R3
+// того же аудита) до отдельной combined item+line clear фазы.
+const MIGRATED_LINE_CLEAR_LAYER_IDS = ["drain", "irrigation"];
 
 function draftPt(from, to, opts) {
   const { point, angleSnap } = resolveDraftPoint(from, to, opts);
@@ -789,6 +798,21 @@ export default function PlanPage() {
       // analysis/retry, geometry unchanged — no false-success cleanup.
       return status === "success";
     }
+    if (coll === "lines") {
+      // PHASE 1A-2C2D3E2 (deleteHits): canonical command boundary —
+      // line.bulkDelete already runs the shared engineering-derived sync
+      // exactly once for the whole delete set (see geometryCommands.js
+      // deleteLinesFromPlan) — not duplicated here. Full ids array is
+      // forwarded (not just ids[0]) so a future multi-line selection is
+      // already handled atomically.
+      const { status } = applyLineBulkDelete({ lineIds: ids, runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        clearSelection();
+      }
+      // geometry-rejected / commit-failed: selection preserved for
+      // analysis/retry, geometry unchanged — no false-success cleanup.
+      return status === "success";
+    }
     setPlan((p) => {
       let next = { ...p };
       if (coll === "rulers") {
@@ -811,9 +835,6 @@ export default function PlanPage() {
         } else {
           next[coll] = p[coll].filter((o) => o.id !== id);
         }
-      }
-      if (coll === "lines") {
-        next = syncEngineeringPlan(next);
       }
       return next;
     });
@@ -1718,6 +1739,22 @@ export default function PlanPage() {
       // geometryCommands.js deleteItemsFromPlan) — not duplicated here.
       const itemIds = getCurrentPlan().items.filter((it) => it.layer === active).map((it) => it.id);
       const { status } = applyItemBulkDelete({ itemIds, runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        setSel(null);
+      }
+      // geometry-rejected / commit-failed: selection preserved, no
+      // false-success cleanup.
+      return;
+    }
+    if (MIGRATED_LINE_CLEAR_LAYER_IDS.includes(active)) {
+      // PHASE 1A-2C2D3E2 (clearSheet): canonical command boundary —
+      // line.bulkDelete already runs the shared engineering-derived sync
+      // exactly once for the whole delete set (see geometryCommands.js
+      // deleteLinesFromPlan) — not duplicated here.
+      const lineIds = getCurrentPlan().lines
+        .filter((line) => line.layer === active || migrateLayerId(line.layer) === active)
+        .map((line) => line.id);
+      const { status } = applyLineBulkDelete({ lineIds, runGeometryCommand });
       if (status === "success" || status === "noop" || status === "no-target") {
         setSel(null);
       }

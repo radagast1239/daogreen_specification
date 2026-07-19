@@ -459,7 +459,9 @@ describe("PHASE 1A-2C2B — entityChanges contract", () => {
     expect(result.entityChanges.deleted.links).toEqual(["lk1"]);
     expect(result.entityChanges.changed.items).toEqual([]);
     expect(result.entityChanges.changed.dimensions).toEqual(["manual1"]);
-    expect(result.entityChanges.created).toEqual({ walls: [], nodes: [], items: [], dimensions: [], links: [] });
+    expect(result.entityChanges.created).toEqual({
+      walls: [], nodes: [], items: [], dimensions: [], links: [], lines: [],
+    });
 
     for (const bucket of ["created", "changed", "deleted"]) {
       const flat = Object.values(result.entityChanges[bucket]).flat();
