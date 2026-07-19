@@ -1373,9 +1373,8 @@ describe("PHASE 1A-2C2D3E4C — combined item+line delete command", () => {
     expect(calls).toBe(1);
   });
 
-  it("PlanPage.jsx does not yet import or reference applyItemLineBulkDelete (no UI wiring in this phase)", () => {
-    expect(planPageSource).not.toMatch(/applyItemLineBulkDelete/);
-    expect(planPageSource).not.toMatch(/itemLine\.bulkDelete/);
+  it("PlanPage.jsx does not import applyItemLineBulkDelete directly (it reaches the combined command only through applyCombinedLayerClear, see PHASE 1A-2C2D3E4D's own boundary block below)", () => {
+    expect(planPageSource).not.toMatch(/from\s*["'][^"']*ui\/applyItemLineBulkDelete\.js["']/);
   });
 
   it("itemLine.bulkDelete is the exactly-one combined command path (no second/alias entry point)", () => {
@@ -1384,5 +1383,153 @@ describe("PHASE 1A-2C2D3E4C — combined item+line delete command", () => {
     // its one HANDLERS registration — a second registration under a
     // different command-type string would push this above 2.
     expect(registrations.length).toBe(2);
+  });
+});
+
+/**
+ * PHASE 1A-2C2D3E4D — combined power/light/vent clearSheet wiring.
+ * itemLine.bulkDelete (core, unchanged by this phase) is reached from
+ * clearSheet through a factored-out pure orchestration helper
+ * (applyCombinedLayerClear.js), which itself composes
+ * combinedLayerClearSummary.js (counts/IDs) + applyItemLineBulkDelete.js
+ * (dispatch) — not a direct import of either from PlanPage.jsx. This keeps
+ * the same "leaf helper does the work, PlanPage only wires it up" shape as
+ * every other migrated clearSheet branch, while making the full flow
+ * (empty-check/confirm/live-plan-race/dispatch) unit-testable without
+ * rendering PlanPage.jsx (see tests/plannerCombinedLayerClear.test.js).
+ * staff/climate/drain/irrigation/room/partitions are untouched by this
+ * phase.
+ */
+describe("PHASE 1A-2C2D3E4D — combined power/light/vent clearSheet wiring", () => {
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  function extractBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    expect(start, `marker not found: ${startMarker}`).toBeGreaterThanOrEqual(0);
+    const end = source.indexOf(endMarker, start);
+    expect(end, `end marker not found: ${endMarker}`).toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  function combinedBranchBody() {
+    return extractBetween(
+      planPageSource,
+      "if (MIGRATED_COMBINED_CLEAR_LAYER_IDS.includes(active)) {",
+      "const name = layerById(active).name;",
+    );
+  }
+
+  it("MIGRATED_COMBINED_CLEAR_LAYER_IDS is exactly power/light/vent, not built dynamically from LINE_LAYER_IDS/ITEM_LAYER_IDS", () => {
+    expect(planPageSource).toMatch(/const MIGRATED_COMBINED_CLEAR_LAYER_IDS = \["power", "light", "vent"\];/);
+  });
+
+  it("staff is absent from MIGRATED_COMBINED_CLEAR_LAYER_IDS (no staff migration in this phase)", () => {
+    expect(planPageSource).not.toMatch(/MIGRATED_COMBINED_CLEAR_LAYER_IDS = \[[^\]]*"staff"/);
+  });
+
+  it("climate remains item-only migrated (MIGRATED_ITEM_CLEAR_LAYER_IDS unchanged); drain/irrigation remain line-only migrated (MIGRATED_LINE_CLEAR_LAYER_IDS unchanged)", () => {
+    expect(planPageSource).toMatch(/const MIGRATED_ITEM_CLEAR_LAYER_IDS = \["racks", "water", "sockets", "sanitary", "furn", "climate"\];/);
+    expect(planPageSource).toMatch(/const MIGRATED_LINE_CLEAR_LAYER_IDS = \["drain", "irrigation"\];/);
+  });
+
+  it("the combined branch is checked before the generic per-sheet confirm (and therefore before partitions/item-only/line-only/legacy fallback, all of which sit after that confirm)", () => {
+    const combinedIdx = planPageSource.indexOf("if (MIGRATED_COMBINED_CLEAR_LAYER_IDS.includes(active)) {");
+    const genericConfirmIdx = planPageSource.indexOf("const name = layerById(active).name;");
+    const legacyFallbackIdx = planPageSource.indexOf("if (LINE_LAYER_IDS.includes(active)) next.lines");
+    expect(combinedIdx).toBeGreaterThan(-1);
+    expect(genericConfirmIdx).toBeGreaterThan(combinedIdx);
+    expect(legacyFallbackIdx).toBeGreaterThan(genericConfirmIdx);
+  });
+
+  it("the combined branch routes through applyCombinedLayerClear, with no competing direct-mutation path and no separate item/line helper calls", () => {
+    const body = stripComments(combinedBranchBody());
+    expect(body).toMatch(/applyCombinedLayerClear\s*\(/);
+    expect(body).not.toMatch(/\bsetPlan\s*\(/);
+    expect(body).not.toMatch(/\bapplyItemBulkDelete\s*\(/);
+    expect(body).not.toMatch(/\bapplyLineBulkDelete\s*\(/);
+    expect(body).not.toMatch(/\bapplyItemLineBulkDelete\s*\(/);
+    expect(body).not.toMatch(/\.filter\(\(it\)\s*=>\s*!?it\.layer/);
+    expect(body).not.toMatch(/\.filter\(\(l(?:ine)?\)\s*=>\s*!?l(?:ine)?\.layer/);
+    expect(body).not.toMatch(/\bsyncEngineeringPlan\s*\(/);
+  });
+
+  it("the combined branch passes getCurrentPlan and layerById(active).name through to applyCombinedLayerClear (live-plan reads and count-based confirm both live inside the helper, not duplicated in PlanPage)", () => {
+    const body = stripComments(combinedBranchBody());
+    expect(body).toMatch(/getCurrentPlan\s*,/);
+    expect(body).toMatch(/layerId:\s*active/);
+    expect(body).toMatch(/layerLabel:\s*layerById\(active\)\.name/);
+    expect(body).toMatch(/confirmFn:/);
+    expect(body).toMatch(/runGeometryCommand/);
+  });
+
+  it("selection cleanup in the combined branch is status-based, covering the helper's own status vocabulary (including \"empty\")", () => {
+    const body = stripComments(combinedBranchBody());
+    expect(body).toMatch(/status === "success"/);
+    expect(body).toMatch(/status === "noop"/);
+    expect(body).toMatch(/status === "no-target"/);
+    expect(body).toMatch(/status === "empty"/);
+    expect(body).toMatch(/setSel\(null\)/);
+  });
+
+  it("the combined branch returns early and never falls through to the legacy setPlan block", () => {
+    const body = stripComments(combinedBranchBody());
+    expect(body.trim().replace(/\}\s*$/, "").trim().endsWith("return;")).toBe(true);
+  });
+
+  it("PlanPage.jsx imports applyCombinedLayerClear (and no longer imports applyItemLineBulkDelete/combinedLayerClearSummary directly)", () => {
+    expect(planPageSource).toMatch(/from\s*["'][^"']*ui\/applyCombinedLayerClear\.js["']/);
+    expect(planPageSource).not.toMatch(/from\s*["'][^"']*ui\/combinedLayerClearSummary\.js["']/);
+  });
+
+  it("applyCombinedLayerClear itself composes combinedLayerClearSummary + applyItemLineBulkDelete — the real combined command IS reached, just not via a direct PlanPage import", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyCombinedLayerClear.js"), "utf8");
+    const codeOnly = stripComments(helperSource);
+    expect(helperSource).toMatch(/from\s*["']\.\/combinedLayerClearSummary\.js["']/);
+    expect(helperSource).toMatch(/from\s*["']\.\/applyItemLineBulkDelete\.js["']/);
+    expect(codeOnly).toMatch(/applyItemLineBulkDelete\s*\(/);
+    const dispatchCalls = (codeOnly.match(/applyItemLineBulkDelete\s*\(/g) || []).length;
+    expect(dispatchCalls).toBe(1);
+  });
+
+  it("applyCombinedLayerClear does not import React, DOM, HistoryModel, geometryCommands, or PlanPage, and never calls confirmFn (window.confirm) more than once per invocation", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyCombinedLayerClear.js"), "utf8");
+    const codeOnly = stripComments(helperSource);
+    expect(helperSource).not.toMatch(/from\s*["']react/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*historyModel\.js["']/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*commands\/geometryCommands\.js["']/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*PlanPage/);
+    expect(codeOnly).not.toMatch(/\bwindow\./);
+    expect(codeOnly).not.toMatch(/\bdocument\./);
+    const confirmCalls = (codeOnly.match(/confirmFn\s*\(/g) || []).length;
+    expect(confirmCalls).toBe(1);
+  });
+
+  it("combinedLayerClearSummary.js is a pure leaf: no React/DOM/HistoryModel/geometryCommands/dispatcher, and uses production migrateLayerId rather than a re-derived alias map", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "combinedLayerClearSummary.js"), "utf8");
+    expect(helperSource).not.toMatch(/from\s*["']react/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*historyModel\.js["']/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*commands\/geometryCommands\.js["']/);
+    expect(helperSource).not.toMatch(/\bwindow\./);
+    expect(helperSource).not.toMatch(/\bdocument\./);
+    expect(helperSource).toMatch(/from\s*["']\.\.\/catalog\.js["']/);
+    expect(helperSource).toMatch(/migrateLayerId\s*\(/);
+  });
+
+  it("power/light/vent clearSheet branches no longer fall through to the legacy direct-setPlan block (that block's LINE_LAYER_IDS/ITEM_LAYER_IDS fallback text is unchanged, but power/light/vent now return early above it)", () => {
+    const legacyBody = stripComments(
+      extractBetween(planPageSource, "setPlan((p) => {\r\n      const next = { ...p };", "  };"),
+    );
+    // The legacy fallback text itself is untouched (still generically
+    // matches all of LINE_LAYER_IDS/ITEM_LAYER_IDS) — the guarantee that
+    // power/light/vent never reach it comes from the branch-ordering test
+    // above, not from removing power/light/vent out of these lists (which
+    // would be a layer-classification change out of scope for this phase).
+    expect(legacyBody).toMatch(/LINE_LAYER_IDS\.includes\(active\)/);
+    expect(legacyBody).toMatch(/ITEM_LAYER_IDS\.includes\(active\)/);
   });
 });

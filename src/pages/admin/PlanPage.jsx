@@ -65,6 +65,7 @@ import { applyWallDelete } from "../../planner/ui/applyWallDelete.js";
 import { applyWallBulkDelete } from "../../planner/ui/applyWallBulkDelete.js";
 import { applyItemBulkDelete } from "../../planner/ui/applyItemBulkDelete.js";
 import { applyLineBulkDelete } from "../../planner/ui/applyLineBulkDelete.js";
+import { applyCombinedLayerClear } from "../../planner/ui/applyCombinedLayerClear.js";
 import { summarizeRoomClearItems, buildRoomClearConfirmMessage } from "../../planner/ui/roomClearSummary.js";
 import { applyWallLengthEdit, createWallLengthEditSession } from "../../planner/ui/applyWallLengthEdit.js";
 import { formatWallLengthMm } from "../../planner/ui/parseWallLengthInput.js";
@@ -178,6 +179,15 @@ const MIGRATED_ITEM_CLEAR_LAYER_IDS = ["racks", "water", "sockets", "sanitary", 
 // и staff содержат реальные item kinds и остаются legacy-путём (см. Risks R1-R3
 // того же аудита) до отдельной combined item+line clear фазы.
 const MIGRATED_LINE_CLEAR_LAYER_IDS = ["drain", "irrigation"];
+// PHASE 1A-2C2D3E4D — только эти три mode:"both" слоя мигрируют на
+// itemLine.bulkDelete (см. AUDIT PHASE 1A-2C2D3E4A: power/light/vent —
+// единственные LINE_LAYER_IDS-слои с реальными catalog item kinds, у
+// которых до этой фазы «Очистить лист» удалял только lines, оставляя все
+// items нетронутыми). Намеренно НЕ строится динамически из LINE_LAYER_IDS/
+// ITEM_LAYER_IDS — staff (mode:"lines", но с person item kind) и climate
+// (уже item-only с PHASE 1A-2C2D3E3) сознательно исключены до отдельных
+// будущих фаз; drain/irrigation остаются line-only (PHASE 1A-2C2D3E2).
+const MIGRATED_COMBINED_CLEAR_LAYER_IDS = ["power", "light", "vent"];
 
 function draftPt(from, to, opts) {
   const { point, angleSnap } = resolveDraftPoint(from, to, opts);
@@ -1720,6 +1730,33 @@ export default function PlanPage() {
       }
       // geometry-rejected / commit-failed: selection preserved, no
       // false-success cleanup.
+      return;
+    }
+    if (MIGRATED_COMBINED_CLEAR_LAYER_IDS.includes(active)) {
+      // PHASE 1A-2C2D3E4D (clearSheet): canonical command boundary —
+      // itemLine.bulkDelete already runs one merged item+line structural
+      // cleanup and one engineering sync for the whole delete set (see
+      // geometryCommands.js deleteItemsAndLinesFromPlan) — not duplicated
+      // here. power/light/vent (mode:"both") get their own honest
+      // equipment+lines count confirm instead of the generic per-sheet
+      // text below, since a bare "Очистить объекты листа X?" historically
+      // only cleared lines while implying everything (see AUDIT PHASE
+      // 1A-2C2D3E4A, Risk R2). Orchestration (pre-confirm summary/empty
+      // check/confirm/live-plan-race re-read/dispatch) is factored out into
+      // applyCombinedLayerClear so it's directly unit-testable without
+      // rendering this component.
+      const status = applyCombinedLayerClear({
+        getCurrentPlan,
+        layerId: active,
+        layerLabel: layerById(active).name,
+        confirmFn: (message) => window.confirm(message),
+        runGeometryCommand,
+      });
+      if (status === "success" || status === "noop" || status === "no-target" || status === "empty") {
+        setSel(null);
+      }
+      // "cancelled" / geometry-rejected / commit-failed: selection
+      // preserved, no false-success cleanup.
       return;
     }
     const name = layerById(active).name;
