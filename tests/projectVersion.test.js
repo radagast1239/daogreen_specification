@@ -302,6 +302,15 @@ describe("published release snapshot", () => {
     expect(info.unpublishedSummary.changedCount).toBe(1);
   });
 
+  it("detects unpublished price and name edits", () => {
+    seedProject("p1", { items: [clientItem("it1", "mat1", { qty: 1, price: 100, name: "A" })] });
+    createVersion("p1", "admin", { force: true });
+    saveItems("p1", [clientItem("it1", "mat1", { qty: 1, price: 120, name: "A" })]);
+    expect(getProjectReleaseInfo(loadProject("p1")).hasUnpublishedChanges).toBe(true);
+    saveItems("p1", [clientItem("it1", "mat1", { qty: 1, price: 100, name: "B" })]);
+    expect(getProjectReleaseInfo(loadProject("p1")).hasUnpublishedChanges).toBe(true);
+  });
+
   it("client page/PDF/Excel parity totals match published snapshot", () => {
     seedProject("p1", {
       items: [

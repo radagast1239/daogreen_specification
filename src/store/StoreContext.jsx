@@ -8,9 +8,11 @@ import {
   reconcileProjectItemsVisibility,
   applyClientVisibilityPatch,
 } from "../../shared/itemTypes.js";
+import { patchTouchesClientDelivery } from "../../shared/projectPublishedRelease.js";
 import { createItemPatchQueue } from "./itemPatchQueue.js";
 import { Modal } from "../components/ui.jsx";
 import { reconcileItemCatalogFields } from "../../shared/itemTypes.js";
+import { createDebouncedTask } from "../lib/debouncedTask.js";
 
 export { buildItemsFromModules };
 
@@ -73,16 +75,36 @@ function reducer(state, action) {
     case "PROJECT_ITEM_UPDATE":
       return {
         ...state,
+        projects: state.projects.map((p) => {
+          if (p.id !== action.projectId) return p;
+          const next = {
+            ...p,
+            updatedAt: action.updatedAt === undefined ? p.updatedAt : action.updatedAt,
+            items: p.items.map((it) =>
+              it.id === action.itemId
+                ? reconcileStoredItem({ ...it, ...action.item }, state.materials)
+                : it
+            ),
+          };
+          // Optimistic: any client-facing edit after a published release needs republish.
+          if (p.publishedRelease && patchTouchesClientDelivery(action.item)) {
+            next.hasUnpublishedChanges = true;
+          }
+          return next;
+        }),
+      };
+    case "PROJECT_RELEASE_FLAGS":
+      return {
+        ...state,
         projects: state.projects.map((p) =>
           p.id === action.projectId
             ? {
                 ...p,
-                updatedAt: action.updatedAt === undefined ? p.updatedAt : action.updatedAt,
-                items: p.items.map((it) =>
-                  it.id === action.itemId
-                    ? reconcileStoredItem({ ...it, ...action.item }, state.materials)
-                    : it
-                ),
+                hasUnpublishedChanges: action.hasUnpublishedChanges,
+                unpublishedSummary: action.unpublishedSummary ?? p.unpublishedSummary,
+                publishedRelease: action.publishedRelease !== undefined
+                  ? action.publishedRelease
+                  : p.publishedRelease,
               }
             : p
         ),
@@ -91,7 +113,13 @@ function reducer(state, action) {
       return {
         ...state,
         projects: state.projects.map((p) =>
-          p.id === action.projectId ? { ...p, items: [...p.items, action.item] } : p
+          p.id === action.projectId
+            ? {
+                ...p,
+                items: [...p.items, action.item],
+                ...(p.publishedRelease ? { hasUnpublishedChanges: true } : {}),
+              }
+            : p
         ),
       };
     case "PROJECT_ITEM_REMOVE":
@@ -99,7 +127,11 @@ function reducer(state, action) {
         ...state,
         projects: state.projects.map((p) =>
           p.id === action.projectId
-            ? { ...p, items: p.items.filter((it) => it.id !== action.itemId) }
+            ? {
+                ...p,
+                items: p.items.filter((it) => it.id !== action.itemId),
+                ...(p.publishedRelease ? { hasUnpublishedChanges: true } : {}),
+              }
             : p
         ),
       };
@@ -200,6 +232,35 @@ export function StoreProvider({ children }) {
     return next;
   }, [currentProjectRevision, noteRevisionConflict]);
 
+  const releaseFlagsRefreshRef = useRef(new Map());
+  const scheduleReleaseFlagsRefresh = useCallback((projectId) => {
+    if (!projectId) return;
+    let task = releaseFlagsRefreshRef.current.get(projectId);
+    if (!task) {
+      task = createDebouncedTask(async () => {
+        try {
+          const p = await apiClient.getProject(projectId);
+          const revision = Number(p?.revision);
+          if (revision > 0) revisionRef.current.set(projectId, revision);
+          dispatch({
+            type: "PROJECT_RELEASE_FLAGS",
+            projectId,
+            hasUnpublishedChanges: !!p.hasUnpublishedChanges,
+            unpublishedSummary: p.unpublishedSummary,
+            publishedRelease: p.publishedRelease,
+          });
+        } catch {
+          /* ignore transient refresh errors */
+        }
+      }, 450);
+      releaseFlagsRefreshRef.current.set(projectId, task);
+    }
+    task.schedule();
+  }, []);
+
+  const scheduleReleaseFlagsRefreshRef = useRef(scheduleReleaseFlagsRefresh);
+  scheduleReleaseFlagsRefreshRef.current = scheduleReleaseFlagsRefresh;
+
   if (!itemPatchQueueRef.current) {
     itemPatchQueueRef.current = createItemPatchQueue({
       send: ({ projectId, itemId, patch }) => runProjectWrite(projectId, (expectedRevision) =>
@@ -210,6 +271,7 @@ export function StoreProvider({ children }) {
       },
       onSettled: (item, { projectId, itemId }) => {
         dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId, item });
+        scheduleReleaseFlagsRefreshRef.current(projectId);
       },
       onLatestError: (_error, { projectId, itemId }, _revision, lastConfirmed) => {
         // Do not reload the project after a transient save failure: a stale snapshot
@@ -405,11 +467,13 @@ export function StoreProvider({ children }) {
       async itemAdd(projectId, item) {
         const created = await runProjectWrite(projectId, (expectedRevision) => apiClient.addItem(projectId, item, expectedRevision));
         dispatch({ type: "PROJECT_ITEM_ADD", projectId, item: created });
+        scheduleReleaseFlagsRefresh(projectId);
         return created;
       },
       async itemDelete(projectId, itemId) {
         await runProjectWrite(projectId, (expectedRevision) => apiClient.deleteItem(projectId, itemId, expectedRevision));
         dispatch({ type: "PROJECT_ITEM_REMOVE", projectId, itemId });
+        scheduleReleaseFlagsRefresh(projectId);
       },
       async importExcel(file, opts) {
         const result = await apiClient.importExcel(file, opts);
@@ -478,6 +542,7 @@ export function StoreProvider({ children }) {
       refreshDashboard,
       runProjectWrite,
       noteRevisionConflict,
+      scheduleReleaseFlagsRefresh,
     ]
   );
 

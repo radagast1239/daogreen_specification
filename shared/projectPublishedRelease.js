@@ -210,15 +210,58 @@ export function mergeLivePurchaseOverlay(snapshotItems = [], liveItems = []) {
   });
 }
 
-const CHANGE_KEYS = ["qty", "price", "actualPrice", "name", "supplier", "link", "visibleToClient"];
+const CHANGE_KEYS = [
+  "qty",
+  "price",
+  "actualPrice",
+  "name",
+  "supplier",
+  "link",
+  "linkAlt",
+  "visibleToClient",
+  "unit",
+  "vatRate",
+  "clientNote",
+  "clientSection",
+  "clientSubsection",
+  "category",
+  "subcategory",
+  "imageUrl",
+  "photoUrl",
+];
+
+const CHANGE_JSON_KEYS = ["pipeCuts", "breakerSpecs", "flowSpecs", "splitSpecs"];
+
+function valueChanged(key, va, vb) {
+  if (key === "price" || key === "actualPrice" || key === "qty" || key === "vatRate") {
+    return (Number(va) || 0) !== (Number(vb) || 0);
+  }
+  if (key === "visibleToClient") {
+    return !!va !== !!vb;
+  }
+  return String(va ?? "").trim() !== String(vb ?? "").trim();
+}
 
 function itemChanged(a, b) {
   for (const k of CHANGE_KEYS) {
-    const va = a?.[k];
-    const vb = b?.[k];
-    if (k === "price" || k === "actualPrice" || k === "qty") {
-      if ((Number(va) || 0) !== (Number(vb) || 0)) return true;
-    } else if (String(va ?? "").trim() !== String(vb ?? "").trim()) return true;
+    if (valueChanged(k, a?.[k], b?.[k])) return true;
+  }
+  for (const k of CHANGE_JSON_KEYS) {
+    const sa = JSON.stringify(a?.[k] ?? null);
+    const sb = JSON.stringify(b?.[k] ?? null);
+    if (sa !== sb) return true;
+  }
+  return false;
+}
+
+/** Patch keys that affect published client delivery (prompt republish). */
+export function patchTouchesClientDelivery(patch = {}) {
+  if (!patch || typeof patch !== "object") return false;
+  for (const k of CHANGE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(patch, k)) return true;
+  }
+  for (const k of CHANGE_JSON_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(patch, k)) return true;
   }
   return false;
 }

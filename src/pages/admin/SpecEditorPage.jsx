@@ -1872,14 +1872,14 @@ function SpecTab({
                             style={{ textAlign: "right" }}
                             type="number"
                             value={it.price}
-                            onChange={(e) => editItem(it.id, { price: Number(e.target.value) || 0 })}
+                            onChange={(e) => editItem(it.id, { price: Number(e.target.value) || 0, ...(it.materialId ? { priceOverridden: true } : {}) })}
                           />
                           {priceChanged && (
                             <button
                               type="button"
                               className="btn btn-xs btn-ghost"
                               title={`Вернуть цену из базы: ${catalogPrice}`}
-                              onClick={() => editItem(it.id, { price: catalogPrice })}
+                              onClick={() => editItem(it.id, { price: catalogPrice, priceOverridden: false })}
                             >
                               ↺ база
                             </button>
