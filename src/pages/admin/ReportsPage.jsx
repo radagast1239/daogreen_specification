@@ -19,6 +19,16 @@ import {
   filterReportPublications,
   filterReportMaterialDrift,
 } from "../../../shared/projectReportsR2.js";
+import {
+  SECTION_CARD_KEYS,
+  NO_ROOM_GROUP,
+  buildReportsR3,
+  buildReportsSections,
+  filterReportSections,
+  filterReportRooms,
+} from "../../../shared/projectReportsR3.js";
+import { PROJECT_STATUS_LIST_FILTERS } from "../../../shared/projectStatus.js";
+import { downloadReportsPurchaseExcel } from "../../lib/reportsPurchaseExcel.js";
 
 export default function ReportsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -59,6 +69,9 @@ export default function ReportsPage() {
     return {
       ...buildReportsR1(projects, materials),
       ...buildReportsR2(projects, materials),
+      ...buildReportsR3(projects, materials),
+      _projects: projects,
+      _materials: materials,
     };
   }, [payload]);
 
@@ -72,7 +85,7 @@ export default function ReportsPage() {
     <>
       <PageHeader
         title="Отчёты"
-        sub="Сводная информация по проектам, публикациям, базе и закупкам"
+        sub="Сводная информация по проектам, закупкам, публикациям и разбивкам"
         back={{ to: "/", label: "Проекты" }}
       />
       <div className="content reports-r1">
@@ -105,6 +118,16 @@ export default function ReportsPage() {
         )}
         {!loading && !error && report && tab === "material-drift" && (
           <MaterialDriftTab drift={report.materialDrift} projects={report.overview.projects} />
+        )}
+        {!loading && !error && report && tab === "sections" && (
+          <SectionsTab
+            projects={report._projects}
+            materials={report._materials}
+            overviewProjects={report.overview.projects}
+          />
+        )}
+        {!loading && !error && report && tab === "rooms" && (
+          <RoomsTab rooms={report.rooms} projects={report.overview.projects} />
         )}
       </div>
     </>
@@ -286,6 +309,8 @@ function PurchasesTab({ purchases, projects }) {
   const [supplier, setSupplier] = useState("");
   const [status, setStatus] = useState("");
   const [q, setQ] = useState("");
+  const [excelBusy, setExcelBusy] = useState(false);
+  const [excelError, setExcelError] = useState("");
 
   const filtered = useMemo(
     () => filterReportPurchases(purchases.rows, { projectId, supplier, status, q }),
@@ -298,6 +323,27 @@ function PurchasesTab({ purchases, projects }) {
   }, [purchases.rows]);
 
   const t = purchases.totals || {};
+  const filteredTotal = useMemo(
+    () => Math.round(filtered.reduce((s, r) => s + (Number(r.sum) || 0), 0) * 100) / 100,
+    [filtered]
+  );
+
+  const onExcel = async () => {
+    setExcelError("");
+    setExcelBusy(true);
+    try {
+      await new Promise((r) => setTimeout(r, 0));
+      const projName =
+        projectId && projects?.find((p) => p.projectId === projectId)?.name
+          ? projects.find((p) => p.projectId === projectId).name
+          : "";
+      downloadReportsPurchaseExcel(filtered, { projectName: projName });
+    } catch (e) {
+      setExcelError(e?.message || "Не удалось выгрузить Excel");
+    } finally {
+      setExcelBusy(false);
+    }
+  };
 
   return (
     <div className="reports-r1__panel">
@@ -335,7 +381,14 @@ function PurchasesTab({ purchases, projects }) {
           onChange={(e) => setQ(e.target.value)}
           aria-label="Поиск"
         />
+        <button type="button" className="btn btn-sm btn-primary" onClick={onExcel} disabled={excelBusy || !filtered.length}>
+          {excelBusy ? "Excel…" : "Скачать Excel"}
+        </button>
+        {(projectId || supplier || status || q) && (
+          <span className="muted" style={{ fontSize: 12 }}>Фильтр: {money(filteredTotal)}</span>
+        )}
       </div>
+      {excelError ? <p className="muted" style={{ color: "var(--danger)" }}>{excelError}</p> : null}
 
       {groups.length === 0 ? (
         <p className="muted">Нет позиций для закупки</p>
@@ -624,6 +677,221 @@ function MaterialDriftTab({ drift, projects }) {
                     <td className="right num">{row.basePrice == null ? "—" : money(row.basePrice)}</td>
                     <td>{row.supplier}</td>
                     <td>{row.typeLabel}</td>
+                    <td>
+                      <Link className="btn btn-sm" to={row.openPath}>Открыть проект</Link>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionsTab({ projects, materials, overviewProjects }) {
+  const [projectId, setProjectId] = useState("");
+  const [statusId, setStatusId] = useState("");
+  const [q, setQ] = useState("");
+
+  const scopedProjects = useMemo(() => {
+    let list = projects || [];
+    if (statusId) {
+      list = list.filter((p) => {
+        const filter = PROJECT_STATUS_LIST_FILTERS.find((f) => f.id === statusId);
+        if (!filter?.statusIds) return true;
+        return filter.statusIds.includes(p.status);
+      });
+    }
+    return list;
+  }, [projects, statusId]);
+
+  const sections = useMemo(
+    () => buildReportsSections(scopedProjects, materials, { projectId }),
+    [scopedProjects, materials, projectId]
+  );
+  const filtered = useMemo(
+    () => filterReportSections(sections.rows, { q }),
+    [sections.rows, q]
+  );
+  const cards = sections.cards || {};
+  const cardDefs = [
+    { id: "totalSum", label: "Общая сумма", always: true },
+    ...SECTION_CARD_KEYS.map((c) => ({ id: c.id, label: c.label, always: false })),
+  ];
+
+  return (
+    <div className="reports-r1__panel">
+      <div className="reports-r1__cards">
+        {cardDefs.map((c) => {
+          const val = cards[c.id] ?? 0;
+          if (!c.always && !(val > 0)) return null;
+          return (
+            <div key={c.id} className="card reports-r1__card">
+              <div className="k">{c.label}</div>
+              <div className="v num">{money(val)}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="reports-r1__filters row wrap">
+        <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Проект">
+          <option value="">Все проекты</option>
+          {(overviewProjects || []).map((p) => (
+            <option key={p.projectId} value={p.projectId}>{p.name}</option>
+          ))}
+        </select>
+        <select value={statusId} onChange={(e) => setStatusId(e.target.value)} aria-label="Статус проекта">
+          <option value="">Все статусы</option>
+          {PROJECT_STATUS_LIST_FILTERS.filter((f) => f.id !== "all" && f.statusIds).map((f) => (
+            <option key={f.id} value={f.id}>{f.label}</option>
+          ))}
+        </select>
+        <input
+          type="search"
+          placeholder="Поиск по разделу…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="Поиск"
+        />
+      </div>
+
+      <div className="card reports-r1__table-card">
+        <div className="table-scroll-wrap reports-r1__scroll">
+          <table className="spec reports-r1__table">
+            <thead>
+              <tr>
+                <th>Раздел</th>
+                <th className="right">Позиций</th>
+                <th className="right">Сумма</th>
+                <th className="right">Доля</th>
+                <th className="right">Проблем</th>
+                <th className="right">Не закуплено</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="muted">Нет данных по разделам</td>
+                </tr>
+              ) : (
+                filtered.map((row) => (
+                  <tr key={row.sectionLabel}>
+                    <td>{row.sectionLabel}</td>
+                    <td className="right num">{row.itemCount}</td>
+                    <td className="right num">{money(row.sum)}</td>
+                    <td className="right num">{row.sharePct}%</td>
+                    <td className="right num">{row.problemCount}</td>
+                    <td className="right num">{row.unpurchasedCount}</td>
+                    <td>
+                      {row.openPath && row.openPath !== "/" ? (
+                        <Link className="btn btn-sm" to={row.openPath}>Открыть проект</Link>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoomsTab({ rooms, projects }) {
+  const [projectId, setProjectId] = useState("");
+  const [room, setRoom] = useState("");
+  const [section, setSection] = useState("");
+  const [q, setQ] = useState("");
+
+  const filtered = useMemo(
+    () => filterReportRooms(rooms.rows, { projectId, room, section, q }),
+    [rooms.rows, projectId, room, section, q]
+  );
+  const roomOptions = useMemo(() => {
+    const set = new Set((rooms.rows || []).map((r) => r.roomLabel).filter(Boolean));
+    return [...set].sort((a, b) => {
+      if (a === NO_ROOM_GROUP) return 1;
+      if (b === NO_ROOM_GROUP) return -1;
+      return a.localeCompare(b, "ru");
+    });
+  }, [rooms.rows]);
+
+  return (
+    <div className="reports-r1__panel">
+      <div className="reports-r1__filters row wrap">
+        <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Проект">
+          <option value="">Все проекты</option>
+          {(projects || []).map((p) => (
+            <option key={p.projectId} value={p.projectId}>{p.name}</option>
+          ))}
+        </select>
+        <select value={room} onChange={(e) => setRoom(e.target.value)} aria-label="Помещение">
+          <option value="">Все помещения</option>
+          {roomOptions.map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
+        </select>
+        <select value={section} onChange={(e) => setSection(e.target.value)} aria-label="Раздел">
+          <option value="">Все разделы</option>
+          {SECTION_CARD_KEYS.map((c) => (
+            <option key={c.id} value={c.id}>{c.label}</option>
+          ))}
+        </select>
+        <input
+          type="search"
+          placeholder="Поиск…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="Поиск"
+        />
+      </div>
+
+      <div className="card reports-r1__table-card">
+        <div className="table-scroll-wrap reports-r1__scroll">
+          <table className="spec reports-r1__table">
+            <thead>
+              <tr>
+                <th>Проект</th>
+                <th>Помещение</th>
+                <th className="right">Позиций</th>
+                <th className="right">Оборуд.</th>
+                <th className="right">Матер.</th>
+                <th className="right">Работы</th>
+                <th className="right">Электр.</th>
+                <th className="right">Сантехн.</th>
+                <th className="right">Климат</th>
+                <th className="right">Сумма</th>
+                <th className="right">Проблем</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={12} className="muted">Помещения не указаны</td>
+                </tr>
+              ) : (
+                filtered.map((row) => (
+                  <tr key={`${row.projectId}:${row.roomLabel}`}>
+                    <td>{row.projectName}</td>
+                    <td>{row.roomLabel}</td>
+                    <td className="right num">{row.itemCount}</td>
+                    <td className="right num">{money(row.equipment)}</td>
+                    <td className="right num">{money(row.materials)}</td>
+                    <td className="right num">{money(row.works)}</td>
+                    <td className="right num">{money(row.electrics)}</td>
+                    <td className="right num">{money(row.plumbing)}</td>
+                    <td className="right num">{money(row.climate)}</td>
+                    <td className="right num">{money(row.sum)}</td>
+                    <td className="right num">{row.problemCount}</td>
                     <td>
                       <Link className="btn btn-sm" to={row.openPath}>Открыть проект</Link>
                     </td>

@@ -24,6 +24,8 @@ export const REPORT_TABS_ALL = Object.freeze([
   { id: "issues", label: "Проблемы" },
   { id: "purchases", label: "Закупка" },
   ...REPORT_PUBLICATION_TABS,
+  { id: "sections", label: "По разделам" },
+  { id: "rooms", label: "По помещениям" },
 ]);
 
 export const MATERIAL_DRIFT_TYPES = Object.freeze([

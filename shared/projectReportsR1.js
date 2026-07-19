@@ -21,6 +21,7 @@ import { detectUnpublishedChanges } from "./projectPublishedRelease.js";
 import { buildClientImageManifest } from "./clientImageManifest.js";
 import { buildClientPurchaseSummary } from "./clientPurchaseSummary.js";
 import { matchSpecLineFilter } from "./specLineFilters.js";
+import { resolveClientSection, getClientSectionLabelMap } from "./clientSections.js";
 
 export const REPORT_TABS = Object.freeze([
   { id: "overview", label: "Сводка" },
@@ -300,6 +301,14 @@ export function buildReportsPurchases(projects = [], materials = []) {
       const qty = Number(raw.qty) || 0;
       const price = Number(raw.price) || 0;
       const sum = lineGross(raw);
+      const resolved = resolveClientSection(raw);
+      const labels = getClientSectionLabelMap();
+      const section =
+        (resolved.section && labels[resolved.section]) ||
+        resolved.label ||
+        raw.section ||
+        raw.module ||
+        "—";
       rows.push({
         id: `${p.id}:${raw.id}`,
         projectId: p.id,
@@ -314,6 +323,8 @@ export function buildReportsPurchases(projects = [], materials = []) {
         statusLabel: PURCHASE_STATUS_LABELS[status] || status,
         supplier,
         link: String(raw.link || "").trim(),
+        section,
+        comment: String(raw.clientNote || raw.clientComment || raw.comment || "").trim(),
         openPath: buildProjectSpecOpenPath(p.id, raw.id),
       });
     }

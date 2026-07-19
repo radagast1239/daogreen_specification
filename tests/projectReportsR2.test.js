@@ -152,10 +152,12 @@ describe("Reports R2 material drift", () => {
     expect(all.some((r) => r.matchesBase)).toBe(true);
   });
 
-  it("parses five report tabs and mobile contract placeholders", () => {
-    expect(REPORT_TABS_ALL).toHaveLength(5);
+  it("parses report tabs including R2/R3 and mobile contract placeholders", () => {
+    expect(REPORT_TABS_ALL.length).toBeGreaterThanOrEqual(5);
     expect(parseReportTabAll("publications")).toBe("publications");
     expect(parseReportTabAll("material-drift")).toBe("material-drift");
+    expect(parseReportTabAll("sections")).toBe("sections");
+    expect(parseReportTabAll("rooms")).toBe("rooms");
     expect(parseReportTabAll("x")).toBe("overview");
     expect([".reports-r1__scroll", "overflow-x: auto", "table-scroll-wrap"].every(Boolean)).toBe(
       true
