@@ -1,0 +1,280 @@
+/* Material Changes Review panel */
+
+.mcr-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(12, 40, 32, 0.45);
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 0;
+  overflow: hidden;
+}
+
+.mcr-panel {
+  width: min(1100px, 100vw);
+  max-width: 100%;
+  height: 100%;
+  max-height: 100dvh;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mcr-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.mcr-panel__sub {
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.mcr-panel__toolbar {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.mcr-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mcr-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.mcr-bulk__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.mcr-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mcr-table-wrap {
+  min-width: 0;
+}
+
+.mcr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.mcr-table th,
+.mcr-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  text-align: left;
+}
+
+.mcr-table th {
+  position: sticky;
+  top: 0;
+  background: var(--paper);
+  z-index: 1;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.mcr-item-name {
+  font-weight: 600;
+}
+
+.mcr-item-mod {
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.mcr-diffs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mcr-diff {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--surface-alt, #f4f7f5);
+}
+
+.mcr-diff__label {
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.mcr-diff__vals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  word-break: break-word;
+}
+
+.mcr-diff__info {
+  font-size: 12.5px;
+}
+
+.mcr-diff__st {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.mcr-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mcr-badge--needs_review {
+  background: #fff3cd;
+  color: #7a5b00;
+}
+
+.mcr-badge--project_override {
+  background: #e7f0ff;
+  color: #1a4a8a;
+}
+
+.mcr-badge--applied_from_catalog {
+  background: #e8f5e9;
+  color: #1b5e20;
+}
+
+.mcr-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 140px;
+}
+
+.mcr-fieldpick {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 2;
+}
+
+.mcr-panel {
+  position: relative;
+}
+
+.mcr-fieldpick__card {
+  background: var(--paper);
+  border-radius: var(--radius);
+  padding: 16px;
+  width: min(420px, 100%);
+  max-height: 80vh;
+  overflow: auto;
+  box-shadow: var(--shadow);
+}
+
+.mcr-fieldpick__list {
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mcr-fieldpick__row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 10px;
+  align-items: start;
+  font-size: 13px;
+}
+
+.mcr-fieldpick__row .muted {
+  grid-column: 2;
+  font-size: 12px;
+}
+
+.mcr-fieldpick__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .mcr-overlay {
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .mcr-panel {
+    width: 100vw;
+    height: 100%;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .mcr-table thead {
+    display: none;
+  }
+
+  .mcr-table,
+  .mcr-table tbody,
+  .mcr-table tr,
+  .mcr-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .mcr-table tr {
+    padding: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .mcr-table td {
+    border: 0;
+    padding: 4px 0;
+  }
+
+  .mcr-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 400px) {
+  .mcr-panel__head,
+  .mcr-panel__toolbar {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
