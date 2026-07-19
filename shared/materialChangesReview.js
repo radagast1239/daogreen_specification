@@ -346,3 +346,71 @@ export function listItemFieldDiffs(item, material, retainedByItem = {}) {
   if (!item?.materialId || !material) return [];
   return diffItemCatalogSnapshot(item, material).map((d) => classifyFieldDiff(d, item, retainedByItem));
 }
+
+/** Default drawer filter on open. */
+export const MATERIAL_REVIEW_DEFAULT_FILTER = "needs_review";
+
+const DIFF_PRIORITY = {
+  price: 0,
+  name: 1,
+  link: 2,
+  linkAlt: 3,
+  unit: 4,
+  supplier: 5,
+};
+
+/** Sort real diffs: price/name/link first. */
+export function prioritizeFieldDiffs(diffs = []) {
+  return [...(diffs || [])].sort((a, b) => {
+    const pa = DIFF_PRIORITY[a.field] ?? 40;
+    const pb = DIFF_PRIORITY[b.field] ?? 40;
+    return pa - pb || String(a.label || "").localeCompare(String(b.label || ""), "ru");
+  });
+}
+
+function formatDiffValue(field, value) {
+  if (value == null || value === "") return "—";
+  if (field === "price" || field === "vatRate") {
+    const n = Number(value) || 0;
+    return `${n.toLocaleString("ru-RU")} ₽`;
+  }
+  return String(value);
+}
+
+/** Compact one-line: «Цена: 680 → 1000». */
+export function formatCompactDiffLine(diff) {
+  if (!diff) return "";
+  if (diff.infoText) return diff.infoText;
+  const label = diff.label || diff.field || "Поле";
+  const before = formatDiffValue(diff.field, diff.before);
+  const after = formatDiffValue(diff.field, diff.after);
+  return `${label}: ${before} → ${after}`;
+}
+
+/**
+ * Split diffs into preview (1–2) and rest for «Ещё N».
+ * @param {object[]} diffs
+ * @param {number} [previewLimit=2]
+ */
+export function splitDiffsForPreview(diffs = [], previewLimit = 2) {
+  const sorted = prioritizeFieldDiffs(diffs);
+  const limit = Math.max(1, Number(previewLimit) || 2);
+  return {
+    preview: sorted.slice(0, limit),
+    rest: sorted.slice(limit),
+    total: sorted.length,
+  };
+}
+
+export function countReviewRowsByStatus(rows = []) {
+  const out = {
+    needs_review: 0,
+    project_override: 0,
+    applied_from_catalog: 0,
+    all: (rows || []).length,
+  };
+  for (const row of rows || []) {
+    if (out[row.status] != null) out[row.status] += 1;
+  }
+  return out;
+}

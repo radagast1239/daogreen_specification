@@ -1,25 +1,72 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  MATERIAL_REVIEW_DEFAULT_FILTER,
   MATERIAL_REVIEW_FILTERS,
   MATERIAL_REVIEW_STATUS,
   buildKeepProjectValuesPatch,
   canUpdateReviewField,
   clearRetainedFields,
+  countReviewRowsByStatus,
   filterMaterialChangesReview,
+  formatCompactDiffLine,
   formatMaterialReviewToast,
   mapFieldsToCatalogApply,
   mapFieldsToRefreshPayload,
   mergeRetainedByItem,
   selectBulkUpdateItemIds,
+  splitDiffsForPreview,
 } from "../../shared/materialChangesReview.js";
 import { applyProjectCatalogUpdates } from "../../shared/applyProjectCatalogUpdates.js";
 import "../styles/material-changes-review.css";
 
-function fmtVal(v) {
+function fmtPickVal(v) {
   if (v == null || v === "") return "—";
   if (typeof v === "number") return String(v);
   const s = String(v);
   return s.length > 80 ? `${s.slice(0, 77)}…` : s;
+}
+
+function RowMenu({ open, onClose, children, anchorRef }) {
+  const menuRef = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => {
+      if (menuRef.current?.contains(e.target) || anchorRef?.current?.contains(e.target)) return;
+      onClose();
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open, onClose, anchorRef]);
+  if (!open) return null;
+  return (
+    <div className="mcr-menu" ref={menuRef} role="menu">
+      {children}
+    </div>
+  );
+}
+
+function CompactDiffs({ diffs }) {
+  const [expanded, setExpanded] = useState(false);
+  const { preview, rest, total } = useMemo(() => splitDiffsForPreview(diffs, 2), [diffs]);
+  const shown = expanded ? [...preview, ...rest] : preview;
+  return (
+    <div className="mcr-diffs">
+      {shown.map((d) => {
+        const line = formatCompactDiffLine(d);
+        return (
+          <div key={d.field} className={`mcr-diff-line mcr-diff-line--${d.status}`} title={line}>
+            {line}
+          </div>
+        );
+      })}
+      {rest.length > 0 ? (
+        <button type="button" className="mcr-more" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "Свернуть" : `Ещё ${rest.length} ${rest.length === 1 ? "изменение" : "изменений"}`}
+        </button>
+      ) : null}
+      {total === 0 ? <span className="muted">Нет отличий</span> : null}
+    </div>
+  );
 }
 
 /**
@@ -55,14 +102,17 @@ export default function MaterialChangesReviewPanel({
   onRetainedChange,
   onAfterChange,
 }) {
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState(MATERIAL_REVIEW_DEFAULT_FILTER);
   const [selected, setSelected] = useState(() => new Set());
   const [busy, setBusy] = useState(false);
   const [fieldPickItemId, setFieldPickItemId] = useState(null);
   const [fieldPickSelected, setFieldPickSelected] = useState(() => new Set());
   const [includeOverridesInBulk, setIncludeOverridesInBulk] = useState(false);
+  const [menuItemId, setMenuItemId] = useState(null);
+  const menuBtnRefs = useRef(new Map());
 
   const rows = review?.rows || [];
+  const statusCounts = useMemo(() => countReviewRowsByStatus(rows), [rows]);
   const filtered = useMemo(() => filterMaterialChangesReview(rows, filter), [rows, filter]);
 
   useEffect(() => {
@@ -72,6 +122,7 @@ export default function MaterialChangesReviewPanel({
     const onKey = (e) => {
       if (e.key === "Escape") {
         if (fieldPickItemId) setFieldPickItemId(null);
+        else if (menuItemId) setMenuItemId(null);
         else onClose();
       }
     };
@@ -80,14 +131,15 @@ export default function MaterialChangesReviewPanel({
       document.body.style.overflow = prev;
       window.removeEventListener("keydown", onKey);
     };
-  }, [open, onClose, fieldPickItemId]);
+  }, [open, onClose, fieldPickItemId, menuItemId]);
 
   useEffect(() => {
     if (!open) {
       setSelected(new Set());
-      setFilter("all");
+      setFilter(MATERIAL_REVIEW_DEFAULT_FILTER);
       setFieldPickItemId(null);
       setIncludeOverridesInBulk(false);
+      setMenuItemId(null);
     }
   }, [open]);
 
@@ -249,6 +301,7 @@ export default function MaterialChangesReviewPanel({
     const defaults = new Set(
       (row.fieldDiffs || []).filter((d) => d.canUpdate && d.status === MATERIAL_REVIEW_STATUS.needs_review).map((d) => d.field)
     );
+    setMenuItemId(null);
     setFieldPickItemId(row.itemId);
     setFieldPickSelected(defaults);
   };
@@ -337,6 +390,12 @@ export default function MaterialChangesReviewPanel({
   };
 
   const fieldPickRow = rows.find((r) => r.itemId === fieldPickItemId);
+  const filterCountLabel = (f) => {
+    if (f.id === "needs_review") return statusCounts.needs_review;
+    if (f.id === "project_override") return statusCounts.project_override;
+    if (f.id === "all") return statusCounts.all;
+    return null;
+  };
 
   return (
     <div className="mcr-overlay" role="dialog" aria-modal="true" aria-label="Изменения в базе материалов" onClick={onClose}>
@@ -344,29 +403,52 @@ export default function MaterialChangesReviewPanel({
         <div className="mcr-panel__head">
           <div>
             <strong>Изменения в базе материалов</strong>
-            <div className="muted mcr-panel__sub">{rows.length} позиций · полный список</div>
+            <div className="muted mcr-panel__sub">
+              {rows.length} позиций
+              {statusCounts.needs_review ? ` · требуют проверки: ${statusCounts.needs_review}` : ""}
+              {statusCounts.project_override ? ` · изменено в проекте: ${statusCounts.project_override}` : ""}
+              {statusCounts.applied_from_catalog ? ` · уже применяется: ${statusCounts.applied_from_catalog}` : ""}
+            </div>
           </div>
-          <button type="button" className="btn btn-ghost" onClick={onClose} aria-label="Закрыть">
-            ✕
-          </button>
+          <div className="mcr-panel__head-actions">
+            <button type="button" className="btn btn-sm btn-ghost" disabled={busy || !rows.length} onClick={onUpdateAll}>
+              Обновить всё из базы ({selectBulkUpdateItemIds(rows, { includeProjectOverrides: includeOverridesInBulk }).length})
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={onClose} aria-label="Закрыть">
+              ✕
+            </button>
+          </div>
         </div>
 
         <div className="mcr-panel__toolbar">
           <div className="mcr-filters" role="tablist">
-            {MATERIAL_REVIEW_FILTERS.map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                role="tab"
-                aria-selected={filter === f.id}
-                className={`btn btn-sm ${filter === f.id ? "btn-primary" : ""}`}
-                onClick={() => setFilter(f.id)}
-              >
-                {f.label}
-              </button>
-            ))}
+            {MATERIAL_REVIEW_FILTERS.map((f) => {
+              const count = filterCountLabel(f);
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={filter === f.id}
+                  className={`mcr-filter${filter === f.id ? " is-active" : ""}`}
+                  onClick={() => setFilter(f.id)}
+                >
+                  {f.label}
+                  {count != null ? <span className="mcr-filter__count">{count}</span> : null}
+                </button>
+              );
+            })}
           </div>
-          <div className="mcr-bulk">
+          <div className="mcr-toolbar-meta">
+            <label className="mcr-select-all">
+              <input
+                type="checkbox"
+                checked={filtered.length > 0 && filtered.every((r) => selected.has(r.itemId))}
+                onChange={toggleAllFiltered}
+                aria-label="Выбрать все"
+              />
+              Выбрать видимые
+            </label>
             <label className="mcr-bulk__check muted">
               <input
                 type="checkbox"
@@ -375,121 +457,109 @@ export default function MaterialChangesReviewPanel({
               />
               Включать «Изменено в проекте»
             </label>
-            <button type="button" className="btn btn-sm" disabled={busy || !selected.size} onClick={onBulkUpdateSelected}>
-              Обновить выбранные ({selected.size})
-            </button>
-            <button type="button" className="btn btn-sm" disabled={busy || !selected.size} onClick={onBulkKeepSelected}>
-              Оставить выбранные значения проекта
-            </button>
-            <button type="button" className="btn btn-sm btn-ghost" disabled={busy || !rows.length} onClick={onUpdateAll}>
-              Обновить всё из базы ({selectBulkUpdateItemIds(rows, { includeProjectOverrides: includeOverridesInBulk }).length})
-            </button>
+            <span className="muted">Показано: {filtered.length}</span>
           </div>
         </div>
 
         <div className="mcr-panel__body">
-          <div className="mcr-table-wrap">
-            <table className="mcr-table">
-              <thead>
-                <tr>
-                  <th>
+          <ul className="mcr-list">
+            {filtered.map((row) => {
+              const canUpdate = (row.fieldDiffs || []).some((d) => d.canUpdate);
+              const canKeep = (row.fieldDiffs || []).some((d) => d.field !== "supplier");
+              const menuOpen = menuItemId === row.itemId;
+              return (
+                <li key={row.itemId} className={`mcr-row mcr-row--${row.status}`} data-status={row.status}>
+                  <label className="mcr-row__check">
                     <input
                       type="checkbox"
-                      checked={filtered.length > 0 && filtered.every((r) => selected.has(r.itemId))}
-                      onChange={toggleAllFiltered}
-                      aria-label="Выбрать все"
+                      checked={selected.has(row.itemId)}
+                      onChange={() => toggleId(row.itemId)}
+                      aria-label={`Выбрать ${row.itemName}`}
                     />
-                  </th>
-                  <th>Позиция проекта</th>
-                  <th>Материал базы</th>
-                  <th>Изменения</th>
-                  <th>Статус</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((row) => (
-                  <tr key={row.itemId} data-status={row.status}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(row.itemId)}
-                        onChange={() => toggleId(row.itemId)}
-                        aria-label={`Выбрать ${row.itemName}`}
-                      />
-                    </td>
-                    <td>
-                      <div className="mcr-item-name">{row.itemName}</div>
-                      {row.module ? <div className="muted mcr-item-mod">{row.module}</div> : null}
-                    </td>
-                    <td>
-                      <div>{row.materialName}</div>
-                      <div className="muted" style={{ fontSize: 12 }}>{row.materialId}</div>
-                    </td>
-                    <td>
-                      <div className="mcr-diffs">
-                        {(row.fieldDiffs || []).map((d) => (
-                          <div key={d.field} className={`mcr-diff mcr-diff--${d.status}`}>
-                            <div className="mcr-diff__label">{d.label}</div>
-                            {d.infoText ? (
-                              <div className="muted mcr-diff__info">{d.infoText}</div>
-                            ) : (
-                              <div className="mcr-diff__vals">
-                                <span title={String(d.before ?? "")}>{fmtVal(d.before)}</span>
-                                <span className="muted">→</span>
-                                <span title={String(d.after ?? "")}>{fmtVal(d.after)}</span>
-                              </div>
-                            )}
-                            <div className="muted mcr-diff__st">{d.statusLabel}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`mcr-badge mcr-badge--${row.status}`}>{row.statusLabel}</span>
-                    </td>
-                    <td>
-                      <div className="mcr-actions">
-                        {(row.fieldDiffs || []).some((d) => d.canUpdate) ? (
-                          <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => onUpdateOne(row)}>
-                            Обновить из базы
-                          </button>
-                        ) : null}
+                  </label>
+                  <div className="mcr-row__main">
+                    <div className="mcr-row__title" title={row.itemName}>{row.itemName}</div>
+                    <div className="mcr-row__mat" title={row.materialName}>{row.materialName}</div>
+                    <CompactDiffs diffs={row.fieldDiffs || []} />
+                  </div>
+                  <div className="mcr-row__status">
+                    <span className={`mcr-badge mcr-badge--${row.status}`}>{row.statusLabel}</span>
+                  </div>
+                  <div className="mcr-row__actions">
+                    {canUpdate ? (
+                      <button type="button" className="btn btn-sm" disabled={busy} onClick={() => onUpdateOne(row)}>
+                        Обновить
+                      </button>
+                    ) : null}
+                    {canKeep ? (
+                      <button type="button" className="btn btn-sm" disabled={busy} onClick={() => onKeepOne(row)}>
+                        Оставить
+                      </button>
+                    ) : null}
+                    <div className="mcr-row__menu-wrap">
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost mcr-more-btn"
+                        aria-haspopup="menu"
+                        aria-expanded={menuOpen}
+                        ref={(node) => {
+                          if (node) menuBtnRefs.current.set(row.itemId, node);
+                          else menuBtnRefs.current.delete(row.itemId);
+                        }}
+                        onClick={() => setMenuItemId(menuOpen ? null : row.itemId)}
+                      >
+                        ⋯
+                      </button>
+                      <RowMenu
+                        open={menuOpen}
+                        onClose={() => setMenuItemId(null)}
+                        anchorRef={{ current: menuBtnRefs.current.get(row.itemId) }}
+                      >
                         {(row.fieldDiffs || []).filter((d) => d.canUpdate).length > 1 ? (
-                          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => openFieldPick(row)}>
+                          <button type="button" role="menuitem" className="mcr-menu__item" disabled={busy} onClick={() => openFieldPick(row)}>
                             Выбрать поля
-                          </button>
-                        ) : null}
-                        {(row.fieldDiffs || []).some((d) => d.field !== "supplier") ? (
-                          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => onKeepOne(row)}>
-                            Оставить значения проекта
                           </button>
                         ) : null}
                         <button
                           type="button"
-                          className="btn btn-sm btn-ghost"
+                          role="menuitem"
+                          className="mcr-menu__item"
                           onClick={() => {
+                            setMenuItemId(null);
                             onOpenItem(row.itemId);
                             onClose();
                           }}
                         >
                           Открыть позицию
                         </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {!filtered.length ? (
-                  <tr>
-                    <td colSpan={6} className="muted" style={{ padding: 24, textAlign: "center" }}>
-                      Нет позиций для этого фильтра
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
+                      </RowMenu>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+            {!filtered.length ? (
+              <li className="mcr-empty muted">Нет позиций для этого фильтра</li>
+            ) : null}
+          </ul>
         </div>
+
+        {selected.size > 0 ? (
+          <div className="mcr-footer">
+            <span className="mcr-footer__count">Выбрано: {selected.size}</span>
+            <div className="mcr-footer__actions">
+              <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={onBulkUpdateSelected}>
+                Обновить выбранные
+              </button>
+              <button type="button" className="btn btn-sm" disabled={busy} onClick={onBulkKeepSelected}>
+                Оставить проектные
+              </button>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setSelected(new Set())}>
+                Снять выбор
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {fieldPickRow ? (
           <div className="mcr-fieldpick" role="dialog" aria-label="Выбор полей">
@@ -513,7 +583,7 @@ export default function MaterialChangesReviewPanel({
                         }}
                       />
                       <span>{d.label}</span>
-                      <span className="muted">{fmtVal(d.before)} → {fmtVal(d.after)}</span>
+                      <span className="muted">{fmtPickVal(d.before)} → {fmtPickVal(d.after)}</span>
                     </label>
                   ))}
               </div>

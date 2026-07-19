@@ -6,12 +6,16 @@ import {
   buildKeepProjectValuesPatch,
   buildMaterialChangesReview,
   filterMaterialChangesReview,
+  formatCompactDiffLine,
   formatMaterialReviewToast,
   listItemFieldDiffs,
   mapFieldsToRefreshPayload,
   mergeRetainedByItem,
   selectBulkUpdateItemIds,
+  splitDiffsForPreview,
+  countReviewRowsByStatus,
   MATERIAL_REVIEW_STATUS,
+  MATERIAL_REVIEW_DEFAULT_FILTER,
 } from "../shared/materialChangesReview.js";
 import { classifyMaterialDrift } from "../shared/projectReportsR2.js";
 import { buildRefreshPatchForItem, formatCatalogRefreshToast } from "../shared/refreshItemFromMaterial.js";
@@ -225,11 +229,55 @@ describe("material changes review", () => {
     expect(css).toContain("overflow: hidden");
     expect(css).toContain("100dvh");
     expect(css).toContain("@media (max-width: 900px)");
+    expect(css).toContain("mcr-footer");
+    expect(css).toContain("56vw");
     const panel = fs.readFileSync(
       path.join(__dirname, "../src/components/MaterialChangesReviewPanel.jsx"),
       "utf8"
     );
     expect(panel).toContain('document.body.style.overflow = "hidden"');
     expect(panel).toContain('e.key === "Escape"');
+  });
+
+  it("does not surface matching notes; collapses extra diffs; default filter needs_review", () => {
+    const sameNotes = item({ price: 500 });
+    const diffs = listItemFieldDiffs(sameNotes, mat);
+    expect(diffs.every((d) => d.field !== "techNote")).toBe(true);
+    expect(diffs.some((d) => d.field === "price")).toBe(true);
+
+    const many = [
+      { field: "price", label: "Базовая цена", before: 1, after: 2 },
+      { field: "name", label: "Название", before: "a", after: "b" },
+      { field: "link", label: "Ссылка", before: "x", after: "y" },
+      { field: "unit", label: "Единица", before: "шт.", after: "компл." },
+    ];
+    const split = splitDiffsForPreview(many, 2);
+    expect(split.preview).toHaveLength(2);
+    expect(split.rest).toHaveLength(2);
+    expect(formatCompactDiffLine(many[0])).toMatch(/→/);
+
+    expect(MATERIAL_REVIEW_DEFAULT_FILTER).toBe("needs_review");
+    const panel = fs.readFileSync(
+      path.join(__dirname, "../src/components/MaterialChangesReviewPanel.jsx"),
+      "utf8"
+    );
+    expect(panel).toContain("MATERIAL_REVIEW_DEFAULT_FILTER");
+    expect(panel).toContain("Ещё ");
+    expect(panel).toContain("Выбрать поля");
+    expect(panel).toContain("Открыть позицию");
+    expect(panel).toContain("mcr-footer");
+    expect(panel).toContain("Обновить");
+    expect(panel).toContain("Оставить");
+    expect(panel).toContain("onUpdateOne");
+    expect(panel).toContain("onKeepOne");
+
+    const review = buildMaterialChangesReview(
+      [item({ id: "a", price: 1 }), item({ id: "b", name: "X", nameOverridden: true })],
+      [mat]
+    );
+    const counts = countReviewRowsByStatus(review.rows);
+    expect(counts.needs_review + counts.project_override).toBeGreaterThan(0);
+    expect(filterMaterialChangesReview(review.rows, "all").length).toBe(review.rows.length);
+    expect(filterMaterialChangesReview(review.rows, "needs_review").length).toBe(counts.needs_review);
   });
 });
