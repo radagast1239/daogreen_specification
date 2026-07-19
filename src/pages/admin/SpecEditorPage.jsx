@@ -1449,7 +1449,6 @@ function SpecTab({
   const REFRESH_ACTIONS = [
     ["price", "Обновить цену из базы"],
     ["link", "Обновить ссылку из базы"],
-    ["supplier", "Обновить поставщика из базы"],
     ["photo", "Обновить фото из базы"],
     ["clientSection", "Обновить клиентский раздел из базы"],
     ["all", "Обновить выбранные из базы"],
@@ -1776,7 +1775,7 @@ function SpecTab({
                       <input
                         className="input-inline"
                         value={it.name}
-                        onChange={(e) => editItem(it.id, { name: e.target.value })}
+                        onChange={(e) => editItem(it.id, { name: e.target.value, ...(it.materialId ? { nameOverridden: true } : {}) })}
                       />
                       {it.comment && !hasStructuredSpecEditor(it.name) && (
                         <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{it.comment}</div>
@@ -1864,8 +1863,8 @@ function SpecTab({
                       )}
                     </td>
                     <td data-spec-column="supplier" hidden={!specificationPresetHasColumn(columnPreset, "supplier")} style={{ width: 100 }}>
-                      {readOnly ? (
-                        <span>{it.supplier || "—"}</span>
+                      {readOnly || it.materialId ? (
+                        <span title={it.materialId ? "Поставщик закреплён в базе материалов" : undefined}>{it.supplier || "—"}</span>
                       ) : (
                       <input
                         className="input-inline"

@@ -30,6 +30,16 @@ export const REFRESH_FROM_MATERIAL_FIELDS = [
   "clientSection",
 ];
 
+/** Catalog supplier wins; the project value remains an orphan/manual fallback. */
+export function resolveEffectiveSupplier(item, material = null) {
+  if (item?.materialId && material) return material.supplier || "";
+  return item?.supplier || "";
+}
+
+export function reconcileItemCatalogFields(item, material = null) {
+  return { ...item, supplier: resolveEffectiveSupplier(item, material) };
+}
+
 export function resolveItemType(it) {
   return it?.itemType || it?.item_type || "material";
 }

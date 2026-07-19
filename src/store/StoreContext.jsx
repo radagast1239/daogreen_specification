@@ -10,6 +10,7 @@ import {
 } from "../../shared/itemTypes.js";
 import { createItemPatchQueue } from "./itemPatchQueue.js";
 import { Modal } from "../components/ui.jsx";
+import { reconcileItemCatalogFields } from "../../shared/itemTypes.js";
 
 export { buildItemsFromModules };
 
@@ -19,7 +20,7 @@ function reconcileStoredItem(item, materials = []) {
   const material = item?.materialId
     ? materials.find((m) => m.id === item.materialId)
     : null;
-  return reconcileItemClientVisibilityFlags(item, material);
+  return reconcileItemClientVisibilityFlags(reconcileItemCatalogFields(item, material), material);
 }
 
 function reducer(state, action) {

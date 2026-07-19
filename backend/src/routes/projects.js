@@ -188,7 +188,7 @@ function revisionErrorResponse(res, error) {
 
 const INSERT_ITEM = db.prepare(`
   INSERT INTO project_items (
-    id, project_id, material_id, module, section, name, unit, category,
+    id, project_id, material_id, module, section, name, name_overridden, unit, category,
     supplier, link, link_alt, photo_url, client_note, tech_note,
     qty, price, vat_rate, visible, approved, enabled, needs_approval,
     status, actual_price, client_comment, sort_order, responsible,
@@ -197,7 +197,7 @@ const INSERT_ITEM = db.prepare(`
     purchase_priority, replacement_link, replacement_photo_url, replacement_price,
     replacement_comment, replacement_proposed_at, source, source_type, source_key, source_object_ids
   ) VALUES (
-    @id, @project_id, @material_id, @module, @section, @name, @unit, @category,
+    @id, @project_id, @material_id, @module, @section, @name, @name_overridden, @unit, @category,
     @supplier, @link, @link_alt, @photo_url, @client_note, @tech_note,
     @qty, @price, @vat_rate, @visible, @approved, @enabled, @needs_approval,
     @status, @actual_price, @client_comment, @sort_order, @responsible,
@@ -210,7 +210,7 @@ const INSERT_ITEM = db.prepare(`
 
 const UPDATE_ITEM = db.prepare(`
   UPDATE project_items SET
-    module=@module, section=@section, name=@name, unit=@unit, category=@category,
+    module=@module, section=@section, name=@name, name_overridden=@name_overridden, unit=@unit, category=@category,
     supplier=@supplier, link=@link, link_alt=@link_alt, photo_url=@photo_url,
     client_note=@client_note, tech_note=@tech_note,
     qty=@qty, price=@price, vat_rate=@vat_rate,
@@ -255,6 +255,7 @@ function itemToParams(it, projectId) {
     module: normalized.module,
     section: normalized.section || normalized.module,
     name: normalized.name,
+    name_overridden: normalized.nameOverridden ? 1 : 0,
     unit: normalized.unit || "шт.",
     category: normalized.category || "Прочее",
     supplier: normalized.supplier || "",
@@ -855,7 +856,9 @@ export function patchItem(projectId, itemId, patch) {
   if (!p) return null;
   let item = p.items.find((i) => i.id === itemId);
   if (!item) return null;
-  item = normalizeItemFlags({ ...item, ...patch });
+  const effectivePatch = { ...patch };
+  if (item.materialId && patch.name !== undefined && patch.nameOverridden === undefined) effectivePatch.nameOverridden = true;
+  item = normalizeItemFlags({ ...item, ...effectivePatch });
   if (patch.qty !== undefined && patch.qty === 0) item.includedInProject = false;
   UPDATE_ITEM.run(updateItemParams(item, projectId));
   touchProject(projectId);

@@ -1,9 +1,21 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 export default function SpecificationRowMenu({ item, sectionOptions = [], onDetails, onRefresh, onDuplicate, onMove, onDelete }) {
   const menuRef = useRef(null);
   const [moving, setMoving] = useState(false);
   const close = () => { if (menuRef.current) menuRef.current.open = false; setMoving(false); };
+  useEffect(() => {
+    const menu = menuRef.current;
+    const closeOther = (event) => event.detail !== menu && close();
+    const outside = (event) => menu?.open && !menu.contains(event.target) && close();
+    const escape = (event) => event.key === "Escape" && close();
+    const toggle = () => menu?.open && document.dispatchEvent(new CustomEvent("spec-row-menu-open", { detail: menu }));
+    document.addEventListener("spec-row-menu-open", closeOther);
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    menu?.addEventListener("toggle", toggle);
+    return () => { document.removeEventListener("spec-row-menu-open", closeOther); document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); menu?.removeEventListener("toggle", toggle); };
+  }, []);
   const run = (callback) => { close(); callback?.(); };
   return <details className="spec-row-menu" ref={menuRef}>
     <summary className="btn btn-sm btn-ghost" aria-label={`Действия: ${item.name}`}>⋯</summary>

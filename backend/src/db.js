@@ -8,7 +8,7 @@ import { parseFlowSpecsFromDb } from "../../shared/flowSpecs.js";
 import { parseSplitSpecsFromDb } from "../../shared/splitSpecs.js";
 import { resolveMaterialModules } from "../../shared/materialModules.js";
 import { resolveMaterialFarmSections } from "../../shared/materialFarmSections.js";
-import { normalizeItemFlags, resolveItemType } from "../../shared/itemTypes.js";
+import { normalizeItemFlags, resolveItemType, resolveEffectiveSupplier } from "../../shared/itemTypes.js";
 import { runSqlMigrations } from "./migrations/runner.js";
 import { resolveProjectPlanFields } from "./plannerPlanState.js";
 
@@ -71,6 +71,7 @@ export function initDb() {
     CREATE TABLE IF NOT EXISTS modules (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      name_overridden INTEGER NOT NULL DEFAULT 0,
       type TEXT NOT NULL DEFAULT 'general',
       tech TEXT DEFAULT '',
       section TEXT DEFAULT '',
@@ -198,6 +199,7 @@ function migrateDb() {
       db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
     }
   };
+  addCol("project_items", "name_overridden", "INTEGER NOT NULL DEFAULT 0");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS suppliers (
@@ -426,6 +428,7 @@ export function rowToMaterial(row) {
   return {
     id: row.id,
     name: row.name,
+    nameOverridden: !!row.name_overridden,
     unit: row.unit,
     basePrice: row.base_price,
     defaultQty: row.default_qty,
@@ -439,7 +442,10 @@ export function rowToMaterial(row) {
     farmSectionId: row.farm_section_id || "",
     farmSections: resolveMaterialFarmSections(row),
     itemType: row.item_type,
-    supplier: row.supplier,
+    supplier: resolveEffectiveSupplier(
+      { materialId: row.material_id, supplier: row.supplier },
+      row.material_id && row.material_exists ? { supplier: row.material_supplier || "" } : null,
+    ),
     link: row.link,
     linkAlt: row.link_alt,
     photoUrl: row.photo_url,
@@ -598,7 +604,10 @@ export function rowToProject(row, items = []) {
 
 export function loadProjectItems(projectId) {
   return db
-    .prepare("SELECT * FROM project_items WHERE project_id = ? ORDER BY sort_order, module, name")
+    .prepare(`SELECT pi.*, m.supplier AS material_supplier,
+                     CASE WHEN m.id IS NULL THEN 0 ELSE 1 END AS material_exists
+              FROM project_items pi LEFT JOIN materials m ON m.id = pi.material_id
+              WHERE pi.project_id = ? ORDER BY pi.sort_order, pi.module, pi.name`)
     .all(projectId)
     .map(rowToItem);
 }

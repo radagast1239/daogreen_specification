@@ -8,7 +8,7 @@
 .spec-row-menu { position:relative; }
 .spec-row-menu > summary { list-style:none; min-width:32px; font-size:18px; line-height:1; }
 .spec-row-menu > summary::-webkit-details-marker { display:none; }
-.spec-row-menu__list { position:absolute; top:calc(100% + 4px); right:0; z-index:30; display:grid; gap:2px; width:190px; padding:6px; box-shadow:0 12px 30px rgba(15,23,42,.16); }
+.spec-row-menu__list { position:absolute; top:calc(100% + 4px); right:0; z-index:30; display:grid; gap:2px; width:220px; max-width:calc(100vw - 24px); padding:6px; box-shadow:0 12px 30px rgba(15,23,42,.16); }
 .spec-row-menu__list .btn { justify-content:flex-start; width:100%; text-align:left; }
 .spec-row-menu__list select { width:100%; min-width:0; }
 .spec-row-menu__delete { color:var(--danger, #b42318); }
