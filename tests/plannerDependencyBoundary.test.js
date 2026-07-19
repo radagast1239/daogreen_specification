@@ -17,7 +17,7 @@
 import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import {
   buildPlannerGraph,
   violationKey,
@@ -1126,5 +1126,125 @@ describe("PHASE 1A-2C2D3E3 — climate clearSheet item.bulkDelete convergence", 
     const geometryCommandsSource = readFileSync(GEOMETRY_COMMANDS_FILE, "utf8");
     expect(geometryCommandsSource).toMatch(/"line\.bulkDelete":\s*handleLineBulkDelete,/);
     expect(geometryCommandsSource).toMatch(/const ENTITY_KINDS = \["walls", "nodes", "items", "dimensions", "links", "lines"\];/);
+  });
+});
+
+/**
+ * PHASE 1A-2C2D3E4B — pure structural cleanup primitive extraction.
+ * computeItemRemoval/computeLineRemoval are extracted out of
+ * deleteItemsFromPlan/deleteLinesFromPlan so a future combined item+line
+ * delete command can reuse them against one shared plan + one
+ * runEngineeringSync pass. This phase does NOT introduce that combined
+ * command, any UI wiring, or any power/light/vent/staff migration — only
+ * the internal command-layer refactor, with item.bulkDelete/line.bulkDelete
+ * behavior fully preserved (proven by the unchanged, still-passing
+ * dispatcher test suites).
+ */
+describe("PHASE 1A-2C2D3E4B — structural cleanup primitive extraction", () => {
+  const GEOMETRY_COMMANDS_FILE = join(PLANNER_ROOT, "commands", "geometryCommands.js");
+  const geometryCommandsSource = readFileSync(GEOMETRY_COMMANDS_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  function extractBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    expect(start, `marker not found: ${startMarker}`).toBeGreaterThanOrEqual(0);
+    const end = source.indexOf(endMarker, start);
+    expect(end, `end marker not found: ${endMarker}`).toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  const codeOnly = stripComments(geometryCommandsSource);
+
+  it("computeItemRemoval and computeLineRemoval each exist exactly once (single source of structural cleanup truth)", () => {
+    expect((codeOnly.match(/function\s+computeItemRemoval\s*\(/g) || []).length).toBe(1);
+    expect((codeOnly.match(/function\s+computeLineRemoval\s*\(/g) || []).length).toBe(1);
+  });
+
+  it("computeItemRemoval does not call runEngineeringSync, changedOk, rejected, or executeGeometryCommand", () => {
+    const body = extractBetween(codeOnly, "function computeItemRemoval(", "\nfunction deleteItemsFromPlan(");
+    expect(body).not.toMatch(/\brunEngineeringSync\s*\(/);
+    expect(body).not.toMatch(/\bchangedOk\s*\(/);
+    expect(body).not.toMatch(/\brejected\s*\(/);
+    expect(body).not.toMatch(/\bexecuteGeometryCommand\s*\(/);
+  });
+
+  it("computeLineRemoval does not call runEngineeringSync, changedOk, rejected, or executeGeometryCommand", () => {
+    const body = extractBetween(codeOnly, "function computeLineRemoval(", "\nfunction deleteLinesFromPlan(");
+    expect(body).not.toMatch(/\brunEngineeringSync\s*\(/);
+    expect(body).not.toMatch(/\bchangedOk\s*\(/);
+    expect(body).not.toMatch(/\brejected\s*\(/);
+    expect(body).not.toMatch(/\bexecuteGeometryCommand\s*\(/);
+  });
+
+  it("computeItemRemoval and computeLineRemoval never reference UI layer/sheet semantics (power/light/vent/climate/staff)", () => {
+    const itemBody = extractBetween(codeOnly, "function computeItemRemoval(", "\nfunction deleteItemsFromPlan(");
+    const lineBody = extractBetween(codeOnly, "function computeLineRemoval(", "\nfunction deleteLinesFromPlan(");
+    for (const layer of ["power", "light", "vent", "climate", "staff"]) {
+      expect(itemBody).not.toMatch(new RegExp(`["']${layer}["']`));
+      expect(lineBody).not.toMatch(new RegExp(`["']${layer}["']`));
+    }
+  });
+
+  it("deleteItemsFromPlan delegates to computeItemRemoval and calls runEngineeringSync exactly once", () => {
+    const body = extractBetween(codeOnly, "function deleteItemsFromPlan(", "\nfunction handleItemBulkDelete(");
+    expect(body).toMatch(/computeItemRemoval\s*\(/);
+    expect((body.match(/\brunEngineeringSync\s*\(/g) || []).length).toBe(1);
+  });
+
+  it("deleteLinesFromPlan delegates to computeLineRemoval and calls runEngineeringSync exactly once", () => {
+    const body = extractBetween(codeOnly, "function deleteLinesFromPlan(", "\nfunction handleLineBulkDelete(");
+    expect(body).toMatch(/computeLineRemoval\s*\(/);
+    expect((body.match(/\brunEngineeringSync\s*\(/g) || []).length).toBe(1);
+  });
+
+  it("no items.filter/links.filter/dimensions cleanup math exists outside computeItemRemoval (single source of truth)", () => {
+    const outsideItemPrimitive = codeOnly.replace(
+      extractBetween(codeOnly, "function computeItemRemoval(", "\nfunction deleteItemsFromPlan("),
+      "",
+    );
+    expect(outsideItemPrimitive).not.toMatch(/\(plan\.items \|\| \[\]\)\.filter\(\(it\) => !deletedItemIdSet\.has\(it\.id\)\)/);
+    // Specific to the item-deletion link cleanup (deletedItemIdSet) — not a
+    // false-positive match against deleteWallsFromPlan's own, legitimately
+    // different link cleanup (danglingItemIdSet), which shares the same
+    // generic "(plan.links || []).filter((l) => {" opening syntax.
+    expect(outsideItemPrimitive).not.toMatch(/deletedItemIdSet\.has\(l\.fromId\) \|\| deletedItemIdSet\.has\(l\.toId\)/);
+  });
+
+  it("no lines.filter cleanup math exists outside computeLineRemoval (single source of truth)", () => {
+    const outsideLinePrimitive = codeOnly.replace(
+      extractBetween(codeOnly, "function computeLineRemoval(", "\nfunction deleteLinesFromPlan("),
+      "",
+    );
+    expect(outsideLinePrimitive).not.toMatch(/\(plan\.lines \|\| \[\]\)\.filter\(\(l\) => !deletedLineIdSet\.has\(l\.id\)\)/);
+  });
+
+  it("handlers remain thin: handleItemBulkDelete/handleLineBulkDelete call the wrapper, not the primitive, directly", () => {
+    const itemHandlerBody = extractBetween(codeOnly, "function handleItemBulkDelete(", "\nfunction computeLineRemoval(");
+    const lineHandlerBody = extractBetween(codeOnly, "function handleLineBulkDelete(", "\nconst HANDLERS = {");
+    expect(itemHandlerBody).toMatch(/deleteItemsFromPlan\s*\(/);
+    expect(itemHandlerBody).not.toMatch(/computeItemRemoval\s*\(/);
+    expect(lineHandlerBody).toMatch(/deleteLinesFromPlan\s*\(/);
+    expect(lineHandlerBody).not.toMatch(/computeLineRemoval\s*\(/);
+  });
+
+  it("no combined item+line command exists yet (itemLine.bulkDelete / entities.bulkDelete / layer.bulkDelete)", () => {
+    expect(geometryCommandsSource).not.toMatch(/itemLine\.bulkDelete/);
+    expect(geometryCommandsSource).not.toMatch(/entities\.bulkDelete/);
+    expect(geometryCommandsSource).not.toMatch(/layer\.bulkDelete/);
+  });
+
+  it("no applyItemLineBulkDelete leaf helper exists yet", () => {
+    const path = join(PLANNER_ROOT, "ui", "applyItemLineBulkDelete.js");
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it("power/light/vent are still absent from both migrated clearSheet sets (no combined-clear migration in this phase)", () => {
+    const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+    const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+    expect(planPageSource).toMatch(/const MIGRATED_ITEM_CLEAR_LAYER_IDS = \["racks", "water", "sockets", "sanitary", "furn", "climate"\];/);
+    expect(planPageSource).toMatch(/const MIGRATED_LINE_CLEAR_LAYER_IDS = \["drain", "irrigation"\];/);
   });
 });
