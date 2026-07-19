@@ -2110,6 +2110,7 @@ function SpecTab({
                           if (await confirm({ title: "Удалить позицию?", message: it.name, confirmLabel: "Удалить" })) actions.itemDelete(project.id, it.id);
                         }}
                       />
+                      {it.nameOverridden && <div className="chip chip--neutral spec-name-override" style={{ fontSize: 10, marginTop: 4 }}>Название изменено в проекте</div>}
                       </span>
                     </td>
                     </>

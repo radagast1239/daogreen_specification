@@ -1,33 +1,42 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export default function SpecificationRowMenu({ item, sectionOptions = [], onDetails, onRefresh, onDuplicate, onMove, onDelete }) {
-  const menuRef = useRef(null);
+  const triggerRef = useRef(null);
+  const popupRef = useRef(null);
+  const [open, setOpen] = useState(false);
   const [moving, setMoving] = useState(false);
-  const close = () => { if (menuRef.current) menuRef.current.open = false; setMoving(false); };
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const close = () => { setOpen(false); setMoving(false); };
+
   useEffect(() => {
-    const menu = menuRef.current;
-    const closeOther = (event) => event.detail !== menu && close();
-    const outside = (event) => menu?.open && !menu.contains(event.target) && close();
+    if (!open) return undefined;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setPosition({ top: Math.min(rect.bottom + 4, window.innerHeight - 260), left: Math.max(12, Math.min(rect.right - 220, window.innerWidth - 232)) });
+    document.dispatchEvent(new CustomEvent("spec-row-menu-open", { detail: item.id }));
+    const closeOther = (event) => event.detail !== item.id && close();
+    const outside = (event) => !triggerRef.current?.contains(event.target) && !popupRef.current?.contains(event.target) && close();
     const escape = (event) => event.key === "Escape" && close();
-    const toggle = () => menu?.open && document.dispatchEvent(new CustomEvent("spec-row-menu-open", { detail: menu }));
     document.addEventListener("spec-row-menu-open", closeOther);
     document.addEventListener("pointerdown", outside);
     document.addEventListener("keydown", escape);
-    menu?.addEventListener("toggle", toggle);
-    return () => { document.removeEventListener("spec-row-menu-open", closeOther); document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); menu?.removeEventListener("toggle", toggle); };
-  }, []);
-  const run = (callback) => { close(); callback?.(); };
-  return <details className="spec-row-menu" ref={menuRef}>
-    <summary className="btn btn-sm btn-ghost" aria-label={`Действия: ${item.name}`}>⋯</summary>
-    <div className="spec-row-menu__list card" role="menu">
-      <button type="button" className="btn btn-sm btn-ghost" role="menuitem" onClick={() => run(onDetails)}>Подробнее</button>
-      <button type="button" className="btn btn-sm btn-ghost" role="menuitem" disabled={!item.materialId} onClick={() => run(onRefresh)}>Обновить из базы</button>
-      <button type="button" className="btn btn-sm btn-ghost" role="menuitem" onClick={() => run(onDuplicate)}>Дублировать</button>
-      <button type="button" className="btn btn-sm btn-ghost" role="menuitem" onClick={() => setMoving((value) => !value)}>Переместить</button>
-      {moving && <select autoFocus aria-label="Раздел для перемещения строки" value={item.module || ""} onChange={(event) => event.target.value !== item.module && run(() => onMove?.(event.target.value))}>
-        {sectionOptions.map((section) => <option key={section} value={section}>{section}</option>)}
-      </select>}
-      <button type="button" className="btn btn-sm btn-ghost spec-row-menu__delete" role="menuitem" onClick={() => run(onDelete)}>Удалить</button>
-    </div>
-  </details>;
+    return () => { document.removeEventListener("spec-row-menu-open", closeOther); document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
+  }, [open, item.id]);
+
+  const run = (callback) => { callback?.(); close(); };
+  return <>
+    <button ref={triggerRef} type="button" className="btn btn-sm btn-ghost spec-row-menu__trigger" aria-label={`Действия: ${item.name}`} aria-expanded={open} onClick={() => setOpen((value) => !value)}>⋯</button>
+    {open && createPortal(
+      <div ref={popupRef} className="spec-row-menu__list card" role="menu" data-project-item-id={item.id} style={position} onPointerDown={(event) => event.stopPropagation()}>
+        <button type="button" className="btn btn-sm btn-ghost" role="menuitem" onClick={() => run(onDetails)}>Подробнее</button>
+        <button type="button" className="btn btn-sm btn-ghost" role="menuitem" disabled={!item.materialId} onClick={() => run(onRefresh)}>Обновить из базы</button>
+        <button type="button" className="btn btn-sm btn-ghost" role="menuitem" onClick={() => run(onDuplicate)}>Дублировать</button>
+        <button type="button" className="btn btn-sm btn-ghost" role="menuitem" onClick={() => setMoving((value) => !value)}>Переместить</button>
+        {moving && <select autoFocus aria-label="Раздел для перемещения строки" value={item.module || ""} onChange={(event) => event.target.value !== item.module && run(() => onMove?.(event.target.value))}>
+          {sectionOptions.map((section) => <option key={section} value={section}>{section}</option>)}
+        </select>}
+        <button type="button" className="btn btn-sm btn-ghost spec-row-menu__delete" role="menuitem" onClick={() => run(onDelete)}>Удалить</button>
+      </div>, document.body
+    )}
+  </>;
 }

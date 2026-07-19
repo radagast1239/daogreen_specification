@@ -5,10 +5,8 @@
 .spec[data-preset]:not([data-preset="all"]) [data-spec-column][hidden] { display:none; }
 .spec-row--inspected { outline:2px solid color-mix(in srgb, var(--primary) 55%, transparent); outline-offset:-2px; }
 .spec-details-cell { position:sticky; right:0; background:var(--surface, #fff); z-index:2; width:44px; text-align:center; }
-.spec-row-menu { position:relative; }
-.spec-row-menu > summary { list-style:none; min-width:32px; font-size:18px; line-height:1; }
-.spec-row-menu > summary::-webkit-details-marker { display:none; }
-.spec-row-menu__list { position:absolute; top:calc(100% + 4px); right:0; z-index:30; display:grid; gap:2px; width:220px; max-width:calc(100vw - 24px); padding:6px; box-shadow:0 12px 30px rgba(15,23,42,.16); }
+.spec-row-menu__trigger { min-width:32px; font-size:18px; line-height:1; }
+.spec-row-menu__list { position:fixed; z-index:120; display:grid; gap:2px; width:220px; max-width:calc(100vw - 24px); padding:6px; box-shadow:0 12px 30px rgba(15,23,42,.16); }
 .spec-row-menu__list .btn { justify-content:flex-start; width:100%; text-align:left; }
 .spec-row-menu__list select { width:100%; min-width:0; }
 .spec-row-menu__delete { color:var(--danger, #b42318); }
@@ -42,5 +40,5 @@
   .spec-active-filter { max-width:100%; overflow-x:auto; flex-wrap:nowrap; scrollbar-width:none; }
   .spec-active-filter::-webkit-scrollbar { display:none; }
   .spec-active-filter__chip { flex:0 0 auto; }
-  .spec-row-menu__list { position:fixed; left:12px; right:12px; bottom:12px; top:auto; width:auto; max-width:none; }
+  .spec-row-menu__list { left:12px!important; right:12px; bottom:12px; top:auto!important; width:auto; max-width:none; }
 }

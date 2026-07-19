@@ -857,8 +857,10 @@ export function patchItem(projectId, itemId, patch) {
   let item = p.items.find((i) => i.id === itemId);
   if (!item) return null;
   const effectivePatch = { ...patch };
-  if (item.materialId && patch.name !== undefined && patch.nameOverridden === undefined) effectivePatch.nameOverridden = true;
+  if (patch.name_overridden !== undefined && patch.nameOverridden === undefined) effectivePatch.nameOverridden = !!patch.name_overridden;
+  if (item.materialId && patch.name !== undefined && effectivePatch.nameOverridden === undefined) effectivePatch.nameOverridden = true;
   item = normalizeItemFlags({ ...item, ...effectivePatch });
+  item.name_overridden = !!item.nameOverridden;
   if (patch.qty !== undefined && patch.qty === 0) item.includedInProject = false;
   UPDATE_ITEM.run(updateItemParams(item, projectId));
   touchProject(projectId);

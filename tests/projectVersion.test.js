@@ -22,6 +22,8 @@ let loadProject;
 let saveItems;
 let createVersion;
 let updateProject;
+let patchItem;
+let refreshItemsFromMaterial;
 
 function lockedUpdate(id, patch) {
   const revision = Number(db.prepare("SELECT revision FROM projects WHERE id = ?").get(id)?.revision) || 1;
@@ -100,6 +102,8 @@ beforeAll(async () => {
   saveItems = projectsMod.saveItems;
   createVersion = projectsMod.createVersion;
   updateProject = projectsMod.updateProject;
+  patchItem = projectsMod.patchItem;
+  refreshItemsFromMaterial = projectsMod.refreshItemsFromMaterial;
   listVersions = projectsMod.listVersions;
   loadVersionRow = releaseMod.loadVersionRow;
   loadPublishedSnapshotItems = releaseMod.loadPublishedSnapshotItems;
@@ -138,6 +142,18 @@ afterAll(() => {
 });
 
 describe("published release snapshot", () => {
+  it("persists project name override, keeps it through refresh, and resets independently", () => {
+    seedProject("p1", { items: [clientItem("it1", "mat1"), clientItem("it2", "mat1")] });
+    const renamed = patchItem("p1", "it1", { name: "Project-only name", name_overridden: true });
+    expect(renamed).toMatchObject({ id: "it1", name: "Project-only name", nameOverridden: true, name_overridden: true });
+    expect(loadProject("p1").items.find((it) => it.id === "it1")).toMatchObject({ name: "Project-only name", nameOverridden: true });
+    refreshItemsFromMaterial("p1", { itemIds: ["it1"], fields: ["all"] });
+    expect(loadProject("p1").items.find((it) => it.id === "it1")).toMatchObject({ name: "Project-only name", nameOverridden: true });
+    expect(loadProject("p1").items.find((it) => it.id === "it2")).toMatchObject({ name: "Test material", nameOverridden: false });
+    const materialName = db.prepare("SELECT name FROM materials WHERE id = ?").get("mat1").name;
+    patchItem("p1", "it1", { name: materialName, name_overridden: false });
+    expect(loadProject("p1").items.find((it) => it.id === "it1")).toMatchObject({ name: "Test material", nameOverridden: false });
+  });
   it("publish creates release_v1 snapshot with client-visible items and commercial fields", () => {
     seedProject("p1", {
       items: [clientItem("it1", "mat1", { actualPrice: 88, clientComment: "note" })],

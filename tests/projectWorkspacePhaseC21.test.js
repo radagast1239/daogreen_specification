@@ -33,6 +33,9 @@ describe("Project Workspace C2.1", () => {
     const types = read("shared/itemTypes.js");
     const menu = read("src/components/SpecificationRowMenu.jsx");
     expect(types.match(/REFRESH_FROM_MATERIAL_FIELDS[\s\S]*?\];/)[0]).not.toContain('"name"');
+    expect(menu).toContain("createPortal");
+    expect(menu).toContain("data-project-item-id={item.id}");
+    expect(menu).toContain("const run = (callback) => { callback?.(); close(); }");
     expect(menu).toContain("spec-row-menu-open");
     expect(menu).toContain('event.key === "Escape"');
     expect(menu).toContain('document.addEventListener("pointerdown"');
