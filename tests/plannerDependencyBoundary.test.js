@@ -756,8 +756,8 @@ describe("PHASE 1A-2C2D3B — item bulk delete UI trigger convergence", () => {
     expect(body.trim().replace(/\}\s*$/, "").trim().endsWith("return;")).toBe(true);
   });
 
-  it("MIGRATED_ITEM_CLEAR_LAYER_IDS is exactly the five proven-working simple item layers, not the full ITEM_LAYER_IDS set", () => {
-    expect(planPageSource).toMatch(/const MIGRATED_ITEM_CLEAR_LAYER_IDS = \["racks", "water", "sockets", "sanitary", "furn"\];/);
+  it("MIGRATED_ITEM_CLEAR_LAYER_IDS is exactly the six proven-working item layers (five simple + climate from PHASE 1A-2C2D3E3), not the full ITEM_LAYER_IDS set", () => {
+    expect(planPageSource).toMatch(/const MIGRATED_ITEM_CLEAR_LAYER_IDS = \["racks", "water", "sockets", "sanitary", "furn", "climate"\];/);
   });
 
   it("line/disputed clearSheet branches are unmigrated legacy paths (still direct setPlan, not routed through a geometry command)", () => {
@@ -900,7 +900,7 @@ describe("PHASE 1A-2C2D3D2 — room clearSheet item.bulkDelete convergence", () 
     expect(helperSource).not.toMatch(/from\s*["'][^"']*commands\/geometryCommands\.js["']/);
   });
 
-  it("disputed clearSheet branches (irrigation/power/light/vent/climate/staff/line layers) remain unmigrated legacy paths", () => {
+  it("disputed clearSheet branches (power/light/vent/staff/line layers) remain unmigrated legacy paths (climate migrated in PHASE 1A-2C2D3E3, see that phase's own boundary block below; irrigation/drain migrated in PHASE 1A-2C2D3E2)", () => {
     const body = stripComments(
       extractBetween(planPageSource, "setPlan((p) => {\r\n      const next = { ...p };", "  };"),
     );
@@ -1069,5 +1069,62 @@ describe("PHASE 1A-2C2D3E2 — line bulk delete UI trigger convergence", () => {
     // No leftover hand-maintained partial literal (walls/nodes/items/
     // dimensions only, missing links/lines) anywhere in the file.
     expect(codeOnly).not.toMatch(/\{\s*walls:\s*\[\],\s*nodes:\s*\[\],\s*items:\s*\[\],\s*dimensions:\s*\[\]\s*\}/);
+  });
+});
+
+/**
+ * PHASE 1A-2C2D3E3 — climate clearSheet routing fix: climate's LAYERS.mode
+ * was already "items" (17 real catalog kinds, no "line" tool in
+ * LAYER_TOOLS.climate — see AUDIT PHASE 1A-2C2D3E1, Risk R1), but climate
+ * also sits in LINE_LAYER_IDS, so the legacy if/else-if fallback used to
+ * intercept it as a line-layer and clear (almost always zero) lines, leaving
+ * every climate item untouched. Only the routing is fixed here — climate is
+ * added to MIGRATED_ITEM_CLEAR_LAYER_IDS, reusing the existing item.bulkDelete
+ * branch unchanged. LINE_LAYER_IDS, LAYERS.mode, catalog, LAYER_TOOLS, and
+ * line.bulkDelete are all untouched by this phase. power/light/vent/staff
+ * remain on the legacy line-fallback path.
+ */
+describe("PHASE 1A-2C2D3E3 — climate clearSheet item.bulkDelete convergence", () => {
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  it("climate is in MIGRATED_ITEM_CLEAR_LAYER_IDS (the exact six-layer set)", () => {
+    expect(planPageSource).toMatch(/const MIGRATED_ITEM_CLEAR_LAYER_IDS = \["racks", "water", "sockets", "sanitary", "furn", "climate"\];/);
+  });
+
+  it("climate is NOT in MIGRATED_LINE_CLEAR_LAYER_IDS (still exactly drain/irrigation, unchanged by this phase)", () => {
+    expect(planPageSource).toMatch(/const MIGRATED_LINE_CLEAR_LAYER_IDS = \["drain", "irrigation"\];/);
+  });
+
+  it("climate stays in LINE_LAYER_IDS unchanged (only routing changed, not layer classification)", () => {
+    expect(planPageSource).toMatch(/const LINE_LAYER_IDS = \["drain", "irrigation", "supply", "power", "vent", "climate", "ac", "light", "staff"\];/);
+  });
+
+  it("the MIGRATED_ITEM_CLEAR_LAYER_IDS branch (now including climate) is checked before MIGRATED_LINE_CLEAR_LAYER_IDS and the legacy fallback, so climate can never reach either", () => {
+    const codeOnly = stripComments(planPageSource);
+    const itemBranchIdx = codeOnly.indexOf("if (MIGRATED_ITEM_CLEAR_LAYER_IDS.includes(active)) {");
+    const lineBranchIdx = codeOnly.indexOf("if (MIGRATED_LINE_CLEAR_LAYER_IDS.includes(active)) {");
+    const legacyFallbackIdx = codeOnly.indexOf("if (LINE_LAYER_IDS.includes(active)) next.lines");
+    expect(itemBranchIdx).toBeGreaterThan(-1);
+    expect(lineBranchIdx).toBeGreaterThan(itemBranchIdx);
+    expect(legacyFallbackIdx).toBeGreaterThan(lineBranchIdx);
+  });
+
+  it("power/light/vent/staff remain reachable only through the legacy LINE_LAYER_IDS fallback (still not in either migrated set)", () => {
+    for (const layer of ["power", "light", "vent", "staff"]) {
+      expect(planPageSource).not.toMatch(new RegExp(`MIGRATED_ITEM_CLEAR_LAYER_IDS = \\[[^\\]]*"${layer}"`));
+      expect(planPageSource).not.toMatch(new RegExp(`MIGRATED_LINE_CLEAR_LAYER_IDS = \\[[^\\]]*"${layer}"`));
+    }
+  });
+
+  it("line.bulkDelete registration and ENTITY_KINDS are unchanged by this phase (climate migration touches only PlanPage.jsx routing)", () => {
+    const GEOMETRY_COMMANDS_FILE = join(PLANNER_ROOT, "commands", "geometryCommands.js");
+    const geometryCommandsSource = readFileSync(GEOMETRY_COMMANDS_FILE, "utf8");
+    expect(geometryCommandsSource).toMatch(/"line\.bulkDelete":\s*handleLineBulkDelete,/);
+    expect(geometryCommandsSource).toMatch(/const ENTITY_KINDS = \["walls", "nodes", "items", "dimensions", "links", "lines"\];/);
   });
 });

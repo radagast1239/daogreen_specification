@@ -67,6 +67,17 @@ function roomItem(id, kind, x, y, extra = {}) {
   };
 }
 
+// PHASE 1A-2C2D3E3 — real climate-layer catalog kinds (fridge/freezer/
+// recirc/ac_indoor/temperature_sensor etc.), matching catalog.js's actual
+// { layer: "climate" } entries — proves item.bulkDelete works for the real
+// climate-clear item shapes (free-standing AND wall-mounted), not just an
+// arbitrary fixture kind.
+function climateItem(id, kind, x, y, extra = {}) {
+  return {
+    id, kind, layer: "climate", x, y, w: 800, h: 600, ...extra,
+  };
+}
+
 function basePlan() {
   return {
     room: { w: 8000, h: 6000 },
@@ -700,5 +711,145 @@ describe("PHASE 1A-2C2D3D2 — room-layer item kinds through item.bulkDelete", (
 
     h.history.redo();
     expect(h.history.current).toBe(committed);
+  });
+});
+
+// ── climate-layer item kinds [PHASE 1A-2C2D3E3] ──────────────────────────
+
+describe("PHASE 1A-2C2D3E3 — climate item kinds through item.bulkDelete", () => {
+  it("a free-standing climate item (fridge, layer:\"climate\") is deleted the same as any other item", () => {
+    const plan = basePlan();
+    plan.items = [climateItem("f1", "fridge", 0, 0)];
+    const result = executeGeometryCommand(plan, { type: "item.bulkDelete", itemIds: ["f1"] }, { makeId: ids() });
+    expect(result.ok).toBe(true);
+    expect(result.plan.items).toEqual([]);
+    expect(result.entityChanges.deleted.items).toEqual(["f1"]);
+  });
+
+  it("a free-standing climate item (freezer) is deleted the same as any other item", () => {
+    const plan = basePlan();
+    plan.items = [climateItem("fz1", "freezer", 0, 0, { w: 1000, h: 500 })];
+    const result = executeGeometryCommand(plan, { type: "item.bulkDelete", itemIds: ["fz1"] }, { makeId: ids() });
+    expect(result.ok).toBe(true);
+    expect(result.plan.items).toEqual([]);
+    expect(result.entityChanges.deleted.items).toEqual(["fz1"]);
+  });
+
+  it("a wall-mounted climate item (recirc, catalog wall:true) is deleted the same as any other item", () => {
+    const plan = basePlan();
+    plan.items = [climateItem("r1", "recirc", 0, 0, { w: 300, h: 310, wall: true, wallId: "o1" })];
+    const result = executeGeometryCommand(plan, { type: "item.bulkDelete", itemIds: ["r1"] }, { makeId: ids() });
+    expect(result.ok).toBe(true);
+    expect(result.plan.items).toEqual([]);
+    expect(result.entityChanges.deleted.items).toEqual(["r1"]);
+  });
+
+  it("a wall-mounted climate item (ac_indoor, catalog wall:true) is deleted the same as any other item", () => {
+    const plan = basePlan();
+    plan.items = [climateItem("ac1", "ac_indoor", 0, 0, { w: 750, h: 220, wall: true, wallId: "o1" })];
+    const result = executeGeometryCommand(plan, { type: "item.bulkDelete", itemIds: ["ac1"] }, { makeId: ids() });
+    expect(result.ok).toBe(true);
+    expect(result.plan.items).toEqual([]);
+    expect(result.entityChanges.deleted.items).toEqual(["ac1"]);
+  });
+
+  it("a wall-mounted climate sensor (temperature_sensor, catalog wall:true) is deleted the same as any other item", () => {
+    const plan = basePlan();
+    plan.items = [climateItem("ts1", "temperature_sensor", 0, 0, { w: 120, h: 120, wall: true, wallId: "o1" })];
+    const result = executeGeometryCommand(plan, { type: "item.bulkDelete", itemIds: ["ts1"] }, { makeId: ids() });
+    expect(result.ok).toBe(true);
+    expect(result.plan.items).toEqual([]);
+    expect(result.entityChanges.deleted.items).toEqual(["ts1"]);
+  });
+
+  it("several mixed climate kinds (free-standing + wall-mounted) are all deleted atomically in one command; a surviving non-climate item keeps its exact placement", () => {
+    const plan = basePlan();
+    const survivor = rack("survivor", 4000, 4000);
+    plan.items = [
+      climateItem("f1", "fridge", 0, 0),
+      climateItem("ac1", "ac_indoor", 1000, 0, { w: 750, h: 220, wall: true, wallId: "o1" }),
+      climateItem("ts1", "temperature_sensor", 2000, 0, { w: 120, h: 120, wall: true, wallId: "o1" }),
+      survivor,
+    ];
+    const climateIds = plan.items.filter((it) => it.layer === "climate").map((it) => it.id);
+    const result = executeGeometryCommand(plan, { type: "item.bulkDelete", itemIds: climateIds }, { makeId: ids() });
+    expect(result.ok).toBe(true);
+    expect(result.plan.items.map((it) => it.id)).toEqual(["survivor"]);
+    expect(result.entityChanges.deleted.items.sort()).toEqual(["ac1", "f1", "ts1"]);
+    const after = result.plan.items.find((it) => it.id === "survivor");
+    expect(after.x).toBe(survivor.x);
+    expect(after.y).toBe(survivor.y);
+    expect(after.w).toBe(survivor.w);
+    expect(after.h).toBe(survivor.h);
+    expect(after.layer).toBe(survivor.layer);
+  });
+
+  it("combined: climate item with a link, a persisted auto item-dimension, and a manual item-dimension — all cleaned up atomically; walls/nodes unchanged; validator clean; undo/redo exact references", () => {
+    const plan = basePlan();
+    const fridge = climateItem("f1", "fridge", 1000, 500, { w: 800, h: 600 });
+    const survivor = { id: "s1", kind: "rack", layer: "racks", x: 4000, y: 4000, w: 500, h: 500 };
+    plan.items = [fridge, survivor];
+    plan.links = [{ id: "lk1", type: "power", fromId: "f1", toId: "s1" }];
+    plan.dimensions = [
+      { id: "auto1", auto: true, kind: "opening", attachedTo: { type: "item", id: "f1" } },
+      {
+        id: "manual1", auto: false, kind: "manual", p1: { x: 1, y: 1 }, p2: { x: 2, y: 2 }, attachedTo: { type: "item", id: "f1", mode: "bbox-width" },
+      },
+    ];
+    const wallsBefore = plan.walls;
+    const nodesBefore = plan.nodes;
+
+    const h = makeHarness(plan);
+    const original = h.history.current;
+    const { status } = applyItemBulkDelete({ itemIds: ["f1"], runGeometryCommand: h.dispatcher });
+    expect(status).toBe("success");
+
+    const committed = h.history.current;
+    expect(committed.items.map((it) => it.id)).toEqual(["s1"]);
+    expect(committed.links).toEqual([]);
+    expect(committed.walls).toEqual(wallsBefore);
+    expect(committed.nodes).toEqual(nodesBefore);
+
+    const manualDim = committed.dimensions.find((d) => d.id === "manual1");
+    expect(manualDim.attachedTo).toBeNull();
+    expect(manualDim.p1).toEqual({ x: 1000, y: 500 });
+    expect(manualDim.p2).toEqual({ x: 1000 + 800, y: 500 });
+    expect(committed.dimensions.find((d) => d.id === "auto1")).toBeUndefined();
+
+    const diagnostics = validatePlanIntegrity(committed).diagnostics.filter((d) => d.severity === "error");
+    expect(diagnostics).toEqual([]);
+
+    h.history.undo();
+    expect(h.history.current).toBe(original);
+    expect(h.history.current.items.map((it) => it.id)).toEqual(["f1", "s1"]);
+    expect(h.history.current.links).toEqual([{ id: "lk1", type: "power", fromId: "f1", toId: "s1" }]);
+
+    h.history.redo();
+    expect(h.history.current).toBe(committed);
+  });
+
+  it("clear whole climate layer (mirrors clearSheet's MIGRATED_ITEM_CLEAR_LAYER_IDS computation): 1 command, 1 checkpoint", () => {
+    const plan = basePlan();
+    plan.items = [
+      climateItem("f1", "fridge", 0, 0),
+      climateItem("hu1", "humidifier", 1000, 0, { w: 520, h: 420 }),
+      rack("survivor", 4000, 4000), // different layer — must NOT be touched
+    ];
+    const h = makeHarness(plan);
+    const itemIds = plan.items.filter((it) => it.layer === "climate").map((it) => it.id);
+    const { status } = applyItemBulkDelete({ itemIds, runGeometryCommand: h.dispatcher });
+    expect(status).toBe("success");
+    expect(h.commitPlan).toHaveBeenCalledTimes(1);
+    expect(h.history.current.items.map((it) => it.id)).toEqual(["survivor"]);
+  });
+
+  it("clear empty climate layer: no-target, 0 checkpoints", () => {
+    const plan = basePlan();
+    plan.items = [rack("r1", 0, 0)];
+    const h = makeHarness(plan);
+    const itemIds = plan.items.filter((it) => it.layer === "climate").map((it) => it.id);
+    const { status } = applyItemBulkDelete({ itemIds, runGeometryCommand: h.dispatcher });
+    expect(status).toBe("no-target");
+    expect(h.commitPlan).not.toHaveBeenCalled();
   });
 });
