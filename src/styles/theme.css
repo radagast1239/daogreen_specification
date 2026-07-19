@@ -3067,6 +3067,25 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 .projects-grid {
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
 }
+.projects-grid .card {
+  min-width: 0;
+}
+.projects-card__meta {
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+.projects-card__meta .eyebrow {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.projects-card__meta .chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .table-scroll-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
