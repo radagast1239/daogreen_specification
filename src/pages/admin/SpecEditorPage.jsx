@@ -32,6 +32,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams, Link, useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import ProjectWorkspaceHeader from "../../components/ProjectWorkspaceHeader.jsx";
 import SpecificationItemInspector from "../../components/SpecificationItemInspector.jsx";
+import SpecificationRowMenu from "../../components/SpecificationRowMenu.jsx";
 import { DEFAULT_SPECIFICATION_COLUMN_PRESET, SPECIFICATION_COLUMN_PRESETS, specificationPresetHasColumn } from "../../lib/specificationColumnPresets.js";
 import {
   parseProjectWorkspaceView,
@@ -150,7 +151,8 @@ export default function SpecEditorPage() {
   const [applyTplId, setApplyTplId] = useState("");
   const [replacementReviewItem, setReplacementReviewItem] = useState(null);
   const [activeCoolingRoomId, setActiveCoolingRoomId] = useState(null);
-  const [specQuickFilter, setSpecQuickFilter] = useState("");
+  const [specQuickFilters, setSpecQuickFilters] = useState([]);
+  const specQuickFilter = specQuickFilters.at(-1) || "";
   const [specSelectedIds, setSpecSelectedIds] = useState([]);
   const [statusSaving, setStatusSaving] = useState(false);
   const [specModalOpen, setSpecModalOpen] = useState(false);
@@ -631,7 +633,7 @@ export default function SpecEditorPage() {
 
   const handleDashboardFilter = (filterId) => {
     setTab("spec");
-    setSpecQuickFilter(filterId || "");
+    setSpecQuickFilters(filterId ? [filterId] : []);
   };
 
   const bulkDeliveryPatch = async (patch) => {
@@ -1163,8 +1165,8 @@ export default function SpecEditorPage() {
             onManualParamsChange={(mp) => actions.projectUpdate(project.id, { manualParams: mp })}
             highlightItemId={highlightItemId}
             viewMode={viewMode}
-            quickFilter={specQuickFilter}
-            onQuickFilterChange={setSpecQuickFilter}
+            quickFilters={specQuickFilters}
+            onQuickFilterChange={setSpecQuickFilters}
             onSelectionChange={setSpecSelectedIds}
             publishCheck={publishCheck}
             onBulkShowClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(true))}
@@ -1321,7 +1323,7 @@ function SpecTab({
   onManualParamsChange,
   highlightItemId,
   viewMode = "designer",
-  quickFilter = "",
+  quickFilters = [],
   onQuickFilterChange,
   onSelectionChange,
   publishCheck,
@@ -1482,8 +1484,7 @@ function SpecTab({
 
   const passesFilter = (it, moduleFilter = "") => {
     if (!matchSpecLineFilter(it, moduleFilter, "project")) return false;
-    if (!quickFilter) return true;
-    return matchSpecLineFilter(it, quickFilter, "project");
+    return quickFilters.every((filterId) => matchSpecLineFilter(it, filterId, "project"));
   };
 
   const sectionNames = useMemo(() => groups.map(([m]) => m), [groups]);
@@ -1659,7 +1660,7 @@ function SpecTab({
         items={project.items || []}
         materials={materials}
         publishCheck={publishCheck}
-        quickFilter={quickFilter}
+        quickFilters={quickFilters}
         onQuickFilterChange={onQuickFilterChange}
         selectedItemIds={selectedItemIds}
         onSelectItems={(ids) => {
@@ -2098,14 +2099,19 @@ function SpecTab({
                       </button>
                     </td>
                     <td data-spec-column="details" className="spec-details-cell">
-                      <button
-                        ref={(node) => node ? inspectorTriggerRefs.current.set(it.id, node) : inspectorTriggerRefs.current.delete(it.id)}
-                        type="button"
-                        className="btn btn-sm btn-ghost"
-                        aria-label={`Подробнее: ${it.name}`}
-                        aria-expanded={inspectedItemId === it.id}
-                        onClick={() => setInspectedItemId(it.id)}
-                      >Подробнее</button>
+                      <span tabIndex={-1} aria-expanded={inspectedItemId === it.id} ref={(node) => node ? inspectorTriggerRefs.current.set(it.id, node) : inspectorTriggerRefs.current.delete(it.id)}>
+                      <SpecificationRowMenu
+                        item={it}
+                        sectionOptions={sectionNames}
+                        onDetails={() => setInspectedItemId(it.id)}
+                        onRefresh={() => refreshFromBase([it.id], ["all"])}
+                        onDuplicate={() => actions.itemAdd(project.id, { ...it })}
+                        onMove={(target) => patchItem(it.id, { module: target, section: target })}
+                        onDelete={async () => {
+                          if (await confirm({ title: "Удалить позицию?", message: it.name, confirmLabel: "Удалить" })) actions.itemDelete(project.id, it.id);
+                        }}
+                      />
+                      </span>
                     </td>
                     </>
                     )}

@@ -17,7 +17,7 @@ export default function SpecQuickFilters({
   items = [],
   materials = [],
   publishCheck,
-  quickFilter = "",
+  quickFilters = [],
   onQuickFilterChange,
   selectedItemIds = [],
   onSelectItems,
@@ -46,20 +46,26 @@ export default function SpecQuickFilters({
   };
 
   const selected = shouldShowSelectedActionBar(selectedItemIds.length);
+  const activeFilters = Array.isArray(quickFilters) ? quickFilters : quickFilters ? [quickFilters] : [];
+  const activeSet = new Set(activeFilters);
+  const toggleFilter = (id) => {
+    if (!id) return onQuickFilterChange?.([]);
+    onQuickFilterChange?.(activeSet.has(id) ? activeFilters.filter((entry) => entry !== id) : [...activeFilters, id]);
+  };
 
   return (
     <div className="spec-quick-filters no-print">
-      {quickFilter ? (
-        <div className="spec-active-filter">
-          <span className="chip chip--brand spec-active-filter__chip">
-            Показаны: <strong>{resolveDashboardFilterLabel(quickFilter)}</strong>
-          </span>
+      {activeFilters.length ? (
+        <div className="spec-active-filter" aria-label="Активные фильтры">
+          {activeFilters.map((filterId) => <button key={filterId} type="button" className="chip chip--brand spec-active-filter__chip" onClick={() => toggleFilter(filterId)} aria-label={`Удалить фильтр: ${resolveDashboardFilterLabel(filterId)}`}>
+            {resolveDashboardFilterLabel(filterId)} <span aria-hidden="true">×</span>
+          </button>)}
           <button
             type="button"
             className="btn btn-sm btn-ghost"
-            onClick={() => onQuickFilterChange?.("")}
+            onClick={() => onQuickFilterChange?.([])}
           >
-            Сбросить фильтр
+            Сбросить всё
           </button>
         </div>
       ) : null}
@@ -69,8 +75,9 @@ export default function SpecQuickFilters({
           <button
             key={id || "all"}
             type="button"
-            className={`btn btn-sm${quickFilter === id ? " btn-primary" : ""}`}
-            onClick={() => onQuickFilterChange?.(id)}
+            className={`btn btn-sm${(!id ? !activeFilters.length : activeSet.has(id)) ? " btn-primary" : ""}`}
+            aria-pressed={!id ? !activeFilters.length : activeSet.has(id)}
+            onClick={() => toggleFilter(id)}
           >
             {label}
           </button>
@@ -87,10 +94,11 @@ export default function SpecQuickFilters({
               <button
                 key={id}
                 type="button"
-                className={`btn btn-sm btn-ghost${quickFilter === id ? " btn-primary" : ""}`}
+                className={`btn btn-sm btn-ghost${activeSet.has(id) ? " btn-primary" : ""}`}
+                aria-pressed={activeSet.has(id)}
                 onClick={() => {
                   setMoreOpen(false);
-                  onQuickFilterChange?.(id);
+                  toggleFilter(id);
                 }}
               >
                 {label}
