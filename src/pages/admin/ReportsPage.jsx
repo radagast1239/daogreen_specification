@@ -21,6 +21,7 @@ import {
 import {
   SECTION_CARD_KEYS,
   NO_ROOM_GROUP,
+  buildReportsR3,
   buildReportsSections,
   filterReportSections,
   filterReportRooms,
@@ -144,13 +145,18 @@ export default function ReportsPage() {
     if (!payload) return null;
     const projects = payload.projects || [];
     const materials = payload.materials || [];
-    return {
-      ...buildReportsR1(projects, materials),
-      ...buildReportsR2(projects, materials),
-      ...buildReportsR3(projects, materials),
-      _projects: projects,
-      _materials: materials,
-    };
+    try {
+      return {
+        ...buildReportsR1(projects, materials),
+        ...buildReportsR2(projects, materials),
+        ...buildReportsR3(projects, materials),
+        _projects: projects,
+        _materials: materials,
+      };
+    } catch (e) {
+      console.error("Reports build failed", e);
+      return null;
+    }
   }, [payload]);
 
   const setTab = (next) => {
@@ -206,6 +212,11 @@ export default function ReportsPage() {
 
       {loading && <p className="muted">Загрузка…</p>}
       {error && <p className="muted" style={{ color: "var(--danger)" }}>{error}</p>}
+      {!loading && !error && !report && payload && (
+        <p className="muted" style={{ color: "var(--danger)" }}>
+          Не удалось построить отчёт. Обновите страницу или сообщите в поддержку.
+        </p>
+      )}
       {!loading && !error && report && tab === "overview" && <OverviewTab overview={report.overview} />}
       {!loading && !error && report && tab === "issues" && (
         <IssuesTab issues={report.issues.issues} projects={report.overview.projects} />

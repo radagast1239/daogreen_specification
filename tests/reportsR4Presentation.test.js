@@ -108,4 +108,10 @@ describe("Reports R4 visual polish contracts", () => {
     expect(page).not.toContain("itemUpdate");
     expect(page).toContain("getReportsR1");
   });
+
+  it("ReportsPage imports buildReportsR3 (prevents white screen after load)", () => {
+    const page = fs.readFileSync(path.join(__dirname, "../src/pages/admin/ReportsPage.jsx"), "utf8");
+    expect(page).toMatch(/buildReportsR3/);
+    expect(page).toMatch(/import\s*\{[^}]*buildReportsR3[^}]*\}\s*from\s*["'].*projectReportsR3/);
+  });
 });
