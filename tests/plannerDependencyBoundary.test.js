@@ -1223,28 +1223,166 @@ describe("PHASE 1A-2C2D3E4B — structural cleanup primitive extraction", () => 
 
   it("handlers remain thin: handleItemBulkDelete/handleLineBulkDelete call the wrapper, not the primitive, directly", () => {
     const itemHandlerBody = extractBetween(codeOnly, "function handleItemBulkDelete(", "\nfunction computeLineRemoval(");
-    const lineHandlerBody = extractBetween(codeOnly, "function handleLineBulkDelete(", "\nconst HANDLERS = {");
+    const lineHandlerBody = extractBetween(codeOnly, "function handleLineBulkDelete(", "\nfunction deleteItemsAndLinesFromPlan(");
     expect(itemHandlerBody).toMatch(/deleteItemsFromPlan\s*\(/);
     expect(itemHandlerBody).not.toMatch(/computeItemRemoval\s*\(/);
     expect(lineHandlerBody).toMatch(/deleteLinesFromPlan\s*\(/);
     expect(lineHandlerBody).not.toMatch(/computeLineRemoval\s*\(/);
   });
 
-  it("no combined item+line command exists yet (itemLine.bulkDelete / entities.bulkDelete / layer.bulkDelete)", () => {
-    expect(geometryCommandsSource).not.toMatch(/itemLine\.bulkDelete/);
+  it("entities.bulkDelete / layer.bulkDelete were never introduced (itemLine.bulkDelete is the one canonical combined command, not a generic/layer-aware alternative)", () => {
     expect(geometryCommandsSource).not.toMatch(/entities\.bulkDelete/);
     expect(geometryCommandsSource).not.toMatch(/layer\.bulkDelete/);
   });
 
-  it("no applyItemLineBulkDelete leaf helper exists yet", () => {
-    const path = join(PLANNER_ROOT, "ui", "applyItemLineBulkDelete.js");
-    expect(existsSync(path)).toBe(false);
-  });
-
-  it("power/light/vent are still absent from both migrated clearSheet sets (no combined-clear migration in this phase)", () => {
+  it("power/light/vent/staff are still absent from both migrated clearSheet sets (itemLine.bulkDelete exists in core but is not wired into clearSheet yet — PHASE 1A-2C2D3E4D)", () => {
     const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
     const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
     expect(planPageSource).toMatch(/const MIGRATED_ITEM_CLEAR_LAYER_IDS = \["racks", "water", "sockets", "sanitary", "furn", "climate"\];/);
     expect(planPageSource).toMatch(/const MIGRATED_LINE_CLEAR_LAYER_IDS = \["drain", "irrigation"\];/);
+    for (const layer of ["power", "light", "vent", "staff"]) {
+      expect(planPageSource).not.toMatch(new RegExp(`MIGRATED_ITEM_CLEAR_LAYER_IDS = \\[[^\\]]*"${layer}"`));
+      expect(planPageSource).not.toMatch(new RegExp(`MIGRATED_LINE_CLEAR_LAYER_IDS = \\[[^\\]]*"${layer}"`));
+    }
+  });
+});
+
+/**
+ * PHASE 1A-2C2D3E4C — canonical combined item+line delete command
+ * (itemLine.bulkDelete). Core-only: no PlanPage wiring, no clearSheet
+ * migration, no confirmation helper, no power/light/vent/staff changes —
+ * those remain PHASE 1A-2C2D3E4D. The combined wrapper
+ * (deleteItemsAndLinesFromPlan) calls the already-accepted
+ * computeItemRemoval/computeLineRemoval primitives against the SAME
+ * original plan and runs runEngineeringSync exactly once — it does not
+ * call deleteItemsFromPlan/deleteLinesFromPlan (each of which would run
+ * its own sync pass) or recurse into executeGeometryCommand.
+ */
+describe("PHASE 1A-2C2D3E4C — combined item+line delete command", () => {
+  const GEOMETRY_COMMANDS_FILE = join(PLANNER_ROOT, "commands", "geometryCommands.js");
+  const geometryCommandsSource = readFileSync(GEOMETRY_COMMANDS_FILE, "utf8");
+  const PLAN_PAGE_FILE = join(REPO, "src", "pages", "admin", "PlanPage.jsx");
+  const planPageSource = readFileSync(PLAN_PAGE_FILE, "utf8");
+
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  function extractBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    expect(start, `marker not found: ${startMarker}`).toBeGreaterThanOrEqual(0);
+    const end = source.indexOf(endMarker, start);
+    expect(end, `end marker not found: ${endMarker}`).toBeGreaterThan(start);
+    return source.slice(start, end);
+  }
+
+  const codeOnly = stripComments(geometryCommandsSource);
+
+  it("itemLine.bulkDelete is registered in HANDLERS exactly once", () => {
+    expect((geometryCommandsSource.match(/"itemLine\.bulkDelete":\s*handleItemLineBulkDelete,/g) || []).length).toBe(1);
+  });
+
+  it("handleItemLineBulkDelete and deleteItemsAndLinesFromPlan each exist exactly once", () => {
+    expect((codeOnly.match(/function\s+handleItemLineBulkDelete\s*\(/g) || []).length).toBe(1);
+    expect((codeOnly.match(/function\s+deleteItemsAndLinesFromPlan\s*\(/g) || []).length).toBe(1);
+  });
+
+  it("the combined wrapper calls computeItemRemoval and computeLineRemoval, both against the same original plan parameter (not against each other's output)", () => {
+    const body = extractBetween(codeOnly, "function deleteItemsAndLinesFromPlan(", "\nfunction handleItemLineBulkDelete(");
+    expect(body).toMatch(/computeItemRemoval\s*\(\s*plan\s*,\s*itemIds\s*\)/);
+    expect(body).toMatch(/computeLineRemoval\s*\(\s*plan\s*,\s*lineIds\s*\)/);
+  });
+
+  it("the combined wrapper calls runEngineeringSync exactly once", () => {
+    const body = extractBetween(codeOnly, "function deleteItemsAndLinesFromPlan(", "\nfunction handleItemLineBulkDelete(");
+    expect((body.match(/\brunEngineeringSync\s*\(/g) || []).length).toBe(1);
+  });
+
+  it("the combined wrapper does not call deleteItemsFromPlan, deleteLinesFromPlan, executeGeometryCommand, or any public command dispatch", () => {
+    const body = extractBetween(codeOnly, "function deleteItemsAndLinesFromPlan(", "\nfunction handleItemLineBulkDelete(");
+    expect(body).not.toMatch(/\bdeleteItemsFromPlan\s*\(/);
+    expect(body).not.toMatch(/\bdeleteLinesFromPlan\s*\(/);
+    expect(body).not.toMatch(/\bexecuteGeometryCommand\s*\(/);
+    expect(body).not.toMatch(/type:\s*["']item\.bulkDelete["']/);
+    expect(body).not.toMatch(/type:\s*["']line\.bulkDelete["']/);
+  });
+
+  it("handleItemLineBulkDelete is thin: calls the combined wrapper, not the primitives or the single-collection wrappers directly", () => {
+    const body = extractBetween(codeOnly, "function handleItemLineBulkDelete(", "\nconst HANDLERS = {");
+    expect(body).toMatch(/deleteItemsAndLinesFromPlan\s*\(/);
+    expect(body).not.toMatch(/computeItemRemoval\s*\(/);
+    expect(body).not.toMatch(/computeLineRemoval\s*\(/);
+    expect(body).not.toMatch(/\bdeleteItemsFromPlan\s*\(/);
+    expect(body).not.toMatch(/\bdeleteLinesFromPlan\s*\(/);
+  });
+
+  it("the combined command validates both fields as required arrays, rejecting missing/non-array/both-empty as GEOMETRY_COMMAND_INVALID", () => {
+    const body = extractBetween(codeOnly, "function handleItemLineBulkDelete(", "\nconst HANDLERS = {");
+    expect(body).toMatch(/Array\.isArray\(itemIds\)/);
+    expect(body).toMatch(/Array\.isArray\(lineIds\)/);
+    expect(body).toMatch(/GEOMETRY_COMMAND_INVALID/);
+    expect(body).toMatch(/GEOMETRY_COMMAND_NO_TARGET/);
+  });
+
+  it("neither the combined wrapper nor the handler reference UI layer/sheet semantics (power/light/vent/climate/staff/room/partitions)", () => {
+    const wrapperBody = extractBetween(codeOnly, "function deleteItemsAndLinesFromPlan(", "\nfunction handleItemLineBulkDelete(");
+    const handlerBody = extractBetween(codeOnly, "function handleItemLineBulkDelete(", "\nconst HANDLERS = {");
+    for (const layer of ["power", "light", "vent", "climate", "staff", "room", "partitions"]) {
+      expect(wrapperBody).not.toMatch(new RegExp(`["']${layer}["']`));
+      expect(handlerBody).not.toMatch(new RegExp(`["']${layer}["']`));
+    }
+  });
+
+  it("applyItemLineBulkDelete leaf helper exists and dispatches the canonical itemLine.bulkDelete command type", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyItemLineBulkDelete.js"), "utf8");
+    expect(helperSource).toMatch(/type:\s*["']itemLine\.bulkDelete["']/);
+  });
+
+  it("applyItemLineBulkDelete does not import React, DOM, HistoryModel, geometryCommands, or PlanPage", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyItemLineBulkDelete.js"), "utf8");
+    expect(helperSource).not.toMatch(/from\s*["']react/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*historyModel\.js["']/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*commands\/geometryCommands\.js["']/);
+    expect(helperSource).not.toMatch(/from\s*["'][^"']*PlanPage/);
+    expect(helperSource).not.toMatch(/\bwindow\./);
+    expect(helperSource).not.toMatch(/\bdocument\./);
+  });
+
+  it("REQUIRED FIX F-01: applyItemLineBulkDelete no longer contains the generic Array.isArray(value) ? value : [] coercion that masked malformed input as omission", () => {
+    const helperSource = readFileSync(join(PLANNER_ROOT, "ui", "applyItemLineBulkDelete.js"), "utf8");
+    expect(helperSource).not.toMatch(/Array\.isArray\(itemIds\)\s*\?\s*itemIds\s*:\s*\[\]/);
+    expect(helperSource).not.toMatch(/Array\.isArray\(lineIds\)\s*\?\s*lineIds\s*:\s*\[\]/);
+    expect(helperSource).toMatch(/itemIds\s*===\s*undefined/);
+    expect(helperSource).toMatch(/lineIds\s*===\s*undefined/);
+  });
+
+  it("REQUIRED FIX F-01 (runtime proof): a malformed non-array collection never dispatches, even when the other collection is a valid non-empty array — the real, previously-reproduced bug", async () => {
+    const { applyItemLineBulkDelete } = await import("../src/planner/ui/applyItemLineBulkDelete.js");
+    let calls = 0;
+    const runGeometryCommand = () => { calls += 1; return { ok: true, changed: true }; };
+
+    expect(applyItemLineBulkDelete({ itemIds: "i1", lineIds: ["l1"], runGeometryCommand })).toEqual({ status: "no-target", result: null });
+    expect(calls).toBe(0);
+
+    expect(applyItemLineBulkDelete({ itemIds: ["i1"], lineIds: "l1", runGeometryCommand })).toEqual({ status: "no-target", result: null });
+    expect(calls).toBe(0);
+
+    // Genuine omission (undefined) is the only value that safely defaults to [].
+    const result = applyItemLineBulkDelete({ itemIds: ["i1"], runGeometryCommand });
+    expect(result.status).toBe("success");
+    expect(calls).toBe(1);
+  });
+
+  it("PlanPage.jsx does not yet import or reference applyItemLineBulkDelete (no UI wiring in this phase)", () => {
+    expect(planPageSource).not.toMatch(/applyItemLineBulkDelete/);
+    expect(planPageSource).not.toMatch(/itemLine\.bulkDelete/);
+  });
+
+  it("itemLine.bulkDelete is the exactly-one combined command path (no second/alias entry point)", () => {
+    const registrations = geometryCommandsSource.match(/handleItemLineBulkDelete/g) || [];
+    // exactly 2 occurrences expected: the function definition itself, and
+    // its one HANDLERS registration — a second registration under a
+    // different command-type string would push this above 2.
+    expect(registrations.length).toBe(2);
   });
 });

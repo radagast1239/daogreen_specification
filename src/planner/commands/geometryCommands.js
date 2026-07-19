@@ -1024,6 +1024,85 @@ function handleLineBulkDelete(plan, command) {
   });
 }
 
+// ── combined item+line deletion (PHASE 1A-2C2D3E4C) ──────────────────────
+
+/**
+ * PHASE 1A-2C2D3E4C — combined atomic item+line deletion. Calls
+ * computeItemRemoval and computeLineRemoval against the SAME original plan
+ * (never against each other's output — neither primitive depends on the
+ * other), merges their plan-shaped fields into one intermediate plan, and
+ * runs runEngineeringSync exactly once for the merged result. Does not call
+ * deleteItemsFromPlan/deleteLinesFromPlan (those each run their own
+ * runEngineeringSync pass, which would sync twice here) and does not
+ * recurse into executeGeometryCommand/item.bulkDelete/line.bulkDelete.
+ *
+ * Used by itemLine.bulkDelete — the single canonical entry point for a
+ * future combined "Очистить лист" clear (power/light/vent), not wired to
+ * any UI yet. Core has no notion of layers/sheets here — only explicit
+ * itemIds/lineIds.
+ *
+ * @param {object} plan
+ * @param {string[]} itemIds
+ * @param {string[]} lineIds
+ * @returns {object|null} internal result, or null if neither any itemIds
+ *   nor any lineIds resolve to something that actually exists in the plan.
+ */
+function deleteItemsAndLinesFromPlan(plan, itemIds, lineIds) {
+  const itemRemoval = computeItemRemoval(plan, itemIds);
+  const lineRemoval = computeLineRemoval(plan, lineIds);
+  if (!itemRemoval && !lineRemoval) return null;
+
+  const nextPlan = runEngineeringSync({
+    ...plan,
+    ...(itemRemoval ? { items: itemRemoval.items, links: itemRemoval.links, dimensions: itemRemoval.dimensions } : {}),
+    ...(lineRemoval ? { lines: lineRemoval.lines } : {}),
+  });
+
+  return {
+    plan: nextPlan,
+    deletedItemIds: itemRemoval?.deletedItemIds || [],
+    deletedLinkIds: itemRemoval?.deletedLinkIds || [],
+    deletedDimensionIds: itemRemoval?.deletedDimensionIds || [],
+    changedDimensionIds: itemRemoval?.changedDimensionIds || [],
+    dimensionWarnings: itemRemoval?.dimensionWarnings || [],
+    deletedLineIds: lineRemoval?.deletedLineIds || [],
+  };
+}
+
+/**
+ * PHASE 1A-2C2D3E4C — canonical combined command. Payload carries only
+ * explicit itemIds/lineIds — no UI layer/sheet policy is known here; the
+ * caller (UI) is responsible for computing which IDs to send (e.g. "every
+ * item/line on the active power/light/vent sheet" for a future combined
+ * clearSheet branch). itemIds-only and lineIds-only calls are both valid —
+ * only both-empty is rejected as invalid.
+ */
+function handleItemLineBulkDelete(plan, command) {
+  const { itemIds, lineIds } = command;
+  if (!Array.isArray(itemIds) || !Array.isArray(lineIds)) {
+    return rejected("itemLine.bulkDelete", plan, GEOMETRY_COMMAND_INVALID, "itemLine.bulkDelete требует itemIds и lineIds в виде массивов");
+  }
+  if (itemIds.length === 0 && lineIds.length === 0) {
+    return rejected("itemLine.bulkDelete", plan, GEOMETRY_COMMAND_INVALID, "itemLine.bulkDelete требует непустой itemIds и/или lineIds");
+  }
+  const result = deleteItemsAndLinesFromPlan(plan, itemIds, lineIds);
+  if (!result) {
+    return rejected("itemLine.bulkDelete", plan, GEOMETRY_COMMAND_NO_TARGET, "Ни один из указанных объектов или линий не найден");
+  }
+  return changedOk("itemLine.bulkDelete", result.plan, {
+    entityChanges: {
+      deleted: {
+        items: result.deletedItemIds,
+        lines: result.deletedLineIds,
+        links: result.deletedLinkIds,
+        dimensions: result.deletedDimensionIds,
+      },
+      changed: { dimensions: result.changedDimensionIds },
+    },
+    warnings: result.dimensionWarnings,
+  });
+}
+
 // ── dispatch table ────────────────────────────────────────────────────────
 
 const HANDLERS = {
@@ -1032,6 +1111,7 @@ const HANDLERS = {
   "wall.bulkDelete": handleWallBulkDelete,
   "item.bulkDelete": handleItemBulkDelete,
   "line.bulkDelete": handleLineBulkDelete,
+  "itemLine.bulkDelete": handleItemLineBulkDelete,
   "wall.create": handleWallCreate,
   "wall.finishDraft": handleWallCreate,
   "wall.straighten": handleWallStraighten,
