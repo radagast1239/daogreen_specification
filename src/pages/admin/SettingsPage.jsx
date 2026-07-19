@@ -64,9 +64,21 @@ export default function SettingsPage() {
   }, []);
 
   const categoryPreview = useMemo(() => previewNames(categories, 4), [categories]);
+  const clientSectionPreview = useMemo(
+    () =>
+      previewNames(
+        clientSections.filter((s) => !s.hidden).map((s) => s.label),
+        4
+      ),
+    [clientSections]
+  );
   const farmPreview = useMemo(
     () => previewNames(farmSections.map((s) => s.name), 4),
     [farmSections]
+  );
+  const visibleClientSections = useMemo(
+    () => clientSections.filter((s) => !s.hidden),
+    [clientSections]
   );
 
   const saveLinkSettings = async () => {
@@ -179,9 +191,43 @@ export default function SettingsPage() {
             </article>
 
             <article className="card settings-card">
-              <h3 className="settings-card__title">Разделы закупки</h3>
+              <h3 className="settings-card__title">Разделы клиентской выдачи</h3>
               <p className="settings-card__desc muted">
-                {farmSections.length} активных раздел{farmSections.length === 1 ? "" : farmSections.length >= 2 && farmSections.length <= 4 ? "а" : "ов"}
+                {visibleClientSections.length} раздел
+                {visibleClientSections.length === 1
+                  ? ""
+                  : visibleClientSections.length >= 2 && visibleClientSections.length <= 4
+                    ? "а"
+                    : "ов"}{" "}
+                в клиентской выдаче
+              </p>
+              <div className="settings-chip-row">
+                {clientSectionPreview.map((name) => (
+                  <span key={name} className="chip chip--neutral">
+                    {name}
+                  </span>
+                ))}
+                {visibleClientSections.length > clientSectionPreview.length ? (
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    +{visibleClientSections.length - clientSectionPreview.length}
+                  </span>
+                ) : null}
+              </div>
+              <Link className="btn btn-sm" to="/modules?tab=publish">
+                Настроить разделы
+              </Link>
+            </article>
+
+            <article className="card settings-card">
+              <h3 className="settings-card__title">Разделы фермы</h3>
+              <p className="settings-card__desc muted">
+                {farmSections.length} раздел
+                {farmSections.length === 1
+                  ? ""
+                  : farmSections.length >= 2 && farmSections.length <= 4
+                    ? "а"
+                    : "ов"}{" "}
+                структуры фермы
               </p>
               <div className="settings-chip-row">
                 {farmPreview.map((name) => (

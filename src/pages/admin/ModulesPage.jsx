@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import { PageHeader, BackLink } from "../../components/Layout.jsx";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
@@ -49,6 +50,10 @@ import {
 } from "../../lib/stellageCatalogConfig.js";
 import { emptySearchMessage, filterByQuery } from "../../lib/modulesListView.js";
 import {
+  resolveModulesTabFromSearch,
+  modulesTabToSearchParams,
+} from "../../lib/modulesTabUrl.js";
+import {
   ModulesSearch,
   RowActionsMenu,
   StickySaveBar,
@@ -87,18 +92,6 @@ const TABS = TAB_GROUPS.flatMap((g) =>
 );
 
 const LEGACY_TAB = { id: "catalog", label: "Старые модули базы" };
-
-const MODULE_TAB_IDS = new Set([...TABS.map((t) => t.id), LEGACY_TAB.id]);
-
-function initialModulesTab() {
-  try {
-    const t = new URLSearchParams(window.location.search).get("tab");
-    if (t && MODULE_TAB_IDS.has(t)) return t;
-  } catch {
-    /* ignore */
-  }
-  return "farm";
-}
 
 const MODULE_TYPES = [
   { id: "stellage", label: "Стеллаж" },
@@ -147,7 +140,14 @@ function ModuleBadge({ mod }) {
 export default function ModulesPage() {
   const { state, actions } = useStore();
   const ref = state.reference;
-  const [tab, setTab] = useState(initialModulesTab);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = resolveModulesTabFromSearch(searchParams.toString());
+  const selectTab = useCallback(
+    (id) => {
+      setSearchParams(modulesTabToSearchParams(id, searchParams), { replace: false });
+    },
+    [searchParams, setSearchParams]
+  );
   const [presets, setPresets] = useState([]);
   const [mods, setMods] = useState([]);
   const [farmSections, setFarmSections] = useState([]);
@@ -813,7 +813,7 @@ export default function ModulesPage() {
                   key={t.id}
                   type="button"
                   className={"modules-tabs__btn" + (tab === t.id ? " is-active" : "")}
-                  onClick={() => setTab(t.id)}
+                  onClick={() => selectTab(t.id)}
                 >
                   {t.label}
                 </button>
@@ -844,7 +844,7 @@ export default function ModulesPage() {
             className="btn btn-ghost btn-sm"
             onClick={() => {
               setShowLegacyTools(true);
-              setTab("catalog");
+              selectTab("catalog");
             }}
           >
             Открыть старые модули базы
@@ -862,7 +862,7 @@ export default function ModulesPage() {
             type="button"
             className="btn btn-ghost btn-sm"
             style={{ marginTop: 8 }}
-            onClick={() => setTab("farm")}
+            onClick={() => selectTab("farm")}
           >
             ← К основным вкладкам
           </button>
@@ -894,6 +894,7 @@ export default function ModulesPage() {
           settings={appSettings}
           onSaved={async () => {
             await reload();
+            await actions.refreshSettings();
           }}
         />
       )}

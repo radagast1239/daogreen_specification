@@ -55,13 +55,15 @@ describe("SettingsPage cleanup 1e", () => {
     expect(layout).toContain("/settings");
   });
 
-  it("links overview cards to brand/directories/farm without local editors", () => {
+  it("links overview cards to brand/directories/farm/publish without local editors", () => {
     expect(settingsPage).toContain('to="/modules?tab=brand"');
     expect(settingsPage).toContain('to="/modules?tab=directories"');
     expect(settingsPage).toContain('to="/modules?tab=farm"');
+    expect(settingsPage).toContain('to="/modules?tab=publish"');
     expect(settingsPage).toContain("Открыть клиент и бренд");
     expect(settingsPage).toContain("Открыть справочники");
     expect(settingsPage).toContain("Открыть структуру фермы");
+    expect(settingsPage).toContain("Настроить разделы");
     expect(settingsPage).not.toContain("ClientSectionsEditor");
     expect(settingsPage).not.toContain("Новая категория");
     expect(settingsPage).not.toContain('["companyName"');
@@ -96,9 +98,9 @@ describe("SettingsPage cleanup 1e", () => {
     expect(settingsPage).toContain("TechDetails");
   });
 
-  it("ModulesPage opens tab from query for settings deep links", () => {
-    expect(modulesPage).toContain("initialModulesTab");
-    expect(modulesPage).toContain("MODULE_TAB_IDS");
-    expect(modulesPage).toContain('search).get("tab")');
+  it("ModulesPage opens and syncs tab from query for settings deep links", () => {
+    expect(modulesPage).toContain("resolveModulesTabFromSearch");
+    expect(modulesPage).toContain("useSearchParams");
+    expect(modulesPage).toContain("selectTab");
   });
 });
