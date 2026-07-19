@@ -358,6 +358,27 @@ describe("catalog snapshot policy", () => {
     expect(materials[0].link).toBe(catalogLink);
   });
 
+  it("keeps project links even when override flags were lost (draft round-trip)", () => {
+    const built = buildProjectFromBuilder({
+      form: { name: "P", client: "C", manualParams: {} },
+      stellages: [{
+        id: "st1", moduleId: "mod1", moduleName: "Rack", name: "Rack A", count: 1,
+        items: [{
+          id: "ln1", materialId: "m073", name: "Болт", unit: "шт.", category: "Крепёж",
+          qty: 1, included: true, price: 12,
+          // Flags absent — DB does not persist linkOverridden / linkAltOverridden
+          link: "https://project.example/bolt-no-flag",
+          linkAlt: "https://project.example/bolt-alt-no-flag",
+        }],
+      }],
+      farmSections: [], materials,
+    });
+    expect(built.items[0].link).toBe("https://project.example/bolt-no-flag");
+    expect(built.items[0].linkAlt).toBe("https://project.example/bolt-alt-no-flag");
+    expect(built.items[0].linkOverridden).toBe(true);
+    expect(built.items[0].linkAltOverridden).toBe(true);
+  });
+
   it("keeps project-local price and links for farm-wide section lines", () => {
     const catalogBefore = { ...materials[0] };
     const built = buildProjectFromBuilder({

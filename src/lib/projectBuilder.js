@@ -216,13 +216,24 @@ export function buildProjectFromBuilder({
   let order = 0;
 
   const pushLine = (line, section, opts = {}) => {
+    // Snapshot overwrites catalog fields; keep project-local price/links from the
+    // editor line even when override flags were lost (flags are not stored in DB).
     const fromCatalog = line.materialId
       ? copyCatalogSnapshotFromMaterial(line, materials)
       : applyMaterialCatalogFields(line, materials, { isNewLine: true });
+    const catalogPrice = Number(fromCatalog.price) || 0;
+    const catalogLink = String(fromCatalog.link || "").trim();
+    const catalogLinkAlt = String(fromCatalog.linkAlt || "").trim();
+    const linePrice = Number(line.price) || 0;
+    const lineLink = String(line.link || "").trim();
+    const lineLinkAlt = String(line.linkAlt || "").trim();
+    const priceOverridden = !!line.priceOverridden || linePrice !== catalogPrice;
+    const linkOverridden = !!line.linkOverridden || lineLink !== catalogLink;
+    const linkAltOverridden = !!line.linkAltOverridden || lineLinkAlt !== catalogLinkAlt;
     const projectOverrides = {
-      ...(line.priceOverridden ? { price: Number(line.price) || 0, priceOverridden: true } : {}),
-      ...(line.linkOverridden ? { link: line.link || "", linkOverridden: true } : {}),
-      ...(line.linkAltOverridden ? { linkAlt: line.linkAlt || "", linkAltOverridden: true } : {}),
+      ...(priceOverridden ? { price: linePrice, priceOverridden: true } : {}),
+      ...(linkOverridden ? { link: line.link || "", linkOverridden: true } : {}),
+      ...(linkAltOverridden ? { linkAlt: line.linkAlt || "", linkAltOverridden: true } : {}),
     };
     const hydrated = hydrateLinePhoto({ ...fromCatalog, ...projectOverrides }, materials);
     items.push(lineToProjectItem(hydrated, section, order++, opts));

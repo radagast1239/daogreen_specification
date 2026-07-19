@@ -283,7 +283,7 @@ export default function SpecPickerLineRow({
           disabled={!ln.included || (!!ln.materialId && !showProjectPrice)}
           onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, {
             link: e.target.value,
-            ...(showProjectPrice ? { linkOverridden: true } : {}),
+            linkOverridden: true,
           }))}
         />
         {showProjectPrice && (
