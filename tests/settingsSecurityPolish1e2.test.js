@@ -83,3 +83,17 @@ describe("settings security polish 1e2", () => {
     expect(settingsPage).toContain("saveLinkSettings");
   });
 });
+
+describe("settings overview chip overflow", () => {
+  const themeCss = fs.readFileSync(
+    path.join(__dirname, "../src/styles/theme.css"),
+    "utf8"
+  );
+
+  it("contains long chip labels inside settings cards", () => {
+    expect(themeCss).toContain(".settings-chip-row .chip");
+    expect(themeCss).toMatch(/\.settings-chip-row\s*\{[^}]*max-width:\s*100%/s);
+    expect(themeCss).toMatch(/\.settings-chip-row \.chip\s*\{[^}]*text-overflow:\s*ellipsis/s);
+    expect(themeCss).toMatch(/\.settings-card\s*\{[^}]*overflow:\s*hidden/s);
+  });
+});
