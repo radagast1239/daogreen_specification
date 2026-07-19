@@ -777,7 +777,7 @@ export default function ModulesPage() {
   };
 
   return (
-    <>
+    <div className="modules-page">
       <PageHeader
         title="Шаблоны и справочники"
         sub="Стеллажи, структура фермы, справочники и клиентская выдача"
@@ -823,19 +823,21 @@ export default function ModulesPage() {
       )}
 
       {!inEditor && tab !== "catalog" && (
-        <p className="muted" style={{ fontSize: 12, margin: "0 0 14px" }}>
+        <TechDetails summary="Техническая информация">
+          <p className="muted" style={{ margin: "0 0 8px", fontSize: 12 }}>
+            Служебный каталог старых модулей базы не участвует в сборке новых проектов. Данные не удаляются.
+          </p>
           <button
             type="button"
             className="btn btn-ghost btn-sm"
-            style={{ padding: "2px 8px", fontSize: 12 }}
             onClick={() => {
               setShowLegacyTools(true);
               setTab("catalog");
             }}
           >
-            Служебное: старые модули базы
+            Открыть старые модули базы
           </button>
-        </p>
+        </TechDetails>
       )}
 
       {tab === "catalog" && !inEditor && (
@@ -905,7 +907,7 @@ export default function ModulesPage() {
               <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
                 Перетащите карточки для изменения порядка в «Новый проект».
               </p>
-              <div className="preset-grid preset-grid--sortable">
+              <div className="preset-grid preset-grid--sortable modules-preset-grid">
                 {filteredPresets.map((p) => (
                   <div
                     key={p.id}
@@ -1001,13 +1003,14 @@ export default function ModulesPage() {
               {emptySearchMessage(compositionQuery, filteredStellageMods.length)}
             </p>
           ) : (
-            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            <div className="card modules-table-card">
+              <div className="modules-table-wrap">
               <table className="spec modules-compact-table">
                 <thead>
                   <tr>
                     <th style={{ width: 56 }}>Фото</th>
                     <th>Тип стеллажа</th>
-                    <th>Технология</th>
+                    <th style={{ width: 140 }}>Технология</th>
                     <th className="right" style={{ width: 90 }}>В шаблоне</th>
                     <th className="right" style={{ width: 160 }} />
                   </tr>
@@ -1069,6 +1072,7 @@ export default function ModulesPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
           <StickySaveBar
@@ -1102,14 +1106,15 @@ export default function ModulesPage() {
           ) : emptySearchMessage(farmQuery, filteredFarmSections.length) ? (
             <p className="muted modules-empty">{emptySearchMessage(farmQuery, filteredFarmSections.length)}</p>
           ) : (
-            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            <div className="card modules-table-card">
+              <div className="modules-table-wrap">
               <table className="spec modules-compact-table">
                 <thead>
                   <tr>
                     <th style={{ width: 36 }}>#</th>
                     <th>Раздел</th>
-                    <th>Группа</th>
-                    <th>Ответств.</th>
+                    <th style={{ width: 160 }}>Группа</th>
+                    <th style={{ width: 120 }}>Ответств.</th>
                     <th className="right" style={{ width: 90 }}>В составе</th>
                     <th className="right" style={{ width: 180 }} />
                   </tr>
@@ -1223,6 +1228,7 @@ export default function ModulesPage() {
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
           <div style={{ marginTop: 12 }}>
@@ -1886,6 +1892,6 @@ export default function ModulesPage() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

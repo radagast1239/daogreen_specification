@@ -52,12 +52,13 @@ export default function StellageGroupsEditor({ groups, onChange, compact = false
       {emptyMsg ? (
         <p className="muted modules-empty">{emptyMsg}</p>
       ) : (
-        <table className="spec modules-compact-table" style={{ marginBottom: 12 }}>
+        <div className="modules-table-wrap" style={{ marginBottom: 12 }}>
+        <table className="spec modules-compact-table">
           <thead>
             <tr>
               <th style={{ width: 36 }}>#</th>
               <th>Группа</th>
-              <th className="right" style={{ width: 200 }} />
+              <th className="right" style={{ width: 80 }} />
             </tr>
           </thead>
           <tbody>
@@ -93,9 +94,6 @@ export default function StellageGroupsEditor({ groups, onChange, compact = false
                       </button>
                     ) : (
                       <>
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditingId(g.id)}>
-                          Редактировать
-                        </button>
                         <RowActionsMenu
                           items={[
                             {
@@ -131,6 +129,7 @@ export default function StellageGroupsEditor({ groups, onChange, compact = false
             })}
           </tbody>
         </table>
+        </div>
       )}
       <div className="row" style={{ gap: 8 }}>
         <input

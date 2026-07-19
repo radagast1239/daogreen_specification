@@ -99,7 +99,7 @@ export default function ClientBrandTab({ settings, onSaved }) {
   };
 
   return (
-    <div className="content">
+    <div className="content modules-page-panel">
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
         Бренд клиентской страницы, PDF и видимые вкладки. Контакты показываются внизу страницы закупки.
       </p>

@@ -100,9 +100,6 @@ function EditableTextRow({
         ) : (
           <>
             {primaryAction}
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onStartEdit}>
-              Редактировать
-            </button>
             <RowActionsMenu items={menuItems} />
           </>
         )}
@@ -265,12 +262,13 @@ export default function DirectoriesTab({ settings, onSaved }) {
         {emptySearchMessage(statusQuery, statuses.length) ? (
           <p className="muted modules-empty">{emptySearchMessage(statusQuery, statuses.length)}</p>
         ) : (
-          <table className="spec modules-compact-table" style={{ marginBottom: 12 }}>
+          <div className="modules-table-wrap" style={{ marginBottom: 12 }}>
+          <table className="spec modules-compact-table">
             <thead>
               <tr>
                 <th style={{ width: 36 }}>#</th>
                 <th>Статус</th>
-                <th className="right" style={{ width: 220 }} />
+                <th className="right" style={{ width: 80 }} />
               </tr>
             </thead>
             <tbody>
@@ -360,6 +358,7 @@ export default function DirectoriesTab({ settings, onSaved }) {
               })}
             </tbody>
           </table>
+          </div>
         )}
         <div className="row wrap" style={{ gap: 8 }}>
           <input
@@ -399,12 +398,13 @@ export default function DirectoriesTab({ settings, onSaved }) {
         {emptySearchMessage(roleQuery, roles.length) ? (
           <p className="muted modules-empty">{emptySearchMessage(roleQuery, roles.length)}</p>
         ) : (
-          <table className="spec modules-compact-table" style={{ marginBottom: 12, marginTop: 10 }}>
+          <div className="modules-table-wrap" style={{ marginBottom: 12, marginTop: 10 }}>
+          <table className="spec modules-compact-table">
             <thead>
               <tr>
                 <th style={{ width: 36 }}>#</th>
                 <th>Роль</th>
-                <th className="right" style={{ width: 220 }} />
+                <th className="right" style={{ width: 80 }} />
               </tr>
             </thead>
             <tbody>
@@ -459,6 +459,7 @@ export default function DirectoriesTab({ settings, onSaved }) {
               })}
             </tbody>
           </table>
+          </div>
         )}
         <div className="row" style={{ gap: 8 }}>
           <input
@@ -497,12 +498,13 @@ export default function DirectoriesTab({ settings, onSaved }) {
         {emptySearchMessage(farmGroupQuery, farmGroups.length) ? (
           <p className="muted modules-empty">{emptySearchMessage(farmGroupQuery, farmGroups.length)}</p>
         ) : (
-          <table className="spec modules-compact-table" style={{ marginBottom: 12 }}>
+          <div className="modules-table-wrap" style={{ marginBottom: 12 }}>
+          <table className="spec modules-compact-table">
             <thead>
               <tr>
                 <th style={{ width: 36 }}>#</th>
                 <th>Группа</th>
-                <th className="right" style={{ width: 220 }} />
+                <th className="right" style={{ width: 80 }} />
               </tr>
             </thead>
             <tbody>
@@ -588,6 +590,7 @@ export default function DirectoriesTab({ settings, onSaved }) {
               })}
             </tbody>
           </table>
+          </div>
         )}
         <div className="row" style={{ gap: 8 }}>
           <input
@@ -622,12 +625,13 @@ export default function DirectoriesTab({ settings, onSaved }) {
             {emptySearchMessage(stellageGroupQuery, stellageGroups.length)}
           </p>
         ) : (
-          <table className="spec modules-compact-table" style={{ marginBottom: 12, marginTop: 10 }}>
+          <div className="modules-table-wrap" style={{ marginBottom: 12, marginTop: 10 }}>
+          <table className="spec modules-compact-table">
             <thead>
               <tr>
                 <th style={{ width: 36 }}>#</th>
                 <th>Группа</th>
-                <th className="right" style={{ width: 220 }} />
+                <th className="right" style={{ width: 80 }} />
               </tr>
             </thead>
             <tbody>
@@ -695,6 +699,7 @@ export default function DirectoriesTab({ settings, onSaved }) {
               })}
             </tbody>
           </table>
+          </div>
         )}
         <div className="row" style={{ gap: 8 }}>
           <input
