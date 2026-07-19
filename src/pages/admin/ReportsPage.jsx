@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api.js";
 import { money } from "../../store/helpers.js";
-import { PageHeader } from "../../components/Layout.jsx";
 import { PURCHASE_STATUS_CHIPS } from "../../../shared/purchaseStatusRules.js";
 import {
   REPORT_ISSUE_TYPES,
@@ -22,13 +21,91 @@ import {
 import {
   SECTION_CARD_KEYS,
   NO_ROOM_GROUP,
-  buildReportsR3,
   buildReportsSections,
   filterReportSections,
   filterReportRooms,
 } from "../../../shared/projectReportsR3.js";
 import { PROJECT_STATUS_LIST_FILTERS } from "../../../shared/projectStatus.js";
 import { downloadReportsPurchaseExcel } from "../../lib/reportsPurchaseExcel.js";
+import {
+  REPORT_TAB_SHORT_LABELS,
+  shouldShowReportKpi,
+  countIssuesByLevel,
+  filterIssuesForDisplay,
+  publicationDiffChips,
+  syncStatusTone,
+  driftTypeTone,
+  isLargePriceDelta,
+  defaultPurchaseGroupOpen,
+  sortRoomsForDisplay,
+  countNoRoomItems,
+  reportFiltersActive,
+  issueLevelTone,
+} from "../../../shared/reportsUi.js";
+import "../../styles/reports.css";
+
+function ReportKpi({ id, label, value, tone, keepZero, important }) {
+  if (!shouldShowReportKpi({ id, value, keepZero, important })) return null;
+  return (
+    <div className={`report-kpi${tone ? ` report-kpi--${tone}` : ""}`}>
+      <div className="report-kpi__label">{label}</div>
+      <div className="report-kpi__value">{value}</div>
+    </div>
+  );
+}
+
+function OpenLink({ to, children = "Открыть", external = false, disabled = false, title }) {
+  if (disabled) {
+    return (
+      <button type="button" className="reports-open reports-open--ghost" disabled title={title || "Недоступно"}>
+        {children}
+      </button>
+    );
+  }
+  if (external) {
+    return (
+      <Link className="reports-open" to={to} target="_blank" rel="noreferrer" title={title}>
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <Link className="reports-open" to={to} title={title}>
+      {children}
+    </Link>
+  );
+}
+
+function FilterBar({ children, search, onSearch, found, onReset, active, excel, filtersOpen, onToggleFilters }) {
+  return (
+    <>
+      <div className={`reports-filters${filtersOpen === false ? " is-collapsed" : ""}`}>
+        <button type="button" className="btn btn-sm reports-filters__toggle" onClick={onToggleFilters}>
+          {filtersOpen ? "Скрыть фильтры" : "Фильтры"}
+        </button>
+        <div className="reports-filters__selects">{children}</div>
+        {search != null && (
+          <input
+            type="search"
+            placeholder="Поиск…"
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+            aria-label="Поиск"
+          />
+        )}
+        <div className="reports-filters__actions">
+          {found != null && <span className="reports-filters__meta">Найдено: {found}</span>}
+          {active && (
+            <button type="button" className="btn btn-sm" onClick={onReset}>
+              Сбросить
+            </button>
+          )}
+          {excel}
+        </div>
+      </div>
+    </>
+  );
+}
 
 export default function ReportsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -36,6 +113,7 @@ export default function ReportsPage() {
   const [payload, setPayload] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const tabsRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,93 +159,111 @@ export default function ReportsPage() {
     setSearchParams(params, { replace: true });
   };
 
-  return (
-    <>
-      <PageHeader
-        title="Отчёты"
-        sub="Сводная информация по проектам, закупкам, публикациям и разбивкам"
-        back={{ to: "/", label: "Проекты" }}
-      />
-      <div className="content reports-r1">
-        <div className="reports-r1__tabs" role="tablist">
-          {REPORT_TABS_ALL.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.id}
-              className={`btn btn-sm${tab === t.id ? " btn-primary" : ""}`}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+  useEffect(() => {
+    const root = tabsRef.current;
+    if (!root) return;
+    const active = root.querySelector(".reports-tabs__btn.is-active");
+    if (active?.scrollIntoView) {
+      active.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+    }
+  }, [tab]);
 
-        {loading && <p className="muted">Загрузка…</p>}
-        {error && <p className="muted" style={{ color: "var(--danger)" }}>{error}</p>}
-        {!loading && !error && report && tab === "overview" && <OverviewTab overview={report.overview} />}
-        {!loading && !error && report && tab === "issues" && (
-          <IssuesTab issues={report.issues.issues} projects={report.overview.projects} />
-        )}
-        {!loading && !error && report && tab === "purchases" && (
-          <PurchasesTab purchases={report.purchases} projects={report.overview.projects} />
-        )}
-        {!loading && !error && report && tab === "publications" && (
-          <PublicationsTab publications={report.publications} projects={report.overview.projects} />
-        )}
-        {!loading && !error && report && tab === "material-drift" && (
-          <MaterialDriftTab drift={report.materialDrift} projects={report.overview.projects} />
-        )}
-        {!loading && !error && report && tab === "sections" && (
-          <SectionsTab
-            projects={report._projects}
-            materials={report._materials}
-            overviewProjects={report.overview.projects}
-          />
-        )}
-        {!loading && !error && report && tab === "rooms" && (
-          <RoomsTab rooms={report.rooms} projects={report.overview.projects} />
-        )}
+  const activeCount = report?.overview?.cards?.activeProjects ?? 0;
+
+  return (
+    <div className="reports">
+      <header className="reports-header">
+        <div>
+          <div className="reports-header__crumb">
+            <Link to="/">Проекты</Link>
+            <span> / Отчёты</span>
+          </div>
+          <h1 className="reports-header__title">Отчёты</h1>
+          <p className="reports-header__sub">
+            Сводка по проектам, закупкам, публикациям и расхождениям с базой материалов
+          </p>
+        </div>
+        {!loading && !error && report ? (
+          <div className="reports-header__meta">{activeCount} активных проекта</div>
+        ) : null}
+      </header>
+
+      <div className="reports-tabs" role="tablist" ref={tabsRef}>
+        {REPORT_TABS_ALL.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            className={`reports-tabs__btn${tab === t.id ? " is-active" : ""}`}
+            onClick={() => setTab(t.id)}
+          >
+            <span className="reports-tabs__full">{t.label}</span>
+            <span className="reports-tabs__short">{REPORT_TAB_SHORT_LABELS[t.id] || t.label}</span>
+          </button>
+        ))}
       </div>
-    </>
+
+      {loading && <p className="muted">Загрузка…</p>}
+      {error && <p className="muted" style={{ color: "var(--danger)" }}>{error}</p>}
+      {!loading && !error && report && tab === "overview" && <OverviewTab overview={report.overview} />}
+      {!loading && !error && report && tab === "issues" && (
+        <IssuesTab issues={report.issues.issues} projects={report.overview.projects} />
+      )}
+      {!loading && !error && report && tab === "purchases" && (
+        <PurchasesTab purchases={report.purchases} projects={report.overview.projects} />
+      )}
+      {!loading && !error && report && tab === "publications" && (
+        <PublicationsTab publications={report.publications} projects={report.overview.projects} />
+      )}
+      {!loading && !error && report && tab === "material-drift" && (
+        <MaterialDriftTab drift={report.materialDrift} projects={report.overview.projects} />
+      )}
+      {!loading && !error && report && tab === "sections" && (
+        <SectionsTab
+          projects={report._projects}
+          materials={report._materials}
+          overviewProjects={report.overview.projects}
+        />
+      )}
+      {!loading && !error && report && tab === "rooms" && (
+        <RoomsTab rooms={report.rooms} projects={report.overview.projects} />
+      )}
+    </div>
   );
 }
 
 function OverviewTab({ overview }) {
   const c = overview.cards || {};
   const cards = [
-    { label: "Активные проекты", value: c.activeProjects },
-    { label: "Требуют внимания", value: c.needsAttention },
-    { label: "Не опубликованы", value: c.unpublished },
-    { label: "Есть изменения после публикации", value: c.withChanges },
-    { label: "Общая сумма активных", value: money(c.activeTotal), money: true },
-    { label: "Ещё не закуплены", value: money(c.unpurchasedTotal), money: true },
+    { id: "activeProjects", label: "Активные проекты", value: c.activeProjects, keepZero: true },
+    { id: "needsAttention", label: "Требуют внимания", value: c.needsAttention, tone: c.needsAttention > 0 ? "warn" : "ok", keepZero: true },
+    { id: "unpublished", label: "Не опубликованы", value: c.unpublished, tone: c.unpublished > 0 ? "amber" : undefined, keepZero: true },
+    { id: "withChanges", label: "Изменения после публикации", value: c.withChanges, tone: c.withChanges > 0 ? "warn" : undefined, keepZero: true },
+    { id: "activeTotal", label: "Общая сумма", value: money(c.activeTotal), important: true },
+    { id: "unpurchasedTotal", label: "Ещё не закуплено", value: money(c.unpurchasedTotal), important: true },
   ];
 
   return (
-    <div className="reports-r1__panel">
-      <div className="reports-r1__cards">
+    <div className="reports-panel">
+      <div className="reports-kpis">
         {cards.map((card) => (
-          <div key={card.label} className="card reports-r1__card">
-            <div className="k">{card.label}</div>
-            <div className={`v${card.money ? " num" : " num"}`}>{card.value}</div>
-          </div>
+          <ReportKpi key={card.id} {...card} />
         ))}
       </div>
 
-      <div className="card reports-r1__table-card">
-        <div className="table-scroll-wrap reports-r1__scroll">
-          <table className="spec reports-r1__table">
+      <div className="reports-table-card">
+        <div className="reports-scroll">
+          <table className="reports-table">
             <thead>
               <tr>
                 <th>Проект</th>
-                <th>Клиент</th>
+                <th className="reports-col-secondary">Клиент</th>
                 <th>Статус</th>
-                <th className="right">Рабочая сумма</th>
+                <th className="right">Рабочая</th>
                 <th className="right">Опубликовано</th>
                 <th>Готовность</th>
-                <th>Публикация</th>
+                <th className="reports-col-secondary">Публикация</th>
                 <th className="right">Проблемы</th>
                 <th />
               </tr>
@@ -175,37 +271,46 @@ function OverviewTab({ overview }) {
             <tbody>
               {(overview.projects || []).length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="muted">Нет активных проектов</td>
+                  <td colSpan={9} className="reports-empty">Нет активных проектов</td>
                 </tr>
               ) : (
-                overview.projects.map((row) => (
-                  <tr key={row.projectId}>
-                    <td>
-                      <strong>{row.name}</strong>
-                      {row.hasUnpublishedChanges && (
-                        <span className="chip chip--amber" style={{ marginLeft: 6, fontSize: 11 }}>Есть изменения</span>
-                      )}
-                    </td>
-                    <td>{row.client}</td>
-                    <td>{row.statusLabel}</td>
-                    <td className="right num">{money(row.workingTotal)}</td>
-                    <td className="right num">
-                      {row.publishedLabel === "Не опубликован"
-                        ? "Не опубликован"
-                        : money(row.publishedTotal || 0)}
-                    </td>
-                    <td>{row.readinessLabel}</td>
-                    <td className="muted" style={{ fontSize: 12 }}>
-                      {row.lastPublishedVersion
-                        ? `v${row.lastPublishedVersion}${row.lastPublishedAt ? ` · ${formatDate(row.lastPublishedAt)}` : ""}`
-                        : "—"}
-                    </td>
-                    <td className="right num">{row.issueCount}</td>
-                    <td>
-                      <Link className="btn btn-sm" to={row.openPath}>Открыть проект</Link>
-                    </td>
-                  </tr>
-                ))
+                overview.projects.map((row) => {
+                  const attention = row.hasUnpublishedChanges || (row.issueCount || 0) > 0 || row.publishedLabel === "Не опубликован";
+                  const issueTone = (row.issueCount || 0) > 0 ? "warn" : "ok";
+                  const sameTotals =
+                    row.publishedTotal != null &&
+                    Math.round((row.workingTotal || 0) * 100) === Math.round((row.publishedTotal || 0) * 100);
+                  return (
+                    <tr key={row.projectId} className={attention ? "is-attention" : undefined}>
+                      <td>
+                        <div className="reports-table__name" title={row.name}>{row.name}</div>
+                        {row.hasUnpublishedChanges && (
+                          <span className="reports-chip reports-chip--amber" style={{ marginTop: 4 }}>Есть изменения</span>
+                        )}
+                      </td>
+                      <td className="reports-col-secondary">{row.client}</td>
+                      <td><span className="reports-chip reports-chip--neutral">{row.statusLabel}</span></td>
+                      <td className="right num">{money(row.workingTotal)}</td>
+                      <td className={`right num${sameTotals ? "" : ""}`}>
+                        {row.publishedLabel === "Не опубликован"
+                          ? <span className="reports-chip reports-chip--amber">Не опубликован</span>
+                          : money(row.publishedTotal || 0)}
+                      </td>
+                      <td><span className="reports-chip reports-chip--neutral">{row.readinessLabel}</span></td>
+                      <td className="reports-col-secondary muted" style={{ fontSize: 12 }}>
+                        {row.lastPublishedVersion
+                          ? `v${row.lastPublishedVersion}${row.lastPublishedAt ? ` · ${formatDate(row.lastPublishedAt)}` : ""}`
+                          : "—"}
+                      </td>
+                      <td className="right">
+                        <span className={`reports-chip reports-chip--${issueTone}`}>{row.issueCount}</span>
+                      </td>
+                      <td>
+                        <OpenLink to={row.openPath} />
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -220,15 +325,41 @@ function IssuesTab({ issues, projects }) {
   const [typeId, setTypeId] = useState("");
   const [level, setLevel] = useState("");
   const [q, setQ] = useState("");
+  const [showInfo, setShowInfo] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(true);
 
   const filtered = useMemo(
     () => filterReportIssues(issues, { projectId, typeId, level, q }),
     [issues, projectId, typeId, level, q]
   );
+  const displayed = useMemo(
+    () => filterIssuesForDisplay(filtered, { showInfo }),
+    [filtered, showInfo]
+  );
+  const counts = useMemo(() => countIssuesByLevel(filtered), [filtered]);
+  const active = reportFiltersActive([projectId, typeId, level, q]);
 
   return (
-    <div className="reports-r1__panel">
-      <div className="reports-r1__filters row wrap">
+    <div className="reports-panel">
+      <div className="reports-summary-row">
+        <span className="reports-chip reports-chip--danger">Ошибки: {counts.error}</span>
+        <span className="reports-chip reports-chip--warn">Предупреждения: {counts.warning}</span>
+        <span className="reports-chip reports-chip--neutral">Информация: {counts.info}</span>
+        <label className="row" style={{ gap: 6, alignItems: "center", fontSize: 13, marginLeft: "auto" }}>
+          <input type="checkbox" checked={showInfo} onChange={(e) => setShowInfo(e.target.checked)} />
+          Показывать информационные
+        </label>
+      </div>
+
+      <FilterBar
+        search={q}
+        onSearch={setQ}
+        found={displayed.length}
+        active={active}
+        onReset={() => { setProjectId(""); setTypeId(""); setLevel(""); setQ(""); }}
+        filtersOpen={filtersOpen}
+        onToggleFilters={() => setFiltersOpen((v) => !v)}
+      >
         <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Проект">
           <option value="">Все проекты</option>
           {(projects || []).map((p) => (
@@ -247,52 +378,44 @@ function IssuesTab({ issues, projects }) {
           <option value="warning">Предупреждение</option>
           <option value="info">Информация</option>
         </select>
-        <input
-          type="search"
-          placeholder="Поиск…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          aria-label="Поиск"
-        />
-      </div>
+      </FilterBar>
 
-      <div className="card reports-r1__table-card">
-        <div className="table-scroll-wrap reports-r1__scroll">
-          <table className="spec reports-r1__table">
+      <div className="reports-table-card">
+        <div className="reports-scroll">
+          <table className="reports-table">
             <thead>
               <tr>
-                <th>Проект</th>
-                <th>Позиция</th>
-                <th>Раздел</th>
                 <th>Проблема</th>
                 <th>Уровень</th>
-                <th className="right">Цена</th>
-                <th>Поставщик</th>
+                <th>Проект</th>
+                <th className="reports-col-secondary">Раздел</th>
+                <th className="reports-col-secondary">Позиция</th>
+                <th className="right reports-col-secondary">Цена</th>
+                <th className="reports-col-secondary">Поставщик</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="muted">Проблем не найдено</td>
-                </tr>
+              {displayed.length === 0 ? (
+                <tr><td colSpan={8} className="reports-empty">Проблем не найдено</td></tr>
               ) : (
-                filtered.map((row) => (
+                displayed.map((row) => (
                   <tr key={row.id}>
-                    <td>{row.projectName}</td>
-                    <td>{row.itemName}</td>
-                    <td>{row.section}</td>
-                    <td>{row.typeLabel}</td>
                     <td>
-                      <span className={`chip chip--${row.level === "error" ? "danger" : row.level === "warning" ? "amber" : "neutral"}`}>
+                      <div className="reports-table__name" title={row.typeLabel}>{row.typeLabel}</div>
+                      <div className="reports-table__secondary" title={row.itemName}>{row.itemName}</div>
+                    </td>
+                    <td>
+                      <span className={`reports-chip reports-chip--${issueLevelTone(row.level)}`}>
                         {row.levelLabel}
                       </span>
                     </td>
-                    <td className="right num">{money(row.price)}</td>
-                    <td>{row.supplier || "—"}</td>
-                    <td>
-                      <Link className="btn btn-sm" to={row.openPath}>Открыть в проекте</Link>
-                    </td>
+                    <td>{row.projectName}</td>
+                    <td className="reports-col-secondary">{row.section}</td>
+                    <td className="reports-col-secondary">{row.itemName}</td>
+                    <td className="right num reports-col-secondary">{money(row.price)}</td>
+                    <td className="reports-col-secondary">{row.supplier || "—"}</td>
+                    <td><OpenLink to={row.openPath} /></td>
                   </tr>
                 ))
               )}
@@ -311,6 +434,8 @@ function PurchasesTab({ purchases, projects }) {
   const [q, setQ] = useState("");
   const [excelBusy, setExcelBusy] = useState(false);
   const [excelError, setExcelError] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [openMap, setOpenMap] = useState({});
 
   const filtered = useMemo(
     () => filterReportPurchases(purchases.rows, { projectId, supplier, status, q }),
@@ -323,10 +448,17 @@ function PurchasesTab({ purchases, projects }) {
   }, [purchases.rows]);
 
   const t = purchases.totals || {};
-  const filteredTotal = useMemo(
-    () => Math.round(filtered.reduce((s, r) => s + (Number(r.sum) || 0), 0) * 100) / 100,
-    [filtered]
-  );
+  const active = reportFiltersActive([projectId, supplier, status, q]);
+
+  useEffect(() => {
+    setOpenMap((prev) => {
+      const next = { ...prev };
+      for (const g of groups) {
+        if (next[g.supplier] === undefined) next[g.supplier] = defaultPurchaseGroupOpen(g);
+      }
+      return next;
+    });
+  }, [groups]);
 
   const onExcel = async () => {
     setExcelError("");
@@ -346,16 +478,29 @@ function PurchasesTab({ purchases, projects }) {
   };
 
   return (
-    <div className="reports-r1__panel">
-      <div className="reports-r1__cards">
-        <div className="card reports-r1__card"><div className="k">Общая сумма</div><div className="v num">{money(t.totalSum)}</div></div>
-        <div className="card reports-r1__card"><div className="k">Не заказано</div><div className="v num">{money(t.notOrderedSum)}</div></div>
-        <div className="card reports-r1__card"><div className="k">Заказано</div><div className="v num">{money(t.orderedSum)}</div></div>
-        <div className="card reports-r1__card"><div className="k">Получено</div><div className="v num">{money(t.receivedSum)}</div></div>
-        <div className="card reports-r1__card"><div className="k">Поставщиков</div><div className="v num">{t.supplierCount}</div></div>
+    <div className="reports-panel">
+      <div className="reports-kpis">
+        <ReportKpi id="totalSum" label="Общая сумма" value={money(t.totalSum)} important />
+        <ReportKpi id="notOrderedSum" label="Не заказано" value={money(t.notOrderedSum)} keepZero />
+        <ReportKpi id="orderedSum" label="Заказано" value={money(t.orderedSum)} keepZero />
+        <ReportKpi id="receivedSum" label="Получено" value={money(t.receivedSum)} keepZero />
+        <ReportKpi id="supplierCount" label="Поставщиков" value={t.supplierCount} keepZero />
       </div>
 
-      <div className="reports-r1__filters row wrap">
+      <FilterBar
+        search={q}
+        onSearch={setQ}
+        found={filtered.length}
+        active={active}
+        onReset={() => { setProjectId(""); setSupplier(""); setStatus(""); setQ(""); }}
+        filtersOpen={filtersOpen}
+        onToggleFilters={() => setFiltersOpen((v) => !v)}
+        excel={
+          <button type="button" className="btn btn-sm btn-primary" onClick={onExcel} disabled={excelBusy || !filtered.length}>
+            {excelBusy ? "Excel…" : "Скачать Excel"}
+          </button>
+        }
+      >
         <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Проект">
           <option value="">Все проекты</option>
           {(projects || []).map((p) => (
@@ -374,73 +519,77 @@ function PurchasesTab({ purchases, projects }) {
             <option key={s.id} value={s.id}>{s.label}</option>
           ))}
         </select>
-        <input
-          type="search"
-          placeholder="Поиск…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          aria-label="Поиск"
-        />
-        <button type="button" className="btn btn-sm btn-primary" onClick={onExcel} disabled={excelBusy || !filtered.length}>
-          {excelBusy ? "Excel…" : "Скачать Excel"}
-        </button>
-        {(projectId || supplier || status || q) && (
-          <span className="muted" style={{ fontSize: 12 }}>Фильтр: {money(filteredTotal)}</span>
-        )}
-      </div>
+      </FilterBar>
       {excelError ? <p className="muted" style={{ color: "var(--danger)" }}>{excelError}</p> : null}
 
       {groups.length === 0 ? (
-        <p className="muted">Нет позиций для закупки</p>
+        <p className="reports-empty">Нет позиций для закупки</p>
       ) : (
-        groups.map((g) => (
-          <div key={g.supplier} className="card reports-r1__table-card" style={{ marginBottom: 14 }}>
-            <div className="between wrap" style={{ marginBottom: 8, gap: 8 }}>
-              <strong>{g.supplier}</strong>
-              <span className="muted num">{money(g.sum)}</span>
+        groups.map((g) => {
+          const isMissing = g.supplier === "Поставщик не указан" || g.supplier === "—";
+          const open = openMap[g.supplier] !== false;
+          return (
+            <div key={g.supplier} className={`reports-purchase-group${isMissing ? " is-missing" : ""}`}>
+              <button
+                type="button"
+                className="reports-purchase-group__head"
+                onClick={() => setOpenMap((m) => ({ ...m, [g.supplier]: !open }))}
+                aria-expanded={open}
+              >
+                <div>
+                  <div className="reports-purchase-group__title">{g.supplier}</div>
+                  <div className="reports-purchase-group__meta">
+                    <span>{g.items.length} поз.</span>
+                    <span className="num">{money(g.sum)}</span>
+                  </div>
+                </div>
+                <span className="reports-purchase-group__chev">{open ? "▾" : "▸"}</span>
+              </button>
+              {open ? (
+                <div className="reports-scroll">
+                  <table className="reports-table">
+                    <thead>
+                      <tr>
+                        <th>Проект</th>
+                        <th>Позиция</th>
+                        <th className="reports-col-secondary">Ед.</th>
+                        <th className="right">Кол-во</th>
+                        <th className="right reports-col-secondary">Цена</th>
+                        <th className="right">Сумма</th>
+                        <th>Статус</th>
+                        <th>Ссылка</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {g.items.map((row) => (
+                        <tr key={row.id}>
+                          <td>{row.projectName}</td>
+                          <td>
+                            <div className="reports-table__name" title={row.itemName}>{row.itemName}</div>
+                          </td>
+                          <td className="reports-col-secondary">{row.unit}</td>
+                          <td className="right num">{row.qty}</td>
+                          <td className="right num reports-col-secondary">{money(row.price)}</td>
+                          <td className="right num" style={{ fontWeight: 700 }}>{money(row.sum)}</td>
+                          <td><span className="reports-chip reports-chip--neutral">{row.statusLabel}</span></td>
+                          <td>
+                            {row.link ? (
+                              <a className="reports-link-btn" href={row.link} target="_blank" rel="noreferrer" title={row.link}>↗</a>
+                            ) : (
+                              <span className="muted">—</span>
+                            )}
+                          </td>
+                          <td><OpenLink to={row.openPath} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
             </div>
-            <div className="table-scroll-wrap reports-r1__scroll">
-              <table className="spec reports-r1__table">
-                <thead>
-                  <tr>
-                    <th>Проект</th>
-                    <th>Позиция</th>
-                    <th>Ед.</th>
-                    <th className="right">Кол-во</th>
-                    <th className="right">Цена</th>
-                    <th className="right">Сумма</th>
-                    <th>Статус</th>
-                    <th>Ссылка</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {g.items.map((row) => (
-                    <tr key={row.id}>
-                      <td>{row.projectName}</td>
-                      <td>{row.itemName}</td>
-                      <td>{row.unit}</td>
-                      <td className="right num">{row.qty}</td>
-                      <td className="right num">{money(row.price)}</td>
-                      <td className="right num">{money(row.sum)}</td>
-                      <td>{row.statusLabel}</td>
-                      <td>
-                        {row.link ? (
-                          <a href={row.link} target="_blank" rel="noreferrer">↗</a>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td>
-                        <Link className="btn btn-sm" to={row.openPath}>Открыть проект</Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))
+          );
+        })
       )}
     </div>
   );
@@ -466,11 +615,13 @@ function PublicationsTab({ publications, projects }) {
   const [published, setPublished] = useState("");
   const [sync, setSync] = useState("");
   const [q, setQ] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(true);
 
   const filtered = useMemo(
     () => filterReportPublications(publications.rows, { projectId, published, sync, q }),
     [publications.rows, projectId, published, sync, q]
   );
+  const active = reportFiltersActive([projectId, published, sync, q]);
 
   const emptyMsg =
     publications.emptyAllCurrent && !projectId && !published && !sync && !q
@@ -478,8 +629,16 @@ function PublicationsTab({ publications, projects }) {
       : "Нет проектов по фильтру";
 
   return (
-    <div className="reports-r1__panel">
-      <div className="reports-r1__filters row wrap">
+    <div className="reports-panel">
+      <FilterBar
+        search={q}
+        onSearch={setQ}
+        found={filtered.length}
+        active={active}
+        onReset={() => { setProjectId(""); setPublished(""); setSync(""); setQ(""); }}
+        filtersOpen={filtersOpen}
+        onToggleFilters={() => setFiltersOpen((v) => !v)}
+      >
         <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Проект">
           <option value="">Все проекты</option>
           {(projects || []).map((p) => (
@@ -497,93 +656,81 @@ function PublicationsTab({ publications, projects }) {
           <option value="current">Актуально</option>
           <option value="unpublished">Не опубликован</option>
         </select>
-        <input
-          type="search"
-          placeholder="Поиск…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          aria-label="Поиск"
-        />
-      </div>
+      </FilterBar>
 
-      <div className="card reports-r1__table-card">
-        <div className="table-scroll-wrap reports-r1__scroll">
-          <table className="spec reports-r1__table">
+      <div className="reports-table-card">
+        <div className="reports-scroll">
+          <table className="reports-table">
             <thead>
               <tr>
                 <th>Проект</th>
-                <th>Клиент</th>
-                <th>Статус</th>
+                <th>Синхронизация</th>
+                <th className="reports-col-secondary">Клиент</th>
                 <th className="right">Рабочая</th>
                 <th className="right">Опубликовано</th>
                 <th className="right">Разница</th>
-                <th>Версия</th>
-                <th>Дата</th>
-                <th>Синхр.</th>
-                <th className="right">+/−/~</th>
+                <th>Изменения</th>
+                <th className="reports-col-secondary">Версия</th>
                 <th />
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={11} className="muted">{emptyMsg}</td>
-                </tr>
+                <tr><td colSpan={9} className="reports-empty">{emptyMsg}</td></tr>
               ) : (
-                filtered.map((row) => (
-                  <tr key={row.projectId}>
-                    <td>
-                      <strong>{row.name}</strong>
-                    </td>
-                    <td>{row.client}</td>
-                    <td>{row.statusLabel}</td>
-                    <td className="right num">{money(row.workingTotal)}</td>
-                    <td className="right num">
-                      {row.hasPublished ? money(row.publishedTotal || 0) : "Не опубликован"}
-                    </td>
-                    <td
-                      className={`right num${row.delta > 0 ? " reports-r1__delta--up" : row.delta < 0 ? " reports-r1__delta--down" : ""}`}
-                    >
-                      {row.hasPublished ? formatDelta(row.delta) : "—"}
-                    </td>
-                    <td>{row.publishedVersion != null ? `v${row.publishedVersion}` : "—"}</td>
-                    <td className="muted" style={{ fontSize: 12 }}>
-                      {row.publishedAt ? formatDate(row.publishedAt) : "—"}
-                    </td>
-                    <td>
-                      <span
-                        className={`chip chip--${
-                          row.syncStatus === "changes"
-                            ? "amber"
-                            : row.syncStatus === "current"
-                              ? "ok"
-                              : "neutral"
-                        }`}
-                      >
-                        {row.syncBadge}
-                      </span>
-                    </td>
-                    <td className="right muted" style={{ fontSize: 12 }}>
-                      {row.hasPublished
-                        ? `+${row.addedCount} / −${row.removedCount} / ~${row.changedCount}`
-                        : "—"}
-                    </td>
-                    <td>
-                      <div className="row wrap" style={{ gap: 6 }}>
-                        <Link className="btn btn-sm" to={row.openPath}>Открыть проект</Link>
-                        {row.hasClientLink ? (
-                          <Link className="btn btn-sm" to={row.clientPath} target="_blank" rel="noreferrer">
-                            Клиентская версия
-                          </Link>
-                        ) : (
-                          <button type="button" className="btn btn-sm" disabled title="Нет публикации">
-                            Клиентская версия
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                filtered.map((row) => {
+                  const chips = publicationDiffChips(row);
+                  const deltaClass =
+                    !row.hasPublished || row.delta == null || row.delta === 0
+                      ? "reports-delta--zero"
+                      : row.delta > 0
+                        ? "reports-delta--up"
+                        : "reports-delta--down";
+                  return (
+                    <tr key={row.projectId} className={row.syncStatus === "changes" || row.syncStatus === "unpublished" ? "is-attention" : undefined}>
+                      <td>
+                        <div className="reports-table__name" title={row.name}>{row.name}</div>
+                        <div className="reports-table__secondary">{row.statusLabel}</div>
+                      </td>
+                      <td>
+                        <span className={`reports-chip reports-chip--${syncStatusTone(row.syncStatus)}`}>
+                          {row.syncBadge}
+                        </span>
+                      </td>
+                      <td className="reports-col-secondary">{row.client}</td>
+                      <td className="right num">{money(row.workingTotal)}</td>
+                      <td className="right num">
+                        {row.hasPublished ? money(row.publishedTotal || 0) : "—"}
+                      </td>
+                      <td className={`right num ${deltaClass}`}>
+                        {row.hasPublished ? formatDelta(row.delta) : "—"}
+                      </td>
+                      <td>
+                        <div className="reports-summary-row" style={{ margin: 0 }}>
+                          {chips.length
+                            ? chips.map((c) => (
+                                <span key={c.id} className={`reports-chip reports-chip--${c.tone}`}>{c.label}</span>
+                              ))
+                            : <span className="muted">—</span>}
+                        </div>
+                      </td>
+                      <td className="reports-col-secondary muted" style={{ fontSize: 12 }}>
+                        {row.publishedVersion != null ? `v${row.publishedVersion}` : "—"}
+                        {row.publishedAt ? ` · ${formatDate(row.publishedAt)}` : ""}
+                      </td>
+                      <td>
+                        <div className="reports-actions">
+                          <OpenLink to={row.openPath}>Проект</OpenLink>
+                          {row.hasClientLink ? (
+                            <OpenLink to={row.clientPath} external>Версия клиента</OpenLink>
+                          ) : (
+                            <OpenLink to="#" disabled title="Нет публикации">Версия клиента</OpenLink>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -599,6 +746,7 @@ function MaterialDriftTab({ drift, projects }) {
   const [supplier, setSupplier] = useState("");
   const [q, setQ] = useState("");
   const [onlyDiffs, setOnlyDiffs] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(true);
 
   const filtered = useMemo(
     () => filterReportMaterialDrift(drift.rows, { projectId, typeId, supplier, q, onlyDiffs }),
@@ -608,10 +756,19 @@ function MaterialDriftTab({ drift, projects }) {
     const set = new Set((drift.rows || []).map((r) => r.supplier).filter((s) => s && s !== "—"));
     return [...set].sort((a, b) => a.localeCompare(b, "ru"));
   }, [drift.rows]);
+  const active = reportFiltersActive([projectId, typeId, supplier, q]);
 
   return (
-    <div className="reports-r1__panel">
-      <div className="reports-r1__filters row wrap">
+    <div className="reports-panel">
+      <FilterBar
+        search={q}
+        onSearch={setQ}
+        found={filtered.length}
+        active={active}
+        onReset={() => { setProjectId(""); setTypeId(""); setSupplier(""); setQ(""); setOnlyDiffs(true); }}
+        filtersOpen={filtersOpen}
+        onToggleFilters={() => setFiltersOpen((v) => !v)}
+      >
         <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Проект">
           <option value="">Все проекты</option>
           {(projects || []).map((p) => (
@@ -631,57 +788,56 @@ function MaterialDriftTab({ drift, projects }) {
           ))}
         </select>
         <label className="row" style={{ gap: 6, alignItems: "center", fontSize: 13 }}>
-          <input
-            type="checkbox"
-            checked={onlyDiffs}
-            onChange={(e) => setOnlyDiffs(e.target.checked)}
-          />
+          <input type="checkbox" checked={onlyDiffs} onChange={(e) => setOnlyDiffs(e.target.checked)} />
           Только отличия
         </label>
-        <input
-          type="search"
-          placeholder="Поиск…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          aria-label="Поиск"
-        />
-      </div>
+      </FilterBar>
+      {onlyDiffs ? (
+        <div className="reports-filters__meta" style={{ marginBottom: 10 }}>Отличий: {filtered.length}</div>
+      ) : null}
 
-      <div className="card reports-r1__table-card">
-        <div className="table-scroll-wrap reports-r1__scroll">
-          <table className="spec reports-r1__table">
+      <div className="reports-table-card">
+        <div className="reports-scroll">
+          <table className="reports-table">
             <thead>
               <tr>
                 <th>Проект</th>
-                <th>Позиция в проекте</th>
-                <th>Материал из базы</th>
-                <th className="right">Цена проекта</th>
-                <th className="right">Цена базы</th>
-                <th>Поставщик</th>
-                <th>Тип отличия</th>
+                <th>Позиция / база</th>
+                <th>Цены</th>
+                <th className="reports-col-secondary">Поставщик</th>
+                <th>Тип</th>
                 <th />
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="muted">Отличий от базы не найдено</td>
-                </tr>
+                <tr><td colSpan={6} className="reports-empty">Отличий от базы не найдено</td></tr>
               ) : (
-                filtered.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.projectName}</td>
-                    <td>{row.itemName}</td>
-                    <td>{row.materialName}</td>
-                    <td className="right num">{money(row.projectPrice)}</td>
-                    <td className="right num">{row.basePrice == null ? "—" : money(row.basePrice)}</td>
-                    <td>{row.supplier}</td>
-                    <td>{row.typeLabel}</td>
-                    <td>
-                      <Link className="btn btn-sm" to={row.openPath}>Открыть проект</Link>
-                    </td>
-                  </tr>
-                ))
+                filtered.map((row) => {
+                  const tone = driftTypeTone(row.typeId);
+                  const big = isLargePriceDelta(row.projectPrice, row.basePrice);
+                  return (
+                    <tr key={row.id} className={big ? "is-price-gap" : undefined}>
+                      <td>{row.projectName}</td>
+                      <td>
+                        <div className="reports-table__name" title={row.itemName}>{row.itemName}</div>
+                        <div className="reports-table__secondary" title={row.materialName}>{row.materialName}</div>
+                      </td>
+                      <td className="reports-price-pair">
+                        <span className={row.projectPrice !== row.basePrice ? "reports-price-pair__diff" : ""}>
+                          {money(row.projectPrice)}
+                        </span>
+                        <span className="reports-price-pair__arrow">→</span>
+                        <span>{row.basePrice == null ? "—" : money(row.basePrice)}</span>
+                      </td>
+                      <td className="reports-col-secondary">{row.supplier}</td>
+                      <td>
+                        <span className={`reports-chip reports-chip--${tone}`}>{row.typeLabel}</span>
+                      </td>
+                      <td><OpenLink to={row.openPath} /></td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -695,6 +851,7 @@ function SectionsTab({ projects, materials, overviewProjects }) {
   const [projectId, setProjectId] = useState("");
   const [statusId, setStatusId] = useState("");
   const [q, setQ] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(true);
 
   const scopedProjects = useMemo(() => {
     let list = projects || [];
@@ -721,23 +878,27 @@ function SectionsTab({ projects, materials, overviewProjects }) {
     { id: "totalSum", label: "Общая сумма", always: true },
     ...SECTION_CARD_KEYS.map((c) => ({ id: c.id, label: c.label, always: false })),
   ];
+  const active = reportFiltersActive([projectId, statusId, q]);
 
   return (
-    <div className="reports-r1__panel">
-      <div className="reports-r1__cards">
+    <div className="reports-panel">
+      <div className="reports-kpis">
         {cardDefs.map((c) => {
           const val = cards[c.id] ?? 0;
           if (!c.always && !(val > 0)) return null;
-          return (
-            <div key={c.id} className="card reports-r1__card">
-              <div className="k">{c.label}</div>
-              <div className="v num">{money(val)}</div>
-            </div>
-          );
+          return <ReportKpi key={c.id} id={c.id} label={c.label} value={money(val)} important={c.always} />;
         })}
       </div>
 
-      <div className="reports-r1__filters row wrap">
+      <FilterBar
+        search={q}
+        onSearch={setQ}
+        found={filtered.length}
+        active={active}
+        onReset={() => { setProjectId(""); setStatusId(""); setQ(""); }}
+        filtersOpen={filtersOpen}
+        onToggleFilters={() => setFiltersOpen((v) => !v)}
+      >
         <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Проект">
           <option value="">Все проекты</option>
           {(overviewProjects || []).map((p) => (
@@ -750,46 +911,54 @@ function SectionsTab({ projects, materials, overviewProjects }) {
             <option key={f.id} value={f.id}>{f.label}</option>
           ))}
         </select>
-        <input
-          type="search"
-          placeholder="Поиск по разделу…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          aria-label="Поиск"
-        />
-      </div>
+      </FilterBar>
 
-      <div className="card reports-r1__table-card">
-        <div className="table-scroll-wrap reports-r1__scroll">
-          <table className="spec reports-r1__table">
+      <div className="reports-table-card">
+        <div className="reports-scroll">
+          <table className="reports-table">
             <thead>
               <tr>
                 <th>Раздел</th>
                 <th className="right">Позиций</th>
                 <th className="right">Сумма</th>
                 <th className="right">Доля</th>
-                <th className="right">Проблем</th>
+                <th className="right">Проблемы</th>
                 <th className="right">Не закуплено</th>
                 <th />
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="muted">Нет данных по разделам</td>
-                </tr>
+                <tr><td colSpan={7} className="reports-empty">Нет данных по разделам</td></tr>
               ) : (
                 filtered.map((row) => (
                   <tr key={row.sectionLabel}>
-                    <td>{row.sectionLabel}</td>
+                    <td>
+                      <div className="reports-table__name" title={row.sectionLabel}>{row.sectionLabel}</div>
+                    </td>
                     <td className="right num">{row.itemCount}</td>
-                    <td className="right num">{money(row.sum)}</td>
-                    <td className="right num">{row.sharePct}%</td>
-                    <td className="right num">{row.problemCount}</td>
-                    <td className="right num">{row.unpurchasedCount}</td>
+                    <td className="right num" style={{ fontWeight: 700 }}>{money(row.sum)}</td>
+                    <td className="right">
+                      <div className="reports-share">
+                        <div className="reports-share__bar" aria-hidden>
+                          <i style={{ width: `${Math.min(100, Math.max(0, Number(row.sharePct) || 0))}%` }} />
+                        </div>
+                        <span className="reports-share__pct">{row.sharePct}%</span>
+                      </div>
+                    </td>
+                    <td className="right">
+                      <span className={`reports-chip reports-chip--${row.problemCount ? "warn" : "ok"}`}>
+                        {row.problemCount}
+                      </span>
+                    </td>
+                    <td className="right">
+                      <span className={`reports-chip reports-chip--${row.unpurchasedCount ? "amber" : "neutral"}`}>
+                        {row.unpurchasedCount}
+                      </span>
+                    </td>
                     <td>
                       {row.openPath && row.openPath !== "/" ? (
-                        <Link className="btn btn-sm" to={row.openPath}>Открыть проект</Link>
+                        <OpenLink to={row.openPath} />
                       ) : (
                         <span className="muted">—</span>
                       )}
@@ -810,10 +979,20 @@ function RoomsTab({ rooms, projects }) {
   const [room, setRoom] = useState("");
   const [section, setSection] = useState("");
   const [q, setQ] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [showBreakdown, setShowBreakdown] = useState(false);
 
   const filtered = useMemo(
     () => filterReportRooms(rooms.rows, { projectId, room, section, q }),
     [rooms.rows, projectId, room, section, q]
+  );
+  const displayRows = useMemo(
+    () => sortRoomsForDisplay(filtered, NO_ROOM_GROUP),
+    [filtered]
+  );
+  const noRoomCount = useMemo(
+    () => countNoRoomItems(filtered, NO_ROOM_GROUP),
+    [filtered]
   );
   const roomOptions = useMemo(() => {
     const set = new Set((rooms.rows || []).map((r) => r.roomLabel).filter(Boolean));
@@ -823,10 +1002,28 @@ function RoomsTab({ rooms, projects }) {
       return a.localeCompare(b, "ru");
     });
   }, [rooms.rows]);
+  const active = reportFiltersActive([projectId, room, section, q]);
 
   return (
-    <div className="reports-r1__panel">
-      <div className="reports-r1__filters row wrap">
+    <div className="reports-panel">
+      {noRoomCount > 0 ? (
+        <div className="reports-warning-banner">Без помещения: {noRoomCount} позиций</div>
+      ) : null}
+
+      <FilterBar
+        search={q}
+        onSearch={setQ}
+        found={displayRows.length}
+        active={active}
+        onReset={() => { setProjectId(""); setRoom(""); setSection(""); setQ(""); }}
+        filtersOpen={filtersOpen}
+        onToggleFilters={() => setFiltersOpen((v) => !v)}
+        excel={
+          <button type="button" className="btn btn-sm reports-mobile-details" onClick={() => setShowBreakdown((v) => !v)}>
+            {showBreakdown ? "Скрыть разбивку" : "Показать разбивку"}
+          </button>
+        }
+      >
         <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Проект">
           <option value="">Все проекты</option>
           {(projects || []).map((p) => (
@@ -845,58 +1042,58 @@ function RoomsTab({ rooms, projects }) {
             <option key={c.id} value={c.id}>{c.label}</option>
           ))}
         </select>
-        <input
-          type="search"
-          placeholder="Поиск…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          aria-label="Поиск"
-        />
-      </div>
+      </FilterBar>
 
-      <div className="card reports-r1__table-card">
-        <div className="table-scroll-wrap reports-r1__scroll">
-          <table className="spec reports-r1__table">
+      <div className="reports-table-card">
+        <div className="reports-scroll">
+          <table className="reports-table">
             <thead>
               <tr>
                 <th>Проект</th>
                 <th>Помещение</th>
                 <th className="right">Позиций</th>
-                <th className="right">Оборуд.</th>
-                <th className="right">Матер.</th>
-                <th className="right">Работы</th>
-                <th className="right">Электр.</th>
-                <th className="right">Сантехн.</th>
-                <th className="right">Климат</th>
+                <th className={`right${showBreakdown ? "" : " reports-col-secondary"}`}>Оборуд.</th>
+                <th className={`right${showBreakdown ? "" : " reports-col-secondary"}`}>Матер.</th>
+                <th className={`right${showBreakdown ? "" : " reports-col-secondary"}`}>Работы</th>
+                <th className={`right${showBreakdown ? "" : " reports-col-secondary"}`}>Электр.</th>
+                <th className={`right${showBreakdown ? "" : " reports-col-secondary"}`}>Сантехн.</th>
+                <th className={`right${showBreakdown ? "" : " reports-col-secondary"}`}>Климат</th>
                 <th className="right">Сумма</th>
-                <th className="right">Проблем</th>
+                <th className="right">Проблемы</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={12} className="muted">Помещения не указаны</td>
-                </tr>
+              {displayRows.length === 0 ? (
+                <tr><td colSpan={12} className="reports-empty">Помещения не указаны</td></tr>
               ) : (
-                filtered.map((row) => (
-                  <tr key={`${row.projectId}:${row.roomLabel}`}>
-                    <td>{row.projectName}</td>
-                    <td>{row.roomLabel}</td>
-                    <td className="right num">{row.itemCount}</td>
-                    <td className="right num">{money(row.equipment)}</td>
-                    <td className="right num">{money(row.materials)}</td>
-                    <td className="right num">{money(row.works)}</td>
-                    <td className="right num">{money(row.electrics)}</td>
-                    <td className="right num">{money(row.plumbing)}</td>
-                    <td className="right num">{money(row.climate)}</td>
-                    <td className="right num">{money(row.sum)}</td>
-                    <td className="right num">{row.problemCount}</td>
-                    <td>
-                      <Link className="btn btn-sm" to={row.openPath}>Открыть проект</Link>
-                    </td>
-                  </tr>
-                ))
+                displayRows.map((row) => {
+                  const isNoRoom = row.roomLabel === NO_ROOM_GROUP;
+                  return (
+                    <tr key={`${row.projectId}:${row.roomLabel}`} className={isNoRoom ? "is-warn-row" : undefined}>
+                      <td>{row.projectName}</td>
+                      <td>
+                        <div className="reports-table__name" title={row.roomLabel}>
+                          {isNoRoom ? "⚠ " : ""}{row.roomLabel}
+                        </div>
+                      </td>
+                      <td className="right num">{row.itemCount}</td>
+                      <td className={`right num${showBreakdown ? "" : " reports-col-secondary"}`}>{money(row.equipment)}</td>
+                      <td className={`right num${showBreakdown ? "" : " reports-col-secondary"}`}>{money(row.materials)}</td>
+                      <td className={`right num${showBreakdown ? "" : " reports-col-secondary"}`}>{money(row.works)}</td>
+                      <td className={`right num${showBreakdown ? "" : " reports-col-secondary"}`}>{money(row.electrics)}</td>
+                      <td className={`right num${showBreakdown ? "" : " reports-col-secondary"}`}>{money(row.plumbing)}</td>
+                      <td className={`right num${showBreakdown ? "" : " reports-col-secondary"}`}>{money(row.climate)}</td>
+                      <td className="right num" style={{ fontWeight: 700 }}>{money(row.sum)}</td>
+                      <td className="right">
+                        <span className={`reports-chip reports-chip--${row.problemCount ? "warn" : "ok"}`}>
+                          {row.problemCount}
+                        </span>
+                      </td>
+                      <td><OpenLink to={row.openPath} /></td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

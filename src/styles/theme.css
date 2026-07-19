@@ -1,6 +1,6 @@
 /* ============================================================
-   Daogreen Spec — design system
-   Subject: BOM/спецификатор вертикальных ферм. Numbers are the hero.
+   Daogreen Spec вЂ” design system
+   Subject: BOM/СЃРїРµС†РёС„РёРєР°С‚РѕСЂ РІРµСЂС‚РёРєР°Р»СЊРЅС‹С… С„РµСЂРј. Numbers are the hero.
    Signature: green ledger spine + tabular monospace figures.
    ============================================================ */
 :root {
@@ -58,7 +58,7 @@ a { color: var(--brand); text-decoration: none; }
 a:hover { text-decoration: underline; }
 button { font-family: inherit; }
 
-/* Tabular figures — the signature */
+/* Tabular figures вЂ” the signature */
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 
 /* ---------- Eyebrow / labels ---------- */
@@ -447,7 +447,7 @@ body.nav-open { overflow: hidden; }
 .topbar .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 .content { padding: 0 0 32px; max-width: none; }
 
-/* Вкладки и пресеты */
+/* Р’РєР»Р°РґРєРё Рё РїСЂРµСЃРµС‚С‹ */
 .step-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
 .section-tabs {
   display: flex;
@@ -847,7 +847,7 @@ body.nav-open { overflow: hidden; }
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
-/* Компактная шапка клиента */
+/* РљРѕРјРїР°РєС‚РЅР°СЏ С€Р°РїРєР° РєР»РёРµРЅС‚Р° */
 .client-topbar {
   position: sticky;
   top: 8px;
@@ -1168,7 +1168,7 @@ body.nav-open { overflow: hidden; }
 .client-trust {
   display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; font-size: 12.5px; color: #9ecdb8;
 }
-.client-trust span::before { content: "✓ "; color: #7fc9a8; font-weight: 700; }
+.client-trust span::before { content: "вњ“ "; color: #7fc9a8; font-weight: 700; }
 .budget-bar {
   position: sticky; top: 0; z-index: 10;
   background: linear-gradient(135deg, var(--brand-deep), var(--brand-mid));
@@ -1777,7 +1777,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 .client-supplier-bar select { min-width: 200px; }
 .client-brand-footer { margin-top: 32px; padding: 16px; text-align: center; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); }
 
-/* Floor plan (схема помещения) */
+/* Floor plan (СЃС…РµРјР° РїРѕРјРµС‰РµРЅРёСЏ) */
 .floor-plan-field__preview {
   display: block;
   position: relative;
@@ -2352,7 +2352,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   gap: 4px;
   box-sizing: border-box;
 }
-/* Фильтры / массовый выбор — открывать вправо от кнопки, без раздувания страницы */
+/* Р¤РёР»СЊС‚СЂС‹ / РјР°СЃСЃРѕРІС‹Р№ РІС‹Р±РѕСЂ вЂ” РѕС‚РєСЂС‹РІР°С‚СЊ РІРїСЂР°РІРѕ РѕС‚ РєРЅРѕРїРєРё, Р±РµР· СЂР°Р·РґСѓРІР°РЅРёСЏ СЃС‚СЂР°РЅРёС†С‹ */
 .spec-more-filters__menu,
 .spec-mass-select__menu,
 .client-readiness__mass-menu {
@@ -2361,7 +2361,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   top: calc(100% + 4px);
   margin-top: 0;
 }
-/* «Ещё» у схем каркасов справа — якорить к правому краю кнопки */
+/* В«Р•С‰С‘В» Сѓ СЃС…РµРј РєР°СЂРєР°СЃРѕРІ СЃРїСЂР°РІР° вЂ” СЏРєРѕСЂРёС‚СЊ Рє РїСЂР°РІРѕРјСѓ РєСЂР°СЋ РєРЅРѕРїРєРё */
 .frame-drawing-more__menu {
   left: auto;
   right: 0;
@@ -2624,7 +2624,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
-/* Client purchase cards: quantity is easy to miss as muted text — give it a quiet box */
+/* Client purchase cards: quantity is easy to miss as muted text вЂ” give it a quiet box */
 .client-qty-badge {
   display: inline-flex;
   align-items: baseline;
@@ -3119,7 +3119,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   max-width: 100%;
 }
 
-/* ---------- Mobile: admin + shared (≤860px) ---------- */
+/* ---------- Mobile: admin + shared (в‰¤860px) ---------- */
 @media (max-width: 860px) {
   .mobile-menu-btn {
     top: calc(10px + env(safe-area-inset-top, 0px));
@@ -3207,7 +3207,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
     scrollbar-width: none;
     padding-bottom: 4px;
   }
-  /* Открытое меню фильтров не должно клипаться/раздувать горизонтальный скролл */
+  /* РћС‚РєСЂС‹С‚РѕРµ РјРµРЅСЋ С„РёР»СЊС‚СЂРѕРІ РЅРµ РґРѕР»Р¶РЅРѕ РєР»РёРїР°С‚СЊСЃСЏ/СЂР°Р·РґСѓРІР°С‚СЊ РіРѕСЂРёР·РѕРЅС‚Р°Р»СЊРЅС‹Р№ СЃРєСЂРѕР»Р» */
   .spec-quick-filters:has(.spec-more-filters[open]),
   .spec-quick-filters:has(.spec-mass-select[open]) {
     overflow: visible;
@@ -3361,75 +3361,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   }
 }
 
-/* Reports R1 */
-.reports-r1__tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-.reports-r1__cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-.reports-r1__card .k {
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 4px;
-}
-.reports-r1__card .v {
-  font-size: 18px;
-  font-weight: 600;
-}
-.reports-r1__filters {
-  gap: 8px;
-  margin-bottom: 12px;
-  align-items: center;
-}
-.reports-r1__filters select,
-.reports-r1__filters input[type="search"] {
-  min-width: 0;
-  max-width: 100%;
-}
-.reports-r1__table-card {
-  overflow: hidden;
-}
-.reports-r1__scroll {
-  max-width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-.reports-r1__table {
-  min-width: 720px;
-  width: 100%;
-}
-.reports-r1__table th,
-.reports-r1__table td {
-  white-space: nowrap;
-}
-.reports-r1__table td:nth-child(1),
-.reports-r1__table td:nth-child(2) {
-  white-space: normal;
-  max-width: 220px;
-}
-.reports-r1__delta--up { color: var(--danger); }
-.reports-r1__delta--down { color: var(--ok, #0a7a4a); }
 .chip--ok { background: var(--ok-tint, #e8f6ef); color: var(--ok, #0a7a4a); }
-@media (max-width: 768px) {
-  .reports-r1__cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .reports-r1__table {
-    min-width: 640px;
-  }
-}
-@media (max-width: 400px) {
-  .reports-r1__cards {
-    grid-template-columns: 1fr;
-  }
-}
 
 @media (max-width: 400px) {
   .stat-grid {
