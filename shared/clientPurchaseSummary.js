@@ -40,11 +40,14 @@ export function resolveClientDeliverySourceLabel(item) {
 /**
  * @param {object[]} items
  * @param {object[]} [materials]
+ * @param {{ stellageConfigs?: object[] }} [options]
  */
-export function buildClientPurchaseSummary(items, materials = []) {
+export function buildClientPurchaseSummary(items, materials = [], options = {}) {
   const pool = purchasablePool(items);
   const clientItems = prepareClientPurchaseItems(items, materials);
-  const mergedRows = buildClientPurchaseMergedRows(clientItems);
+  const mergedRows = buildClientPurchaseMergedRows(clientItems, {
+    stellageConfigs: options.stellageConfigs || [],
+  });
 
   let hiddenItems = 0;
   let noPrice = 0;
@@ -115,9 +118,12 @@ export function buildClientPurchaseSummary(items, materials = []) {
 
 /**
  * Строки предпросмотра «Что увидит клиент» — из merged rows (как PDF/Excel).
+ * @param {object[]} items
+ * @param {object[]} [materials]
+ * @param {{ stellageConfigs?: object[] }} [options]
  */
-export function buildClientDeliveryPreviewRows(items, materials = []) {
-  const { mergedRows } = buildClientPurchaseSummary(items, materials);
+export function buildClientDeliveryPreviewRows(items, materials = [], options = {}) {
+  const { mergedRows } = buildClientPurchaseSummary(items, materials, options);
   const sectionLabels = getClientSectionLabelMap();
 
   return mergedRows.map((row) => {

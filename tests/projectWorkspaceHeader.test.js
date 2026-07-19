@@ -24,9 +24,12 @@ describe("project workspace compact header", () => {
     expect(css).not.toMatch(/\.pw-tabs\s*\{[\s\S]{0,160}position:\s*sticky/);
   });
 
-  it("uses one observer with cleanup and no scroll listener", () => {
-    expect(header).toContain("new IntersectionObserver");
-    expect(header).toContain("observer.disconnect()");
+  it("uses hysteresis observers with cleanup and no scroll listener", () => {
+    expect(header).toContain("IntersectionObserver");
+    expect(header).toContain("collapseObserver");
+    expect(header).toContain("expandObserver");
+    expect(header).toContain("-96px 0px 0px 0px");
+    expect(header).toContain("disconnect()");
     expect(header).not.toContain('addEventListener("scroll"');
   });
 

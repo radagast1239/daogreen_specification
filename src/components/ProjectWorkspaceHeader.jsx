@@ -21,12 +21,38 @@ export default function ProjectWorkspaceHeader({
   useEffect(() => {
     const node = sentinelRef.current;
     if (!node || typeof IntersectionObserver === "undefined") return undefined;
-    const observer = new IntersectionObserver(
-      ([entry]) => setCompact(!entry.isIntersecting),
-      { threshold: 0, rootMargin: "-1px 0px 0px" }
+
+    let compactNow = false;
+    const apply = (next) => {
+      if (next === compactNow) return;
+      compactNow = next;
+      setCompact(next);
+    };
+
+    // Collapse as soon as the sentinel leaves the top of the viewport.
+    const collapseObserver = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) apply(true);
+      },
+      { threshold: 0, rootMargin: "0px" },
     );
-    observer.observe(node);
-    return () => observer.disconnect();
+
+    // Expand only after scrolling back far enough that the sentinel sits well
+    // below the top. Without this gap, shrinking the sticky header brings the
+    // sentinel back into view and the compact state flickers (~3 Hz).
+    const expandObserver = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) apply(false);
+      },
+      { threshold: 0, rootMargin: "-96px 0px 0px 0px" },
+    );
+
+    collapseObserver.observe(node);
+    expandObserver.observe(node);
+    return () => {
+      collapseObserver.disconnect();
+      expandObserver.disconnect();
+    };
   }, []);
 
   const hasPublishedTotal = Number.isFinite(Number(publishedTotal));

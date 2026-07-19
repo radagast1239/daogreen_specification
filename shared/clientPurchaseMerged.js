@@ -6,6 +6,7 @@ import {
   isProfilePipeName,
   mergePipeCutsFromItems,
   pipeCutsClientNote,
+  resolveStellageCountForProjectItem,
 } from "./profilePipeCuts.js";
 import {
   mergeClientItemNotes,
@@ -13,6 +14,7 @@ import {
 } from "./clientPurchaseRows.js";
 import { lineContributesToSum } from "./itemTypes.js";
 import { buildPurchaseStatusSummary } from "./purchaseStatusRules.js";
+import { isFrameBomLine } from "./frameBomProjectItems.js";
 
 function lineNet(it) {
   if (!lineContributesToSum(it)) return 0;
@@ -66,7 +68,8 @@ function buildMergedSourceText(row) {
   return `из ${mods.length} ${noun}: ${detail}`;
 }
 
-function finalizeMergedRow(row) {
+function finalizeMergedRow(row, options = {}) {
+  const stellageConfigs = options.stellageConfigs || [];
   const rep = row.sourceItems?.[0];
   row.supplier = resolveMergedSupplier(row.sourceItems) || row.supplier || "";
   row.link = resolveMergedLink(row.sourceItems) || row.link || "";
@@ -85,7 +88,12 @@ function finalizeMergedRow(row) {
   row.status = row.statusSummary.status;
   row.statusLabel = row.statusSummary.statusLabel;
   if (isProfilePipeName(row.name) && row.sourceItems?.length) {
-    const mergedCuts = mergePipeCutsFromItems(row.sourceItems);
+    // Catalog/builder pipes store per-rack segments; qty is already × count.
+    // Frame BOM pipeCuts are already scaled when added to the project.
+    const mergedCuts = mergePipeCutsFromItems(row.sourceItems, {
+      scaleOf: (it) =>
+        isFrameBomLine(it) ? 1 : resolveStellageCountForProjectItem(it, stellageConfigs),
+    });
     if (mergedCuts.length) {
       row.pipeCuts = mergedCuts;
       row.clientNote = pipeCutsClientNote(mergedCuts);
@@ -98,7 +106,7 @@ function finalizeMergedRow(row) {
   return row;
 }
 
-export function buildClientPurchaseMergedRows(items) {
+export function buildClientPurchaseMergedRows(items, options = {}) {
   const map = new Map();
   for (const it of items || []) {
     const key = purchaseMergeKey(it);
@@ -133,5 +141,5 @@ export function buildClientPurchaseMergedRows(items) {
     row.sources.push({ id: it.id, module: it.module, qty: Number(it.qty) || 0, unit: it.unit });
     row.sourceItems.push(it);
   }
-  return [...map.values()].map(finalizeMergedRow).sort((a, b) => b.sumVat - a.sumVat);
+  return [...map.values()].map((row) => finalizeMergedRow(row, options)).sort((a, b) => b.sumVat - a.sumVat);
 }

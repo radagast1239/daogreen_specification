@@ -93,17 +93,18 @@ export const CLIENT_PDF_EXPORT_OPTIONS = [
   },
 ];
 
-export function getClientPdfExportStats(items) {
+export function getClientPdfExportStats(items, project = null) {
+  const opts = { stellageConfigs: project?.stellageConfigs || [] };
   const purchase = clientPurchaseItems({ items: items || [] });
-  const merged = mergedPurchaseRows(purchase);
+  const merged = mergedPurchaseRows(purchase, opts);
   const mergedCount = merged.length;
   const rawCount = purchase.length;
 
-  const plumberMerged = mergedPurchaseRows(itemsByResponsible(purchase, "plumber")).length;
-  const electricMerged = mergedPurchaseRows(itemsByResponsible(purchase, "electrician")).length;
-  const installerMerged = mergedPurchaseRows(itemsByResponsible(purchase, "installer")).length;
-  const climateMerged = mergedPurchaseRows(itemsByResponsible(purchase, "climate")).length;
-  const clientMerged = mergedPurchaseRows(itemsByResponsible(purchase, "client")).length;
+  const plumberMerged = mergedPurchaseRows(itemsByResponsible(purchase, "plumber"), opts).length;
+  const electricMerged = mergedPurchaseRows(itemsByResponsible(purchase, "electrician"), opts).length;
+  const installerMerged = mergedPurchaseRows(itemsByResponsible(purchase, "installer"), opts).length;
+  const climateMerged = mergedPurchaseRows(itemsByResponsible(purchase, "climate"), opts).length;
+  const clientMerged = mergedPurchaseRows(itemsByResponsible(purchase, "client"), opts).length;
 
   const fullPdfTableRows =
     mergedCount * 2 + plumberMerged + electricMerged + installerMerged + climateMerged;

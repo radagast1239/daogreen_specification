@@ -435,7 +435,7 @@ export default function ClientProjectPage() {
           <ClientPurchaseGuide
             projectId={project.id}
             itemCount={purchaseItems.length}
-            uniqueCount={mergedPurchaseRows(purchaseItems).length}
+            uniqueCount={mergedPurchaseRows(purchaseItems, { stellageConfigs: project?.stellageConfigs || [] }).length}
           />
           <div className="client-purchase-toolbar no-print">
             <input

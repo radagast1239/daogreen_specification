@@ -38,6 +38,7 @@ import {
   isSpecialistPurchaseMode,
   isSimplePurchaseMode,
 } from "../../lib/clientBrandConfig.js";
+import { scaleClientItemPipeCutsForDisplay } from "../../../shared/clientPurchaseRows.js";
 import { isTodayPriority } from "../../../shared/purchasePriority.js";
 import ClientPurchaseDashboard from "./ClientPurchaseDashboard.jsx";
 import ClientPurchaseTable from "./ClientPurchaseTable.jsx";
@@ -272,7 +273,7 @@ function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, mater
 }
 
 export function ClientMergedList({ project, items, patch, purchaseStatuses, groupBySection = false, layout = "cards" }) {
-  const rows = mergedPurchaseRows(items);
+  const rows = mergedPurchaseRows(items, { stellageConfigs: project?.stellageConfigs || [] });
   if (groupBySection) {
     const groups = groupMergedBySectionHierarchy(rows, project.currency);
     return (
@@ -341,19 +342,24 @@ export default function ClientPurchasePanel({
 
   const mergeFilter = isClosedMode || isStatusMode ? "all" : effectiveFilter;
 
+  const mergeOpts = useMemo(
+    () => ({ stellageConfigs: project?.stellageConfigs || [] }),
+    [project?.stellageConfigs],
+  );
+
   const mergedRows = useMemo(() => {
     if (isStatusMode || !isMergedPurchaseMode(effectiveMode)) return null;
     const pool = filterItemPool(scoped, { supplierFilter, purchaseQuery });
-    let rows = mergedPurchaseRows(pool);
+    let rows = mergedPurchaseRows(pool, mergeOpts);
     if (!isClosedMode) rows = applyMergedPurchaseFilter(rows, mergeFilter);
     return sortMergedRows(rows, project.currency);
-  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, mergeFilter, project.currency, isStatusMode, isClosedMode]);
+  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, mergeFilter, project.currency, isStatusMode, isClosedMode, mergeOpts]);
 
   const allMergedForStats = useMemo(() => {
     if (!simple || effectiveMode !== "categories") return null;
     const pool = filterItemPool(scoped, { supplierFilter, purchaseQuery });
-    return mergedPurchaseRows(pool);
-  }, [simple, effectiveMode, scoped, supplierFilter, purchaseQuery]);
+    return mergedPurchaseRows(pool, mergeOpts);
+  }, [simple, effectiveMode, scoped, supplierFilter, purchaseQuery, mergeOpts]);
 
   const sectionStats = useMemo(() => {
     if (!allMergedForStats) return null;
@@ -364,19 +370,25 @@ export default function ClientPurchasePanel({
     if (!isStatusMode && isMergedPurchaseMode(effectiveMode)) return [];
     let out = filterItemPool(scoped, { supplierFilter, purchaseQuery });
     out = applyPurchaseFilter(out, effectiveFilter);
-    return [...out].sort((a, b) => {
-      const ao = a.sortOrder ?? 99999;
-      const bo = b.sortOrder ?? 99999;
-      if (ao !== bo) return ao - bo;
-      return (a.name || "").localeCompare(b.name || "", "ru");
-    });
-  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, effectiveFilter, isStatusMode]);
+    const configs = project?.stellageConfigs || [];
+    return [...out]
+      .map((it) => scaleClientItemPipeCutsForDisplay(it, configs))
+      .sort((a, b) => {
+        const ao = a.sortOrder ?? 99999;
+        const bo = b.sortOrder ?? 99999;
+        if (ao !== bo) return ao - bo;
+        return (a.name || "").localeCompare(b.name || "", "ru");
+      });
+  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, effectiveFilter, isStatusMode, project?.stellageConfigs]);
 
   const statusFlatList = useMemo(() => {
     if (!isStatusMode) return [];
     let out = filterItemPool(scoped, { supplierFilter, purchaseQuery });
-    return [...out].sort((a, b) => (a.name || "").localeCompare(b.name || "", "ru"));
-  }, [isStatusMode, scoped, supplierFilter, purchaseQuery]);
+    const configs = project?.stellageConfigs || [];
+    return [...out]
+      .map((it) => scaleClientItemPipeCutsForDisplay(it, configs))
+      .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ru"));
+  }, [isStatusMode, scoped, supplierFilter, purchaseQuery, project?.stellageConfigs]);
 
   const { todo, bought } = isClosedMode || (isStatusMode && effectiveMode !== "bought")
     ? { todo: mergedRows ?? filtered, bought: [] }

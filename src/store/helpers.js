@@ -111,18 +111,18 @@ export function groupBy(items, key) {
 import { buildClientPurchaseMergedRows as buildMergedRowsShared } from "../../shared/clientPurchaseMerged.js";
 
 /** Склеенные клиентские строки закупки (единая точка для UI / PDF / Excel). */
-export function buildClientPurchaseMergedRows(items) {
-  return buildMergedRowsShared(items || []);
+export function buildClientPurchaseMergedRows(items, options = {}) {
+  return buildMergedRowsShared(items || [], options);
 }
 
-export function mergedPurchaseRows(items) {
-  return buildClientPurchaseMergedRows(items);
+export function mergedPurchaseRows(items, options = {}) {
+  return buildClientPurchaseMergedRows(items, options);
 }
 
 /** Склеенные строки для клиентского UI / Excel / PDF */
 export function mergedItemsForClient(project, items) {
   const pool = items ?? clientPurchaseItems(project);
-  return mergedPurchaseRows(pool);
+  return mergedPurchaseRows(pool, { stellageConfigs: project?.stellageConfigs || [] });
 }
 
 export function mergedPurchaseList(project) {

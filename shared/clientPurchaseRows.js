@@ -1,7 +1,7 @@
 import { lineVisibleToClient, isPurchasableLineType, resolveItemType, isCoolingSpecItem } from "./itemTypes.js";
 import { enrichProjectItemFromMaterial, isFrameBomLine } from "./frameBomProjectItems.js";
 import { structuredClientNote } from "./structuredClientNote.js";
-import { pipeCutsClientNote, normalizePipeCuts } from "./profilePipeCuts.js";
+import { isProfilePipeName, resolvePipeCuts, pipeCutsClientNote, normalizePipeCuts, resolveStellageCountForProjectItem, scalePipeCuts } from "./profilePipeCuts.js";
 import {
   formatClientPurchaseStatusLine,
   getPurchaseStatusLabel,
@@ -171,6 +171,27 @@ export function formatClientLineTotal(row) {
 
 export function formatPipeCutsNote(pipeCuts) {
   return pipeCutsClientNote(normalizePipeCuts(pipeCuts));
+}
+
+/**
+ * Для карточек без склейки: умножить сегменты профильной трубы на count стеллажа.
+ * Frame BOM не трогаем — сегменты уже с учётом count.
+ */
+export function scaleClientItemPipeCutsForDisplay(item, stellageConfigs = []) {
+  if (!item || !isProfilePipeName(item.name) || isFrameBomLine(item)) return item;
+  const configs = Array.isArray(stellageConfigs) ? stellageConfigs : [];
+  if (!configs.length) return item;
+  const count = resolveStellageCountForProjectItem(item, configs);
+  if (count <= 1) return item;
+  const cuts = scalePipeCuts(resolvePipeCuts(item), count);
+  if (!cuts.length) return item;
+  const note = pipeCutsClientNote(cuts);
+  return {
+    ...item,
+    pipeCuts: cuts,
+    clientNote: note || item.clientNote,
+    comment: note || item.comment,
+  };
 }
 
 /** Объединить уникальные клиентские примечания из нескольких sourceItems. */

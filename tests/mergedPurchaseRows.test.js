@@ -82,6 +82,66 @@ describe("mergedPurchaseRows profile pipe", () => {
       { lengthMm: 2400, qty: 4 },
     ]);
   });
+
+  it("умножает сегменты на count стеллажа (каталог/builder), Frame BOM не трогает", () => {
+    const base = {
+      name: "Труба профильная 20/20/1,5 мм",
+      unit: "м.п.",
+      supplier: "Местная металлобаза",
+      price: 90,
+      itemType: "material",
+      includedInProject: true,
+      visibleToClient: true,
+    };
+    const stellageConfigs = [
+      { id: "st_a", name: "Стеллаж A", count: 14 },
+      { id: "st_b", name: "Стеллаж B", count: 6 },
+    ];
+    const rows = mergedPurchaseRows(
+      [
+        {
+          ...base,
+          id: "st_a__pipe1",
+          module: "Стеллаж A",
+          section: "Стеллаж A",
+          // qty уже ×14 при сборке проекта; сегменты — на 1 стеллаж
+          qty: 14 * 30,
+          pipeCuts: [
+            { lengthMm: 1300, qty: 12 },
+            { lengthMm: 660, qty: 18 },
+          ],
+        },
+        {
+          ...base,
+          id: "st_b__pipe1",
+          module: "Стеллаж B",
+          section: "Стеллаж B",
+          qty: 6 * 10,
+          pipeCuts: [{ lengthMm: 1300, qty: 2 }],
+        },
+        {
+          ...base,
+          id: "it_fbom_pipe",
+          module: "Стеллаж A",
+          section: "Стеллаж A",
+          source: "frame_bom",
+          qty: 100,
+          // Frame BOM уже с учётом count
+          pipeCuts: [{ lengthMm: 2400, qty: 40 }],
+        },
+      ],
+      { stellageConfigs },
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].pipeCuts).toEqual([
+      { lengthMm: 660, qty: 18 * 14 },
+      { lengthMm: 1300, qty: 12 * 14 + 2 * 6 },
+      { lengthMm: 2400, qty: 40 },
+    ]);
+    expect(rows[0].clientNote).toBe(
+      "Сегменты: 660 мм — 252 шт, 1300 мм — 180 шт, 2400 мм — 40 шт",
+    );
+  });
 });
 
 function hiddenFromClientReason(it) {
