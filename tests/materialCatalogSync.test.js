@@ -11,6 +11,7 @@ const materials = [
     category: "Крепёж",
     supplier: "Лемана про",
     link: "https://bolt",
+    linkAlt: "https://bolt-alt",
     basePrice: 12,
     vatRate: 0,
   },
@@ -73,8 +74,8 @@ describe("applyMaterialCatalogFields", () => {
 });
 
 describe("buildProjectFromBuilder material catalog sync", () => {
-  it("writes supplier from materials for new builder lines", () => {
-    const built = buildProjectFromBuilder({
+  const buildBoltLine = (lineOverrides = {}) =>
+    buildProjectFromBuilder({
       form: { name: "P", client: "C", manualParams: {} },
       stellages: [
         {
@@ -93,6 +94,7 @@ describe("buildProjectFromBuilder material catalog sync", () => {
               included: true,
               unit: "шт.",
               category: "Крепёж",
+              ...lineOverrides,
             },
           ],
         },
@@ -100,12 +102,81 @@ describe("buildProjectFromBuilder material catalog sync", () => {
       farmSections: [],
       materials,
       rooms: [],
-    });
-    const bolt = built.items.find((it) => it.materialId === "m073");
+    }).items.find((it) => it.materialId === "m073");
+
+  it("writes supplier from materials for new builder lines", () => {
+    const bolt = buildBoltLine();
     expect(bolt).toBeTruthy();
     expect(bolt.supplier).toBe("Лемана про");
-    expect(bolt.link).toBe("https://bolt");
     expect(bolt.price).toBe(12);
+  });
+
+  it("inherits missing link and linkAlt from catalog for a new builder line", () => {
+    const bolt = buildBoltLine();
+    expect(bolt.link).toBe("https://bolt");
+    expect(bolt.linkAlt).toBe("https://bolt-alt");
+    expect(bolt.linkOverridden).toBeFalsy();
+    expect(bolt.linkAltOverridden).toBeFalsy();
+  });
+
+  it("explicit empty link/linkAlt clears catalog values as a project override", () => {
+    const bolt = buildBoltLine({ link: "", linkAlt: "" });
+    expect(bolt.link).toBe("");
+    expect(bolt.linkAlt).toBe("");
+    expect(bolt.linkOverridden).toBe(true);
+    expect(bolt.linkAltOverridden).toBe(true);
+  });
+
+  it("custom project link/linkAlt are preserved over catalog", () => {
+    const bolt = buildBoltLine({ link: "https://custom-bolt", linkAlt: "https://custom-bolt-alt" });
+    expect(bolt.link).toBe("https://custom-bolt");
+    expect(bolt.linkAlt).toBe("https://custom-bolt-alt");
+    expect(bolt.linkOverridden).toBe(true);
+    expect(bolt.linkAltOverridden).toBe(true);
+  });
+
+  it("explicit price 0 is preserved as a project override, not reset to catalog", () => {
+    const bolt = buildBoltLine({ price: 0 });
+    expect(bolt.price).toBe(0);
+    expect(bolt.priceOverridden).toBe(true);
+  });
+
+  it("custom project price is preserved over catalog", () => {
+    const bolt = buildBoltLine({ price: 99 });
+    expect(bolt.price).toBe(99);
+    expect(bolt.priceOverridden).toBe(true);
+  });
+
+  it("explicit price equal to catalog price is not marked as override", () => {
+    const bolt = buildBoltLine({ price: 12 });
+    expect(bolt.price).toBe(12);
+    expect(bolt.priceOverridden).toBeFalsy();
+  });
+
+  it("priceOverridden flag with missing price normalizes to 0, keeps override", () => {
+    const bolt = buildBoltLine({ priceOverridden: true });
+    expect(bolt.price).toBe(0);
+    expect(bolt.priceOverridden).toBe(true);
+  });
+
+  it("malformed price without override flag inherits catalog price, never NaN", () => {
+    const bolt = buildBoltLine({ price: "abc" });
+    expect(bolt.price).toBe(12);
+    expect(Number.isFinite(bolt.price)).toBe(true);
+    expect(bolt.priceOverridden).toBeFalsy();
+  });
+
+  it("malformed price with override flag normalizes to 0, keeps override", () => {
+    const bolt = buildBoltLine({ priceOverridden: true, price: "abc" });
+    expect(bolt.price).toBe(0);
+    expect(Number.isFinite(bolt.price)).toBe(true);
+    expect(bolt.priceOverridden).toBe(true);
+  });
+
+  it("existing custom price override survives a re-run through the builder", () => {
+    const bolt = buildBoltLine({ price: 99, priceOverridden: true });
+    expect(bolt.price).toBe(99);
+    expect(bolt.priceOverridden).toBe(true);
   });
 });
 

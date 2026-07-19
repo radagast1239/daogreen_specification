@@ -114,7 +114,7 @@ describe("item client visibility override", () => {
   it("refreshItemFromMaterial does not reset visibleToClient=true", () => {
     const item = baseItem({ visibleToClient: true });
     const patch = buildRefreshPatchForItem(item, m034Material, ["price"]);
-    expect(patch).toEqual({ price: 85 });
+    expect(patch).toEqual({ price: 85, priceOverridden: false });
     expect(patch.visibleToClient).toBeUndefined();
     const refreshed = reconcileItemClientVisibilityFlags({ ...item, ...patch }, m034Material);
     expect(refreshed.visibleToClient).toBe(true);

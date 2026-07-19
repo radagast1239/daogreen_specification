@@ -67,10 +67,11 @@ describe("PHASE 0B — corrupt planner_plan integration", () => {
     insertProject("bad2", CORRUPT_RAW);
     expect(rawPlannerPlan("bad2")).toBe(CORRUPT_RAW);
 
-    const result = updateProject("bad2", { name: "Переименован" });
+    const result = updateProject("bad2", { name: "Переименован", expectedRevision: 1 });
 
     // имя обновилось, но повреждение по-прежнему видно
     expect(result.name).toBe("Переименован");
+    expect(result.revision).toBe(2);
     expect(result.plannerPlanState).toEqual({ status: "corrupt", code: "PLANNER_PLAN_JSON_INVALID" });
     // КЛЮЧЕВОЕ: исходные повреждённые байты в БД не изменились (не стали "{}")
     expect(rawPlannerPlan("bad2")).toBe(CORRUPT_RAW);
@@ -78,8 +79,9 @@ describe("PHASE 0B — corrupt planner_plan integration", () => {
 
   it("апдейт метаданных валидного проекта сохраняет план как прежде", () => {
     insertProject("valid2", VALID_RAW);
-    const result = updateProject("valid2", { name: "Валидный ново" });
+    const result = updateProject("valid2", { name: "Валидный ново", expectedRevision: 1 });
     expect(result.name).toBe("Валидный ново");
+    expect(result.revision).toBe(2);
     expect(result.plan).toEqual(JSON.parse(VALID_RAW));
     expect(result.plannerPlanState).toBeUndefined();
   });

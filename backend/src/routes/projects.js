@@ -1407,6 +1407,8 @@ api.post("/:id/items/refresh-from-material", (req, res) => {
   try {
   const p = loadProject(req.params.id);
   if (!p) return res.status(404).json({ error: "Not found" });
+  const expectedRevision = requireExpectedRevision(req.params.id, req.body?.expectedRevision);
+  assertRevision(req.params.id, expectedRevision);
   const itemIds = req.body?.itemIds || (req.body?.itemId ? [req.body.itemId] : []);
   const fields = req.body?.fields || [];
   const planned = planRefreshItemsFromMaterial(p, { itemIds, fields });
@@ -1415,7 +1417,7 @@ api.post("/:id/items/refresh-from-material", (req, res) => {
       updated: [],
       skipped: planned.skipped,
       results: planned.results,
-      revision: Number(p.revision) || 1,
+      revision: expectedRevision,
     });
   }
   const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {

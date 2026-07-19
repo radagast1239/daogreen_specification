@@ -25,10 +25,15 @@ describe("production reconcile gate (7593942 vs d1be671)", () => {
   });
 
   it("keeps UPLOAD_ROOT override for frame drawing PDF storage", () => {
-    const src = readFileSync("backend/src/routes/frameDrawings.js", "utf8");
-    expect(src).toContain("process.env.UPLOAD_ROOT");
-    expect(src).toContain("moduleRackKey");
-    expect(src).toContain("computeNextVersion");
+    const routeSrc = readFileSync("backend/src/routes/frameDrawings.js", "utf8");
+    expect(routeSrc).toContain("localUploadDir");
+    expect(routeSrc).toMatch(/from ["']\.\.\/storage\/index\.js["']/);
+    expect(routeSrc).not.toMatch(/process\.env\.UPLOAD_ROOT/);
+    expect(routeSrc).toContain("moduleRackKey");
+    expect(routeSrc).toContain("computeNextVersion");
+
+    const storageSrc = readFileSync("backend/src/storage/index.js", "utf8");
+    expect(storageSrc).toContain("process.env.UPLOAD_ROOT");
   });
 
   it("registers frame-drawings API behind adminAuth", () => {

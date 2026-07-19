@@ -265,6 +265,50 @@ describe("optimistic project revision", () => {
     expect(reviewOk.data.revision).toBe(3);
   });
 
+  it("no-op refresh-from-material still enforces revision and never bumps it", async () => {
+    const staleNoOp = await admin("POST", "/api/projects/p1/items/refresh-from-material", {
+      expectedRevision: 2,
+      itemIds: ["old"],
+      fields: ["price"],
+    });
+    expect(staleNoOp.status).toBe(409);
+    expect(loadProject("p1").revision).toBe(1);
+
+    const okNoOp = await admin("POST", "/api/projects/p1/items/refresh-from-material", {
+      expectedRevision: 1,
+      itemIds: ["old"],
+      fields: ["price"],
+    });
+    expect(okNoOp.status).toBe(200);
+    expect(okNoOp.data.revision).toBe(1);
+    expect(loadProject("p1").revision).toBe(1);
+  });
+
+  it("real refresh-from-material enforces revision and bumps it exactly once", async () => {
+    db.prepare("INSERT INTO materials (id, name, unit, base_price, module) VALUES ('mat1', 'Material One', 'шт.', 20, 'general')").run();
+    db.prepare(`INSERT INTO project_items (id, project_id, material_id, module, name, unit, category, qty, price, status, visible_to_client, enabled, included_in_project, item_type)
+      VALUES ('mitem', 'p1', 'mat1', 'general', 'Mat item', 'шт.', 'Прочее', 1, 5, 'not_bought', 1, 1, 1, 'material')`).run();
+
+    const stale = await admin("POST", "/api/projects/p1/items/refresh-from-material", {
+      expectedRevision: 2,
+      itemIds: ["mitem"],
+      fields: ["price"],
+    });
+    expect(stale.status).toBe(409);
+    expect(db.prepare("SELECT price FROM project_items WHERE id = 'mitem'").get().price).toBe(5);
+    expect(loadProject("p1").revision).toBe(1);
+
+    const ok = await admin("POST", "/api/projects/p1/items/refresh-from-material", {
+      expectedRevision: 1,
+      itemIds: ["mitem"],
+      fields: ["price"],
+    });
+    expect(ok.status).toBe(200);
+    expect(ok.data.revision).toBe(2);
+    expect(db.prepare("SELECT price FROM project_items WHERE id = 'mitem'").get().price).toBe(20);
+    expect(loadProject("p1").revision).toBe(2);
+  });
+
   it("protects client purchase status, replacement and cooling write-paths", async () => {
     const bought = await client("PATCH", "/api/client/p/token-p1/items/old", {
       expectedRevision: 1,

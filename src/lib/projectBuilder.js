@@ -225,14 +225,29 @@ export function buildProjectFromBuilder({
     const catalogPrice = Number(fromCatalog.price) || 0;
     const catalogLink = String(fromCatalog.link || "").trim();
     const catalogLinkAlt = String(fromCatalog.linkAlt || "").trim();
-    const linePrice = Number(line.price) || 0;
-    const lineLink = String(line.link || "").trim();
-    const lineLinkAlt = String(line.linkAlt || "").trim();
-    const priceOverridden = !!line.priceOverridden || linePrice !== catalogPrice;
-    const linkOverridden = !!line.linkOverridden || lineLink !== catalogLink;
-    const linkAltOverridden = !!line.linkAltOverridden || lineLinkAlt !== catalogLinkAlt;
+    // Price never leaks NaN/Infinity: a malformed explicit value is treated as absent
+    // unless priceOverridden was already set, in which case it normalizes to 0.
+    const hasExplicitPriceValue = line.price !== undefined && line.price !== null;
+    const rawLinePrice = hasExplicitPriceValue ? Number(line.price) : null;
+    const hasFiniteLinePrice = rawLinePrice != null && Number.isFinite(rawLinePrice);
+    const explicitPriceOverride = !!line.priceOverridden;
+    let normalizedLinePrice = null;
+    let priceOverridden = false;
+    if (hasFiniteLinePrice) {
+      normalizedLinePrice = rawLinePrice;
+      priceOverridden = explicitPriceOverride || normalizedLinePrice !== catalogPrice;
+    } else if (explicitPriceOverride) {
+      normalizedLinePrice = 0;
+      priceOverridden = true;
+    }
+    const normalizedLineLink = line.link == null ? null : String(line.link).trim();
+    const normalizedLineLinkAlt = line.linkAlt == null ? null : String(line.linkAlt).trim();
+    const linkOverridden =
+      !!line.linkOverridden || (normalizedLineLink != null && normalizedLineLink !== catalogLink);
+    const linkAltOverridden =
+      !!line.linkAltOverridden || (normalizedLineLinkAlt != null && normalizedLineLinkAlt !== catalogLinkAlt);
     const projectOverrides = {
-      ...(priceOverridden ? { price: linePrice, priceOverridden: true } : {}),
+      ...(priceOverridden ? { price: normalizedLinePrice, priceOverridden: true } : {}),
       ...(linkOverridden ? { link: line.link || "", linkOverridden: true } : {}),
       ...(linkAltOverridden ? { linkAlt: line.linkAlt || "", linkAltOverridden: true } : {}),
     };
