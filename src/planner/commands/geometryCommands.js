@@ -805,23 +805,27 @@ function runEngineeringSync(nextPlan) {
 }
 
 /**
- * PHASE 1A-2C2D3B — shared bulk-safe item-deletion mutation. Used by
- * item.bulkDelete (single ID or many) — the single source of this cleanup
- * policy. Computes the FINAL surviving item set ONCE, cleans up links and
- * item-attached dimensions against it, then runs the same engineering-
- * derived sync production already runs once per item delete
- * (see PlanPage.jsx syncEngineeringPlan) — exactly once, not per item.
+ * PHASE 1A-2C2D3E4B — pure structural cleanup primitive for item deletion.
+ * Extracted out of deleteItemsFromPlan so a future combined item+line delete
+ * can call this (and computeLineRemoval below) against the SAME original
+ * plan and run runEngineeringSync exactly once for the merged result,
+ * instead of composing two independently-syncing wrappers. Not used by any
+ * combined command yet — this phase is extraction-only, deleteItemsFromPlan
+ * below still calls this and then syncs exactly as before.
  *
- * Deleting an item never changes wall topology or other items' placement:
- * no mounted-item refresh, no wall/node mutation is performed here.
+ * Deliberately does NOT: call runEngineeringSync, call changedOk/rejected,
+ * touch room sync/history, mutate plan or itemIds, or know about UI layer/
+ * sheet semantics (power/light/vent/climate/staff never appear here).
  *
  * @param {object} plan
  * @param {string[]} itemIds — may contain duplicates and/or IDs absent from
  *   plan.items (both silently normalized away) — matches wall.bulkDelete's
  *   own "operate only on what actually exists" policy.
- * @returns {object|null} internal result, or null if none of itemIds exist.
+ * @returns {object|null} { items, links, dimensions, deletedItemIds,
+ *   deletedLinkIds, deletedDimensionIds, changedDimensionIds,
+ *   dimensionWarnings }, or null if none of itemIds exist.
  */
-function deleteItemsFromPlan(plan, itemIds) {
+function computeItemRemoval(plan, itemIds) {
   const existingItemIdSet = new Set((plan.items || []).map((it) => it.id));
   const deletedItemIds = [...new Set(itemIds)].filter((id) => existingItemIdSet.has(id));
   if (deletedItemIds.length === 0) return null;
@@ -845,7 +849,9 @@ function deleteItemsFromPlan(plan, itemIds) {
   // auto-dims — resolvePlanDimensions всегда игнорирует persisted auto-
   // записи и генерирует их заново из живой геометрии, см. runtime.js).
   // Manual — detach с сохранением ЖИВОГО p1/p2 (resolveAttachedDimension),
-  // аналогично wall-attached manual dimension detach.
+  // аналогично wall-attached manual dimension detach. Resolved against the
+  // ORIGINAL plan (pre-removal) — item.x/y/w/h must still be live here for
+  // bbox-based dimension modes to resolve correctly.
   const dimensionWarnings = [];
   const changedDimensionIds = [];
   const deletedDimensionIds = [];
@@ -870,15 +876,45 @@ function deleteItemsFromPlan(plan, itemIds) {
     }];
   });
 
-  const nextPlan = runEngineeringSync({ ...plan, items, links, dimensions });
-
   return {
-    plan: nextPlan,
+    items,
+    links,
+    dimensions,
     deletedItemIds,
     deletedLinkIds,
     deletedDimensionIds,
     changedDimensionIds,
     dimensionWarnings,
+  };
+}
+
+/**
+ * PHASE 1A-2C2D3B (structure unchanged by PHASE 1A-2C2D3E4B) — shared
+ * bulk-safe item-deletion mutation. Used by item.bulkDelete (single ID or
+ * many) — the single source of this cleanup policy. Delegates the pure
+ * structural computation to computeItemRemoval, then runs the same
+ * engineering-derived sync production already runs once per item delete
+ * (see PlanPage.jsx syncEngineeringPlan) — exactly once, not per item.
+ *
+ * Deleting an item never changes wall topology or other items' placement:
+ * no mounted-item refresh, no wall/node mutation is performed here.
+ *
+ * @param {object} plan
+ * @param {string[]} itemIds
+ * @returns {object|null} internal result, or null if none of itemIds exist.
+ */
+function deleteItemsFromPlan(plan, itemIds) {
+  const removal = computeItemRemoval(plan, itemIds);
+  if (!removal) return null;
+  const {
+    items, links, dimensions, ...deletedMeta
+  } = removal;
+
+  const nextPlan = runEngineeringSync({ ...plan, items, links, dimensions });
+
+  return {
+    plan: nextPlan,
+    ...deletedMeta,
   };
 }
 
@@ -907,29 +943,29 @@ function handleItemBulkDelete(plan, command) {
 // ── line deletion (PHASE 1A-2C2D3E2) ──────────────────────────────────────
 
 /**
- * PHASE 1A-2C2D3E2 — shared bulk-safe line-deletion mutation. Used by
- * line.bulkDelete (single ID or many) — the single source of this cleanup
- * policy, mirroring deleteItemsFromPlan's contract for lines. Computes the
- * FINAL surviving line set ONCE, then runs the same engineering-derived
- * sync production already runs once per item delete (see runEngineeringSync
- * above) — exactly once, not per line.
+ * PHASE 1A-2C2D3E4B — pure structural cleanup primitive for line deletion.
+ * Extracted out of deleteLinesFromPlan for the same reason as
+ * computeItemRemoval above — a future combined item+line delete can call
+ * this against the original plan and sync once for the merged result. Not
+ * used by any combined command yet.
  *
  * No attached-dimension type exists for lines today (dimensions attach only
  * to attachedTo.type "item"/"wall" — see validatePlanIntegrity.js), and
  * plan.links reference items (fromId/toId), never lines — so there is
- * nothing to detach/prune directly here. Deleting a line never changes
- * plan.items, plan.walls, or plan.nodes: no mounted-item refresh, no wall/
- * node mutation is performed here. Any derived item.connections / line
- * fromItemId-toItemId recompute is left entirely to runEngineeringSync's
- * own existing policy (unchanged by this command).
+ * nothing to detach/prune here.
+ *
+ * Deliberately does NOT: call runEngineeringSync, call changedOk/rejected,
+ * touch room sync/history, mutate plan or lineIds, or know about UI layer/
+ * sheet semantics.
  *
  * @param {object} plan
  * @param {string[]} lineIds — may contain duplicates and/or IDs absent from
  *   plan.lines (both silently normalized away) — matches item.bulkDelete's
  *   own "operate only on what actually exists" policy.
- * @returns {object|null} internal result, or null if none of lineIds exist.
+ * @returns {object|null} { lines, deletedLineIds }, or null if none of
+ *   lineIds exist.
  */
-function deleteLinesFromPlan(plan, lineIds) {
+function computeLineRemoval(plan, lineIds) {
   const existingLineIdSet = new Set((plan.lines || []).map((l) => l.id));
   const deletedLineIds = [...new Set(lineIds)].filter((id) => existingLineIdSet.has(id));
   if (deletedLineIds.length === 0) return null;
@@ -937,11 +973,38 @@ function deleteLinesFromPlan(plan, lineIds) {
 
   const lines = (plan.lines || []).filter((l) => !deletedLineIdSet.has(l.id));
 
+  return { lines, deletedLineIds };
+}
+
+/**
+ * PHASE 1A-2C2D3E2 (structure unchanged by PHASE 1A-2C2D3E4B) — shared
+ * bulk-safe line-deletion mutation. Used by line.bulkDelete (single ID or
+ * many) — the single source of this cleanup policy, mirroring
+ * deleteItemsFromPlan's contract for lines. Delegates the pure structural
+ * computation to computeLineRemoval, then runs the same engineering-derived
+ * sync production already runs once per item delete (see runEngineeringSync
+ * above) — exactly once, not per line.
+ *
+ * Deleting a line never changes plan.items, plan.walls, or plan.nodes: no
+ * mounted-item refresh, no wall/node mutation is performed here. Any
+ * derived item.connections / line fromItemId-toItemId recompute is left
+ * entirely to runEngineeringSync's own existing policy (unchanged by this
+ * command).
+ *
+ * @param {object} plan
+ * @param {string[]} lineIds
+ * @returns {object|null} internal result, or null if none of lineIds exist.
+ */
+function deleteLinesFromPlan(plan, lineIds) {
+  const removal = computeLineRemoval(plan, lineIds);
+  if (!removal) return null;
+  const { lines, ...deletedMeta } = removal;
+
   const nextPlan = runEngineeringSync({ ...plan, lines });
 
   return {
     plan: nextPlan,
-    deletedLineIds,
+    ...deletedMeta,
   };
 }
 
