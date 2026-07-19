@@ -18,6 +18,9 @@ export default function SpecificationItemInspector({ item, project, materials, r
   const material = materials.find((entry) => entry.id === item.materialId);
   const patch = (value) => onPatch(item.id, value);
   const visible = lineVisibleToClient(item, material);
+  const showResetName = !!item.materialId && (
+    !!item.nameOverridden || (!!material && String(item.name || "") !== String(material.name || ""))
+  );
   const resetName = () => {
     if (!material || !window.confirm("Вернуть название из базы? Текущее название позиции будет заменено.")) return;
     patch({ name: material.name || "", nameOverridden: false });
@@ -32,7 +35,7 @@ export default function SpecificationItemInspector({ item, project, materials, r
         <section><h3>Основное</h3>
           {photoSrc(item.imageUrl || item.photoUrl) && <img className="spec-inspector__photo" src={photoSrc(item.imageUrl || item.photoUrl)} alt="" />}
           <label>Наименование<input value={item.name || ""} onChange={(e) => patch({ name: e.target.value, ...(item.materialId ? { nameOverridden: true } : {}) })} /></label>
-          {item.nameOverridden && <><small className="spec-name-override">Название изменено в проекте</small><button type="button" className="btn btn-sm btn-ghost" onClick={resetName}>Вернуть название из базы</button></>}
+          {showResetName && <><small className="spec-name-override">Название изменено в проекте</small><button type="button" className="btn btn-sm btn-ghost" onClick={resetName}>Вернуть название из базы</button></>}
           <div className="spec-inspector__grid"><label>Единица<input value={item.unit || ""} onChange={(e) => patch({ unit: e.target.value })} /></label><label>Количество<input type="number" value={item.qty || 0} onChange={(e) => patch({ qty: Number(e.target.value) || 0 })} /></label></div>
           <div className="spec-inspector__grid"><label>Цена<input type="number" value={item.price || 0} onChange={(e) => patch({ price: Number(e.target.value) || 0 })} /></label><label>НДС<select value={item.vatRate || 0} onChange={(e) => patch({ vatRate: Number(e.target.value) })}>{VAT_RATES.map((rate) => <option key={rate} value={rate}>{rate}%</option>)}</select></label></div>
           <div className="spec-inspector__total">Сумма <strong>{money(lineGross(item), project.currency)}</strong></div>

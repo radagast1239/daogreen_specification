@@ -29,13 +29,19 @@ describe("Project Workspace C2.1", () => {
     expect(inspector).toContain("nameOverridden: false");
   });
 
-  it("keeps refresh name-safe and row menus exclusive/dismissible", () => {
+  it("keeps refresh catalog-driven and row menus exclusive/dismissible", () => {
     const types = read("shared/itemTypes.js");
+    const refresh = read("shared/refreshItemFromMaterial.js");
     const menu = read("src/components/SpecificationRowMenu.jsx");
-    expect(types.match(/REFRESH_FROM_MATERIAL_FIELDS[\s\S]*?\];/)[0]).not.toContain('"name"');
+    const fields = types.match(/REFRESH_FROM_MATERIAL_FIELDS[\s\S]*?\];/)[0];
+    expect(fields).toContain('"name"');
+    expect(fields).toContain('"price"');
+    expect(refresh).toContain("nameOverridden: false");
+    expect(refresh).toContain("priceOverridden: false");
     expect(menu).toContain("createPortal");
     expect(menu).toContain("data-project-item-id={item.id}");
     expect(menu).toContain("const run = (callback) => { callback?.(); close(); }");
+    expect(menu).toContain("Вернуть название из базы");
     expect(menu).toContain("spec-row-menu-open");
     expect(menu).toContain('event.key === "Escape"');
     expect(menu).toContain('document.addEventListener("pointerdown"');

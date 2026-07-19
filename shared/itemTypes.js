@@ -23,6 +23,7 @@ export const PROJECT_LINE_TYPE_LABELS = {
 };
 
 export const REFRESH_FROM_MATERIAL_FIELDS = [
+  "name",
   "price",
   "link",
   "supplier",

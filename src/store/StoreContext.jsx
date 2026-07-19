@@ -440,9 +440,13 @@ export function StoreProvider({ children }) {
         );
       },
       async refreshItemsFromMaterial(projectId, body, context) {
-        return runProjectWrite(projectId, (expectedRevision) =>
+        const result = await runProjectWrite(projectId, (expectedRevision) =>
           apiClient.refreshItemsFromMaterial(projectId, { ...body, expectedRevision }, context)
         );
+        for (const it of result?.updated || []) {
+          dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId: it.id, item: it });
+        }
+        return result;
       },
       async applySectionTemplate(projectId, body) {
         return runProjectWrite(projectId, (expectedRevision) =>

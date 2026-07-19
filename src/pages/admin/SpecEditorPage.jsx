@@ -43,6 +43,7 @@ import "../../styles/project-workspace.css";
 import "../../styles/specification-table.css";
 import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
 import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient, buildClientVisibilityPatch } from "../../../shared/itemTypes.js";
+import { formatCatalogRefreshToast } from "../../../shared/refreshItemFromMaterial.js";
 import { buildModuleSelectionFromIds } from "../../../shared/specLineSelection.js";
 import { FARM_LINE_GROUPS, farmLineGroupLabel } from "../../../shared/farmLineGroups.js";
 import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
@@ -1413,17 +1414,54 @@ function SpecTab({
       error("Выберите позиции с materialId");
       return;
     }
+    const linkedIds = itemIds.filter((id) => project.items.find((it) => it.id === id)?.materialId);
+    if (!linkedIds.length) {
+      error("Нет позиций с привязкой к материалу в базе");
+      return;
+    }
+    const touchesNameOrPrice = !fields?.length || fields.includes("all") || fields.includes("name") || fields.includes("price");
+    if (touchesNameOrPrice) {
+      const needsConfirm = linkedIds.some((id) => {
+        const it = project.items.find((row) => row.id === id);
+        const mat = materials.find((row) => row.id === it?.materialId);
+        if (!it?.materialId || !mat) return false;
+        const nameDiff = !!it.nameOverridden || String(it.name || "") !== String(mat.name || "");
+        const priceDiff = (Number(it.price) || 0) !== (Number(mat.basePrice) || 0);
+        return nameDiff || priceDiff;
+      });
+      if (needsConfirm) {
+        const ok = await confirm({
+          title: "Обновить из базы",
+          message: "Вернуть название и цену из базы материалов? Ручные изменения этой позиции будут сброшены",
+          confirmLabel: "Обновить",
+        });
+        if (!ok) return;
+      }
+    }
     try {
       const res = await actions.refreshItemsFromMaterial(
         project.id,
-        { itemIds, fields },
+        { itemIds: linkedIds, fields },
         { items: project.items, materials }
       );
-      await actions.loadProject(project.id);
-      success(`Обновлено позиций: ${res.updated?.length || 0}`);
+      const changedFields = [...new Set((res.results || []).flatMap((row) => row.changedFields || []))];
+      const anyChanged = (res.results || []).some((row) => row.changed) || (res.updated || []).length > 0;
+      success(anyChanged ? formatCatalogRefreshToast(changedFields) : "Позиция уже соответствует базе");
     } catch (e) {
       error(e.message);
     }
+  };
+
+  const resetItemNameFromBase = async (item) => {
+    const mat = materials.find((row) => row.id === item.materialId);
+    if (!item.materialId || !mat) return;
+    const ok = await confirm({
+      title: "Вернуть название из базы",
+      message: "Текущее название позиции будет заменено названием из базы материалов.",
+      confirmLabel: "Вернуть",
+    });
+    if (!ok) return;
+    await patchItem(item.id, { name: mat.name || "", nameOverridden: false });
   };
 
   const syncClientSections = async (itemIds) => {
@@ -2101,9 +2139,11 @@ function SpecTab({
                       <span tabIndex={-1} aria-expanded={inspectedItemId === it.id} ref={(node) => node ? inspectorTriggerRefs.current.set(it.id, node) : inspectorTriggerRefs.current.delete(it.id)}>
                       <SpecificationRowMenu
                         item={it}
+                        material={materials.find((row) => row.id === it.materialId) || null}
                         sectionOptions={sectionNames}
                         onDetails={() => setInspectedItemId(it.id)}
                         onRefresh={() => refreshFromBase([it.id], ["all"])}
+                        onResetName={() => resetItemNameFromBase(it)}
                         onDuplicate={() => actions.itemAdd(project.id, { ...it })}
                         onMove={(target) => patchItem(it.id, { module: target, section: target })}
                         onDelete={async () => {

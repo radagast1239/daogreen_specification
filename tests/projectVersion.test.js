@@ -142,14 +142,17 @@ afterAll(() => {
 });
 
 describe("published release snapshot", () => {
-  it("persists project name override, keeps it through refresh, and resets independently", () => {
+  it("persists project name override, restores catalog name on refresh, and resets independently", () => {
     seedProject("p1", { items: [clientItem("it1", "mat1"), clientItem("it2", "mat1")] });
     const renamed = patchItem("p1", "it1", { name: "Project-only name", name_overridden: true });
     expect(renamed).toMatchObject({ id: "it1", name: "Project-only name", nameOverridden: true, name_overridden: true });
     expect(loadProject("p1").items.find((it) => it.id === "it1")).toMatchObject({ name: "Project-only name", nameOverridden: true });
-    refreshItemsFromMaterial("p1", { itemIds: ["it1"], fields: ["all"] });
-    expect(loadProject("p1").items.find((it) => it.id === "it1")).toMatchObject({ name: "Project-only name", nameOverridden: true });
+    const refreshed = refreshItemsFromMaterial("p1", { itemIds: ["it1"], fields: ["all"] });
+    expect(refreshed.results[0]).toMatchObject({ changed: true });
+    expect(refreshed.results[0].changedFields).toEqual(expect.arrayContaining(["name", "nameOverridden"]));
+    expect(loadProject("p1").items.find((it) => it.id === "it1")).toMatchObject({ name: "Test material", nameOverridden: false });
     expect(loadProject("p1").items.find((it) => it.id === "it2")).toMatchObject({ name: "Test material", nameOverridden: false });
+    patchItem("p1", "it1", { name: "Again overridden", name_overridden: true });
     const materialName = db.prepare("SELECT name FROM materials WHERE id = ?").get("mat1").name;
     patchItem("p1", "it1", { name: materialName, name_overridden: false });
     expect(loadProject("p1").items.find((it) => it.id === "it1")).toMatchObject({ name: "Test material", nameOverridden: false });

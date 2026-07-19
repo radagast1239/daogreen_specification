@@ -51,6 +51,7 @@ import {
   patchFromMaterial,
   resolveRefreshFields,
 } from "../services/refreshItemFromMaterial.js";
+import { diffRefreshPatch } from "../../../shared/refreshItemFromMaterial.js";
 import {
   cloneProjectItem,
   cloneProjectItemsWithIdMap,
@@ -888,34 +889,64 @@ export function bulkPatchItems(projectId, { itemIds = [], patch = {} } = {}) {
   return { updated: updated.filter(Boolean), skipped, before, patch };
 }
 
-export function refreshItemsFromMaterial(projectId, { itemIds = [], fields = [] } = {}) {
-  const p = loadProject(projectId);
-  if (!p) return { updated: [], skipped: [] };
+export function planRefreshItemsFromMaterial(project, { itemIds = [], fields = [] } = {}) {
+  if (!project) return { plans: [], skipped: [], results: [] };
   const refreshFields = resolveRefreshFields(fields);
-  const ids = itemIds.length ? itemIds : p.items.map((i) => i.id);
-  const updated = [];
+  const ids = itemIds.length ? itemIds : (project.items || []).map((i) => i.id);
+  const plans = [];
   const skipped = [];
+  const results = [];
 
   for (const itemId of ids) {
-    const item = p.items.find((i) => i.id === itemId);
+    const item = (project.items || []).find((i) => i.id === itemId);
     if (!item?.materialId) {
       skipped.push({ itemId, reason: "no_material" });
+      results.push({ itemId, changed: false, changedFields: [], item: item || null, reason: "no_material" });
       continue;
     }
     const mat = getMaterialById(item.materialId);
     if (!mat) {
       skipped.push({ itemId, reason: "material_missing" });
+      results.push({ itemId, changed: false, changedFields: [], item, reason: "material_missing" });
       continue;
     }
     const matPatch = patchFromMaterial(mat, refreshFields);
     if (!Object.keys(matPatch).length) {
       skipped.push({ itemId, reason: "no_fields" });
+      results.push({ itemId, changed: false, changedFields: [], item, reason: "no_fields" });
       continue;
     }
-    updated.push(patchItem(projectId, itemId, matPatch));
+    const changedFields = diffRefreshPatch(item, matPatch);
+    if (!changedFields.length) {
+      results.push({ itemId, changed: false, changedFields: [], item });
+      continue;
+    }
+    plans.push({ itemId, patch: matPatch, changedFields, before: item });
+    results.push({ itemId, changed: true, changedFields, item });
   }
 
-  return { updated, skipped };
+  return { plans, skipped, results };
+}
+
+export function refreshItemsFromMaterial(projectId, { itemIds = [], fields = [] } = {}) {
+  const p = loadProject(projectId);
+  if (!p) return { updated: [], skipped: [], results: [] };
+  const { plans, skipped, results: plannedResults } = planRefreshItemsFromMaterial(p, { itemIds, fields });
+  const updated = [];
+  const results = [];
+
+  for (const row of plannedResults) {
+    if (!row.changed) {
+      results.push(row);
+      continue;
+    }
+    const plan = plans.find((entry) => entry.itemId === row.itemId);
+    const next = patchItem(projectId, row.itemId, plan.patch);
+    updated.push(next);
+    results.push({ itemId: row.itemId, changed: true, changedFields: row.changedFields, item: next });
+  }
+
+  return { updated, skipped, results };
 }
 
 export function addItem(projectId, item) {
@@ -1374,14 +1405,22 @@ api.post("/:id/items/bulk-patch", (req, res) => {
 
 api.post("/:id/items/refresh-from-material", (req, res) => {
   try {
-  const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
   const p = loadProject(req.params.id);
-  if (!p) return null;
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const itemIds = req.body?.itemIds || (req.body?.itemId ? [req.body.itemId] : []);
+  const fields = req.body?.fields || [];
+  const planned = planRefreshItemsFromMaterial(p, { itemIds, fields });
+  if (!planned.plans.length) {
+    return res.json({
+      updated: [],
+      skipped: planned.skipped,
+      results: planned.results,
+      revision: Number(p.revision) || 1,
+    });
+  }
+  const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
   const beforeMap = new Map((p.items || []).map((it) => [it.id, it]));
-  const result = refreshItemsFromMaterial(req.params.id, {
-    itemIds: req.body?.itemIds || (req.body?.itemId ? [req.body.itemId] : []),
-    fields: req.body?.fields || [],
-  });
+  const result = refreshItemsFromMaterial(req.params.id, { itemIds, fields });
   for (const it of result.updated || []) {
     const before = beforeMap.get(it.id);
     if (!before) continue;
