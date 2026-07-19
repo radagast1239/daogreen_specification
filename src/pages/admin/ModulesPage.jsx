@@ -132,7 +132,8 @@ export default function ModulesPage() {
   const [stellageGroupsDraft, setStellageGroupsDraft] = useState([]);
   const [showLegacyTools, setShowLegacyTools] = useState(false);
 
-  const stellageMods = state.modules.filter((m) => m.type === "stellage");
+  // Admin list (`mods`) — not store cache: create/update must show up in «Состав стеллажей» without full app reload.
+  const stellageMods = mods.filter((m) => m.type === "stellage" && m.active !== false);
   const stellagePresets = useMemo(
     () =>
       [...presets.filter((p) => p.presetType === "stellage")].sort(
@@ -593,6 +594,11 @@ export default function ModulesPage() {
     setModForm(emptyModuleForm());
   };
 
+  const openNewStellageModule = () => {
+    setEditingMod({ id: null });
+    setModForm({ ...emptyModuleForm(), type: "stellage" });
+  };
+
   const openEditModule = (m) => {
     setEditingMod(m);
     setModForm({
@@ -619,7 +625,7 @@ export default function ModulesPage() {
       }
       setEditingMod(null);
       await reload();
-      await actions.refreshSettings();
+      await Promise.all([actions.refreshModules(), actions.refreshSettings()]);
     } catch (e) {
       alert(e.message);
     } finally {
@@ -871,7 +877,10 @@ export default function ModulesPage() {
             groups={stellageGroupsDraft}
             onChange={setStellageGroupsDraft}
           />
-          <div className="toolbar" style={{ marginBottom: 14 }}>
+          <div className="toolbar" style={{ marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={openNewStellageModule}>
+              ＋ Создать стеллаж
+            </button>
             <button type="button" className="btn btn-sm" disabled={saving} onClick={saveStellageGroups}>
               Сохранить группы
             </button>
@@ -881,7 +890,9 @@ export default function ModulesPage() {
             позиции, укажите кол-во и группу состава.
           </p>
           {stellageMods.length === 0 ? (
-            <p className="muted">Нет типов стеллажей в справочнике. Добавьте в «Служебное → Старые модули базы» модуль с типом «Стеллаж».</p>
+            <p className="muted">
+              Нет типов стеллажей. Нажмите «＋ Создать стеллаж» выше или добавьте модуль с типом «Стеллаж» в «Служебное → Старые модули базы».
+            </p>
           ) : (
             <div className="card" style={{ padding: 0, overflow: "hidden" }}>
               <table className="spec">
@@ -1175,7 +1186,9 @@ export default function ModulesPage() {
       {editingMod && (
         <div className="content">
           <div className="card" style={{ padding: 16, marginBottom: 12 }}>
-            <h3 style={{ marginTop: 0 }}>{editingMod.id ? "Редактирование модуля" : "Новый модуль"}</h3>
+            <h3 style={{ marginTop: 0 }}>
+              {editingMod.id ? "Редактирование модуля" : modForm.type === "stellage" ? "Новый стеллаж" : "Новый модуль"}
+            </h3>
             <div className="form-grid">
               <label>
                 Название *
