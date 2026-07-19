@@ -15,7 +15,9 @@ import { resolveFarmSections } from "../../lib/farmSectionsConfig.js";
 import {
   SETTINGS_TABS,
   adminKeyFingerprint,
+  filterExtraAdminUsers,
   formatAdminKeyCreatedAt,
+  isPrimaryAdminUser,
   previewNames,
 } from "../../lib/settingsUi.js";
 import packageJson from "../../../package.json";
@@ -35,6 +37,7 @@ export default function SettingsPage() {
   });
   const [adminUsers, setAdminUsers] = useState([]);
   const [newUser, setNewUser] = useState({ name: "", apiKey: "" });
+  const [extraKeysOpen, setExtraKeysOpen] = useState(false);
   const [categories, setCategories] = useState([...CATEGORIES]);
   const [clientSections, setClientSections] = useState([]);
   const [farmSections, setFarmSections] = useState([]);
@@ -80,6 +83,7 @@ export default function SettingsPage() {
     () => clientSections.filter((s) => !s.hidden),
     [clientSections]
   );
+  const extraAdminUsers = useMemo(() => filterExtraAdminUsers(adminUsers), [adminUsers]);
 
   const saveLinkSettings = async () => {
     setSaving(true);
@@ -103,10 +107,12 @@ export default function SettingsPage() {
     await api.createAdminUser(newUser);
     setAdminUsers(await api.getAdminUsers());
     setNewUser({ name: "", apiKey: "" });
+    setExtraKeysOpen(true);
     success("Сохранено");
   };
 
   const removeAdminKey = async (u) => {
+    if (isPrimaryAdminUser(u)) return;
     if (!(await confirm({ title: "Удалить дополнительный ключ?", message: u.name, confirmLabel: "Удалить" }))) {
       return;
     }
@@ -266,7 +272,7 @@ export default function SettingsPage() {
             </div>
             <button
               type="button"
-              className="btn btn-primary btn-sm"
+              className="btn btn-primary btn-sm settings-links-save"
               disabled={saving}
               onClick={saveLinkSettings}
             >
@@ -282,17 +288,21 @@ export default function SettingsPage() {
               <p className="settings-card__desc">Основной доступ настроен на сервере.</p>
             </article>
 
-            <details className="card settings-card settings-details">
+            <details
+              className="card settings-card settings-details"
+              open={extraKeysOpen}
+              onToggle={(e) => setExtraKeysOpen(e.currentTarget.open)}
+            >
               <summary>Дополнительные ключи доступа</summary>
               <div className="settings-details__body">
                 <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
                   Используйте только при необходимости. Основной вход работает отдельно.
                 </p>
-                {adminUsers.length === 0 ? (
-                  <p className="muted" style={{ fontSize: 13 }}>Нет дополнительных ключей.</p>
+                {extraAdminUsers.length === 0 ? (
+                  <p className="muted" style={{ fontSize: 13 }}>Дополнительные ключи не созданы.</p>
                 ) : (
                   <ul className="settings-key-list">
-                    {adminUsers.map((u) => {
+                    {extraAdminUsers.map((u) => {
                       const fp = adminKeyFingerprint(u.apiKey);
                       const created = formatAdminKeyCreatedAt(u.createdAt);
                       return (

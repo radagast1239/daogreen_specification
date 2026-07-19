@@ -3641,6 +3641,12 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 .settings-card--narrow {
   max-width: 480px;
 }
+.settings-links-save {
+  align-self: flex-start;
+  width: auto;
+  min-width: 0;
+  flex: 0 0 auto;
+}
 .settings-card__title {
   margin: 0;
   font-size: 16px;
