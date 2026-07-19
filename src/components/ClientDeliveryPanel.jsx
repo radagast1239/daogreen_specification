@@ -58,6 +58,7 @@ export default function ClientDeliveryPanel({
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [showAllPreview, setShowAllPreview] = useState(false);
+  const [exportBusy, setExportBusy] = useState("");
 
   const summary = useMemo(
     () => buildClientPurchaseSummary(items, materials, { stellageConfigs }),
@@ -180,11 +181,37 @@ export default function ClientDeliveryPanel({
         <button type="button" className="btn btn-sm" onClick={onCopyClientLink}>
           Скопировать ссылку
         </button>
-        <button type="button" className="btn btn-sm" onClick={onExportPdf}>
-          PDF
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={!!exportBusy}
+          onClick={async () => {
+            if (exportBusy) return;
+            setExportBusy("pdf");
+            try {
+              await onExportPdf?.();
+            } finally {
+              setExportBusy("");
+            }
+          }}
+        >
+          {exportBusy === "pdf" ? "PDF…" : "PDF"}
         </button>
-        <button type="button" className="btn btn-sm" onClick={onExportExcel}>
-          Excel
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={!!exportBusy}
+          onClick={async () => {
+            if (exportBusy) return;
+            setExportBusy("excel");
+            try {
+              await onExportExcel?.();
+            } finally {
+              setExportBusy("");
+            }
+          }}
+        >
+          {exportBusy === "excel" ? "Excel…" : "Excel"}
         </button>
         {preSendMessages.length > 0 ? (
           <button type="button" className="btn btn-sm btn-ghost" onClick={() => onFilterSelect?.("problems")}>

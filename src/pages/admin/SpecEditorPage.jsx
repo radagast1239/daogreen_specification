@@ -536,6 +536,7 @@ export default function SpecEditorPage() {
         ? { ...project, items: pool, version: project.publishedRelease.versionNumber }
         : project;
       const { downloadClientWorkbook } = await import("../../lib/clientExcelExport.js");
+      await new Promise((r) => setTimeout(r, 0));
       downloadClientWorkbook(exportProject, visibleItems, {
         purchaseStatuses: PURCHASE_STATUSES,
         branding: { companyName },

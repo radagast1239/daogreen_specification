@@ -917,7 +917,8 @@ export function patchClientExcelXlsxArray(arrayBuf) {
     xml = patchSheetCurrencyCells(xml);
     files[key] = strToU8(xml);
   }
-  return zipSync(files, { level: 6 });
+  // level 1: much faster on large multi-sheet workbooks; size difference is minor for purchase lists
+  return zipSync(files, { level: 1 });
 }
 
 /** Собрать ArrayBuffer клиентского Excel с persistent wrapText. */

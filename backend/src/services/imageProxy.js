@@ -70,7 +70,8 @@ export async function loadProxyImage(rawUrl) {
   const res = await fetch(parsed.url, {
     redirect: "follow",
     headers: { "User-Agent": "DaogreenSpec/1.0" },
-    signal: AbortSignal.timeout(15000),
+    // Keep short: PDF loads many photos; one slow CDN must not stall export.
+    signal: AbortSignal.timeout(5000),
   });
   if (!res.ok) {
     const err = new Error(`Upstream HTTP ${res.status}`);

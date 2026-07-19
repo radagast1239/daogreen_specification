@@ -22,6 +22,9 @@ export default function ClientPdfExportModal({ open, items, onClose, onExport })
     try {
       await onExport(selected);
       onClose();
+    } catch (e) {
+      console.error(e);
+      window.alert(e?.message || "Не удалось собрать PDF");
     } finally {
       setExporting(false);
     }

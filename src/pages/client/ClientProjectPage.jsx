@@ -312,7 +312,7 @@ export default function ClientProjectPage() {
   const exportPdf = async (mode = "client_full") => {
     const { generateClientPurchasePdf } = await import("../../lib/clientPdfExport.js");
     const { projectForClientPdfExport } = await import("../../lib/clientExportProject.js");
-    generateClientPurchasePdf({
+    await generateClientPurchasePdf({
       project: projectForClientPdfExport(project),
       items: visibleItems,
       branding,
@@ -326,6 +326,8 @@ export default function ClientProjectPage() {
   const exportExcel = async () => {
     const { downloadClientWorkbook } = await import("../../lib/clientExcelExport.js");
     const { projectForClientExcelExport } = await import("../../lib/clientExportProject.js");
+    // Yield so the UI can paint a busy state before the sync workbook build.
+    await new Promise((r) => setTimeout(r, 0));
     downloadClientWorkbook(projectForClientExcelExport(project), visibleItems, {
       purchaseStatuses,
       branding,
@@ -585,8 +587,18 @@ function ClientBrandFooter({ branding }) {
 }
 
 function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
+  const [excelBusy, setExcelBusy] = useState(false);
   const frameGroups = groupClientFrameDocuments(documents || []);
   const otherDocs = (documents || []).filter((d) => d.type !== "frame_drawing");
+  const runExcel = async () => {
+    if (excelBusy) return;
+    setExcelBusy(true);
+    try {
+      await onExportExcel?.();
+    } finally {
+      setExcelBusy(false);
+    }
+  };
   return (
     <div className="card" style={{ padding: 22, marginTop: 16 }}>
       <h3>Документы</h3>
@@ -597,18 +609,18 @@ function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
       <div style={{ marginTop: 14 }}>
         <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>Excel</div>
         <div className="row wrap" style={{ gap: 8 }}>
-          <button type="button" className="btn" onClick={onExportExcel}>
-            Скачать книгу закупки
+          <button type="button" className="btn" onClick={runExcel} disabled={excelBusy}>
+            {excelBusy ? "Собираем Excel…" : "Скачать книгу закупки"}
           </button>
         </div>
       </div>
       <div style={{ marginTop: 16 }}>
         <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>PDF</div>
         <div className="row wrap" style={{ gap: 8 }}>
-          <button type="button" className="btn btn-primary" onClick={onOpenPdf}>
+          <button type="button" className="btn btn-primary" onClick={onOpenPdf} disabled={excelBusy}>
             Скачать PDF…
           </button>
-          <button type="button" className="btn" onClick={printPDF}>
+          <button type="button" className="btn" onClick={printPDF} disabled={excelBusy}>
             Печать страницы
           </button>
         </div>

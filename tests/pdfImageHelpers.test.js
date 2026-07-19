@@ -8,6 +8,9 @@ import {
   isAllowedImageContentType,
   isPdfImageDataUrl,
   loadImageDataUrl,
+  mapWithConcurrency,
+  PDF_IMAGE_FETCH_TIMEOUT_MS,
+  PDF_IMAGE_CONCURRENCY,
 } from "../src/lib/pdfImageHelpers.js";
 
 describe("pdfImageHelpers", () => {
@@ -83,5 +86,24 @@ describe("pdfImageHelpers", () => {
     expect(() => resolvePdfFetchUrl("!!!garbage")).not.toThrow();
     expect(() => resolvePdfFetchUrl("")).not.toThrow();
     expect(resolvePdfFetchUrl("")).toBe("");
+  });
+
+  it("ограничивает параллельность загрузки фото и держит короткий таймаут", async () => {
+    expect(PDF_IMAGE_FETCH_TIMEOUT_MS).toBeLessThanOrEqual(5000);
+    expect(PDF_IMAGE_CONCURRENCY).toBeLessThanOrEqual(8);
+    const order = [];
+    let active = 0;
+    let maxActive = 0;
+    await mapWithConcurrency([1, 2, 3, 4, 5, 6], 2, async (n) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      order.push(`start-${n}`);
+      await new Promise((r) => setTimeout(r, 20));
+      active -= 1;
+      order.push(`end-${n}`);
+      return n * 10;
+    });
+    expect(maxActive).toBeLessThanOrEqual(2);
+    expect(order.filter((x) => x.startsWith("start-"))).toHaveLength(6);
   });
 });
