@@ -331,6 +331,7 @@ export const TOOL_REGISTRY = {
   fan_wall: { id: "fan_wall", label: "Настенный вентилятор", mode: "add", kind: "blade_fan", categories: ["vent"], params: { airflowM3h: 1800, diameter: 300 } },
   fan_recirc: { id: "fan_recirc", label: "Рециркуляционный вентилятор", mode: "add", kind: "recirc", categories: ["vent", "climate"], params: { airflowM3h: 2000, direction: "clockwise" } },
 
+  person: { id: "person", label: "Человек", mode: "add", kind: "person", categories: ["routes"] },
   route_staff: { id: "route_staff", label: "Персонал", mode: "line", categories: ["routes"], lineLayer: "staff", lineTag: "staff" },
   route_raw: { id: "route_raw", label: "Сырьё", mode: "line", categories: ["routes"], lineLayer: "staff", lineTag: "raw" },
   route_product: { id: "route_product", label: "Готовая продукция", mode: "line", categories: ["routes"], lineLayer: "staff", lineTag: "product" },

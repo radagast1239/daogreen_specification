@@ -248,7 +248,7 @@ const FARM_SHEETS = [
     visibleLayers: ["room", "partitions", "zones", "sanitary", "staff", "labels"],
     defaultToolId: "dezmat_hygiene",
     toolGroups: [
-      { id: "safe", label: "Санитария", tools: ["dezmat_hygiene", "dispenser", "comment", "route_staff"] },
+      { id: "safe", label: "Санитария", tools: ["dezmat_hygiene", "dispenser", "comment", "person", "route_staff", "route_raw", "route_product", "route_waste"] },
       { id: "common", label: "Общие", tools: BASE_TOOLS },
     ],
   }),
@@ -394,6 +394,7 @@ const CATEGORY_DEFAULT_SHEETS = {
   cart: ["equipment", "racks", "specification"],
   cold_room_equipment: ["equipment", "climate", "specification"],
   sanitation: ["safety", "plumbing", "specification"],
+  personnel: ["safety", "specification"],
   storage: ["equipment", "racks", "specification"],
   custom: ["equipment", "racks", "specification"],
 };
@@ -408,6 +409,7 @@ function inferByLayer(item) {
   if (layer === "climate") return ["climate", "equipment", "specification"];
   if (layer === "vent") return ["ventilation", "climate", "specification"];
   if (layer === "sanitary") return ["plumbing", "safety", "specification"];
+  if (layer === "staff") return ["safety", "specification"];
   if (layer === "furn") return ["equipment", "racks", "specification"];
   if (layer === "room" || layer === "partitions") return ["base_plan", "partitions", "farm_zones", "specification"];
   return ["base_plan", "specification"];

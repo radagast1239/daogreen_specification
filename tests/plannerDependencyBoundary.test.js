@@ -1657,3 +1657,128 @@ describe("PHASE 1A-2C2D3E5B — staff combined clearSheet wiring", () => {
     expect(planPageSource).not.toMatch(/from\s*["'][^"']*ui\/applyStaffBulkDelete/i);
   });
 });
+
+/**
+ * PHASE 1A-2C2D3E5C — staff person + route tool wiring boundary. Structural/
+ * source-text guards only — runtime correctness (visibility, placement,
+ * category resolution, persistence) is proven in tests/plannerSheetsFarm.test.js,
+ * not re-derived here. Confirms the E5C diff stayed inside plannerTools.js/
+ * plannerSheets.js/farmObjects.js and did not touch geometry core, the staff
+ * combined clear path (PHASE 1A-2C2D3E5B), ObjectPalette.jsx, PlanPage.jsx,
+ * or catalog.js.
+ */
+describe("PHASE 1A-2C2D3E5C — staff person/route tool wiring boundary", () => {
+  function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  const plannerToolsSource = readFileSync(join(PLANNER_ROOT, "plannerTools.js"), "utf8");
+  const plannerSheetsSource = readFileSync(join(PLANNER_ROOT, "plannerSheets.js"), "utf8");
+  const farmObjectsSource = readFileSync(join(PLANNER_ROOT, "farmObjects.js"), "utf8");
+  const catalogSource = readFileSync(join(PLANNER_ROOT, "catalog.js"), "utf8");
+  const objectPaletteSource = readFileSync(join(PLANNER_ROOT, "ui", "ObjectPalette.jsx"), "utf8");
+  const planPageSourceE5C = readFileSync(join(REPO, "src", "pages", "admin", "PlanPage.jsx"), "utf8");
+
+  it("the person tool is defined exactly once in TOOL_REGISTRY, with mode:\"add\", kind:\"person\", categories:[\"routes\"]", () => {
+    const codeOnly = stripComments(plannerToolsSource);
+    const defs = codeOnly.match(/^\s*person:\s*\{/gm) || [];
+    expect(defs.length).toBe(1);
+    expect(codeOnly).toMatch(/person:\s*\{\s*id:\s*"person",\s*label:\s*"Человек",\s*mode:\s*"add",\s*kind:\s*"person",\s*categories:\s*\["routes"\]\s*\}/);
+  });
+
+  it("route_staff/route_raw/route_product/route_waste tool definitions keep their existing lineLayer/lineTag values unchanged", () => {
+    const codeOnly = stripComments(plannerToolsSource);
+    expect(codeOnly).toMatch(/route_staff:\s*\{[^}]*lineLayer:\s*"staff"[^}]*lineTag:\s*"staff"[^}]*\}/);
+    expect(codeOnly).toMatch(/route_raw:\s*\{[^}]*lineLayer:\s*"staff"[^}]*lineTag:\s*"raw"[^}]*\}/);
+    expect(codeOnly).toMatch(/route_product:\s*\{[^}]*lineLayer:\s*"staff"[^}]*lineTag:\s*"product"[^}]*\}/);
+    expect(codeOnly).toMatch(/route_waste:\s*\{[^}]*lineLayer:\s*"staff"[^}]*lineTag:\s*"waste"[^}]*\}/);
+  });
+
+  function safeToolGroupLine() {
+    const match = plannerSheetsSource.match(/\{ id: "safe", label: "Санитария", tools: \[([^\]]*)\] \},/);
+    expect(match, "safety sheet's safe toolGroup literal not found").toBeTruthy();
+    return match[1].split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
+  }
+
+  it("safety sheet's safe toolGroup contains exactly the required 8 tool IDs, no duplicates", () => {
+    const tools = safeToolGroupLine();
+    const required = ["dezmat_hygiene", "dispenser", "comment", "person", "route_staff", "route_raw", "route_product", "route_waste"];
+    expect(tools.slice().sort()).toEqual(required.slice().sort());
+    const seen = new Set();
+    tools.forEach((id) => {
+      expect(seen.has(id), `duplicate tool id "${id}" in safe toolGroup`).toBe(false);
+      seen.add(id);
+    });
+  });
+
+  it("no separate staff sheet was added — no sheet() call anywhere uses \"staff\" as its layerId argument or an explicit activeLayer:\"staff\"", () => {
+    const codeOnly = stripComments(plannerSheetsSource);
+    expect(codeOnly).not.toMatch(/sheet\(\s*"[^"]+",\s*"[^"]+",\s*"staff"/);
+    expect(codeOnly).not.toMatch(/activeLayer:\s*"staff"/);
+  });
+
+  it("the safety sheet still activates \"sanitary\" and still lists \"staff\" among its visibleLayers", () => {
+    expect(plannerSheetsSource).toMatch(/sheet\("safety", "Санитария \/ безопасность", "sanitary", \{/);
+    const match = plannerSheetsSource.match(/sheet\("safety"[\s\S]*?visibleLayers:\s*\[([^\]]*)\]/);
+    expect(match, "safety sheet visibleLayers literal not found").toBeTruthy();
+    expect(match[1]).toMatch(/"staff"/);
+    expect(match[1]).toMatch(/"sanitary"/);
+  });
+
+  it("fresh-created person visibility fix is present: KIND_TO_CATEGORY maps person to a dedicated category, and that category's DEFAULT_VISIBLE_BY_CATEGORY entry includes \"safety\" (not \"custom\")", () => {
+    const codeOnly = stripComments(farmObjectsSource);
+    const kindMatch = codeOnly.match(/person:\s*"(\w+)"/);
+    expect(kindMatch, "KIND_TO_CATEGORY.person entry not found").toBeTruthy();
+    const category = kindMatch[1];
+    expect(category).not.toBe("custom");
+    const categoryMatch = codeOnly.match(new RegExp(`${category}:\\s*\\[([^\\]]*)\\]`));
+    expect(categoryMatch, `DEFAULT_VISIBLE_BY_CATEGORY.${category} entry not found`).toBeTruthy();
+    expect(categoryMatch[1]).toMatch(/"safety"/);
+    expect(codeOnly).toMatch(new RegExp(`FARM_OBJECT_CATEGORIES[\\s\\S]*?"${category}"[\\s\\S]*?\\];`));
+  });
+
+  it("legacy/fallback person visibility fix is present: plannerSheets.js's CATEGORY_DEFAULT_SHEETS and inferByLayer both resolve staff/person to a set including \"safety\"", () => {
+    const codeOnly = stripComments(plannerSheetsSource);
+    expect(codeOnly).toMatch(/personnel:\s*\["safety",\s*"specification"\]/);
+    expect(codeOnly).toMatch(/if\s*\(layer\s*===\s*"staff"\)\s*return\s*\["safety",\s*"specification"\];/);
+  });
+
+  it("ObjectPalette.jsx still resolves a single active layer's catalog list (catalogForLayer(active)) — no multi-layer aggregation was introduced", () => {
+    const codeOnly = stripComments(objectPaletteSource);
+    expect(codeOnly).toMatch(/const items = catalogForLayer\(active\);/);
+    expect(codeOnly).not.toMatch(/catalogForLayer\([^)]*\.map\(/);
+    expect(codeOnly).not.toMatch(/flatMap/);
+  });
+
+  it("PlanPage.jsx has zero diff-relevant code references to route_raw/route_product/route_waste/personnel/setActive(\"staff\") — no active-layer hack, no duplicated wiring (pre-existing PHASE 1A-2C2D3E5B comments mentioning \"person\"/\"staff\" descriptively are excluded)", () => {
+    const codeOnly = stripComments(planPageSourceE5C);
+    expect(codeOnly).not.toMatch(/route_raw|route_product|route_waste/);
+    expect(codeOnly).not.toMatch(/kind:\s*"person"/);
+    expect(codeOnly).not.toMatch(/"personnel"/);
+    expect(codeOnly).not.toMatch(/setActive\(\s*"staff"\s*\)/);
+  });
+
+  it("geometryCommands.js and core/ have zero \"person\"/\"personnel\" references — no geometry/core change", () => {
+    const geometryCommandsSource = readFileSync(join(PLANNER_ROOT, "commands", "geometryCommands.js"), "utf8");
+    expect(stripComments(geometryCommandsSource)).not.toMatch(/"person"|"personnel"/);
+  });
+
+  it("the staff combined clear path (applyCombinedLayerClear.js, combinedLayerClearSummary.js, applyItemLineBulkDelete.js) has zero \"person\"/\"personnel\" references — clear-path unchanged by E5C", () => {
+    const applyCombined = readFileSync(join(PLANNER_ROOT, "ui", "applyCombinedLayerClear.js"), "utf8");
+    const summary = readFileSync(join(PLANNER_ROOT, "ui", "combinedLayerClearSummary.js"), "utf8");
+    const applyItemLine = readFileSync(join(PLANNER_ROOT, "ui", "applyItemLineBulkDelete.js"), "utf8");
+    expect(stripComments(applyCombined)).not.toMatch(/"person"|"personnel"/);
+    expect(stripComments(summary)).not.toMatch(/"person"|"personnel"/);
+    expect(stripComments(applyItemLine)).not.toMatch(/"person"|"personnel"/);
+  });
+
+  it("staff.mode remains \"lines\" in catalog.js — the E5C audit found zero runtime consumers of LAYERS[].mode, so it was deliberately left unchanged", () => {
+    expect(catalogSource).toMatch(/\{ id: "staff",\s+name: "Движение персонала",[^}]*mode: "lines"/);
+  });
+
+  it("no new production file was introduced — only plannerTools.js, plannerSheets.js, and farmObjects.js changed in src/planner", () => {
+    expect(existsSync(join(PLANNER_ROOT, "personTool.js"))).toBe(false);
+    expect(existsSync(join(PLANNER_ROOT, "ui", "personPlacement.js"))).toBe(false);
+    expect(existsSync(join(PLANNER_ROOT, "staffSheet.js"))).toBe(false);
+  });
+});
