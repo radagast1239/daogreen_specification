@@ -3414,6 +3414,9 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   white-space: normal;
   max-width: 220px;
 }
+.reports-r1__delta--up { color: var(--danger); }
+.reports-r1__delta--down { color: var(--ok, #0a7a4a); }
+.chip--ok { background: var(--ok-tint, #e8f6ef); color: var(--ok, #0a7a4a); }
 @media (max-width: 768px) {
   .reports-r1__cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -5,18 +5,24 @@ import { money } from "../../store/helpers.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { PURCHASE_STATUS_CHIPS } from "../../../shared/purchaseStatusRules.js";
 import {
-  REPORT_TABS,
   REPORT_ISSUE_TYPES,
-  parseReportTab,
   buildReportsR1,
   filterReportIssues,
   filterReportPurchases,
   groupPurchasesBySupplier,
 } from "../../../shared/projectReportsR1.js";
+import {
+  REPORT_TABS_ALL,
+  MATERIAL_DRIFT_TYPES,
+  parseReportTabAll,
+  buildReportsR2,
+  filterReportPublications,
+  filterReportMaterialDrift,
+} from "../../../shared/projectReportsR2.js";
 
 export default function ReportsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = parseReportTab(searchParams.get("report"));
+  const tab = parseReportTabAll(searchParams.get("report"));
   const [payload, setPayload] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -48,12 +54,17 @@ export default function ReportsPage() {
 
   const report = useMemo(() => {
     if (!payload) return null;
-    return buildReportsR1(payload.projects || [], payload.materials || []);
+    const projects = payload.projects || [];
+    const materials = payload.materials || [];
+    return {
+      ...buildReportsR1(projects, materials),
+      ...buildReportsR2(projects, materials),
+    };
   }, [payload]);
 
   const setTab = (next) => {
     const params = new URLSearchParams(searchParams);
-    params.set("report", parseReportTab(next));
+    params.set("report", parseReportTabAll(next));
     setSearchParams(params, { replace: true });
   };
 
@@ -61,12 +72,12 @@ export default function ReportsPage() {
     <>
       <PageHeader
         title="Отчёты"
-        sub="Сводная информация по проектам, проблемным позициям и закупкам"
+        sub="Сводная информация по проектам, публикациям, базе и закупкам"
         back={{ to: "/", label: "Проекты" }}
       />
       <div className="content reports-r1">
         <div className="reports-r1__tabs" role="tablist">
-          {REPORT_TABS.map((t) => (
+          {REPORT_TABS_ALL.map((t) => (
             <button
               key={t.id}
               type="button"
@@ -88,6 +99,12 @@ export default function ReportsPage() {
         )}
         {!loading && !error && report && tab === "purchases" && (
           <PurchasesTab purchases={report.purchases} projects={report.overview.projects} />
+        )}
+        {!loading && !error && report && tab === "publications" && (
+          <PublicationsTab publications={report.publications} projects={report.overview.projects} />
+        )}
+        {!loading && !error && report && tab === "material-drift" && (
+          <MaterialDriftTab drift={report.materialDrift} projects={report.overview.projects} />
         )}
       </div>
     </>
@@ -382,4 +399,241 @@ function formatDate(iso) {
   } catch {
     return "";
   }
+}
+
+function formatDelta(delta) {
+  if (delta == null || Number.isNaN(Number(delta))) return "—";
+  const n = Number(delta);
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${money(n)}`;
+}
+
+function PublicationsTab({ publications, projects }) {
+  const [projectId, setProjectId] = useState("");
+  const [published, setPublished] = useState("");
+  const [sync, setSync] = useState("");
+  const [q, setQ] = useState("");
+
+  const filtered = useMemo(
+    () => filterReportPublications(publications.rows, { projectId, published, sync, q }),
+    [publications.rows, projectId, published, sync, q]
+  );
+
+  const emptyMsg =
+    publications.emptyAllCurrent && !projectId && !published && !sync && !q
+      ? "Все проекты опубликованы и актуальны"
+      : "Нет проектов по фильтру";
+
+  return (
+    <div className="reports-r1__panel">
+      <div className="reports-r1__filters row wrap">
+        <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Проект">
+          <option value="">Все проекты</option>
+          {(projects || []).map((p) => (
+            <option key={p.projectId} value={p.projectId}>{p.name}</option>
+          ))}
+        </select>
+        <select value={published} onChange={(e) => setPublished(e.target.value)} aria-label="Публикация">
+          <option value="">Все</option>
+          <option value="yes">Опубликован</option>
+          <option value="no">Не опубликован</option>
+        </select>
+        <select value={sync} onChange={(e) => setSync(e.target.value)} aria-label="Актуальность">
+          <option value="">Все статусы</option>
+          <option value="changes">Есть изменения</option>
+          <option value="current">Актуально</option>
+          <option value="unpublished">Не опубликован</option>
+        </select>
+        <input
+          type="search"
+          placeholder="Поиск…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="Поиск"
+        />
+      </div>
+
+      <div className="card reports-r1__table-card">
+        <div className="table-scroll-wrap reports-r1__scroll">
+          <table className="spec reports-r1__table">
+            <thead>
+              <tr>
+                <th>Проект</th>
+                <th>Клиент</th>
+                <th>Статус</th>
+                <th className="right">Рабочая</th>
+                <th className="right">Опубликовано</th>
+                <th className="right">Разница</th>
+                <th>Версия</th>
+                <th>Дата</th>
+                <th>Синхр.</th>
+                <th className="right">+/−/~</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={11} className="muted">{emptyMsg}</td>
+                </tr>
+              ) : (
+                filtered.map((row) => (
+                  <tr key={row.projectId}>
+                    <td>
+                      <strong>{row.name}</strong>
+                    </td>
+                    <td>{row.client}</td>
+                    <td>{row.statusLabel}</td>
+                    <td className="right num">{money(row.workingTotal)}</td>
+                    <td className="right num">
+                      {row.hasPublished ? money(row.publishedTotal || 0) : "Не опубликован"}
+                    </td>
+                    <td
+                      className={`right num${row.delta > 0 ? " reports-r1__delta--up" : row.delta < 0 ? " reports-r1__delta--down" : ""}`}
+                    >
+                      {row.hasPublished ? formatDelta(row.delta) : "—"}
+                    </td>
+                    <td>{row.publishedVersion != null ? `v${row.publishedVersion}` : "—"}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>
+                      {row.publishedAt ? formatDate(row.publishedAt) : "—"}
+                    </td>
+                    <td>
+                      <span
+                        className={`chip chip--${
+                          row.syncStatus === "changes"
+                            ? "amber"
+                            : row.syncStatus === "current"
+                              ? "ok"
+                              : "neutral"
+                        }`}
+                      >
+                        {row.syncBadge}
+                      </span>
+                    </td>
+                    <td className="right muted" style={{ fontSize: 12 }}>
+                      {row.hasPublished
+                        ? `+${row.addedCount} / −${row.removedCount} / ~${row.changedCount}`
+                        : "—"}
+                    </td>
+                    <td>
+                      <div className="row wrap" style={{ gap: 6 }}>
+                        <Link className="btn btn-sm" to={row.openPath}>Открыть проект</Link>
+                        {row.hasClientLink ? (
+                          <Link className="btn btn-sm" to={row.clientPath} target="_blank" rel="noreferrer">
+                            Клиентская версия
+                          </Link>
+                        ) : (
+                          <button type="button" className="btn btn-sm" disabled title="Нет публикации">
+                            Клиентская версия
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MaterialDriftTab({ drift, projects }) {
+  const [projectId, setProjectId] = useState("");
+  const [typeId, setTypeId] = useState("");
+  const [supplier, setSupplier] = useState("");
+  const [q, setQ] = useState("");
+  const [onlyDiffs, setOnlyDiffs] = useState(true);
+
+  const filtered = useMemo(
+    () => filterReportMaterialDrift(drift.rows, { projectId, typeId, supplier, q, onlyDiffs }),
+    [drift.rows, projectId, typeId, supplier, q, onlyDiffs]
+  );
+  const suppliers = useMemo(() => {
+    const set = new Set((drift.rows || []).map((r) => r.supplier).filter((s) => s && s !== "—"));
+    return [...set].sort((a, b) => a.localeCompare(b, "ru"));
+  }, [drift.rows]);
+
+  return (
+    <div className="reports-r1__panel">
+      <div className="reports-r1__filters row wrap">
+        <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Проект">
+          <option value="">Все проекты</option>
+          {(projects || []).map((p) => (
+            <option key={p.projectId} value={p.projectId}>{p.name}</option>
+          ))}
+        </select>
+        <select value={typeId} onChange={(e) => setTypeId(e.target.value)} aria-label="Тип отличия">
+          <option value="">Все типы</option>
+          {MATERIAL_DRIFT_TYPES.filter((t) => t.id !== "matches_base" || !onlyDiffs).map((t) => (
+            <option key={t.id} value={t.id}>{t.label}</option>
+          ))}
+        </select>
+        <select value={supplier} onChange={(e) => setSupplier(e.target.value)} aria-label="Поставщик">
+          <option value="">Все поставщики</option>
+          {suppliers.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+        <label className="row" style={{ gap: 6, alignItems: "center", fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={onlyDiffs}
+            onChange={(e) => setOnlyDiffs(e.target.checked)}
+          />
+          Только отличия
+        </label>
+        <input
+          type="search"
+          placeholder="Поиск…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="Поиск"
+        />
+      </div>
+
+      <div className="card reports-r1__table-card">
+        <div className="table-scroll-wrap reports-r1__scroll">
+          <table className="spec reports-r1__table">
+            <thead>
+              <tr>
+                <th>Проект</th>
+                <th>Позиция в проекте</th>
+                <th>Материал из базы</th>
+                <th className="right">Цена проекта</th>
+                <th className="right">Цена базы</th>
+                <th>Поставщик</th>
+                <th>Тип отличия</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="muted">Отличий от базы не найдено</td>
+                </tr>
+              ) : (
+                filtered.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.projectName}</td>
+                    <td>{row.itemName}</td>
+                    <td>{row.materialName}</td>
+                    <td className="right num">{money(row.projectPrice)}</td>
+                    <td className="right num">{row.basePrice == null ? "—" : money(row.basePrice)}</td>
+                    <td>{row.supplier}</td>
+                    <td>{row.typeLabel}</td>
+                    <td>
+                      <Link className="btn btn-sm" to={row.openPath}>Открыть проект</Link>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 }
