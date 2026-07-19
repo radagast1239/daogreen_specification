@@ -24,13 +24,20 @@ import { applyItemLineBulkDelete } from "./applyItemLineBulkDelete.js";
  *   delete set — never reuse the pre-confirm read for the actual delete.
  * @param {string} params.layerId — active layer id (e.g. "power")
  * @param {string} params.layerLabel — display name of the active sheet
+ * @param {string} [params.itemLabel] — optional confirm-message item-row
+ *   label override, passed straight through to
+ *   buildCombinedLayerClearMessage (see PHASE 1A-2C2D3E5B, staff
+ *   terminology) — this file stays layer-agnostic, the caller decides
+ *   which layer gets a custom label
+ * @param {string} [params.lineLabel] — optional confirm-message line-row
+ *   label override, same policy as itemLabel
  * @param {(message: string) => boolean} params.confirmFn — injected in
  *   place of window.confirm so this stays DOM-free
  * @param {(command: object) => object | null} params.runGeometryCommand
  * @returns {"empty"|"cancelled"|"success"|"noop"|"no-target"|"geometry-rejected"|"commit-failed"}
  */
 export function applyCombinedLayerClear({
-  getCurrentPlan, layerId, layerLabel, confirmFn, runGeometryCommand,
+  getCurrentPlan, layerId, layerLabel, itemLabel, lineLabel, confirmFn, runGeometryCommand,
 }) {
   const preConfirmPlan = getCurrentPlan();
   const preConfirmSummary = summarizeCombinedLayerClear({
@@ -47,6 +54,8 @@ export function applyCombinedLayerClear({
     layerLabel,
     itemCount: preConfirmSummary.itemCount,
     lineCount: preConfirmSummary.lineCount,
+    itemLabel,
+    lineLabel,
   }));
   if (!confirmed) {
     return "cancelled";

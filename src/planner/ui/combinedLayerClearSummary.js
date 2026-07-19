@@ -48,14 +48,22 @@ export function summarizeCombinedLayerClear({ items, lines, layerId }) {
  * @param {string} params.layerLabel — display name of the active sheet
  * @param {number} params.itemCount
  * @param {number} params.lineCount
+ * @param {string} [params.itemLabel] — caller-supplied item-row label
+ *   (defaults to "Оборудование" so power/light/vent stay byte-for-byte
+ *   unchanged when the caller passes no override — see PHASE
+ *   1A-2C2D3E5B, staff terminology)
+ * @param {string} [params.lineLabel] — caller-supplied line-row label
+ *   (defaults to "Линии и трассы", same policy as itemLabel)
  * @returns {string} explicit, honest combined-clear confirmation text
  */
-export function buildCombinedLayerClearMessage({ layerLabel, itemCount, lineCount }) {
+export function buildCombinedLayerClearMessage({
+  layerLabel, itemCount, lineCount, itemLabel = "Оборудование", lineLabel = "Линии и трассы",
+}) {
   return [
     `Будут удалены объекты листа «${layerLabel}»:`,
     "",
-    `Оборудование — ${itemCount}`,
-    `Линии и трассы — ${lineCount}`,
+    `${itemLabel} — ${itemCount}`,
+    `${lineLabel} — ${lineCount}`,
     "",
     "Продолжить?",
   ].join("\n");
