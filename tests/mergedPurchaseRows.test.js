@@ -71,16 +71,16 @@ describe("mergedPurchaseRows profile pipe", () => {
       },
     ]);
     expect(rows).toHaveLength(1);
-    expect(rows[0].qty).toBe(435);
-    expect(rows[0].clientNote).toBe(
-      "Сегменты: 660 мм — 18 шт, 1300 мм — 24 шт, 1800 мм — 4 шт, 2400 мм — 4 шт"
-    );
     expect(rows[0].pipeCuts).toEqual([
       { lengthMm: 660, qty: 18 },
       { lengthMm: 1300, qty: 24 },
       { lengthMm: 1800, qty: 4 },
       { lengthMm: 2400, qty: 4 },
     ]);
+    expect(rows[0].clientNote).toBe(
+      "Сегменты: 660 мм — 18 шт, 1300 мм — 24 шт, 1800 мм — 4 шт, 2400 мм — 4 шт"
+    );
+    expect(rows[0].qty).toBe(59.88);
   });
 
   it("умножает сегменты на count стеллажа (каталог/builder), Frame BOM не трогает", () => {
@@ -104,7 +104,7 @@ describe("mergedPurchaseRows profile pipe", () => {
           id: "st_a__pipe1",
           module: "Стеллаж A",
           section: "Стеллаж A",
-          // qty уже ×14 при сборке проекта; сегменты — на 1 стеллаж
+          // qty already ×14 at project build; segments are per-rack
           qty: 14 * 30,
           pipeCuts: [
             { lengthMm: 1300, qty: 12 },
@@ -126,7 +126,7 @@ describe("mergedPurchaseRows profile pipe", () => {
           section: "Стеллаж A",
           source: "frame_bom",
           qty: 100,
-          // Frame BOM уже с учётом count
+          // Frame BOM already includes count
           pipeCuts: [{ lengthMm: 2400, qty: 40 }],
         },
       ],
@@ -141,6 +141,38 @@ describe("mergedPurchaseRows profile pipe", () => {
     expect(rows[0].clientNote).toBe(
       "Сегменты: 660 мм — 252 шт, 1300 мм — 180 шт, 2400 мм — 40 шт",
     );
+    // qty = meters from scaled segments, not sum of raw line qty
+    const expectedM =
+      (660 * 252 + 1300 * 180 + 2400 * 40) / 1000;
+    expect(rows[0].qty).toBe(Math.round(expectedM * 100) / 100);
+    expect(rows[0].sources.map((s) => s.qty)).toEqual([
+      Math.round(((1300 * 12 + 660 * 18) * 14) / 1000 * 100) / 100,
+      Math.round((1300 * 2 * 6) / 1000 * 100) / 100,
+      Math.round((2400 * 40) / 1000 * 100) / 100,
+    ]);
+  });
+
+  it("берёт count из stellageCounts клиентского DTO", () => {
+    const rows = mergedPurchaseRows(
+      [
+        {
+          id: "st_x__p",
+          name: "Труба профильная 20/20/1,5 мм",
+          unit: "м.п.",
+          module: "Стеллаж X",
+          section: "Стеллаж X",
+          qty: 6,
+          price: 100,
+          itemType: "material",
+          includedInProject: true,
+          visibleToClient: true,
+          pipeCuts: [{ lengthMm: 1000, qty: 2 }],
+        },
+      ],
+      { stellageCounts: [{ id: "st_x", name: "Стеллаж X", count: 6 }] },
+    );
+    expect(rows[0].pipeCuts).toEqual([{ lengthMm: 1000, qty: 12 }]);
+    expect(rows[0].qty).toBe(12);
   });
 });
 

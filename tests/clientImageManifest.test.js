@@ -44,6 +44,10 @@ describe("unified client image manifest", () => {
     const dto = buildClientProjectFromRelease(draft, parsed, { overlayLive: false });
     expect(dto.manualParams).toBeUndefined();
     expect(dto.stellageConfigs).toBeUndefined();
+    expect(dto.stellageCounts).toEqual([
+      { id: "rack-a", name: "Стеллаж A", moduleName: "", count: 1 },
+      { id: "rack-b", name: "Стеллаж B", moduleName: "", count: 1 },
+    ]);
     expect(dto.clientImages.projectSchemes[0].title).toBe("Трубы");
   });
 

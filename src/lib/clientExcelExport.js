@@ -682,7 +682,7 @@ function supplierMergedSheet(merged) {
 
 function mergedForRole(items, role, project = null) {
   return rowsForResponsibleRole(
-    buildClientPurchaseMergedRows(items, { stellageConfigs: project?.stellageConfigs || [] }),
+    buildClientPurchaseMergedRows(items, { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] }),
     role,
   );
 }
@@ -733,7 +733,7 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
   const installItems = (items || []).filter(
     (i) => i.itemRole === "installation" || i.category === "Работы и доставка"
   );
-  const merged = buildClientPurchaseMergedRows(purchaseItems, { stellageConfigs: project?.stellageConfigs || [] });
+  const merged = buildClientPurchaseMergedRows(purchaseItems, { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] });
   const wb = XLSX.utils.book_new();
 
   const append = (ws, name) => {
@@ -758,7 +758,7 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
   }
 
   if (installItems.length) {
-    append(sheetFromMergedRows(buildClientPurchaseMergedRows(installItems, { stellageConfigs: project?.stellageConfigs || [] }), purchaseStatuses), "10б Монтаж");
+    append(sheetFromMergedRows(buildClientPurchaseMergedRows(installItems, { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] }), purchaseStatuses), "10б Монтаж");
   }
 
   append(moduleDetailSheet(purchaseItems, project, purchaseStatuses), "11 Детализация по модулям");

@@ -884,6 +884,7 @@ export default function SpecEditorPage() {
             items={project.items || []}
             materials={state.materials}
             currency={project.currency}
+            stellageConfigs={project.stellageConfigs || []}
             publishCheck={publishCheck}
             activeFilter={specQuickFilter}
             onFilterSelect={handleDashboardFilter}

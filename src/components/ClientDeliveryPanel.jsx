@@ -42,6 +42,7 @@ export default function ClientDeliveryPanel({
   items = [],
   materials = [],
   currency = "₽",
+  stellageConfigs = [],
   activeFilter = "",
   onFilterSelect,
   selectedItemIds = [],
@@ -59,13 +60,13 @@ export default function ClientDeliveryPanel({
   const [showAllPreview, setShowAllPreview] = useState(false);
 
   const summary = useMemo(
-    () => buildClientPurchaseSummary(items, materials),
-    [items, materials]
+    () => buildClientPurchaseSummary(items, materials, { stellageConfigs }),
+    [items, materials, stellageConfigs]
   );
 
   const previewRows = useMemo(
-    () => buildClientDeliveryPreviewRows(items, materials),
-    [items, materials]
+    () => buildClientDeliveryPreviewRows(items, materials, { stellageConfigs }),
+    [items, materials, stellageConfigs]
   );
 
   const visiblePreview = showAllPreview ? previewRows : previewRows.slice(0, PREVIEW_LIMIT);

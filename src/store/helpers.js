@@ -122,7 +122,9 @@ export function mergedPurchaseRows(items, options = {}) {
 /** Склеенные строки для клиентского UI / Excel / PDF */
 export function mergedItemsForClient(project, items) {
   const pool = items ?? clientPurchaseItems(project);
-  return mergedPurchaseRows(pool, { stellageConfigs: project?.stellageConfigs || [] });
+  return mergedPurchaseRows(pool, {
+    stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [],
+  });
 }
 
 export function mergedPurchaseList(project) {

@@ -94,7 +94,7 @@ export const CLIENT_PDF_EXPORT_OPTIONS = [
 ];
 
 export function getClientPdfExportStats(items, project = null) {
-  const opts = { stellageConfigs: project?.stellageConfigs || [] };
+  const opts = { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] };
   const purchase = clientPurchaseItems({ items: items || [] });
   const merged = mergedPurchaseRows(purchase, opts);
   const mergedCount = merged.length;

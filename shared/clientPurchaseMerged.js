@@ -4,9 +4,13 @@ import { purchaseMergeKey } from "./purchaseMerge.js";
 import { resolveClientSection } from "./clientSections.js";
 import {
   isProfilePipeName,
+  isLinearMeterPipeUnit,
   mergePipeCutsFromItems,
   pipeCutsClientNote,
   resolveStellageCountForProjectItem,
+  scalePipeCuts,
+  resolvePipeCuts,
+  totalPipeCutMeters,
 } from "./profilePipeCuts.js";
 import {
   mergeClientItemNotes,
@@ -69,7 +73,7 @@ function buildMergedSourceText(row) {
 }
 
 function finalizeMergedRow(row, options = {}) {
-  const stellageConfigs = options.stellageConfigs || [];
+  const stellageConfigs = options.stellageConfigs || options.stellageCounts || [];
   const rep = row.sourceItems?.[0];
   row.supplier = resolveMergedSupplier(row.sourceItems) || row.supplier || "";
   row.link = resolveMergedLink(row.sourceItems) || row.link || "";
@@ -83,26 +87,42 @@ function finalizeMergedRow(row, options = {}) {
   for (const s of row.sources) {
     s.unit = row.unit;
   }
-  row.sourceText = buildMergedSourceText(row);
   row.statusSummary = buildPurchaseStatusSummary(row.sourceItems);
   row.status = row.statusSummary.status;
   row.statusLabel = row.statusSummary.statusLabel;
   if (isProfilePipeName(row.name) && row.sourceItems?.length) {
-    // Catalog/builder pipes store per-rack segments; qty is already × count.
-    // Frame BOM pipeCuts are already scaled when added to the project.
-    const mergedCuts = mergePipeCutsFromItems(row.sourceItems, {
-      scaleOf: (it) =>
-        isFrameBomLine(it) ? 1 : resolveStellageCountForProjectItem(it, stellageConfigs),
-    });
+    // Catalog/builder pipes store per-rack segments; Frame BOM already scaled.
+    const scaleOf = (it) =>
+      isFrameBomLine(it) ? 1 : resolveStellageCountForProjectItem(it, stellageConfigs);
+    const mergedCuts = mergePipeCutsFromItems(row.sourceItems, { scaleOf });
     if (mergedCuts.length) {
       row.pipeCuts = mergedCuts;
       row.clientNote = pipeCutsClientNote(mergedCuts);
+      // Per-rack meters in "Из:" and total qty from scaled segments (not raw line qty).
+      if (isLinearMeterPipeUnit(row.unit)) {
+        for (const s of row.sources) {
+          const src = row.sourceItems.find((i) => i.id === s.id) || {};
+          const scaled = scalePipeCuts(resolvePipeCuts(src), scaleOf(src));
+          const meters = totalPipeCutMeters(scaled);
+          if (meters > 0) s.qty = meters;
+        }
+        const metersTotal = totalPipeCutMeters(mergedCuts);
+        if (metersTotal > 0) {
+          row.qty = metersTotal;
+          const price = Number(row.price) || 0;
+          const vat = (Number(row.vatRate) || 0) / 100;
+          const net = lineContributesToSum(rep || row) ? metersTotal * price : 0;
+          row.sum = net;
+          row.sumVat = net + net * vat;
+        }
+      }
     }
   } else {
     const mergedNote = mergeClientItemNotes(row.sourceItems);
     if (mergedNote) row.clientNote = mergedNote;
     else if (!row.clientNote) row.clientNote = resolveClientItemNote(rep || {}) || rep?.clientNote || "";
   }
+  row.sourceText = buildMergedSourceText(row);
   return row;
 }
 

@@ -198,6 +198,7 @@ export function lineToProjectItem(line, section, sortOrder, opts = {}) {
     actualPrice: null,
     clientComment: "",
     sortOrder,
+    ...(Number(line.stellageCount) >= 1 ? { stellageCount: Math.max(1, Number(line.stellageCount)) } : {}),
   };
 }
 
@@ -265,7 +266,7 @@ export function buildProjectFromBuilder({
       const baseQty = resolveBuilderLineQty(line);
       if (baseQty <= 0) continue;
       pushLine(
-        { ...line, qty: Math.round(baseQty * stCount * 100) / 100 },
+        { ...line, qty: Math.round(baseQty * stCount * 100) / 100, stellageCount: stCount },
         section,
         { instanceId: st.id }
       );

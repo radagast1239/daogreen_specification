@@ -18,7 +18,7 @@ import { safePdfText, safePdfPhotoCell } from "./pdfSafeValue.js";
 import { buildClientPdfRowLabel } from "../../shared/clientPurchaseRows.js";
 
 function mergeOpts(project) {
-  return { stellageConfigs: project?.stellageConfigs || [] };
+  return { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] };
 }
 
 function mergedRowsForProject(project, items) {

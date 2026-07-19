@@ -65,6 +65,7 @@ export default function ProjectClientReadinessPanel({
   items = [],
   materials = [],
   currency = "₽",
+  stellageConfigs = [],
   publishCheck,
   activeFilter = "",
   onFilterSelect,
@@ -82,8 +83,8 @@ export default function ProjectClientReadinessPanel({
   const [massMenuOpen, setMassMenuOpen] = useState(false);
 
   const clientSummary = useMemo(
-    () => buildClientPurchaseSummary(items, materials),
-    [items, materials]
+    () => buildClientPurchaseSummary(items, materials, { stellageConfigs }),
+    [items, materials, stellageConfigs]
   );
 
   const residualTwinCount = useMemo(() => countResidualFrameBomTwins(items), [items]);
@@ -103,8 +104,8 @@ export default function ProjectClientReadinessPanel({
   );
 
   const previewRows = useMemo(
-    () => buildClientDeliveryPreviewRows(items, materials),
-    [items, materials]
+    () => buildClientDeliveryPreviewRows(items, materials, { stellageConfigs }),
+    [items, materials, stellageConfigs]
   );
 
   const visiblePreview = showAllPreview ? previewRows : previewRows.slice(0, PREVIEW_LIMIT);

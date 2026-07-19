@@ -273,7 +273,7 @@ function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, mater
 }
 
 export function ClientMergedList({ project, items, patch, purchaseStatuses, groupBySection = false, layout = "cards" }) {
-  const rows = mergedPurchaseRows(items, { stellageConfigs: project?.stellageConfigs || [] });
+  const rows = mergedPurchaseRows(items, { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] });
   if (groupBySection) {
     const groups = groupMergedBySectionHierarchy(rows, project.currency);
     return (
@@ -343,8 +343,8 @@ export default function ClientPurchasePanel({
   const mergeFilter = isClosedMode || isStatusMode ? "all" : effectiveFilter;
 
   const mergeOpts = useMemo(
-    () => ({ stellageConfigs: project?.stellageConfigs || [] }),
-    [project?.stellageConfigs],
+    () => ({ stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] }),
+    [project?.stellageConfigs, project?.stellageCounts],
   );
 
   const mergedRows = useMemo(() => {
@@ -370,7 +370,7 @@ export default function ClientPurchasePanel({
     if (!isStatusMode && isMergedPurchaseMode(effectiveMode)) return [];
     let out = filterItemPool(scoped, { supplierFilter, purchaseQuery });
     out = applyPurchaseFilter(out, effectiveFilter);
-    const configs = project?.stellageConfigs || [];
+    const configs = project?.stellageConfigs || project?.stellageCounts || [];
     return [...out]
       .map((it) => scaleClientItemPipeCutsForDisplay(it, configs))
       .sort((a, b) => {
@@ -379,16 +379,16 @@ export default function ClientPurchasePanel({
         if (ao !== bo) return ao - bo;
         return (a.name || "").localeCompare(b.name || "", "ru");
       });
-  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, effectiveFilter, isStatusMode, project?.stellageConfigs]);
+  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, effectiveFilter, isStatusMode, project?.stellageConfigs, project?.stellageCounts]);
 
   const statusFlatList = useMemo(() => {
     if (!isStatusMode) return [];
     let out = filterItemPool(scoped, { supplierFilter, purchaseQuery });
-    const configs = project?.stellageConfigs || [];
+    const configs = project?.stellageConfigs || project?.stellageCounts || [];
     return [...out]
       .map((it) => scaleClientItemPipeCutsForDisplay(it, configs))
       .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ru"));
-  }, [isStatusMode, scoped, supplierFilter, purchaseQuery, project?.stellageConfigs]);
+  }, [isStatusMode, scoped, supplierFilter, purchaseQuery, project?.stellageConfigs, project?.stellageCounts]);
 
   const { todo, bought } = isClosedMode || (isStatusMode && effectiveMode !== "bought")
     ? { todo: mergedRows ?? filtered, bought: [] }

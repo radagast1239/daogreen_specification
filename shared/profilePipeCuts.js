@@ -78,6 +78,24 @@ export function pipeCutsClientNote(cuts) {
   return label ? `Сегменты: ${label}` : "";
 }
 
+/** Сумма отрезков в погонных метрах (lengthMm × qty / 1000). */
+export function totalPipeCutMeters(pipeCuts) {
+  const totalMm = normalizePipeCuts(pipeCuts).reduce(
+    (sum, c) => sum + (Number(c.lengthMm) || 0) * (Number(c.qty) || 0),
+    0,
+  );
+  return Math.round((totalMm / 1000) * 100) / 100;
+}
+
+/** Единицы, для которых qty должен считаться из сегментов. */
+export function isLinearMeterPipeUnit(unit) {
+  const u = String(unit || "")
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/\s+/g, "");
+  return u === "м" || u === "м." || u === "мп" || u === "м.п" || u === "м.п." || u.includes("м.п");
+}
+
 /** Склеивает отрезки из нескольких строк (стеллажей): одинаковые длины суммируются */
 export function mergePipeCutsFromItems(items, options = {}) {
   const scaleOf = typeof options.scaleOf === "function" ? options.scaleOf : () => 1;
@@ -106,11 +124,26 @@ export function scalePipeCuts(cuts, factor) {
   }));
 }
 
+/** Lean counts for client DTO (no photos / internal fields). */
+export function leanStellageCounts(stellageConfigs = []) {
+  return (Array.isArray(stellageConfigs) ? stellageConfigs : [])
+    .map((c) => ({
+      id: String(c?.id || "").trim(),
+      name: String(c?.name || "").trim(),
+      moduleName: String(c?.moduleName || "").trim(),
+      count: Math.max(1, Number(c?.count) || 1),
+    }))
+    .filter((c) => c.id || c.name);
+}
+
 /**
  * Количество одинаковых стеллажей для позиции спецификации.
  * Frame BOM уже сохранён с учётом count — вызывающий код не должен умножать повторно.
  */
 export function resolveStellageCountForProjectItem(item, stellageConfigs = []) {
+  const embedded = Number(item?.stellageCount ?? item?.rackCount);
+  if (Number.isFinite(embedded) && embedded >= 1) return Math.max(1, embedded);
+
   const configs = Array.isArray(stellageConfigs) ? stellageConfigs : [];
   if (!configs.length) return 1;
   const id = String(item?.id || "");

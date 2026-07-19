@@ -19,6 +19,7 @@ import { buildFarmPowerSnapshot } from "../../../shared/farmPower.js";
 import { stripClientTechnicalFields } from "../../../shared/clientPurchaseRows.js";
 import { normalizePurchaseStatus, getPurchaseStatusLabel } from "../../../shared/purchaseStatusRules.js";
 import { applyPublishedProjectMeta } from "../../../shared/publishedClientMeta.js";
+import { leanStellageCounts } from "../../../shared/profilePipeCuts.js";
 import { documentsFromPinnedFrameDrawings } from "../../../shared/publishedAssetPin.js";
 import { publishedPlannedTotal } from "../../../shared/publishedPurchaseTotals.js";
 import { formatReleaseSummaryText } from "../../../shared/releaseHistoryDiff.js";
@@ -176,6 +177,12 @@ export function buildClientProjectFromRelease(workingProject, snapshot, {
     rooms: coolingRooms,
     farmPower,
     items: clientItems,
+    // Lean rack counts for purchase pipe-cut scaling (not full stellageConfigs).
+    stellageCounts: leanStellageCounts(
+      historicalMode
+        ? (parsed.projectMeta?.stellageCounts || [])
+        : (workingProject?.stellageConfigs || parsed.projectMeta?.stellageCounts || []),
+    ),
     publishedRelease: historicalMode ? historicalRelease : release,
     isPublishedRelease: true,
     clientImages,
