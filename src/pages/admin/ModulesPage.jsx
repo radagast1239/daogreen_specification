@@ -88,6 +88,18 @@ const TABS = TAB_GROUPS.flatMap((g) =>
 
 const LEGACY_TAB = { id: "catalog", label: "Старые модули базы" };
 
+const MODULE_TAB_IDS = new Set([...TABS.map((t) => t.id), LEGACY_TAB.id]);
+
+function initialModulesTab() {
+  try {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t && MODULE_TAB_IDS.has(t)) return t;
+  } catch {
+    /* ignore */
+  }
+  return "farm";
+}
+
 const MODULE_TYPES = [
   { id: "stellage", label: "Стеллаж" },
   { id: "general", label: "Общий" },
@@ -135,7 +147,7 @@ function ModuleBadge({ mod }) {
 export default function ModulesPage() {
   const { state, actions } = useStore();
   const ref = state.reference;
-  const [tab, setTab] = useState("farm");
+  const [tab, setTab] = useState(initialModulesTab);
   const [presets, setPresets] = useState([]);
   const [mods, setMods] = useState([]);
   const [farmSections, setFarmSections] = useState([]);
