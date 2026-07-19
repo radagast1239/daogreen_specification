@@ -31,12 +31,15 @@ import { useStore } from "../../store/StoreContext.jsx";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import ProjectWorkspaceHeader from "../../components/ProjectWorkspaceHeader.jsx";
+import SpecificationItemInspector from "../../components/SpecificationItemInspector.jsx";
+import { DEFAULT_SPECIFICATION_COLUMN_PRESET, SPECIFICATION_COLUMN_PRESETS, specificationPresetHasColumn } from "../../lib/specificationColumnPresets.js";
 import {
   parseProjectWorkspaceView,
   buildProjectWorkspaceSearch,
   normalizeProjectWorkspaceView,
 } from "../../lib/projectWorkspaceView.js";
 import "../../styles/project-workspace.css";
+import "../../styles/specification-table.css";
 import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
 import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient, buildClientVisibilityPatch } from "../../../shared/itemTypes.js";
 import { buildModuleSelectionFromIds } from "../../../shared/specLineSelection.js";
@@ -1352,7 +1355,25 @@ function SpecTab({
   const [saveTplModule, setSaveTplModule] = useState(null);
   const [commentExpandId, setCommentExpandId] = useState(null);
   const [addMaterialModule, setAddMaterialModule] = useState(null);
+  const [columnPreset, setColumnPreset] = useState(DEFAULT_SPECIFICATION_COLUMN_PRESET);
+  const [inspectedItemId, setInspectedItemId] = useState(null);
+  const inspectorTriggerRefs = useRef(new Map());
   const moduleScrollRefs = useRef({});
+
+  const inspectedItem = useMemo(
+    () => project.items.find((item) => item.id === inspectedItemId) || null,
+    [project.items, inspectedItemId]
+  );
+
+  useEffect(() => {
+    if (inspectedItemId && !inspectedItem) setInspectedItemId(null);
+  }, [inspectedItemId, inspectedItem]);
+
+  const closeInspector = useCallback(() => {
+    const trigger = inspectorTriggerRefs.current.get(inspectedItemId);
+    setInspectedItemId(null);
+    window.setTimeout(() => trigger?.focus(), 0);
+  }, [inspectedItemId]);
 
   useEffect(() => {
     onModalOpenChange?.(Boolean(saveTplModule || addMaterialModule));
@@ -1651,6 +1672,22 @@ function SpecTab({
         onClearSelection={() => setModuleSelected({})}
         syncClientSections={syncClientSections}
       />
+      {!clientPreview && (
+        <div className="spec-columns" role="group" aria-label="Набор колонок спецификации">
+          <span className="spec-columns__label muted">Колонки:</span>
+          {Object.entries(SPECIFICATION_COLUMN_PRESETS).map(([id, preset]) => (
+            <button
+              key={id}
+              type="button"
+              className={`btn btn-sm${columnPreset === id ? " btn-primary" : ""}`}
+              aria-pressed={columnPreset === id}
+              onClick={() => setColumnPreset(id)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      )}
       </div>
       </>
       )}
@@ -1675,7 +1712,7 @@ function SpecTab({
         const modSum = visibleItems.filter(lineContributesToSum).reduce((s, i) => s + lineGross(i), 0);
         const specColSpan = clientPreview
           ? (hasFarmItems ? 11 : 10)
-          : (hasFarmItems ? 21 : 20);
+          : (hasFarmItems ? 22 : 21);
         const isStellage = isStellageModuleTitle(module, modules);
         const lineGroups = isStellage ? stellageGroups : FARM_LINE_GROUPS;
         const editItem = readOnly ? () => Promise.resolve() : patchItem;
@@ -1694,10 +1731,10 @@ function SpecTab({
             <React.Fragment key={it.id}>
                   <tr
                     id={`spec-item-${it.id}`}
-                    className={((it.includedInProject === false ? "row-hidden " : "") + (highlightItemId === it.id ? "spec-row--highlight" : ""))}
+                    className={((it.includedInProject === false ? "row-hidden " : "") + (highlightItemId === it.id ? "spec-row--highlight " : "") + (inspectedItemId === it.id ? "spec-row--inspected" : ""))}
                   >
                     {!clientPreview && (
-                    <td style={{ width: 36, textAlign: "center" }}>
+                    <td data-spec-column="select" hidden={!specificationPresetHasColumn(columnPreset, "select")} style={{ width: 36, textAlign: "center" }}>
                       <input
                         type="checkbox"
                         checked={modSelected.has(it.id)}
@@ -1712,7 +1749,7 @@ function SpecTab({
                       />
                     </td>
                     )}
-                    <td className="spec-photo">
+                    <td data-spec-column="photo" hidden={!specificationPresetHasColumn(columnPreset, "photo")} className="spec-photo">
                       {photoSrc(it.imageUrl || it.photoUrl) ? (
                         <img
                           src={photoSrc(it.imageUrl || it.photoUrl)}
@@ -1725,7 +1762,7 @@ function SpecTab({
                         </div>
                       )}
                     </td>
-                    <td style={{ minWidth: 240 }}>
+                    <td data-spec-column="name" hidden={!specificationPresetHasColumn(columnPreset, "name")} style={{ minWidth: 240 }}>
                       {readOnly ? (
                         <div>
                           <strong style={{ fontSize: 13 }}>{it.name}</strong>
@@ -1764,14 +1801,14 @@ function SpecTab({
                         </>
                       )}
                     </td>
-                    <td style={{ width: 70 }}>
+                    <td data-spec-column="unit" hidden={!specificationPresetHasColumn(columnPreset, "unit")} style={{ width: 70 }}>
                       {readOnly ? (
                         <span>{it.unit}</span>
                       ) : (
                       <input className="input-inline" value={it.unit} onChange={(e) => editItem(it.id, { unit: e.target.value })} />
                       )}
                     </td>
-                    <td className="right spec-qty-cell">
+                    <td data-spec-column="qty" hidden={!specificationPresetHasColumn(columnPreset, "qty")} className="right spec-qty-cell">
                       {readOnly ? (
                         <span className="num">{it.qty}</span>
                       ) : (
@@ -1783,7 +1820,7 @@ function SpecTab({
                       />
                       )}
                     </td>
-                    <td className="right" style={{ width: 100 }}>
+                    <td data-spec-column="price" hidden={!specificationPresetHasColumn(columnPreset, "price")} className="right" style={{ width: 100 }}>
                       {readOnly ? (
                         <span className="num">{it.price}</span>
                       ) : (
@@ -1808,7 +1845,7 @@ function SpecTab({
                         </div>
                       )}
                     </td>
-                    <td style={{ width: 56 }}>
+                    <td data-spec-column="vat" hidden={!specificationPresetHasColumn(columnPreset, "vat")} style={{ width: 56 }}>
                       {readOnly ? (
                         <span className="num">{it.vatRate || 0}%</span>
                       ) : (
@@ -1825,7 +1862,7 @@ function SpecTab({
                       </select>
                       )}
                     </td>
-                    <td style={{ width: 100 }}>
+                    <td data-spec-column="supplier" hidden={!specificationPresetHasColumn(columnPreset, "supplier")} style={{ width: 100 }}>
                       {readOnly ? (
                         <span>{it.supplier || "—"}</span>
                       ) : (
@@ -1838,7 +1875,7 @@ function SpecTab({
                       )}
                     </td>
                     {hasFarmItems && (
-                      <td style={{ width: 130 }}>
+                      <td data-spec-column="room" hidden={!specificationPresetHasColumn(columnPreset, "room")} style={{ width: 130 }}>
                         {isFarmGeneralItem(project, it) ? (
                           <select
                             className="input-inline"
@@ -1855,10 +1892,10 @@ function SpecTab({
                         )}
                       </td>
                     )}
-                    <td className="right num" style={{ width: 100, fontWeight: 600 }}>
+                    <td data-spec-column="sum" hidden={!specificationPresetHasColumn(columnPreset, "sum")} className="right num" style={{ width: 100, fontWeight: 600 }}>
                       {lineContributesToSum(it) ? money(lineGross(it), project.currency) : "—"}
                     </td>
-                    <td style={{ minWidth: 170, maxWidth: 240 }}>
+                    <td data-spec-column="links" hidden={!specificationPresetHasColumn(columnPreset, "links")} style={{ minWidth: 170, maxWidth: 240 }}>
                       {readOnly ? (
                         <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
                           {it.link && <a href={it.link} target="_blank" rel="noreferrer">основная ↗</a>}
@@ -1894,7 +1931,7 @@ function SpecTab({
                         </div>
                       )}
                     </td>
-                    <td style={{ minWidth: 120, maxWidth: 150 }}>
+                    <td data-spec-column="purchaseStatus" hidden={!specificationPresetHasColumn(columnPreset, "purchaseStatus")} style={{ minWidth: 120, maxWidth: 150 }}>
                       {readOnly || clientPreview ? (
                         <StatusChip status={it.status || "not_bought"} statuses={PURCHASE_STATUSES} />
                       ) : (
@@ -1921,7 +1958,7 @@ function SpecTab({
                       )}
                     </td>
                     {!clientPreview && (
-                    <td className="spec-comment-cell">
+                    <td data-spec-column="comments" hidden={!specificationPresetHasColumn(columnPreset, "comments")} className="spec-comment-cell">
                       <button
                         type="button"
                         className={`spec-comment-toggle${hasComments ? " has-notes" : ""}${commentsOpen ? " is-open" : ""}`}
@@ -1940,7 +1977,7 @@ function SpecTab({
                       </button>
                     </td>
                     )}
-                    <td style={{ minWidth: 100, maxWidth: 160, fontSize: 12 }}>
+                    <td data-spec-column="clientComment" hidden={!specificationPresetHasColumn(columnPreset, "clientComment")} style={{ minWidth: 100, maxWidth: 160, fontSize: 12 }}>
                       {it.clientComment ? (
                         <span className="chip chip--amber" style={{ whiteSpace: "normal", textAlign: "left" }}>
                           {it.clientComment}
@@ -1951,7 +1988,7 @@ function SpecTab({
                     </td>
                     {!clientPreview && (
                     <>
-                    <td style={{ width: 56 }}>
+                    <td data-spec-column="deliveryDays" hidden={!specificationPresetHasColumn(columnPreset, "deliveryDays")} style={{ width: 56 }}>
                       <input
                         className="input-inline num"
                         type="number"
@@ -1961,7 +1998,7 @@ function SpecTab({
                         onChange={(e) => editItem(it.id, { deliveryDays: Number(e.target.value) || 0 })}
                       />
                     </td>
-                    <td style={{ width: 100 }}>
+                    <td data-spec-column="group" hidden={!specificationPresetHasColumn(columnPreset, "group")} style={{ width: 100 }}>
                       <select
                         className="input-inline"
                         value={it.subcategory || ""}
@@ -1975,7 +2012,7 @@ function SpecTab({
                         ))}
                       </select>
                     </td>
-                    <td style={{ width: 100 }}>
+                    <td data-spec-column="type" hidden={!specificationPresetHasColumn(columnPreset, "type")} style={{ width: 100 }}>
                       <select
                         className="input-inline"
                         value={it.itemType || "material"}
@@ -1988,7 +2025,7 @@ function SpecTab({
                         ))}
                       </select>
                     </td>
-                    <td style={{ width: 60, textAlign: "center" }} title="Включена в проект и сумму">
+                    <td data-spec-column="included" hidden={!specificationPresetHasColumn(columnPreset, "included")} style={{ width: 60, textAlign: "center" }} title="Включена в проект и сумму">
                       <input
                         type="checkbox"
                         checked={it.includedInProject !== false}
@@ -2003,7 +2040,7 @@ function SpecTab({
                         }
                       />
                     </td>
-                    <td style={{ width: 60, textAlign: "center" }} title="Скрыто от клиента">
+                    <td data-spec-column="clientVisibility" hidden={!specificationPresetHasColumn(columnPreset, "clientVisibility") && !specificationPresetHasColumn(columnPreset, "hidden")} style={{ width: 60, textAlign: "center" }} title="Скрыто от клиента">
                       <input
                         type="checkbox"
                         checked={it.includedInProject !== false && !lineVisibleToClient(it, materials.find((m) => m.id === it.materialId))}
@@ -2017,7 +2054,7 @@ function SpecTab({
                         }
                       />
                     </td>
-                    <td style={{ width: 44 }}>
+                    <td data-spec-column="catalog" hidden={!specificationPresetHasColumn(columnPreset, "catalog")} style={{ width: 44 }}>
                       {it.materialId ? (
                         <details className="refresh-from-base">
                           <summary className="btn btn-ghost btn-sm" title="Обновить из базы материалов">
@@ -2042,7 +2079,7 @@ function SpecTab({
                         <span className="muted" style={{ fontSize: 11 }}>—</span>
                       )}
                     </td>
-                    <td style={{ width: 36 }}>
+                    <td data-spec-column="delete" hidden={!specificationPresetHasColumn(columnPreset, "delete")} style={{ width: 36 }}>
                       <button
                         className="btn btn-ghost btn-sm"
                         title="Удалить"
@@ -2059,6 +2096,16 @@ function SpecTab({
                       >
                         ✕
                       </button>
+                    </td>
+                    <td data-spec-column="details" className="spec-details-cell">
+                      <button
+                        ref={(node) => node ? inspectorTriggerRefs.current.set(it.id, node) : inspectorTriggerRefs.current.delete(it.id)}
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        aria-label={`Подробнее: ${it.name}`}
+                        aria-expanded={inspectedItemId === it.id}
+                        onClick={() => setInspectedItemId(it.id)}
+                      >Подробнее</button>
                     </td>
                     </>
                     )}
@@ -2155,34 +2202,35 @@ function SpecTab({
                 : {}),
             }}
           >
-            <table className="spec">
+            <table className="spec" data-preset={columnPreset}>
               <thead className="virtual-table-head">
                 <tr>
-                  {!clientPreview && <th style={{ width: 36 }} aria-label="Выбор" />}
-                  <th style={{ width: 48 }}>Фото</th>
-                  <th>Наименование</th>
-                  <th>Ед</th>
-                  <th className="right spec-qty-cell">Кол-во</th>
-                  <th className="right">Цена</th>
-                  <th>НДС</th>
-                  <th>Поставщик</th>
-                  {hasFarmItems && <th style={{ width: 130 }}>Комната</th>}
-                  <th className="right">Сумма</th>
-                  <th>Ссылка</th>
-                  <th style={{ width: 130 }}>Статус закупки</th>
-                  {!clientPreview && <th className="spec-comment-cell" title="Комментарии к позиции">💬</th>}
-                  <th title="Комментарий клиента">Клиент</th>
+                  {!clientPreview && <th data-spec-column="select" hidden={!specificationPresetHasColumn(columnPreset, "select")} style={{ width: 36 }} aria-label="Выбор" />}
+                  <th data-spec-column="photo" hidden={!specificationPresetHasColumn(columnPreset, "photo")} style={{ width: 48 }}>Фото</th>
+                  <th data-spec-column="name" hidden={!specificationPresetHasColumn(columnPreset, "name")}>Наименование</th>
+                  <th data-spec-column="unit" hidden={!specificationPresetHasColumn(columnPreset, "unit")}>Ед</th>
+                  <th data-spec-column="qty" hidden={!specificationPresetHasColumn(columnPreset, "qty")} className="right spec-qty-cell">Кол-во</th>
+                  <th data-spec-column="price" hidden={!specificationPresetHasColumn(columnPreset, "price")} className="right">Цена</th>
+                  <th data-spec-column="vat" hidden={!specificationPresetHasColumn(columnPreset, "vat")}>НДС</th>
+                  <th data-spec-column="supplier" hidden={!specificationPresetHasColumn(columnPreset, "supplier")}>Поставщик</th>
+                  {hasFarmItems && <th data-spec-column="room" hidden={!specificationPresetHasColumn(columnPreset, "room")} style={{ width: 130 }}>Комната</th>}
+                  <th data-spec-column="sum" hidden={!specificationPresetHasColumn(columnPreset, "sum")} className="right">Сумма</th>
+                  <th data-spec-column="links" hidden={!specificationPresetHasColumn(columnPreset, "links")}>Ссылка</th>
+                  <th data-spec-column="purchaseStatus" hidden={!specificationPresetHasColumn(columnPreset, "purchaseStatus")} style={{ width: 130 }}>Статус закупки</th>
+                  {!clientPreview && <th data-spec-column="comments" hidden={!specificationPresetHasColumn(columnPreset, "comments")} className="spec-comment-cell" title="Комментарии к позиции">💬</th>}
+                  <th data-spec-column="clientComment" hidden={!specificationPresetHasColumn(columnPreset, "clientComment")} title="Комментарий клиента">Клиент</th>
                   {!clientPreview && (
                     <>
-                  <th title="Срок поставки, дней">Дней</th>
-                  <th>Группа</th>
-                  <th>Тип</th>
-                  <th title="В проекте">В проекте</th>
-                  <th title="Скрыто от клиента">Скрыто</th>
-                  <th title="Обновить снимок из базы">База</th>
-                  <th></th>
+                  <th data-spec-column="deliveryDays" hidden={!specificationPresetHasColumn(columnPreset, "deliveryDays")} title="Срок поставки, дней">Дней</th>
+                  <th data-spec-column="group" hidden={!specificationPresetHasColumn(columnPreset, "group")}>Группа</th>
+                  <th data-spec-column="type" hidden={!specificationPresetHasColumn(columnPreset, "type")}>Тип</th>
+                  <th data-spec-column="included" hidden={!specificationPresetHasColumn(columnPreset, "included")} title="В проекте">В проекте</th>
+                  <th data-spec-column="clientVisibility" hidden={!specificationPresetHasColumn(columnPreset, "clientVisibility") && !specificationPresetHasColumn(columnPreset, "hidden")} title="Скрыто от клиента">Скрыто</th>
+                  <th data-spec-column="catalog" hidden={!specificationPresetHasColumn(columnPreset, "catalog")} title="Обновить снимок из базы">База</th>
+                  <th data-spec-column="delete" hidden={!specificationPresetHasColumn(columnPreset, "delete")}></th>
                     </>
                   )}
+                  {!clientPreview && <th data-spec-column="details" className="spec-details-cell">Подробнее</th>}
                 </tr>
               </thead>
               <tbody>{bodyRows}</tbody>
@@ -2191,6 +2239,25 @@ function SpecTab({
         </Collapsible>
       );
       })}
+      {!clientPreview && inspectedItem && (
+        <SpecificationItemInspector
+          item={inspectedItem}
+          project={project}
+          materials={materials}
+          rooms={rooms}
+          lineGroups={isStellageModuleTitle(inspectedItem.module, modules) ? stellageGroups : FARM_LINE_GROUPS}
+          sectionOptions={sectionNames}
+          onPatch={patchItem}
+          onClose={closeInspector}
+          onRefreshFromBase={(itemId) => refreshFromBase([itemId], ["all"])}
+          onDuplicate={(item) => actions.itemAdd(project.id, { ...item })}
+          onMove={(item, target) => patchItem(item.id, { module: target, section: target })}
+          onDelete={async (item) => {
+            const ok = await confirm({ title: "Удалить позицию?", message: item.name, confirmLabel: "Удалить" });
+            if (ok) actions.itemDelete(project.id, item.id);
+          }}
+        />
+      )}
       </div>
     </div>
   );
