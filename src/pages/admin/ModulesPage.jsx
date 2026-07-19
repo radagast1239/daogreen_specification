@@ -47,15 +47,44 @@ import {
   stellageCatalogLinesCopiedFrom,
   stripStellageCatalogLines,
 } from "../../lib/stellageCatalogConfig.js";
+import { emptySearchMessage, filterByQuery } from "../../lib/modulesListView.js";
+import {
+  ModulesSearch,
+  RowActionsMenu,
+  StickySaveBar,
+  TechDetails,
+} from "../../components/modulesUi.jsx";
 
-const TABS = [
-  { id: "stellage", label: "Пресеты стеллажей" },
-  { id: "stellage_composition", label: "Состав стеллажей" },
-  { id: "farm", label: "Разделы фермы" },
-  { id: "directories", label: "Справочники" },
-  { id: "brand", label: "Клиент и бренд" },
-  { id: "publish", label: "Правила публикации" },
+const TAB_GROUPS = [
+  {
+    id: "g-stellage",
+    label: "Стеллажи",
+    tabs: [
+      { id: "stellage", label: "Пресеты", fullLabel: "Пресеты стеллажей" },
+      { id: "stellage_composition", label: "Состав", fullLabel: "Состав стеллажей" },
+    ],
+  },
+  {
+    id: "g-farm",
+    label: "Ферма",
+    tabs: [
+      { id: "farm", label: "Разделы", fullLabel: "Разделы фермы" },
+      { id: "directories", label: "Справочники", fullLabel: "Справочники" },
+    ],
+  },
+  {
+    id: "g-client",
+    label: "Клиент",
+    tabs: [
+      { id: "brand", label: "Клиент и бренд", fullLabel: "Клиент и бренд" },
+      { id: "publish", label: "Публикация", fullLabel: "Правила публикации" },
+    ],
+  },
 ];
+
+const TABS = TAB_GROUPS.flatMap((g) =>
+  g.tabs.map((t) => ({ id: t.id, label: t.fullLabel || t.label }))
+);
 
 const LEGACY_TAB = { id: "catalog", label: "Старые модули базы" };
 
@@ -116,6 +145,11 @@ export default function ModulesPage() {
   const [editingSection, setEditingSection] = useState(null);
   const [editLines, setEditLines] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [farmQuery, setFarmQuery] = useState("");
+  const [presetQuery, setPresetQuery] = useState("");
+  const [compositionQuery, setCompositionQuery] = useState("");
+  const [farmRowEditingId, setFarmRowEditingId] = useState(null);
+  const [groupsSavedFlash, setGroupsSavedFlash] = useState(false);
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [showArchived, setShowArchived] = useState(false);
@@ -223,6 +257,8 @@ export default function ModulesPage() {
     const nextRef = { ...ref, stellageGroups: stellageGroupsDraft };
     await api.saveSettings(referenceToSettings(nextRef));
     await actions.refreshSettings();
+    setGroupsSavedFlash(true);
+    setTimeout(() => setGroupsSavedFlash(false), 1600);
   };
 
   const saveStellageModuleCatalog = async () => {
@@ -430,6 +466,8 @@ export default function ModulesPage() {
   const sectionVersions = editingSection ? farmSectionVersions[editingSection.id] || [] : [];
   const inEditor = !!(editing || editingSection || editingMod || editingStellageMod);
   const tabLabel = [...TABS, LEGACY_TAB].find((t) => t.id === tab)?.label || "раздел";
+  const groupsDirty =
+    JSON.stringify(stellageGroupsDraft) !== JSON.stringify(ref.stellageGroups || []);
 
   const exitEditor = () => {
     setEditing(null);
@@ -439,6 +477,37 @@ export default function ModulesPage() {
   };
 
   const responsibleLabel = (id) => ref.responsibleRoles.find((r) => r.id === id)?.label || "—";
+
+  const filteredFarmSections = useMemo(
+    () =>
+      filterByQuery(
+        farmSections,
+        farmQuery,
+        (sec) => {
+          const groupLabel =
+            farmSectionGroups.find((g) => g.id === (sec.group || "other"))?.label || "";
+          const role =
+            ref.responsibleRoles.find((r) => r.id === sec.defaultResponsible)?.label || "";
+          return `${sec.name} ${sec.icon || ""} ${groupLabel} ${role}`;
+        }
+      ),
+    [farmSections, farmQuery, farmSectionGroups, ref.responsibleRoles]
+  );
+
+  const filteredPresets = useMemo(
+    () =>
+      filterByQuery(
+        stellagePresets,
+        presetQuery,
+        (p) => `${p.name} ${p.moduleName || ""} ${formatStellageParamsSummary(p.params) || ""}`
+      ),
+    [stellagePresets, presetQuery]
+  );
+
+  const filteredStellageMods = useMemo(
+    () => filterByQuery(stellageMods, compositionQuery, (m) => `${m.name} ${m.tech || ""}`),
+    [stellageMods, compositionQuery]
+  );
 
   const saveStellagePreset = async () => {
     if (!editing?.name?.trim()) {
@@ -710,8 +779,8 @@ export default function ModulesPage() {
   return (
     <>
       <PageHeader
-        title="Модули и шаблоны фермы"
-        sub="Разделы фермы, состав стеллажей по умолчанию, пресеты и справочники."
+        title="Шаблоны и справочники"
+        sub="Стеллажи, структура фермы, справочники и клиентская выдача"
         back={{ to: "/", label: "Проекты" }}
       />
 
@@ -722,23 +791,35 @@ export default function ModulesPage() {
       )}
 
       {!inEditor && (
-      <div className="step-tabs">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={`btn btn-sm ${tab === t.id ? "btn-primary" : ""}`}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-          </button>
+      <nav className="modules-tabs" aria-label="Разделы шаблонов">
+        {TAB_GROUPS.map((group) => (
+          <div key={group.id} className="modules-tabs__group">
+            <span className="modules-tabs__group-label">{group.label}</span>
+            <div className="modules-tabs__items">
+              {group.tabs.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={"modules-tabs__btn" + (tab === t.id ? " is-active" : "")}
+                  onClick={() => setTab(t.id)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
         {showLegacyTools && tab === "catalog" && (
-          <button type="button" className="btn btn-sm btn-primary">
-            {LEGACY_TAB.label}
-          </button>
+          <div className="modules-tabs__group">
+            <span className="modules-tabs__group-label">Служебное</span>
+            <div className="modules-tabs__items">
+              <button type="button" className="modules-tabs__btn is-active">
+                {LEGACY_TAB.label}
+              </button>
+            </div>
+          </div>
         )}
-      </div>
+      </nav>
       )}
 
       {!inEditor && tab !== "catalog" && (
@@ -804,21 +885,28 @@ export default function ModulesPage() {
       )}
 
       {tab === "stellage" && !inEditor && (
-        <div className="content">
-          <div className="toolbar">
+        <div className="content modules-page-panel">
+          <div className="toolbar modules-list-toolbar">
+            <ModulesSearch
+              value={presetQuery}
+              onChange={setPresetQuery}
+              placeholder="Поиск пресетов…"
+            />
             <button type="button" className="btn btn-primary btn-sm" onClick={startNewStellagePreset}>
-              ＋ Новый пресет стеллажа
+              + Новый пресет
             </button>
           </div>
           {stellagePresets.length === 0 ? (
             <p className="muted">Пока нет сохранённых конфигураций стеллажей.</p>
+          ) : emptySearchMessage(presetQuery, filteredPresets.length) ? (
+            <p className="muted modules-empty">{emptySearchMessage(presetQuery, filteredPresets.length)}</p>
           ) : (
             <>
               <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
                 Перетащите карточки для изменения порядка в «Новый проект».
               </p>
               <div className="preset-grid preset-grid--sortable">
-                {stellagePresets.map((p) => (
+                {filteredPresets.map((p) => (
                   <div
                     key={p.id}
                     className={`preset-card ${dragPresetId === p.id ? "preset-card--drag" : ""}`}
@@ -852,16 +940,30 @@ export default function ModulesPage() {
                         fetchParams={{ preset_id: p.id }}
                       />
                     </div>
-                    <div className="row" style={{ marginTop: 10, gap: 6 }}>
+                    <div className="row modules-row__actions" style={{ marginTop: 10, gap: 6 }}>
                       <button type="button" className="btn btn-sm" onClick={() => openStellagePreset(p)}>
-                        Редактировать
+                        Настроить
                       </button>
-                      <button type="button" className="btn btn-sm" onClick={() => duplicateStellagePreset(p)}>
-                        Копия
-                      </button>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => deletePreset(p.id)}>
-                        ✕
-                      </button>
+                      <RowActionsMenu
+                        items={[
+                          {
+                            id: "edit",
+                            label: "Редактировать",
+                            onClick: () => openStellagePreset(p),
+                          },
+                          {
+                            id: "copy",
+                            label: "Копировать",
+                            onClick: () => duplicateStellagePreset(p),
+                          },
+                          {
+                            id: "delete",
+                            label: "Удалить",
+                            danger: true,
+                            onClick: () => deletePreset(p.id),
+                          },
+                        ]}
+                      />
                     </div>
                   </div>
                 ))}
@@ -872,41 +974,46 @@ export default function ModulesPage() {
       )}
 
       {tab === "stellage_composition" && !inEditor && (
-        <div className="content">
+        <div className="content modules-page-panel">
           <StellageGroupsEditor
             groups={stellageGroupsDraft}
             onChange={setStellageGroupsDraft}
           />
-          <div className="toolbar" style={{ marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+          <div className="toolbar modules-list-toolbar" style={{ marginBottom: 14 }}>
+            <ModulesSearch
+              value={compositionQuery}
+              onChange={setCompositionQuery}
+              placeholder="Поиск стеллажей…"
+            />
             <button type="button" className="btn btn-primary btn-sm" onClick={openNewStellageModule}>
-              ＋ Создать стеллаж
-            </button>
-            <button type="button" className="btn btn-sm" disabled={saving} onClick={saveStellageGroups}>
-              Сохранить группы
+              + Новый стеллаж
             </button>
           </div>
           <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
-            Шаблон по умолчанию для каждого типа стеллажа — попадает в мастер «Новый проект» и в пресеты. Отметьте
-            позиции, укажите кол-во и группу состава.
+            Шаблон по умолчанию для каждого типа стеллажа — попадает в мастер «Новый проект» и в пресеты.
           </p>
           {stellageMods.length === 0 ? (
             <p className="muted">
-              Нет типов стеллажей. Нажмите «＋ Создать стеллаж» выше или добавьте модуль с типом «Стеллаж» в «Служебное → Старые модули базы».
+              Нет типов стеллажей. Нажмите «+ Новый стеллаж» выше или добавьте модуль с типом «Стеллаж» в «Служебное → Старые модули базы».
+            </p>
+          ) : emptySearchMessage(compositionQuery, filteredStellageMods.length) ? (
+            <p className="muted modules-empty">
+              {emptySearchMessage(compositionQuery, filteredStellageMods.length)}
             </p>
           ) : (
             <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-              <table className="spec">
+              <table className="spec modules-compact-table">
                 <thead>
                   <tr>
-                    <th style={{ width: 64 }}>Фото</th>
+                    <th style={{ width: 56 }}>Фото</th>
                     <th>Тип стеллажа</th>
                     <th>Технология</th>
                     <th className="right" style={{ width: 90 }}>В шаблоне</th>
-                    <th className="right" style={{ width: 220 }} />
+                    <th className="right" style={{ width: 160 }} />
                   </tr>
                 </thead>
                 <tbody>
-                  {stellageMods.map((mod) => (
+                  {filteredStellageMods.map((mod) => (
                     <tr key={mod.id}>
                       <td>
                         <StellagePhotoThumb url={stellageModulePhoto(stellageModuleMeta, mod.id)} />
@@ -916,18 +1023,24 @@ export default function ModulesPage() {
                       </td>
                       <td className="muted" style={{ fontSize: 12 }}>{mod.tech || "—"}</td>
                       <td className="right num muted">{stellageCatalogCount(stellageCatalogs, mod.id)}</td>
-                      <td className="right">
+                      <td className="right modules-row__actions">
                         <button type="button" className="btn btn-sm" onClick={() => openStellageModuleEditor(mod)}>
                           Настроить
                         </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          title="Скопировать состав в другой тип"
-                          onClick={() => copyStellageCatalogToModule(mod)}
-                        >
-                          Копия
-                        </button>
+                        <RowActionsMenu
+                          items={[
+                            {
+                              id: "configure",
+                              label: "Настроить",
+                              onClick: () => openStellageModuleEditor(mod),
+                            },
+                            {
+                              id: "copy",
+                              label: "Копировать",
+                              onClick: () => copyStellageCatalogToModule(mod),
+                            },
+                          ]}
+                        />
                         <div style={{ marginTop: 8, textAlign: "left" }}>
                           <FrameDrawingTargetRow
                             compact
@@ -958,105 +1071,160 @@ export default function ModulesPage() {
               </table>
             </div>
           )}
+          <StickySaveBar
+            dirty={groupsDirty}
+            saving={saving}
+            saved={groupsSavedFlash}
+            onSave={saveStellageGroups}
+            onCancel={() => setStellageGroupsDraft(ref.stellageGroups || [])}
+            saveLabel="Сохранить группы"
+          />
         </div>
       )}
 
       {tab === "farm" && !inEditor && (
-        <div className="content">
-          <div className="toolbar" style={{ marginBottom: 14 }}>
+        <div className="content modules-page-panel">
+          <div className="toolbar modules-list-toolbar" style={{ marginBottom: 14 }}>
+            <ModulesSearch
+              value={farmQuery}
+              onChange={setFarmQuery}
+              placeholder="Поиск разделов…"
+            />
             <button type="button" className="btn btn-primary btn-sm" onClick={addFarmSection}>
-              ＋ Новый раздел
+              + Новый раздел
             </button>
           </div>
           <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
-            Каждый раздел — шаблон списка материалов с кол-вом по умолчанию. В проекте вы отмечаете нужные позиции.
-            Можно экспортировать раздел в JSON и перенести на другой сервер.
+            Каждый раздел — шаблон списка материалов с кол-вом по умолчанию. Можно экспортировать раздел в JSON.
           </p>
-          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-            <table className="spec">
-              <thead>
-                <tr>
-                  <th style={{ width: 36 }}>#</th>
-                  <th>Раздел</th>
-                  <th>Группа</th>
-                  <th>Ответств.</th>
-                  <th className="right" style={{ width: 90 }}>В составе</th>
-                  <th className="right" style={{ width: 340 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {farmSections.map((sec, i) => (
-                  <tr key={sec.id}>
-                    <td className="muted num">{i + 1}</td>
-                    <td>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <span aria-hidden>{sec.icon}</span>
-                        <input
-                          className="spec-cell-input"
-                          value={sec.name}
-                          style={{ borderColor: `${sec.color}55` }}
-                          onChange={(e) =>
-                            setFarmSections(patchSectionName(farmSections, sec.id, e.target.value))
-                          }
-                          onBlur={(e) => saveSectionName(sec.id, e.target.value)}
-                        />
-                      </span>
-                    </td>
-                    <td>
-                      <select
-                        className="spec-cell-input"
-                        value={sec.group || "other"}
-                        onChange={(e) => saveSectionMeta(sec.id, { group: e.target.value })}
-                      >
-                        {farmSectionGroups.map((g) => (
-                          <option key={g.id} value={g.id}>{g.label}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="muted" style={{ fontSize: 12 }}>
-                      {responsibleLabel(sec.defaultResponsible)}
-                    </td>
-                    <td className="right num muted">{catalogCount(sec.id)}</td>
-                    <td className="right">
-                      <button type="button" className="btn btn-sm" onClick={() => openSectionEditor(sec)}>
-                        Настроить
-                      </button>
-                      <button type="button" className="btn btn-sm" onClick={() => duplicateFarmSection(sec)}>
-                        Копия
-                      </button>
-                      <button type="button" className="btn btn-ghost btn-sm" title="Экспорт JSON" onClick={() => exportSectionJson(sec)}>
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        disabled={i === 0}
-                        onClick={() => moveFarmSection(sec.id, "up")}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        disabled={i === farmSections.length - 1}
-                        onClick={() => moveFarmSection(sec.id, "down")}
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        title="Удалить"
-                        onClick={() => deleteFarmSection(sec)}
-                      >
-                        ✕
-                      </button>
-                    </td>
+          {farmSections.length === 0 ? (
+            <p className="muted">Нет разделов фермы.</p>
+          ) : emptySearchMessage(farmQuery, filteredFarmSections.length) ? (
+            <p className="muted modules-empty">{emptySearchMessage(farmQuery, filteredFarmSections.length)}</p>
+          ) : (
+            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+              <table className="spec modules-compact-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 36 }}>#</th>
+                    <th>Раздел</th>
+                    <th>Группа</th>
+                    <th>Ответств.</th>
+                    <th className="right" style={{ width: 90 }}>В составе</th>
+                    <th className="right" style={{ width: 180 }} />
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filteredFarmSections.map((sec, i) => {
+                    const fullIndex = farmSections.findIndex((s) => s.id === sec.id);
+                    const groupMeta = farmSectionGroups.find((g) => g.id === (sec.group || "other"));
+                    const editingRow = farmRowEditingId === sec.id;
+                    return (
+                      <tr key={sec.id} className={editingRow ? "modules-row--editing" : undefined}>
+                        <td className="muted num">{i + 1}</td>
+                        <td>
+                          {editingRow ? (
+                            <div className="modules-row__edit">
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                <span aria-hidden>{sec.icon}</span>
+                                <input
+                                  className="spec-cell-input"
+                                  value={sec.name}
+                                  style={{ borderColor: `${sec.color}55` }}
+                                  onChange={(e) =>
+                                    setFarmSections(patchSectionName(farmSections, sec.id, e.target.value))
+                                  }
+                                  onBlur={(e) => saveSectionName(sec.id, e.target.value)}
+                                />
+                              </span>
+                              <TechDetails>
+                                <div><code>{sec.id}</code></div>
+                                {sec.group ? <div>group: <code>{sec.group}</code></div> : null}
+                              </TechDetails>
+                            </div>
+                          ) : (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <span aria-hidden>{sec.icon}</span>
+                              <strong>{sec.name}</strong>
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {editingRow ? (
+                            <select
+                              className="spec-cell-input"
+                              value={sec.group || "other"}
+                              onChange={(e) => saveSectionMeta(sec.id, { group: e.target.value })}
+                            >
+                              {farmSectionGroups.map((g) => (
+                                <option key={g.id} value={g.id}>{g.label}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="muted" style={{ fontSize: 12 }}>{groupMeta?.label || "—"}</span>
+                          )}
+                        </td>
+                        <td className="muted" style={{ fontSize: 12 }}>
+                          {responsibleLabel(sec.defaultResponsible)}
+                        </td>
+                        <td className="right num muted">{catalogCount(sec.id)}</td>
+                        <td className="right modules-row__actions">
+                          {editingRow ? (
+                            <button type="button" className="btn btn-sm" onClick={() => setFarmRowEditingId(null)}>
+                              Готово
+                            </button>
+                          ) : (
+                            <>
+                              <button type="button" className="btn btn-sm" onClick={() => openSectionEditor(sec)}>
+                                Настроить
+                              </button>
+                              <RowActionsMenu
+                                items={[
+                                  {
+                                    id: "edit",
+                                    label: "Редактировать",
+                                    onClick: () => setFarmRowEditingId(sec.id),
+                                  },
+                                  {
+                                    id: "copy",
+                                    label: "Копировать",
+                                    onClick: () => duplicateFarmSection(sec),
+                                  },
+                                  {
+                                    id: "export",
+                                    label: "Экспорт JSON",
+                                    onClick: () => exportSectionJson(sec),
+                                  },
+                                  {
+                                    id: "up",
+                                    label: "Переместить выше",
+                                    disabled: fullIndex <= 0,
+                                    onClick: () => moveFarmSection(sec.id, "up"),
+                                  },
+                                  {
+                                    id: "down",
+                                    label: "Переместить ниже",
+                                    disabled: fullIndex < 0 || fullIndex >= farmSections.length - 1,
+                                    onClick: () => moveFarmSection(sec.id, "down"),
+                                  },
+                                  {
+                                    id: "delete",
+                                    label: "Удалить",
+                                    danger: true,
+                                    onClick: () => deleteFarmSection(sec),
+                                  },
+                                ]}
+                              />
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
           <div style={{ marginTop: 12 }}>
             <label className="btn btn-sm">
               ↑ Импорт раздела JSON

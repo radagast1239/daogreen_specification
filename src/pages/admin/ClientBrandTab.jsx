@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api, photoSrc } from "../../lib/api.js";
 import {
   buildClientBrand,
@@ -12,6 +12,7 @@ import {
   PDF_COLUMN_OPTIONS,
   PDF_COLUMN_PRESETS,
 } from "../../lib/clientBrandConfig.js";
+import { StickySaveBar } from "../../components/modulesUi.jsx";
 
 function ColorField({ label, value, onChange }) {
   return (
@@ -28,11 +29,15 @@ function ColorField({ label, value, onChange }) {
 export default function ClientBrandTab({ settings, onSaved }) {
   const [brand, setBrand] = useState(() => buildClientBrand(settings));
   const [saving, setSaving] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     setBrand(buildClientBrand(settings));
   }, [settings]);
+
+  const baseline = useMemo(() => JSON.stringify(buildClientBrand(settings)), [settings]);
+  const dirty = JSON.stringify(brand) !== baseline;
 
   const patch = (key, value) => setBrand((b) => ({ ...b, [key]: value }));
 
@@ -69,6 +74,8 @@ export default function ClientBrandTab({ settings, onSaved }) {
     try {
       await api.saveSettings(clientBrandToSettings(brand));
       onSaved?.();
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1600);
     } catch (e) {
       alert(e.message);
     } finally {
@@ -279,10 +286,7 @@ export default function ClientBrandTab({ settings, onSaved }) {
         </label>
       </div>
 
-      <div className="toolbar">
-        <button type="button" className="btn btn-primary" disabled={saving} onClick={save}>
-          {saving ? "Сохранение…" : "Сохранить"}
-        </button>
+      <div className="toolbar" style={{ marginBottom: 56 }}>
         <button
           type="button"
           className="btn btn-ghost"
@@ -303,6 +307,15 @@ export default function ClientBrandTab({ settings, onSaved }) {
           Сбросить оформление
         </button>
       </div>
+
+      <StickySaveBar
+        dirty={dirty}
+        saving={saving}
+        saved={savedFlash}
+        onSave={save}
+        onCancel={() => setBrand(buildClientBrand(settings))}
+        saveLabel="Сохранить"
+      />
     </div>
   );
 }

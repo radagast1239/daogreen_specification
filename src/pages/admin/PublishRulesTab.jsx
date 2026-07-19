@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/api.js";
 import {
   PUBLISH_RULE_OPTIONS,
@@ -6,14 +6,19 @@ import {
   buildPublishRulesForm,
   publishRulesToSettings,
 } from "../../lib/publishRulesConfig.js";
+import { StickySaveBar, TechDetails } from "../../components/modulesUi.jsx";
 
 export default function PublishRulesTab({ settings, onSaved }) {
   const [form, setForm] = useState(() => buildPublishRulesForm(settings));
   const [saving, setSaving] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
 
   useEffect(() => {
     setForm(buildPublishRulesForm(settings));
   }, [settings]);
+
+  const baseline = useMemo(() => JSON.stringify(buildPublishRulesForm(settings)), [settings]);
+  const dirty = JSON.stringify(form) !== baseline;
 
   const patchRule = (id, value) =>
     setForm((f) => ({ ...f, rules: { ...f.rules, [id]: value } }));
@@ -23,6 +28,8 @@ export default function PublishRulesTab({ settings, onSaved }) {
     try {
       await api.saveSettings(publishRulesToSettings(form));
       onSaved?.();
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1600);
     } catch (e) {
       alert(e.message);
     } finally {
@@ -31,7 +38,7 @@ export default function PublishRulesTab({ settings, onSaved }) {
   };
 
   return (
-    <div className="content">
+    <div className="content modules-page-panel">
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
         Что должно быть заполнено у позиций перед «Ссылка клиенту» и «Утвердить версию». Проверяются видимые и включённые
         позиции; для клиента дополнительно нужны утверждение и количество.
@@ -84,15 +91,17 @@ export default function PublishRulesTab({ settings, onSaved }) {
 
       <div className="card" style={{ padding: 20, marginBottom: 16 }}>
         <h3 style={{ marginTop: 0 }}>Текст сообщения клиенту</h3>
-        <p className="muted" style={{ fontSize: 12, margin: "0 0 10px" }}>
-          Подстановки: <code>{"{greeting}"}</code>, <code>{"{clientName}"}</code>, <code>{"{projectName}"}</code>,{" "}
-          <code>{"{url}"}</code>, <code>{"{company}"}</code>
-        </p>
+        <TechDetails summary="Дополнительно — подстановки">
+          <p className="muted" style={{ fontSize: 12, margin: "0 0 10px" }}>
+            Подстановки: <code>{"{greeting}"}</code>, <code>{"{clientName}"}</code>, <code>{"{projectName}"}</code>,{" "}
+            <code>{"{url}"}</code>, <code>{"{company}"}</code>
+          </p>
+        </TechDetails>
         <textarea
           rows={9}
           value={form.clientLinkTemplate}
           onChange={(e) => setForm((f) => ({ ...f, clientLinkTemplate: e.target.value }))}
-          style={{ width: "100%", fontFamily: "inherit", fontSize: 13 }}
+          style={{ width: "100%", fontFamily: "inherit", fontSize: 13, marginTop: 8 }}
         />
         <button
           type="button"
@@ -104,9 +113,14 @@ export default function PublishRulesTab({ settings, onSaved }) {
         </button>
       </div>
 
-      <button type="button" className="btn btn-primary" disabled={saving} onClick={save}>
-        {saving ? "Сохранение…" : "Сохранить правила"}
-      </button>
+      <StickySaveBar
+        dirty={dirty}
+        saving={saving}
+        saved={savedFlash}
+        onSave={save}
+        onCancel={() => setForm(buildPublishRulesForm(settings))}
+        saveLabel="Сохранить правила"
+      />
     </div>
   );
 }
