@@ -3535,14 +3535,29 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
     flex-direction: column;
     align-items: stretch;
     gap: 8px;
+    max-width: 100%;
+    min-width: 0;
   }
-  .project-filters input,
+  /* text controls stretch; checkboxes stay intrinsic width.
+     Prior width:100% on checkbox + label.row text caused 390-480px page H-overflow. */
+  .project-filters input:not([type="checkbox"]):not([type="radio"]),
   .project-filters select {
     width: 100% !important;
-    max-width: none !important;
+    max-width: 100% !important;
+    min-width: 0;
+  }
+  .project-filters input[type="checkbox"],
+  .project-filters input[type="radio"] {
+    width: auto !important;
+    max-width: none;
+    min-width: 1rem;
+    flex-shrink: 0;
   }
   .project-filters label.row {
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
   }
   .project-filters .muted {
     margin-left: 0 !important;

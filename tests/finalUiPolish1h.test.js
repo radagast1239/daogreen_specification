@@ -136,4 +136,23 @@ describe("modal + narrow layout CSS 1h", () => {
     expect(themeCss).toMatch(/\.toolbar\s*\{[^}]*flex-wrap:\s*wrap/s);
     expect(themeCss).toContain(".table-scroll-wrap");
   });
+
+  it("project filters wrap on narrow and do not stretch checkboxes to full width", () => {
+    expect(themeCss).toMatch(/\.project-filters\s*\{[^}]*flex-wrap:\s*wrap/s);
+    expect(themeCss).toContain(
+      '.project-filters input:not([type="checkbox"]):not([type="radio"])'
+    );
+    expect(themeCss).toMatch(
+      /\.project-filters input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\),\s*\n\s*\.project-filters select\s*\{[^}]*max-width:\s*100%\s*!important/s
+    );
+    expect(themeCss).toMatch(
+      /\.project-filters input\[type="checkbox"\][\s\S]*?width:\s*auto\s*!important/
+    );
+    expect(themeCss).toMatch(
+      /\.project-filters label\.row\s*\{[^}]*max-width:\s*100%/s
+    );
+    // no page-level overflow mask for this fix
+    expect(themeCss).not.toMatch(/html\s*,\s*body\s*\{[^}]*overflow-x:\s*hidden/s);
+    expect(themeCss).not.toMatch(/body\s*\{[^}]*overflow-x:\s*hidden/s);
+  });
 });
