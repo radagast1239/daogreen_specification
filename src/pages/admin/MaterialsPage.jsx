@@ -26,6 +26,7 @@ import {
   patchMaterialFarmSections,
   resolveMaterialFarmSections,
 } from "../../../shared/materialFarmSections.js";
+import { modulesTabPath } from "../../lib/modulesTabUrl.js";
 import {
   clientSectionLabel,
   suggestClientSectionFromCategory,
@@ -687,7 +688,7 @@ export default function MaterialsPage() {
                       ))}
                     </select>
                     <p className="muted material-edit-hint">
-                      <a href="/settings">Настроить клиентские разделы</a>
+                      <Link to={modulesTabPath("publish")}>Настроить клиентские разделы</Link>
                     </p>
                   </div>
                   <div className="field">
@@ -725,7 +726,7 @@ export default function MaterialsPage() {
                   onChange={(farmSections) => setEditing(patchMaterialFarmSections(editing, farmSections))}
                 />
                 <p className="muted material-edit-hint">
-                  <a href="/modules">Настроить разделы фермы</a>
+                  <Link to={modulesTabPath("farm")}>Настроить разделы фермы</Link>
                 </p>
                 {hasStructuredSpecEditor(editing.name) ? (
                   <StructuredSpecEditor

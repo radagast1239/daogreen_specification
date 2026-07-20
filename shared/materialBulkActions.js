@@ -15,7 +15,7 @@ export function buildBulkPatchPayload(actionType, actionValue, extraValue) {
     case "setReview":
       return { category: "Требует разбора", clientSection: "requires_review" };
     case "clearReview":
-      return { clientSection: "" }; // Will trigger "no_client_section" which is better than being stuck in review
+      return { category: "", clientSection: "" };
     default:
       return {};
   }

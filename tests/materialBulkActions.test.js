@@ -26,10 +26,21 @@ describe("materialBulkActions", () => {
   });
 
   it("bulk payloads never include frame_bom technical keys", () => {
-    const types = ["responsible", "supplier", "clientSection", "showClient", "hideClient", "setReview"];
+    const types = ["responsible", "supplier", "clientSection", "showClient", "hideClient", "setReview", "clearReview"];
     for (const t of types) {
       const payload = buildBulkPatchPayload(t, "x", "y");
       expect(JSON.stringify(payload)).not.toMatch(/frame_bom|sourceKey|sourceType/i);
     }
+  });
+
+  it("setReview and clearReview use symmetric manual review fields", () => {
+    expect(buildBulkPatchPayload("setReview")).toEqual({
+      category: "Требует разбора",
+      clientSection: "requires_review",
+    });
+    expect(buildBulkPatchPayload("clearReview")).toEqual({
+      category: "",
+      clientSection: "",
+    });
   });
 });

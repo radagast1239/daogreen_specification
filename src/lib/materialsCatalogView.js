@@ -63,15 +63,18 @@ export function buildQualityEntryMap(materials, modules = []) {
   return { report, entriesById: map };
 }
 
+/** Manual «На проверку» flag — category + clientSection set by bulk/row actions. */
+export function materialInManualReview(material) {
+  const cat = (material?.category || "").trim();
+  const sec = (material?.clientSection || "").trim();
+  return cat === "Требует разбора" || sec === "requires_review";
+}
+
 export function matchCatalogQuickFilter(entry, material, quickId) {
   if (!quickId || quickId === "all") return true;
   if (quickId === "hidden_client") return !materialShownToClientByDefault(material);
   if (quickId === "needs_review") {
-    if (!entry) return false;
-    return (
-      matchQualityFilter(entry, "critical") ||
-      (entry.issues || []).some((i) => i.id === "needs_review_category")
-    );
+    return materialInManualReview(material);
   }
   if (!entry) return false;
   return matchQualityFilter(entry, quickId);

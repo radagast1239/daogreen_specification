@@ -27,3 +27,9 @@ export function modulesTabToSearchParams(tabId, prev) {
   next.set("tab", tabId);
   return next;
 }
+
+/** React Router path for a Modules tab (basename applied by BrowserRouter). */
+export function modulesTabPath(tabId, allowed = KNOWN_TABS) {
+  const tab = allowed.has(tabId) ? tabId : "farm";
+  return `/modules?tab=${tab}`;
+}
