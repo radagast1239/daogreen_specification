@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   normalizeMaterialFarmSections,
   resolveMaterialFarmSections,
 } from "../../shared/materialFarmSections.js";
+import { modulesTabPath } from "../lib/modulesTabUrl.js";
 
 export default function MaterialFarmSectionsEditor({ value, onChange, farmSections = [] }) {
   const selected = resolveMaterialFarmSections(value);
@@ -41,7 +43,7 @@ export default function MaterialFarmSectionsEditor({ value, onChange, farmSectio
       <label>Разделы фермы</label>
       <p className="muted material-modules-editor__hint">
         Позиция автоматически попадёт в шаблоны выбранных разделов при сборке проекта. Список разделов — в{" "}
-        <a href="/modules">Модули и шаблоны</a>.
+        <Link to={modulesTabPath("farm")}>Модули и шаблоны</Link>.
       </p>
 
       <div className={`material-modules-dropdown${open ? " material-modules-dropdown--open" : ""}`}>

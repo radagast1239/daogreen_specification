@@ -23,6 +23,10 @@ const materialsPage = fs.readFileSync(
   path.join(__dirname, "../src/pages/admin/MaterialsPage.jsx"),
   "utf8"
 );
+const farmSectionsEditor = fs.readFileSync(
+  path.join(__dirname, "../src/components/MaterialFarmSectionsEditor.jsx"),
+  "utf8"
+);
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "daogreen-review-toggle-"));
 const tmpDb = path.join(tmpDir, "test.db");
@@ -89,6 +93,12 @@ describe("material editor module links 1g.2", () => {
     expect(modulesTabPath("farm")).toBe("/modules?tab=farm");
     expect(resolveModulesTabFromSearch("?tab=publish")).toBe("publish");
     expect(resolveModulesTabFromSearch("?tab=farm")).toBe("farm");
+  });
+
+  it("MaterialFarmSectionsEditor uses Link + modulesTabPath for «Модули и шаблоны»", () => {
+    expect(farmSectionsEditor).toContain('import { modulesTabPath } from "../lib/modulesTabUrl.js"');
+    expect(farmSectionsEditor).toContain('<Link to={modulesTabPath("farm")}>Модули и шаблоны</Link>');
+    expect(farmSectionsEditor).not.toContain('href="/modules"');
   });
 });
 
