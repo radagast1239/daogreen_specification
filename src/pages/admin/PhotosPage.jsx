@@ -3,6 +3,12 @@ import { useStore } from "../../store/StoreContext.jsx";
 import { api } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import MaterialsSubnav from "../../components/MaterialsSubnav.jsx";
+import {
+  formatPhotoPageSubtitle,
+  formatUnlinkedCardValue,
+  materialPhotoCounts,
+  resolveUnlinkedPhotoCount,
+} from "../../lib/photoStatistics.js";
 
 export default function PhotosPage() {
   const { state, actions } = useStore();
@@ -11,9 +17,9 @@ export default function PhotosPage() {
   const [result, setResult] = useState(null);
   const [err, setErr] = useState("");
 
-  const withPhoto = state.materials.filter((m) => m.imageUrl || m.photoUrl).length;
-  const withoutPhoto = Math.max(0, state.materials.length - withPhoto);
-  const unmatchedCount = result?.unmatched?.length || 0;
+  const { withPhoto, withoutPhoto } = materialPhotoCounts(state.materials);
+  const unlinkedCount = resolveUnlinkedPhotoCount(result);
+  const unlinkedCardValue = formatUnlinkedCardValue(unlinkedCount);
 
   const upload = async () => {
     if (!files.length) return;
@@ -51,7 +57,7 @@ export default function PhotosPage() {
     <>
       <PageHeader
         title="Фото материалов"
-        sub={`${withPhoto} с фото · ${withoutPhoto} без фото · файлов не привязано: ${unmatchedCount || "—"}`}
+        sub={formatPhotoPageSubtitle({ withPhoto, withoutPhoto, unlinkedCount })}
         back={{ to: "/materials", label: "Материалы" }}
       />
       <div className="content">
@@ -67,8 +73,8 @@ export default function PhotosPage() {
               <div className="photos-stat__k">Без фото</div>
             </div>
             <div className="photos-stat">
-              <div className="photos-stat__v num">{state.materials.length}</div>
-              <div className="photos-stat__k">Всего материалов</div>
+              <div className={`photos-stat__v${unlinkedCount == null ? "" : " num"}`}>{unlinkedCardValue}</div>
+              <div className="photos-stat__k">Не привязано</div>
             </div>
           </div>
 
