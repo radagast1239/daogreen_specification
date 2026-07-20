@@ -37,7 +37,7 @@ import {
   isSubsectionValid,
   getClientSectionLabel,
 } from "../../../shared/clientSections.js";
-import { buildBulkPatchPayload, formatBulkActionConfirmation } from "../../../shared/materialBulkActions.js";
+import { buildBulkPatchPayload, formatBulkActionConfirmation, resolveBulkPatchPayload } from "../../../shared/materialBulkActions.js";
 import { materialShownToClientByDefault } from "../../../shared/materialQualityCheck.js";
 import { MaterialsQualityPanel } from "./MaterialsQualityPage.jsx";
 import MaterialsSubnav from "../../components/MaterialsSubnav.jsx";
@@ -189,12 +189,15 @@ export default function MaterialsPage() {
     const msg = formatBulkActionConfirmation(bulkAction, bulkValue, bulkSubValue, selectedIds.size);
     if (!(await confirm({ title: "Применить массовое действие?", message: msg }))) return;
     setBulkApplying(true);
-    const payload = buildBulkPatchPayload(bulkAction, bulkValue, bulkSubValue);
     let ok = 0;
+    const succeeded = new Set();
     for (const id of selectedIds) {
+      const material = state.materials.find((m) => m.id === id);
+      const payload = resolveBulkPatchPayload(bulkAction, bulkValue, bulkSubValue, material);
       try {
         await actions.materialUpdate(id, payload);
         ok += 1;
+        succeeded.add(id);
       } catch {
         /* continue */
       }
@@ -202,10 +205,16 @@ export default function MaterialsPage() {
     setBulkApplying(false);
     if (ok > 0) {
       success(`Успешно обновлено: ${ok}`);
-      setSelectedIds(new Set());
-      setBulkAction("");
-      setBulkValue("");
-      setBulkSubValue("");
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of succeeded) next.delete(id);
+        return next;
+      });
+      if (ok === selectedIds.size) {
+        setBulkAction("");
+        setBulkValue("");
+        setBulkSubValue("");
+      }
     }
   };
 

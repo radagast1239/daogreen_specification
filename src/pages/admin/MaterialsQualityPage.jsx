@@ -11,7 +11,7 @@ import {
   qualityReportRows,
   qualitySummaryRows,
 } from "../../../shared/materialQualityCheck.js";
-import { buildBulkPatchPayload, formatBulkActionConfirmation } from "../../../shared/materialBulkActions.js";
+import { buildBulkPatchPayload, buildReviewPatchPayload, formatBulkActionConfirmation, resolveBulkPatchPayload } from "../../../shared/materialBulkActions.js";
 import { DEFAULT_RESPONSIBLE_ROLES } from "../../lib/responsibleRoles.js";
 import { getClientSections, subsectionsForSection } from "../../../shared/clientSections.js";
 import { api } from "../../lib/api.js";
@@ -105,12 +105,15 @@ export function MaterialsQualityPanel({ materials, modules, suppliers = [], onEd
     setIsApplying(true);
     let successCount = 0;
     let errorCount = 0;
-    const payload = buildBulkPatchPayload(bulkAction, bulkValue, bulkSubValue);
+    const succeeded = new Set();
 
     for (const id of selectedIds) {
+      const material = materials.find((m) => m.id === id);
+      const payload = resolveBulkPatchPayload(bulkAction, bulkValue, bulkSubValue, material);
       try {
         await onPatchMaterial(id, payload, true); // true to skip individual success toasts if supported
         successCount++;
+        succeeded.add(id);
       } catch (e) {
         errorCount++;
       }
@@ -119,10 +122,16 @@ export function MaterialsQualityPanel({ materials, modules, suppliers = [], onEd
     setIsApplying(false);
     if (successCount > 0) {
       success(`Успешно обновлено: ${successCount}`);
-      setSelectedIds(new Set());
-      setBulkAction("");
-      setBulkValue("");
-      setBulkSubValue("");
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of succeeded) next.delete(id);
+        return next;
+      });
+      if (successCount === selectedIds.size) {
+        setBulkAction("");
+        setBulkValue("");
+        setBulkSubValue("");
+      }
     }
     if (errorCount > 0) {
       error(`Ошибок при обновлении: ${errorCount}`);
@@ -412,10 +421,7 @@ export function MaterialsQualityPanel({ materials, modules, suppliers = [], onEd
                         type="button"
                         className="btn btn-ghost btn-sm"
                         onClick={() =>
-                          onPatchMaterial(entry.row.id, {
-                            category: "Требует разбора",
-                            clientSection: "requires_review",
-                          })
+                          onPatchMaterial(entry.row.id, buildReviewPatchPayload(entry.row, "setReview"))
                         }
                       >
                         На проверку

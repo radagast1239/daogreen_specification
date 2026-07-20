@@ -3,6 +3,10 @@ import {
   matchQualityFilter,
   materialShownToClientByDefault,
 } from "../../shared/materialQualityCheck.js";
+import {
+  LEGACY_REVIEW_CATEGORY,
+  REVIEW_CLIENT_SECTION,
+} from "../../shared/materialBulkActions.js";
 
 export const CATALOG_QUICK_FILTERS = [
   { id: "all", label: "Все" },
@@ -63,11 +67,11 @@ export function buildQualityEntryMap(materials, modules = []) {
   return { report, entriesById: map };
 }
 
-/** Manual «На проверку» flag — category + clientSection set by bulk/row actions. */
+/** Manual «На проверку» flag — clientSection marker + legacy category. */
 export function materialInManualReview(material) {
   const cat = (material?.category || "").trim();
   const sec = (material?.clientSection || "").trim();
-  return cat === "Требует разбора" || sec === "requires_review";
+  return sec === REVIEW_CLIENT_SECTION || cat === LEGACY_REVIEW_CATEGORY;
 }
 
 export function matchCatalogQuickFilter(entry, material, quickId) {

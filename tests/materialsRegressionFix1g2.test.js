@@ -3,7 +3,14 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { buildBulkPatchPayload } from "../shared/materialBulkActions.js";
+import {
+  buildBulkPatchPayload,
+  buildReviewPatchPayload,
+  DEFAULT_MATERIAL_CATEGORY,
+  LEGACY_REVIEW_CATEGORY,
+  REVIEW_CLIENT_SECTION,
+  resolveBulkPatchPayload,
+} from "../shared/materialBulkActions.js";
 import {
   filterMaterialsCatalog,
   materialInManualReview,
@@ -60,6 +67,10 @@ afterAll(() => {
   }
 });
 
+function entryFor(material) {
+  return { material, issues: [], row: material };
+}
+
 describe("material editor module links 1g.2", () => {
   it("uses React Router Link + modulesTabPath for client sections", () => {
     expect(materialsPage).toContain('import { modulesTabPath } from "../../lib/modulesTabUrl.js"');
@@ -81,19 +92,65 @@ describe("material editor module links 1g.2", () => {
   });
 });
 
-describe("review bulk actions 1g.2", () => {
-  it("setReview sets manual review fields", () => {
+describe("review bulk actions 1g.2.1 — preserve category", () => {
+  const normalCategories = ["Электрика и свет", "Инструмент и инвентарь", "Стеллажи и каркас"];
+
+  it("setReview sends only clientSection (no category)", () => {
     expect(buildBulkPatchPayload("setReview")).toEqual({
-      category: "Требует разбора",
-      clientSection: "requires_review",
+      clientSection: REVIEW_CLIENT_SECTION,
     });
+    expect("category" in buildBulkPatchPayload("setReview")).toBe(false);
   });
 
-  it("clearReview clears category and clientSection (false is not dropped)", () => {
+  it("clearReview generic payload clears only clientSection", () => {
     const payload = buildBulkPatchPayload("clearReview");
-    expect(payload).toEqual({ category: "", clientSection: "" });
-    expect("category" in payload).toBe(true);
-    expect(payload.clientSection).toBe("");
+    expect(payload).toEqual({ clientSection: "" });
+    expect("category" in payload).toBe(false);
+  });
+
+  for (const category of normalCategories) {
+    it(`setReview/clearReview preserve category «${category}»`, () => {
+      const material = { id: "m1", category, clientSection: "" };
+      const setPayload = buildReviewPatchPayload(material, "setReview");
+      expect(setPayload).toEqual({ clientSection: REVIEW_CLIENT_SECTION });
+      expect("category" in setPayload).toBe(false);
+
+      const inReview = { ...material, clientSection: REVIEW_CLIENT_SECTION };
+      const clearPayload = buildReviewPatchPayload(inReview, "clearReview");
+      expect(clearPayload).toEqual({ clientSection: "" });
+      expect("category" in clearPayload).toBe(false);
+    });
+  }
+
+  it("legacy materialInManualReview recognizes both markers", () => {
+    expect(materialInManualReview({ category: "Электрика и свет", clientSection: REVIEW_CLIENT_SECTION })).toBe(true);
+    expect(materialInManualReview({ category: LEGACY_REVIEW_CATEGORY, clientSection: "" })).toBe(true);
+    expect(materialInManualReview({ category: LEGACY_REVIEW_CATEGORY, clientSection: REVIEW_CLIENT_SECTION })).toBe(
+      true
+    );
+    expect(materialInManualReview({ category: "Полив", clientSection: "" })).toBe(false);
+  });
+
+  it("legacy clearReview normalizes category to fallback", () => {
+    const legacy = { id: "leg", category: LEGACY_REVIEW_CATEGORY, clientSection: REVIEW_CLIENT_SECTION };
+    const payload = buildReviewPatchPayload(legacy, "clearReview");
+    expect(payload).toEqual({
+      clientSection: "",
+      category: DEFAULT_MATERIAL_CATEGORY,
+    });
+    expect(materialInManualReview(legacy)).toBe(true);
+    const cleared = { ...legacy, category: DEFAULT_MATERIAL_CATEGORY, clientSection: "" };
+    expect(materialInManualReview(cleared)).toBe(false);
+  });
+
+  it("mixed bulk resolveBulkPatchPayload builds per-material payloads", () => {
+    const normal = { id: "n1", category: "Электрика и свет", clientSection: REVIEW_CLIENT_SECTION };
+    const legacy = { id: "l1", category: LEGACY_REVIEW_CATEGORY, clientSection: REVIEW_CLIENT_SECTION };
+    expect(resolveBulkPatchPayload("clearReview", null, null, normal)).toEqual({ clientSection: "" });
+    expect(resolveBulkPatchPayload("clearReview", null, null, legacy)).toEqual({
+      clientSection: "",
+      category: DEFAULT_MATERIAL_CATEGORY,
+    });
   });
 
   it("needs_review filter matches manual flag only, not unrelated critical issues", () => {
@@ -111,31 +168,101 @@ describe("review bulk actions 1g.2", () => {
     expect(matchCatalogQuickFilter(entry, criticalOnly, "needs_review")).toBe(false);
   });
 
-  it("persists clearReview via API contract on temp SQLite", () => {
+  it("temp SQLite: normal material preserves category through review toggle", () => {
     const created = createMaterial({
-      name: "Review me",
-      category: "Лотки",
+      name: "Cable",
+      category: "Электрика и свет",
       clientSection: "",
       defaultQty: 1,
     });
-    updateMaterial(created.id, buildBulkPatchPayload("setReview"));
+    updateMaterial(created.id, buildReviewPatchPayload(created, "setReview"));
     let stored = getMaterial(created.id);
-    expect(stored.category).toBe("Требует разбора");
-    expect(stored.clientSection).toBe("requires_review");
+    expect(stored.category).toBe("Электрика и свет");
+    expect(stored.clientSection).toBe(REVIEW_CLIENT_SECTION);
     expect(materialInManualReview(stored)).toBe(true);
 
-    const entriesById = new Map([[stored.id, { material: stored, issues: [], row: stored }]]);
-    expect(
-      filterMaterialsCatalog([stored], { quick: "needs_review", entriesById }).map((m) => m.id)
-    ).toEqual([stored.id]);
+    const entriesById = new Map([[stored.id, entryFor(stored)]]);
+    expect(filterMaterialsCatalog([stored], { quick: "needs_review", entriesById }).map((m) => m.id)).toEqual([
+      stored.id,
+    ]);
 
-    updateMaterial(created.id, buildBulkPatchPayload("clearReview"));
+    updateMaterial(created.id, buildReviewPatchPayload(stored, "clearReview"));
     stored = getMaterial(created.id);
+    expect(stored.category).toBe("Электрика и свет");
     expect(stored.clientSection).toBe("");
-    expect(stored.category).toBe("Прочее");
     expect(materialInManualReview(stored)).toBe(false);
     expect(
-      filterMaterialsCatalog([stored], { quick: "needs_review", entriesById: new Map([[stored.id, { material: stored, issues: [], row: stored }]]) }).length
+      filterMaterialsCatalog([stored], {
+        quick: "needs_review",
+        entriesById: new Map([[stored.id, entryFor(stored)]]),
+      }).length
     ).toBe(0);
+  });
+
+  it("temp SQLite: legacy material clearReview normalizes category", () => {
+    const created = createMaterial({
+      name: "Legacy item",
+      category: LEGACY_REVIEW_CATEGORY,
+      clientSection: REVIEW_CLIENT_SECTION,
+      defaultQty: 1,
+    });
+    expect(materialInManualReview(getMaterial(created.id))).toBe(true);
+
+    updateMaterial(created.id, buildReviewPatchPayload(created, "clearReview"));
+    const stored = getMaterial(created.id);
+    expect(stored.category).toBe(DEFAULT_MATERIAL_CATEGORY);
+    expect(stored.clientSection).toBe("");
+    expect(materialInManualReview(stored)).toBe(false);
+    expect(
+      filterMaterialsCatalog([stored], {
+        quick: "needs_review",
+        entriesById: new Map([[stored.id, entryFor(stored)]]),
+      }).length
+    ).toBe(0);
+  });
+
+  it("bulk mixed selection: per-id payloads preserve normal and normalize legacy", () => {
+    const normal = createMaterial({
+      name: "Normal",
+      category: "Стеллажи и каркас",
+      clientSection: REVIEW_CLIENT_SECTION,
+      defaultQty: 1,
+    });
+    const legacy = createMaterial({
+      name: "Legacy",
+      category: LEGACY_REVIEW_CATEGORY,
+      clientSection: REVIEW_CLIENT_SECTION,
+      defaultQty: 1,
+    });
+
+    const normalPayload = resolveBulkPatchPayload("clearReview", null, null, normal);
+    const legacyPayload = resolveBulkPatchPayload("clearReview", null, null, legacy);
+    expect(normalPayload).toEqual({ clientSection: "" });
+    expect(legacyPayload).toEqual({ clientSection: "", category: DEFAULT_MATERIAL_CATEGORY });
+
+    updateMaterial(normal.id, normalPayload);
+    updateMaterial(legacy.id, legacyPayload);
+
+    const storedNormal = getMaterial(normal.id);
+    const storedLegacy = getMaterial(legacy.id);
+    expect(storedNormal.category).toBe("Стеллажи и каркас");
+    expect(storedLegacy.category).toBe(DEFAULT_MATERIAL_CATEGORY);
+    expect(materialInManualReview(storedNormal)).toBe(false);
+    expect(materialInManualReview(storedLegacy)).toBe(false);
+  });
+
+  it("failed materialUpdate leaves stored material unchanged (API contract)", () => {
+    const created = createMaterial({
+      name: "Fail test",
+      category: "Инструмент и инвентарь",
+      clientSection: REVIEW_CLIENT_SECTION,
+      defaultQty: 1,
+    });
+    const result = updateMaterial("missing-id", buildReviewPatchPayload(created, "clearReview"));
+    expect(result).toBeNull();
+    const stored = getMaterial(created.id);
+    expect(stored.category).toBe("Инструмент и инвентарь");
+    expect(stored.clientSection).toBe(REVIEW_CLIENT_SECTION);
+    expect(materialInManualReview(stored)).toBe(true);
   });
 });
