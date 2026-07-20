@@ -396,7 +396,7 @@ export function MaterialsQualityPanel({ materials, modules, suppliers = [], onEd
                         });
                       }}
                     >
-                      {expanded ? "Скрыть" : "Показать все"}
+                      {expanded ? "Свернуть проблемы" : "Показать все"}
                     </button>
                   )}
                   {onPatchMaterial && (

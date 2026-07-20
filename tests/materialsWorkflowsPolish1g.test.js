@@ -74,6 +74,10 @@ describe("materials workflows polish 1g", () => {
   it("compacts quality rows and shows bulk only when selected", () => {
     expect(quality).toMatch(/quality-row/);
     expect(quality).toMatch(/Показать все/);
+    expect(quality).toMatch(/Свернуть проблемы/);
+    expect(quality).toMatch(/expanded \? "Свернуть проблемы" : "Показать все"/);
+    expect(quality).toMatch(/onPatchMaterial\(entry\.row\.id, \{ active: false, status: "archived" \}\)/);
+    expect(quality).toMatch(/>\s*Скрыть\s*</);
     expect(quality).toMatch(/selectedIds\.size > 0/);
     expect(quality).toMatch(/buildBulkPatchPayload/);
     expect(quality).toMatch(/QUALITY_QUICK_FILTERS/);
