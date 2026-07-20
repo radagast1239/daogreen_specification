@@ -101,6 +101,7 @@ describe("ProjectsPage UI cleanup 1d", () => {
     expect(projectsPage).toContain("RowActionsMenu");
     expect(modulesUi).toContain("children");
     expect(modulesUi).toContain("separator");
+    expect(modulesUi).toContain("placeRowActionsMenu");
     expect(projectsPage).toContain('label: "Создать копию"');
     expect(projectsPage).toContain('label: "Быстрая копия"');
     expect(projectsPage).toContain('label: "На основе этого проекта"');

@@ -9,12 +9,17 @@ import {
   modalEscapeStackDepth,
   resetModalEscapeStack,
 } from "../src/lib/modalEscape.js";
+import { placeRowActionsMenu } from "../src/components/modulesUi.jsx";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uiSrc = fs.readFileSync(path.join(__dirname, "../src/components/ui.jsx"), "utf8");
 const themeCss = fs.readFileSync(path.join(__dirname, "../src/styles/theme.css"), "utf8");
 const materialsPage = fs.readFileSync(
   path.join(__dirname, "../src/pages/admin/MaterialsPage.jsx"),
+  "utf8"
+);
+const modulesUiSrc = fs.readFileSync(
+  path.join(__dirname, "../src/components/modulesUi.jsx"),
   "utf8"
 );
 
@@ -154,5 +159,61 @@ describe("modal + narrow layout CSS 1h", () => {
     // no page-level overflow mask for this fix
     expect(themeCss).not.toMatch(/html\s*,\s*body\s*\{[^}]*overflow-x:\s*hidden/s);
     expect(themeCss).not.toMatch(/body\s*\{[^}]*overflow-x:\s*hidden/s);
+  });
+
+  it("row-actions menu caps width to viewport and keeps desktop right alignment", () => {
+    expect(themeCss).toMatch(
+      /\.row-actions__menu\s*\{[^}]*right:\s*0/s
+    );
+    expect(themeCss).toMatch(
+      /\.row-actions__menu\s*\{[^}]*max-width:\s*min\(280px,\s*calc\(100vw\s*-\s*16px\)\)/s
+    );
+  });
+});
+
+describe("RowActionsMenu viewport placement 1h.2", () => {
+  it("exports placeRowActionsMenu and wires layout clamp on open", () => {
+    expect(modulesUiSrc).toContain("export function placeRowActionsMenu");
+    expect(modulesUiSrc).toContain("useLayoutEffect");
+    expect(modulesUiSrc).toContain("placeRowActionsMenu(menu)");
+    expect(modulesUiSrc).toContain('removeEventListener("resize"');
+    expect(modulesUiSrc).toContain('ref={menuRef}');
+  });
+
+  it("clamps negative left into the viewport pad without shrinking below readable width", () => {
+    const styles = {};
+    const menuEl = {
+      style: styles,
+      getBoundingClientRect() {
+        // right:0 against a left-side trigger => left negative before clamp
+        if (styles.transform && String(styles.transform).includes("translateX")) {
+          const m = String(styles.transform).match(/translateX\(([-\d.]+)px\)/);
+          const shift = m ? Number(m[1]) : 0;
+          return { left: -117 + shift, right: 63 + shift, width: 180, top: 0, bottom: 40 };
+        }
+        return { left: -117, right: 63, width: 180, top: 0, bottom: 40 };
+      },
+    };
+    const placed = placeRowActionsMenu(menuEl, { pad: 8, viewportWidth: 390 });
+    expect(placed.left).toBeGreaterThanOrEqual(8);
+    expect(placed.right).toBeLessThanOrEqual(390 - 8);
+    expect(placed.width).toBe(180);
+    expect(styles.right).toBe("0px");
+    expect(styles.maxWidth).toBe(`${390 - 16}px`);
+  });
+
+  it("keeps right-aligned menu unchanged when already inside viewport", () => {
+    const styles = {};
+    const menuEl = {
+      style: styles,
+      getBoundingClientRect() {
+        return { left: 1090, right: 1270, width: 180, top: 0, bottom: 40 };
+      },
+    };
+    const placed = placeRowActionsMenu(menuEl, { pad: 8, viewportWidth: 1280 });
+    expect(placed.shiftX).toBe(0);
+    expect(styles.transform).toBe("");
+    expect(styles.right).toBe("0px");
+    expect(placed.left).toBe(1090);
   });
 });

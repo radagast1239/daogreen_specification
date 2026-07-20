@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export function ModulesSearch({ value, onChange, placeholder = "Поиск…" }) {
   return (
@@ -23,6 +23,37 @@ export function TechDetails({ children, summary = "Техническая инф
   );
 }
 
+const MENU_VIEWPORT_PAD = 8;
+
+/** Keep absolutely positioned menu fully inside the viewport (default CSS: right:0). */
+export function placeRowActionsMenu(menuEl, { pad = MENU_VIEWPORT_PAD, viewportWidth } = {}) {
+  if (!menuEl || typeof menuEl.getBoundingClientRect !== "function") return null;
+  const vw =
+    typeof viewportWidth === "number"
+      ? viewportWidth
+      : typeof window !== "undefined"
+        ? window.innerWidth
+        : 0;
+  if (!vw) return null;
+
+  menuEl.style.left = "";
+  menuEl.style.right = "0px";
+  menuEl.style.transform = "";
+  menuEl.style.maxWidth = `${Math.max(0, vw - pad * 2)}px`;
+
+  let rect = menuEl.getBoundingClientRect();
+  let shiftX = 0;
+  if (rect.left < pad) shiftX += pad - rect.left;
+  if (rect.right + shiftX > vw - pad) shiftX -= rect.right + shiftX - (vw - pad);
+
+  if (shiftX !== 0) {
+    menuEl.style.transform = `translateX(${shiftX}px)`;
+    rect = menuEl.getBoundingClientRect();
+  }
+
+  return { left: rect.left, right: rect.right, width: rect.width, viewportWidth: vw, shiftX };
+}
+
 /**
  * Compact ⋯ menu.
  * Items: { id, label, onClick, disabled?, danger?, separator?, children? }
@@ -32,6 +63,7 @@ export function RowActionsMenu({ items, label = "Действия" }) {
   const [open, setOpen] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const root = useRef(null);
+  const menuRef = useRef(null);
 
   useEffect(() => {
     if (!open) {
@@ -52,6 +84,23 @@ export function RowActionsMenu({ items, label = "Действия" }) {
     };
   }, [open]);
 
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const menu = menuRef.current;
+    if (!menu) return undefined;
+
+    const place = () => placeRowActionsMenu(menu);
+    place();
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      menu.style.left = "";
+      menu.style.right = "";
+      menu.style.transform = "";
+      menu.style.maxWidth = "";
+    };
+  }, [open, expandedId]);
+
   const visible = (items || []).filter(Boolean);
   if (!visible.length) return null;
 
@@ -69,7 +118,7 @@ export function RowActionsMenu({ items, label = "Действия" }) {
         ⋯
       </button>
       {open && (
-        <div className="row-actions__menu" role="menu">
+        <div className="row-actions__menu" role="menu" ref={menuRef}>
           {visible.map((item, index) => {
             if (item.separator) {
               return (
@@ -142,6 +191,7 @@ export function RowActionsMenu({ items, label = "Действия" }) {
     </div>
   );
 }
+
 
 export function StickySaveBar({
   dirty,

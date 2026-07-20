@@ -4146,6 +4146,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   top: calc(100% + 4px);
   z-index: 20;
   min-width: 180px;
+  max-width: min(280px, calc(100vw - 16px));
   padding: 6px;
   border: 1px solid var(--line-strong, var(--line));
   border-radius: 10px;
