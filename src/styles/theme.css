@@ -1,6 +1,6 @@
 /* ============================================================
-   Daogreen Spec вЂ” design system
-   Subject: BOM/СЃРїРµС†РёС„РёРєР°С‚РѕСЂ РІРµСЂС‚РёРєР°Р»СЊРЅС‹С… С„РµСЂРј. Numbers are the hero.
+   Daogreen Spec ??? design system
+   Subject: BOM/???????????????????????? ???????????????????????? ????????. Numbers are the hero.
    Signature: green ledger spine + tabular monospace figures.
    ============================================================ */
 :root {
@@ -58,7 +58,7 @@ a { color: var(--brand); text-decoration: none; }
 a:hover { text-decoration: underline; }
 button { font-family: inherit; }
 
-/* Tabular figures вЂ” the signature */
+/* Tabular figures ??? the signature */
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 
 /* ---------- Eyebrow / labels ---------- */
@@ -471,7 +471,7 @@ body.nav-open { overflow: hidden; }
 .topbar .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 .content { padding: 0 0 32px; max-width: none; }
 
-/* Р’РєР»Р°РґРєРё Рё РїСЂРµСЃРµС‚С‹ */
+/* ?????????????? ?? ?????????????? */
 .step-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
 .section-tabs {
   display: flex;
@@ -871,7 +871,7 @@ body.nav-open { overflow: hidden; }
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
-/* РљРѕРјРїР°РєС‚РЅР°СЏ С€Р°РїРєР° РєР»РёРµРЅС‚Р° */
+/* ???????????????????? ?????????? ?????????????? */
 .client-topbar {
   position: sticky;
   top: 8px;
@@ -1192,7 +1192,7 @@ body.nav-open { overflow: hidden; }
 .client-trust {
   display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; font-size: 12.5px; color: #9ecdb8;
 }
-.client-trust span::before { content: "вњ“ "; color: #7fc9a8; font-weight: 700; }
+.client-trust span::before { content: "??? "; color: #7fc9a8; font-weight: 700; }
 .budget-bar {
   position: sticky; top: 0; z-index: 10;
   background: linear-gradient(135deg, var(--brand-deep), var(--brand-mid));
@@ -1225,11 +1225,46 @@ body.nav-open { overflow: hidden; }
 
 /* ---------- Modal ---------- */
 .overlay { position: fixed; inset: 0; background: rgba(12,40,32,.45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
-.modal { background: var(--paper); border-radius: var(--radius); width: 100%; max-width: 620px; max-height: 88vh; overflow: auto; box-shadow: var(--shadow); }
+.modal {
+  background: var(--paper);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 620px;
+  max-height: min(88vh, calc(100vh - 40px));
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
 .modal:has(.material-picker-list) { max-width: 820px; }
-.modal-head { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
-.modal-body { padding: 20px; display: grid; gap: 14px; }
-.modal-foot { padding: 14px 20px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; }
+.modal-head {
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 12px;
+}
+.modal-body {
+  padding: 20px;
+  display: grid;
+  gap: 14px;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+.modal-foot {
+  padding: 14px 20px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+  background: var(--paper);
+}
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1024px) {
@@ -1801,7 +1836,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 .client-supplier-bar select { min-width: 200px; }
 .client-brand-footer { margin-top: 32px; padding: 16px; text-align: center; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); }
 
-/* Floor plan (СЃС…РµРјР° РїРѕРјРµС‰РµРЅРёСЏ) */
+/* Floor plan (?????????? ??????????????????) */
 .floor-plan-field__preview {
   display: block;
   position: relative;
@@ -2376,7 +2411,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   gap: 4px;
   box-sizing: border-box;
 }
-/* Р¤РёР»СЊС‚СЂС‹ / РјР°СЃСЃРѕРІС‹Р№ РІС‹Р±РѕСЂ вЂ” РѕС‚РєСЂС‹РІР°С‚СЊ РІРїСЂР°РІРѕ РѕС‚ РєРЅРѕРїРєРё, Р±РµР· СЂР°Р·РґСѓРІР°РЅРёСЏ СЃС‚СЂР°РЅРёС†С‹ */
+/* ?????????????? / ???????????????? ?????????? ??? ?????????????????? ???????????? ???? ????????????, ?????? ???????????????????? ???????????????? */
 .spec-more-filters__menu,
 .spec-mass-select__menu,
 .client-readiness__mass-menu {
@@ -2385,7 +2420,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   top: calc(100% + 4px);
   margin-top: 0;
 }
-/* В«Р•С‰С‘В» Сѓ СЃС…РµРј РєР°СЂРєР°СЃРѕРІ СЃРїСЂР°РІР° вЂ” СЏРєРѕСЂРёС‚СЊ Рє РїСЂР°РІРѕРјСѓ РєСЂР°СЋ РєРЅРѕРїРєРё */
+/* ?????????? ?? ???????? ???????????????? ???????????? ??? ?????????????? ?? ?????????????? ???????? ???????????? */
 .frame-drawing-more__menu {
   left: auto;
   right: 0;
@@ -2648,7 +2683,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
-/* Client purchase cards: quantity is easy to miss as muted text вЂ” give it a quiet box */
+/* Client purchase cards: quantity is easy to miss as muted text ??? give it a quiet box */
 .client-qty-badge {
   display: inline-flex;
   align-items: baseline;
@@ -3285,7 +3320,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   box-shadow: 0 1px 0 var(--line);
 }
 
-/* Materials catalog — Phase 1F */
+/* Materials catalog ? Phase 1F */
 .materials-catalog-filters {
   display: flex;
   flex-wrap: wrap;
@@ -3460,7 +3495,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   max-width: 100%;
 }
 
-/* ---------- Mobile: admin + shared (в‰¤860px) ---------- */
+/* ---------- Mobile: admin + shared (???860px) ---------- */
 @media (max-width: 860px) {
   .mobile-menu-btn {
     top: calc(10px + env(safe-area-inset-top, 0px));
@@ -3568,7 +3603,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
     scrollbar-width: none;
     padding-bottom: 4px;
   }
-  /* РћС‚РєСЂС‹С‚РѕРµ РјРµРЅСЋ С„РёР»СЊС‚СЂРѕРІ РЅРµ РґРѕР»Р¶РЅРѕ РєР»РёРїР°С‚СЊСЃСЏ/СЂР°Р·РґСѓРІР°С‚СЊ РіРѕСЂРёР·РѕРЅС‚Р°Р»СЊРЅС‹Р№ СЃРєСЂРѕР»Р» */
+  /* ???????????????? ???????? ???????????????? ???? ???????????? ??????????????????/?????????????????? ???????????????????????????? ???????????? */
   .spec-quick-filters:has(.spec-more-filters[open]),
   .spec-quick-filters:has(.spec-mass-select[open]) {
     overflow: visible;
@@ -3737,7 +3772,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   }
 }
 
-/* Settings page — Phase 1E */
+/* Settings page ? Phase 1E */
 .settings-page {
   width: 100%;
   max-width: 1200px;
@@ -3905,7 +3940,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   }
 }
 
-/* Modules / templates page — Phase 1C / 1C.1 */
+/* Modules / templates page ? Phase 1C / 1C.1 */
 .modules-page {
   width: 100%;
   max-width: 1340px;
@@ -4167,7 +4202,7 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   }
 }
 
-/* Clients admin list — Phase 1A compact UI */
+/* Clients admin list ? Phase 1A compact UI */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -4342,12 +4377,12 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
   }
 }
 
-/* Materials workflows polish � Phase 1G */
+/* Materials workflows polish ? Phase 1G */
 .modal.material-edit-modal {
   display: flex;
   flex-direction: column;
   max-width: 720px;
-  max-height: 88vh;
+  max-height: min(88vh, calc(100vh - 40px));
   overflow: hidden;
 }
 .modal.material-edit-modal .modal-body {
@@ -4357,8 +4392,6 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 }
 .modal.material-edit-modal .modal-foot {
   flex-shrink: 0;
-  position: sticky;
-  bottom: 0;
   background: var(--paper);
 }
 .material-edit-sections {
@@ -4546,6 +4579,8 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 .photos-stat__v {
   font-size: 18px;
   font-weight: 700;
+  line-height: 1.2;
+  word-break: break-word;
 }
 .photos-stat__k {
   font-size: 11.5px;
@@ -4566,4 +4601,21 @@ html.compact-tables .spec-picker .thumb-img { width: 36px; height: 36px; }
 .photos-tech-block {
   margin-top: 14px;
   padding: 14px 16px;
+}
+
+/* Phase 1H ? narrow photo/quality stats */
+@media (max-width: 480px) {
+  .photos-stat-row {
+    grid-template-columns: 1fr;
+  }
+  .quality-stat-grid {
+    grid-template-columns: 1fr;
+  }
+  .modal-foot {
+    justify-content: stretch;
+  }
+  .modal-foot .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
 }

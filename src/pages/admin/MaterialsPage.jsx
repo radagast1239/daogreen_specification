@@ -647,7 +647,7 @@ export default function MaterialsPage() {
                       ))}
                     </select>
                     <p className="muted material-edit-hint">
-                      <a href="/suppliers">Создать поставщика</a>
+                      <Link to="/suppliers">Создать поставщика</Link>
                     </p>
                   </div>
                 </div>

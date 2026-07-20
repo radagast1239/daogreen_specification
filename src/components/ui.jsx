@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { PURCHASE_STATUSES } from "../data/modules.js";
 import { copyToClipboard } from "../lib/copyText.js";
 import { clientLinkMessage } from "../lib/clientLinkText.js";
+import { registerModalEscape } from "../lib/modalEscape.js";
 
 export function Chip({ kind = "neutral", children, dot = true }) {
   return <span className={`chip chip--${kind} ${dot ? "chip-dot" : ""}`}>{children}</span>;
@@ -32,12 +33,68 @@ export function Stat({ k, v, sub }) {
 }
 
 export function Modal({ title, onClose, children, footer, className = "" }) {
+  const closeBtnRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  const previousFocusRef = useRef(null);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    previousFocusRef.current =
+      typeof document !== "undefined" ? document.activeElement : null;
+    const prevOverflow =
+      typeof document !== "undefined" ? document.body.style.overflow : "";
+    if (typeof document !== "undefined") {
+      document.body.style.overflow = "hidden";
+    }
+
+    const unregister = registerModalEscape(() => onCloseRef.current?.());
+
+    const focusClose = () => {
+      try {
+        closeBtnRef.current?.focus?.();
+      } catch {
+        /* ignore */
+      }
+    };
+    if (typeof queueMicrotask === "function") queueMicrotask(focusClose);
+    else focusClose();
+
+    return () => {
+      unregister();
+      if (typeof document !== "undefined") {
+        document.body.style.overflow = prevOverflow;
+      }
+      const prev = previousFocusRef.current;
+      if (prev && typeof prev.focus === "function") {
+        try {
+          prev.focus();
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, []);
+
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className={`modal${className ? ` ${className}` : ""}`} onClick={(e) => e.stopPropagation()}>
+    <div className="overlay" onClick={onClose} role="presentation">
+      <div
+        className={`modal${className ? ` ${className}` : ""}`}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
         <div className="modal-head">
           <strong>{title}</strong>
-          <button className="btn-ghost btn" onClick={onClose}>✕</button>
+          <button
+            ref={closeBtnRef}
+            type="button"
+            className="btn-ghost btn"
+            onClick={onClose}
+            aria-label="Закрыть"
+            title="Закрыть"
+          >
+            ✕
+          </button>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
