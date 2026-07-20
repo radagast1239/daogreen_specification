@@ -31,10 +31,10 @@ export function Stat({ k, v, sub }) {
   );
 }
 
-export function Modal({ title, onClose, children, footer }) {
+export function Modal({ title, onClose, children, footer, className = "" }) {
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal${className ? ` ${className}` : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <strong>{title}</strong>
           <button className="btn-ghost btn" onClick={onClose}>✕</button>

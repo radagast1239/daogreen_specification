@@ -6,13 +6,13 @@ import { useToast } from "./Toast.jsx";
 const MODES = [
   {
     id: "full",
-    title: "Материалы + фото",
-    desc: "Импорт строк из Excel. Картинки из колонки «Фото» подставятся автоматически.",
+    title: "Материалы и фото",
+    desc: "Строки из Excel и картинки из колонки «Фото».",
   },
   {
     id: "photos",
     title: "Только фото",
-    desc: "Не меняет цены и названия — только привязывает картинки к уже существующим материалам.",
+    desc: "Только привязка картинок к уже существующим материалам.",
   },
 ];
 
@@ -68,7 +68,7 @@ export default function ExcelImportPanel() {
   };
 
   return (
-    <div className="excel-import">
+    <div className="excel-import excel-import--compact">
       <div className="import-mode-grid">
         {MODES.map((m) => (
           <button
@@ -86,12 +86,12 @@ export default function ExcelImportPanel() {
         ))}
       </div>
 
-      <div className="card" style={{ padding: 20, marginTop: 16 }}>
+      <div className="card import-form-card">
         <div className="import-steps">
           <div className="import-step">
             <span className="import-step__n">1</span>
             <div className="field" style={{ flex: 1, margin: 0 }}>
-              <label>Файл Excel (.xlsx)</label>
+              <label>Выберите Excel</label>
               <input type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] || null)} />
               {file && (
                 <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
@@ -104,7 +104,7 @@ export default function ExcelImportPanel() {
           <div className="import-step">
             <span className="import-step__n">2</span>
             <div className="field" style={{ flex: 1, margin: 0 }}>
-              <label>Модуль материалов</label>
+              <label>Модуль или автоопределение</label>
               <select value={module} onChange={(e) => setModule(e.target.value)}>
                 {modulePresets.map((m) => (
                   <option key={m.value || "auto"} value={m.value}>
@@ -112,9 +112,6 @@ export default function ExcelImportPanel() {
                   </option>
                 ))}
               </select>
-              <p className="muted" style={{ fontSize: 11, margin: "6px 0 0" }}>
-                Для фото: модуль можно определить по имени файла (проточка, подтопление…) или выбрать вручную.
-              </p>
             </div>
           </div>
 
@@ -122,7 +119,7 @@ export default function ExcelImportPanel() {
             <div className="import-step">
               <span className="import-step__n">3</span>
               <div className="field" style={{ flex: 1, margin: 0 }}>
-                <label>Если позиция уже есть в базе</label>
+                <label>Режим обновления</label>
                 <select value={mergeMode} onChange={(e) => setMergeMode(e.target.value)}>
                   <option value="merge">Обновить / добавить (безопасно)</option>
                   <option value="replace">Заменить всю базу (осторожно)</option>
@@ -132,22 +129,25 @@ export default function ExcelImportPanel() {
           )}
         </div>
 
-        <div className="import-hint panel" style={{ marginTop: 16, padding: 12 }}>
-          <strong style={{ fontSize: 13 }}>Как устроен Excel</strong>
+        <details className="import-help-details">
+          <summary>Как устроен Excel</summary>
+          <p className="muted" style={{ fontSize: 13, margin: "8px 0 0", lineHeight: 1.5 }}>
+            Поддерживается .xlsx. Фото можно вставлять в ячейки или указывать ссылками.
+          </p>
           <ul className="muted" style={{ fontSize: 12, margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.55 }}>
             <li>Колонка <strong>Фото</strong> — встроенные картинки в ячейках (не URL).</li>
             <li>Название материала должно совпадать с базой (режим «только фото»).</li>
             <li>Формат .xlsx надёжнее .xls для извлечения изображений.</li>
           </ul>
-        </div>
+        </details>
 
-        <button type="button" className="btn btn-primary" style={{ marginTop: 16 }} disabled={!file || loading} onClick={run}>
+        <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 14 }} disabled={!file || loading} onClick={run}>
           {loading ? "Импорт…" : mode === "photos" ? "Подставить фото из Excel" : "Импортировать материалы"}
         </button>
       </div>
 
       {result && (
-        <div className="card" style={{ padding: 20, marginTop: 16 }}>
+        <div className="card import-form-card" style={{ marginTop: 16 }}>
           <h3 style={{ marginTop: 0, fontSize: 16 }}>Результат</h3>
           {result.type === "photos" ? (
             <>

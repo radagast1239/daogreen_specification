@@ -568,6 +568,7 @@ export default function MaterialsPage() {
 
       {editing && (
         <Modal
+          className="material-edit-modal"
           title={editing.id ? "Редактировать позицию" : "Новая позиция"}
           onClose={() => setEditing(null)}
           footer={
@@ -575,227 +576,281 @@ export default function MaterialsPage() {
               <button className="btn" onClick={() => setEditing(null)}>
                 Отмена
               </button>
-              <button className="btn btn-primary" onClick={save}>
+              <button className="btn btn-primary" onClick={save} disabled={!editing.name?.trim()}>
                 Сохранить
               </button>
             </>
           }
         >
-          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-            Это справочник. Количество для сметы выбирается при сборке проекта.
-          </p>
-          <div className="field">
-            <label>Наименование *</label>
-            <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
-          </div>
-          <div className="form-grid">
-            <div className="field">
-              <label>Цена, ₽</label>
-              <input
-                type="number"
-                value={editing.basePrice}
-                onChange={(e) => setEditing({ ...editing, basePrice: Number(e.target.value) || 0 })}
-              />
-            </div>
-            <div className="field">
-              <label>Единица</label>
-              <select value={editing.unit} onChange={(e) => setEditing({ ...editing, unit: e.target.value })}>
-                {ref.units.map((u) => (
-                  <option key={u} value={u}>{u}</option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Категория (внутренняя)</label>
-              <select
-                value={editing.category}
-                onChange={(e) => {
-                  const category = e.target.value;
-                  const patch = { category };
-                  if (!editing.clientSection) {
-                    patch.clientSection = suggestClientSectionFromCategory(category);
-                    patch.clientSubsection = suggestClientSubsectionFromCategory(category);
-                  }
-                  setEditing({ ...editing, ...patch });
-                }}
-              >
-                {categories.map((c) => (
-                  <option key={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="form-grid">
-            <div className="field">
-              <label>Раздел для клиента</label>
-              <select
-                value={editing.clientSection || ""}
-                onChange={(e) => {
-                  const clientSection = e.target.value;
-                  const subs = subsectionsForSection(clientSection);
-                  const patch = { clientSection };
-                  if (editing.clientSubsection && !subs.includes(editing.clientSubsection)) {
-                    patch.clientSubsection = "";
-                  }
-                  setEditing({ ...editing, ...patch });
-                }}
-              >
-                <option value="">— авто (из категории / названия) —</option>
-                {clientSectionOptions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-              <p className="muted" style={{ fontSize: 11, margin: "4px 0 0" }}>
-                Список разделов — в <a href="/settings">Настройках</a>
-              </p>
-            </div>
-            <div className="field">
-              <label>Подраздел для клиента</label>
-              <select
-                value={editing.clientSubsection || ""}
-                disabled={!editing.clientSection}
-                onChange={(e) => setEditing({ ...editing, clientSubsection: e.target.value })}
-              >
-                <option value="">— не выбран —</option>
-                {subsectionOptions.map((sub) => (
-                  <option key={sub} value={sub}>
-                    {sub}
-                  </option>
-                ))}
-              </select>
-              {subsectionMismatch && (
-                <p style={{ color: "var(--danger)", fontSize: 12, margin: "4px 0 0" }}>
-                  Подраздел не относится к выбранному разделу — выберите из списка.
+          <div className="material-edit-sections">
+            <details className="material-edit-section" open>
+              <summary>Основное</summary>
+              <div className="material-edit-section__body">
+                <div className="field">
+                  <label>Наименование *</label>
+                  <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+                </div>
+                <div className="form-grid material-edit-pair">
+                  <div className="field">
+                    <label>Цена, ₽</label>
+                    <input
+                      type="number"
+                      value={editing.basePrice}
+                      onChange={(e) => setEditing({ ...editing, basePrice: Number(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Единица</label>
+                    <select value={editing.unit} onChange={(e) => setEditing({ ...editing, unit: e.target.value })}>
+                      {ref.units.map((u) => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="form-grid material-edit-pair">
+                  <div className="field">
+                    <label>Категория</label>
+                    <select
+                      value={editing.category}
+                      onChange={(e) => {
+                        const category = e.target.value;
+                        const patch = { category };
+                        if (!editing.clientSection) {
+                          patch.clientSection = suggestClientSectionFromCategory(category);
+                          patch.clientSubsection = suggestClientSubsectionFromCategory(category);
+                        }
+                        setEditing({ ...editing, ...patch });
+                      }}
+                    >
+                      {categories.map((c) => (
+                        <option key={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Поставщик</label>
+                    <select value={editing.supplier || ""} onChange={(e) => setEditing({ ...editing, supplier: e.target.value })}>
+                      <option value="">— не выбран —</option>
+                      {suppliers.map((s) => (
+                        <option key={s.id} value={s.name}>{s.name}</option>
+                      ))}
+                    </select>
+                    <p className="muted material-edit-hint">
+                      <a href="/suppliers">Создать поставщика</a>
+                    </p>
+                  </div>
+                </div>
+                <div className="field">
+                  <label>Ответственный по умолчанию</label>
+                  <select
+                    value={editing.responsible || "general"}
+                    onChange={(e) => setEditing({ ...editing, responsible: e.target.value })}
+                  >
+                    <option value="general">Не назначено / Общее</option>
+                    {DEFAULT_RESPONSIBLE_ROLES.filter((r) => r.id !== "general").map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="muted material-edit-hint">
+                    Копируется в позицию при добавлении в проект.
+                  </p>
+                </div>
+              </div>
+            </details>
+
+            <details className="material-edit-section" open>
+              <summary>Клиент и проект</summary>
+              <div className="material-edit-section__body">
+                <div className="form-grid material-edit-pair">
+                  <div className="field">
+                    <label>Раздел для клиента</label>
+                    <select
+                      value={editing.clientSection || ""}
+                      onChange={(e) => {
+                        const clientSection = e.target.value;
+                        const subs = subsectionsForSection(clientSection);
+                        const patch = { clientSection };
+                        if (editing.clientSubsection && !subs.includes(editing.clientSubsection)) {
+                          patch.clientSubsection = "";
+                        }
+                        setEditing({ ...editing, ...patch });
+                      }}
+                    >
+                      <option value="">— авто (из категории / названия) —</option>
+                      {clientSectionOptions.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="muted material-edit-hint">
+                      <a href="/settings">Настроить клиентские разделы</a>
+                    </p>
+                  </div>
+                  <div className="field">
+                    <label>Подраздел для клиента</label>
+                    <select
+                      value={editing.clientSubsection || ""}
+                      disabled={!editing.clientSection}
+                      onChange={(e) => setEditing({ ...editing, clientSubsection: e.target.value })}
+                    >
+                      <option value="">— не выбран —</option>
+                      {subsectionOptions.map((sub) => (
+                        <option key={sub} value={sub}>
+                          {sub}
+                        </option>
+                      ))}
+                    </select>
+                    {subsectionMismatch && (
+                      <p style={{ color: "var(--danger)", fontSize: 12, margin: "4px 0 0" }}>
+                        Подраздел не относится к выбранному разделу — выберите из списка.
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <p className="muted material-edit-hint" style={{ margin: "0 0 8px" }}>
+                  В закупочном листе: <strong>{purchaseListPreview || "—"}</strong>
+                  {editing.category === "Прочее" && isMiscCategory(editing) && (
+                    <span style={{ color: "var(--danger)", display: "block", marginTop: 4 }}>
+                      Категория «Прочее» — укажите раздел для клиента, иначе публикация заблокирована.
+                    </span>
+                  )}
                 </p>
-              )}
-            </div>
+                <MaterialFarmSectionsEditor
+                  value={editing}
+                  farmSections={farmSections}
+                  onChange={(farmSections) => setEditing(patchMaterialFarmSections(editing, farmSections))}
+                />
+                <p className="muted material-edit-hint">
+                  <a href="/modules">Настроить разделы фермы</a>
+                </p>
+                {hasStructuredSpecEditor(editing.name) ? (
+                  <StructuredSpecEditor
+                    name={editing.name}
+                    values={editing}
+                    onChange={(patch) => setEditing({ ...editing, ...patch })}
+                  />
+                ) : (
+                  <div className="field">
+                    <label>Пояснение клиенту</label>
+                    <textarea rows={2} value={editing.clientNote} onChange={(e) => setEditing({ ...editing, clientNote: e.target.value })} />
+                  </div>
+                )}
+              </div>
+            </details>
+
+            <details className="material-edit-section">
+              <summary>Закупка</summary>
+              <div className="material-edit-section__body">
+                {!isFlowSpecName(editing.name) && (
+                  <div className="field">
+                    <label>Ссылка на товар</label>
+                    <input value={editing.link} onChange={(e) => setEditing({ ...editing, link: e.target.value })} />
+                  </div>
+                )}
+                <div className="field">
+                  <label>НДС, %</label>
+                  <select value={editing.vatRate || 0} onChange={(e) => setEditing({ ...editing, vatRate: Number(e.target.value) })}>
+                    <option value={0}>0%</option>
+                    <option value={5}>5%</option>
+                    <option value={20}>20%</option>
+                  </select>
+                </div>
+                <div className="form-grid material-edit-pair">
+                  <div className="field">
+                    <label>Мин. заказ</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={editing.minOrderQty || ""}
+                      onChange={(e) => setEditing({ ...editing, minOrderQty: Number(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Кратность</label>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={editing.orderStep || 1}
+                      onChange={(e) => setEditing({ ...editing, orderStep: Number(e.target.value) || 1 })}
+                    />
+                  </div>
+                </div>
+                <div className="field">
+                  <label>Альтернатива (если нет в наличии)</label>
+                  <select
+                    value={editing.alternativeMaterialId || ""}
+                    onChange={(e) => setEditing({ ...editing, alternativeMaterialId: e.target.value })}
+                  >
+                    <option value="">— не задана —</option>
+                    {state.materials
+                      .filter((m) => m.id !== editing.id)
+                      .map((m) => (
+                        <option key={m.id} value={m.id}>{m.name}</option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+            </details>
+
+            <details className="material-edit-section" open>
+              <summary>Фото</summary>
+              <div className="material-edit-section__body">
+                <PhotoUploadField
+                  label="Фото"
+                  value={editing.imageUrl || editing.photoUrl || ""}
+                  pasteAnywhere
+                  showUrlInput={false}
+                  onChange={(url) => setEditing({ ...editing, imageUrl: url, photoUrl: url })}
+                />
+                <details className="material-edit-tech">
+                  <summary className="muted">Техническая информация</summary>
+                  <div className="field" style={{ marginTop: 8 }}>
+                    <label>Путь / URL</label>
+                    <input
+                      value={editing.imageUrl || editing.photoUrl || ""}
+                      onChange={(e) => {
+                        const url = e.target.value;
+                        setEditing({ ...editing, imageUrl: url, photoUrl: url });
+                      }}
+                      placeholder="/uploads/…"
+                    />
+                  </div>
+                </details>
+              </div>
+            </details>
+
+            <details className="material-edit-section">
+              <summary>Дополнительно</summary>
+              <div className="material-edit-section__body">
+                <details className="legacy-field-block">
+                  <summary className="muted" style={{ cursor: "pointer", fontSize: 13 }}>
+                    Служебные старые модули
+                  </summary>
+                  <div style={{ marginTop: 10 }}>
+                    <MaterialModulesEditor
+                      legacy
+                      value={editing.modules ?? editing.module}
+                      activeModules={activeModules}
+                      archivedModules={resolveMaterialModules(editing).filter((m) => !activeModules.includes(m))}
+                      onChange={(modules) => setEditing(patchMaterialModules(editing, modules))}
+                    />
+                  </div>
+                </details>
+                {editing.id && (
+                  <div className="field">
+                    <label className="muted">ID</label>
+                    <input value={editing.id} readOnly />
+                  </div>
+                )}
+                {editing.id && <PriceHistoryBlock materialId={editing.id} />}
+              </div>
+            </details>
           </div>
-          <p className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>
-            В закупочном листе: <strong>{purchaseListPreview || "—"}</strong>
-            {editing.category === "Прочее" && isMiscCategory(editing) && (
-              <span style={{ color: "var(--danger)", display: "block", marginTop: 4 }}>
-                Категория «Прочее» — укажите раздел для клиента, иначе публикация заблокирована.
-              </span>
-            )}
-          </p>
-          <MaterialFarmSectionsEditor
-            value={editing}
-            farmSections={farmSections}
-            onChange={(farmSections) => setEditing(patchMaterialFarmSections(editing, farmSections))}
-          />
-          <details className="legacy-field-block" style={{ marginTop: 8 }}>
-            <summary className="muted" style={{ cursor: "pointer", fontSize: 13 }}>
-              Служебное: старые модули (не для сборки)
-            </summary>
-            <div style={{ marginTop: 10 }}>
-              <MaterialModulesEditor
-                legacy
-                value={editing.modules ?? editing.module}
-                activeModules={activeModules}
-                archivedModules={resolveMaterialModules(editing).filter((m) => !activeModules.includes(m))}
-                onChange={(modules) => setEditing(patchMaterialModules(editing, modules))}
-              />
-            </div>
-          </details>
-          <div className="field">
-            <label>Поставщик</label>
-            <select value={editing.supplier || ""} onChange={(e) => setEditing({ ...editing, supplier: e.target.value })}>
-              <option value="">— не выбран —</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.name}>{s.name}</option>
-              ))}
-            </select>
-            <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
-              <a href="/suppliers">Создать поставщика</a>
-            </p>
-          </div>
-          <div className="field">
-            <label>Ответственный по умолчанию</label>
-            <select
-              value={editing.responsible || "general"}
-              onChange={(e) => setEditing({ ...editing, responsible: e.target.value })}
-            >
-              <option value="general">Не назначено / Общее</option>
-              {DEFAULT_RESPONSIBLE_ROLES.filter((r) => r.id !== "general").map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-            <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
-              Копируется в позицию при добавлении материала в проект. Старые проекты не меняются.
-            </p>
-          </div>
-          {!isFlowSpecName(editing.name) && (
-            <div className="field">
-              <label>Ссылка на товар</label>
-              <input value={editing.link} onChange={(e) => setEditing({ ...editing, link: e.target.value })} />
-            </div>
-          )}
-          <PhotoUploadField
-            label="Фото"
-            value={editing.imageUrl || editing.photoUrl || ""}
-            pasteAnywhere
-            onChange={(url) => setEditing({ ...editing, imageUrl: url, photoUrl: url })}
-          />
-          <div className="field">
-            <label>НДС, %</label>
-            <select value={editing.vatRate || 0} onChange={(e) => setEditing({ ...editing, vatRate: Number(e.target.value) })}>
-              <option value={0}>0%</option>
-              <option value={5}>5%</option>
-              <option value={20}>20%</option>
-            </select>
-          </div>
-          {hasStructuredSpecEditor(editing.name) ? (
-            <StructuredSpecEditor
-              name={editing.name}
-              values={editing}
-              onChange={(patch) => setEditing({ ...editing, ...patch })}
-            />
-          ) : (
-            <div className="field">
-              <label>Пояснение клиенту</label>
-              <textarea rows={2} value={editing.clientNote} onChange={(e) => setEditing({ ...editing, clientNote: e.target.value })} />
-            </div>
-          )}
-          <div className="form-grid">
-            <div className="field">
-              <label>Мин. заказ</label>
-              <input
-                type="number"
-                min={0}
-                value={editing.minOrderQty || ""}
-                onChange={(e) => setEditing({ ...editing, minOrderQty: Number(e.target.value) || 0 })}
-              />
-            </div>
-            <div className="field">
-              <label>Кратность</label>
-              <input
-                type="number"
-                min={1}
-                step={1}
-                value={editing.orderStep || 1}
-                onChange={(e) => setEditing({ ...editing, orderStep: Number(e.target.value) || 1 })}
-              />
-            </div>
-          </div>
-          <div className="field">
-            <label>Альтернатива (если нет в наличии)</label>
-            <select
-              value={editing.alternativeMaterialId || ""}
-              onChange={(e) => setEditing({ ...editing, alternativeMaterialId: e.target.value })}
-            >
-              <option value="">— не задана —</option>
-              {state.materials
-                .filter((m) => m.id !== editing.id)
-                .map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-            </select>
-          </div>
-          {editing.id && <PriceHistoryBlock materialId={editing.id} />}
         </Modal>
       )}
     </div>
