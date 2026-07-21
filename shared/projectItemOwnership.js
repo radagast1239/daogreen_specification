@@ -200,13 +200,15 @@ export const PROJECT_OWNED_FIELD_KEYS = [
   "clientSubsection",
 ];
 
-/** True when a generated builder line carries SpecEditor / procurement activity. */
+/** True when a generated builder line carries meaningful SpecEditor / procurement activity.
+ * Visibility-only hide flags are NOT enough to preserve a removed generated row forever.
+ * Catalog supplier / default responsible alone also do not count (would create ghosts).
+ */
 export function projectItemHasAdminActivity(item) {
   if (!item || typeof item !== "object") return false;
   const status = String(item.status || "not_bought").trim();
   if (status && status !== "not_bought") return true;
   if (item.actualPrice != null && item.actualPrice !== "") return true;
-  if (item.visibleToClient === false || item.visible === false || item.approved === false) return true;
   if (item.nameOverridden || item.name_overridden) return true;
   if (item.priceOverridden || item.linkOverridden || item.linkAltOverridden) return true;
   const notes = [item.clientComment, item.internalNote, item.internal_note, item.techNote, item.clientNote, item.comment];
@@ -216,5 +218,12 @@ export function projectItemHasAdminActivity(item) {
   }
   if (String(item.purchaseKey || "").trim()) return true;
   if (Number(item.deliveryDays) > 0) return true;
+  // SpecEditor-changed procurement fields (not catalog defaults on every generated line).
+  // A non-empty supplier alone is too weak — catalog snapshot always fills it.
+  // Treat explicit custom responsible only when paired with another signal above, or when
+  // purchaseStatus / qty override markers exist.
+  if (item.purchaseStatus != null && String(item.purchaseStatus).trim() && String(item.purchaseStatus) !== "not_bought") {
+    return true;
+  }
   return false;
 }
