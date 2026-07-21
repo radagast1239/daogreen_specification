@@ -1,8 +1,86 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api, photoSrc } from "../lib/api.js";
 import FloorPlanViewer from "./FloorPlanViewer.jsx";
 import { useClipboardImagePaste } from "../lib/useClipboardImagePaste.js";
 import { isPdfScheme, SCHEME_FILE_ACCEPT, schemeOpenRel } from "../lib/schemeMedia.js";
+import {
+  createTitleSaveGate,
+  resolveSchemeTitleCommit,
+} from "../lib/schemeTitleDraft.js";
+
+/** Local draft title input — same commit semantics as client-scheme SchemeTitleInput. */
+function FloorPlanTitleInput({ value, onCommit }) {
+  const [draft, setDraft] = useState(value);
+  const editingRef = useRef(false);
+  const cancelCommitRef = useRef(false);
+  const saveGateRef = useRef(createTitleSaveGate());
+  const savedValueRef = useRef(value);
+  const pendingSaveRef = useRef(null);
+  const savingRef = useRef(false);
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+  savedValueRef.current = value;
+
+  useEffect(() => {
+    if (!editingRef.current) setDraft(value);
+  }, [value]);
+
+  const flushSaves = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try {
+      while (pendingSaveRef.current != null) {
+        const nextValue = pendingSaveRef.current;
+        pendingSaveRef.current = null;
+        const token = saveGateRef.current.begin();
+        if (typeof onCommitRef.current !== "function") continue;
+        if (nextValue === savedValueRef.current) continue;
+        await Promise.resolve(onCommitRef.current(nextValue));
+        void saveGateRef.current.isLatest(token);
+      }
+    } finally {
+      savingRef.current = false;
+      if (pendingSaveRef.current != null) await flushSaves();
+    }
+  };
+
+  const commit = () => {
+    editingRef.current = false;
+    if (cancelCommitRef.current) {
+      cancelCommitRef.current = false;
+      setDraft(savedValueRef.current);
+      return;
+    }
+    const resolved = resolveSchemeTitleCommit(draft, savedValueRef.current);
+    setDraft(resolved.display);
+    if (!resolved.shouldSave || typeof onCommitRef.current !== "function") return;
+    // Latest queued value wins; in-flight save finishes then flushes the newest title.
+    pendingSaveRef.current = resolved.value;
+    void flushSaves();
+  };
+
+  return (
+    <input
+      className="spec-cell-input"
+      value={draft}
+      aria-label="Название схемы помещения"
+      onFocus={() => {
+        editingRef.current = true;
+        cancelCommitRef.current = false;
+      }}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+        if (event.key === "Escape") {
+          cancelCommitRef.current = true;
+          event.currentTarget.blur();
+        }
+      }}
+      style={{ marginTop: 6, width: "100%", maxWidth: 420, fontWeight: 600, fontSize: 13 }}
+    />
+  );
+}
 
 /** Загрузка одной схемы помещения (на весь объект, не по стеллажам) */
 export default function FloorPlanField({
@@ -59,13 +137,7 @@ export default function FloorPlanField({
         <div style={{ flex: "1 1 220px", minWidth: 0 }}>
           <h4 style={{ margin: 0, fontSize: 14 }}>Схема помещения</h4>
           {typeof onTitleChange === "function" ? (
-            <input
-              className="spec-cell-input"
-              value={title}
-              aria-label="Название схемы помещения"
-              onChange={(e) => onTitleChange(e.target.value)}
-              style={{ marginTop: 6, width: "100%", maxWidth: 420, fontWeight: 600, fontSize: 13 }}
-            />
+            <FloorPlanTitleInput value={title} onCommit={onTitleChange} />
           ) : null}
           <p className="muted" style={{ fontSize: 12, margin: "4px 0 0", maxWidth: 640 }}>
             План с трубами, стеллажами и зонами — общая схема объекта. Загрузите файл или вставьте скриншот
