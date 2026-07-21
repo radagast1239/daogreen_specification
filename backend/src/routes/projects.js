@@ -17,6 +17,11 @@ import {
   projectTotals,
 } from "../services/buildItems.js";
 import { listMaterials, listModules } from "./materials.js";
+import {
+  isBuilderProjectSave,
+  isBuilderTitleOnlySave,
+  reconcileBuilderProjectPatch,
+} from "../../../shared/reconcileBuilderProjectSave.js";
 import { validateProjectForPublish, validateProjectForPublishFromItems } from "../services/publishRules.js";
 import { getAnalytics } from "../services/analytics.js";
 import {
@@ -501,7 +506,45 @@ export function updateProject(id, patch) {
     const cur = loadProject(id);
     if (!cur) return null;
     assertRevision(id, expectedRevision);
-    const { expectedRevision: _expectedRevision, ...safePatch } = patch;
+
+    let workingPatch = patch;
+    if (isBuilderProjectSave(patch)) {
+      // Live DB is the source of truth for SpecEditor-owned fields. Incoming
+      // builder payloads may be stale (opened before admin edits) or regenerated
+      // with catalog defaults that would wipe purchase / visibility / notes.
+      workingPatch = reconcileBuilderProjectPatch(cur, patch, {
+        materials: listMaterials(),
+      });
+      workingPatch.expectedRevision = expectedRevision;
+    }
+
+    const {
+      expectedRevision: _expectedRevision,
+      builderSave: _builderSave,
+      saveSource: _saveSource,
+      builderSaveMode: _builderSaveMode,
+      _builderReconcileMeta: _meta,
+      ...safePatch
+    } = workingPatch;
+
+    // Title-only builder save: update name (and bump revision) without touching items / manualParams.
+    if (isBuilderTitleOnlySave(patch) || isBuilderTitleOnlySave(workingPatch)) {
+      const name = safePatch.name != null ? String(safePatch.name) : cur.name;
+      const merged = { ...cur, name };
+      const row = projectUpdateRow(merged);
+      const storedRow = db.prepare("SELECT planner_plan FROM projects WHERE id = ?").get(id);
+      if (shouldPreserveStoredPlan(storedRow?.planner_plan, {})) {
+        row.planner_plan = storedRow.planner_plan;
+      }
+      row.expected_revision = expectedRevision;
+      const updated = UPDATE_PROJECT.run(row);
+      if (updated.changes !== 1) {
+        const current = db.prepare("SELECT revision FROM projects WHERE id = ?").get(id);
+        throw revisionConflict(id, expectedRevision, Number(current?.revision || 0));
+      }
+      return true;
+    }
+
     if (safePatch.items) {
       saveItemsWithin(id, safePatch.items);
     }

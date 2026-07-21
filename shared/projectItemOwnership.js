@@ -145,13 +145,19 @@ export function builderProjectItemLogicalKey(item) {
   return `sec::${section}::${materialId}::${id}`;
 }
 
-/** Project-owned fields preserved when builder updates a line. */
+/**
+ * Admin / SpecEditor-owned fields — preserved from the live DB row when the
+ * project builder regenerates lines. Builder may still rewrite qty / geometry
+ * via BUILDER_REWRITE_FIELD_KEYS in buildProjectItemsAfterBuilderSave.
+ */
 export const PROJECT_OWNED_FIELD_KEYS = [
   "qty",
   "includedInProject",
   "visibleToClient",
   "visible",
   "approved",
+  "showToClient",
+  "clientVisible",
   "enabled",
   "status",
   "actualPrice",
@@ -166,15 +172,49 @@ export const PROJECT_OWNED_FIELD_KEYS = [
   "flowSpecs",
   "splitSpecs",
   "responsible",
+  "supplier",
+  "name",
+  "nameOverridden",
+  "name_overridden",
+  "price",
+  "priceOverridden",
+  "link",
+  "linkOverridden",
+  "linkAlt",
+  "linkAltOverridden",
   "roomId",
   "purchaseKey",
+  "purchaseStatus",
   "sortOrder",
   "needsApproval",
   "replacementPrice",
   "replacementComment",
   "replacementProposedAt",
+  "replacementLink",
+  "replacementPhotoUrl",
   "deliveryDays",
   "itemRole",
   "subcategory",
   "farmGroup",
+  "clientSection",
+  "clientSubsection",
 ];
+
+/** True when a generated builder line carries SpecEditor / procurement activity. */
+export function projectItemHasAdminActivity(item) {
+  if (!item || typeof item !== "object") return false;
+  const status = String(item.status || "not_bought").trim();
+  if (status && status !== "not_bought") return true;
+  if (item.actualPrice != null && item.actualPrice !== "") return true;
+  if (item.visibleToClient === false || item.visible === false || item.approved === false) return true;
+  if (item.nameOverridden || item.name_overridden) return true;
+  if (item.priceOverridden || item.linkOverridden || item.linkAltOverridden) return true;
+  const notes = [item.clientComment, item.internalNote, item.internal_note, item.techNote, item.clientNote, item.comment];
+  if (notes.some((n) => String(n || "").trim())) return true;
+  if (item.replacementPrice != null || String(item.replacementComment || "").trim() || String(item.replacementLink || "").trim()) {
+    return true;
+  }
+  if (String(item.purchaseKey || "").trim()) return true;
+  if (Number(item.deliveryDays) > 0) return true;
+  return false;
+}

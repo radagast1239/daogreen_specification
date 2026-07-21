@@ -746,6 +746,37 @@ export default function ProjectBuilderPage() {
     return requested;
   };
 
+  /** Title-only when name changed and builder geometry / client fields are unchanged. */
+  const detectBuilderSaveMode = ({
+    draftOverride,
+    stellagesOverride,
+  } = {}) => {
+    if (!loadedProject) return "full";
+    const nameNext = String(form.name || "").trim();
+    const namePrev = String(loadedProject.name || "").trim();
+    if (!nameNext || nameNext === namePrev) return "full";
+    if (String(form.client || "") !== String(loadedProject.client || "")) return "full";
+    if (String(form.city || "") !== String(loadedProject.city || "")) return "full";
+    if (Number(form.area) !== Number(loadedProject.area)) return "full";
+    if (Number(form.height) !== Number(loadedProject.height)) return "full";
+    if (String(form.type || "") !== String(loadedProject.type || "")) return "full";
+    const draftResolved = draftOverride !== undefined ? draftOverride : draft;
+    const stellagesResolved = Array.isArray(stellagesOverride) ? stellagesOverride : stellages;
+    const nextStellages = stellagesForProjectSave(stellagesResolved, draftResolved);
+    const prevConfigs = Array.isArray(loadedProject.stellageConfigs) ? loadedProject.stellageConfigs : [];
+    if (nextStellages.length !== prevConfigs.length) return "full";
+    for (let i = 0; i < nextStellages.length; i += 1) {
+      const next = nextStellages[i];
+      const prev = prevConfigs[i];
+      if (String(next?.id || "") !== String(prev?.id || "")) return "full";
+      if (Number(next?.count) !== Number(prev?.count)) return "full";
+      if (String(next?.name || "") !== String(prev?.name || "")) return "full";
+    }
+    const prevRooms = Array.isArray(loadedProject.rooms) ? loadedProject.rooms : [];
+    if ((rooms || []).length !== prevRooms.length) return "full";
+    return "title";
+  };
+
   const persistProject = async ({
     status = PROJECT_STATUS_DRAFT,
     nextStep = step,
@@ -759,7 +790,26 @@ export default function ProjectBuilderPage() {
     if (!silent) setDraftSaving(true);
     try {
       const effectiveStatus = resolveSaveStatus(status);
-      const payload = buildProjectPayload({ status: effectiveStatus, nextStep, draftOverride, stellagesOverride });
+      if (loadedProjectId) {
+        const saveMode = detectBuilderSaveMode({ draftOverride, stellagesOverride });
+        if (saveMode === "title") {
+          const updated = await actions.projectUpdate(loadedProjectId, {
+            name: String(form.name || "").trim(),
+            builderSave: true,
+            builderSaveMode: "title",
+          });
+          setLoadedProjectId(updated.id);
+          setLoadedProject(updated);
+          syncBuilderProjectUrl(updated.id, nextStep);
+          if (!silent) markSaved();
+          return updated;
+        }
+      }
+      const payload = {
+        ...buildProjectPayload({ status: effectiveStatus, nextStep, draftOverride, stellagesOverride }),
+        builderSave: true,
+        builderSaveMode: "full",
+      };
       if (loadedProjectId) {
         const updated = await actions.projectUpdate(loadedProjectId, payload);
         setLoadedProjectId(updated.id);

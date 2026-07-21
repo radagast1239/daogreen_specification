@@ -9,6 +9,7 @@ import {
   itemBelongsToActiveStellage,
   PROJECT_ITEM_OWNERSHIP,
   PROJECT_OWNED_FIELD_KEYS,
+  projectItemHasAdminActivity,
 } from "./projectItemOwnership.js";
 import { copyCatalogSnapshotFromMaterial } from "./materialCatalogSnapshot.js";
 import { isFrameBomLine, resolveBuilderPrefixedStellageId } from "./frameBomProjectItems.js";
@@ -37,14 +38,14 @@ function buildContext(builderContext = {}, existingItems = []) {
   };
 }
 
-/** Fields the builder wizard is allowed to rewrite on re-save. */
+/**
+ * Fields the builder wizard may rewrite on matched generated lines.
+ * Client visibility, purchase state, supplier, titles, and notes stay admin-owned.
+ */
 const BUILDER_REWRITE_FIELD_KEYS = new Set([
   "qty",
   "includedInProject",
   "enabled",
-  "visibleToClient",
-  "visible",
-  "approved",
   "pipeCuts",
   "breakerSpecs",
   "flowSpecs",
@@ -52,7 +53,6 @@ const BUILDER_REWRITE_FIELD_KEYS = new Set([
   "subcategory",
   "farmGroup",
   "roomId",
-  "responsible",
   "sortOrder",
 ]);
 
@@ -81,10 +81,19 @@ function mergeProjectOwnedFields(existing, generated) {
   }
   // Exact persistent identity — never adopt a new generated id for an existing row.
   merged.id = existing.id;
+  // SpecEditor title override stays on this row.
+  if (existing.nameOverridden || existing.name_overridden) {
+    merged.name = existing.name;
+    merged.nameOverridden = true;
+    merged.name_overridden = true;
+  }
   // Project-local commercial overrides stay on this row (never borrow from a peer).
-  if (existing.priceOverridden) {
-    merged.price = existing.price;
-    merged.priceOverridden = true;
+  if (existing.priceOverridden || (existing.price != null && generated?.price != null && Number(existing.price) !== Number(generated.price))) {
+    // Prefer explicit override flag; also keep DB price when it differs from regenerated catalog.
+    if (existing.priceOverridden || existing.price != null) {
+      merged.price = existing.price;
+      if (existing.priceOverridden) merged.priceOverridden = true;
+    }
   }
   if (existing.linkOverridden) {
     merged.link = existing.link;
@@ -93,6 +102,9 @@ function mergeProjectOwnedFields(existing, generated) {
   if (existing.linkAltOverridden) {
     merged.linkAlt = existing.linkAlt;
     merged.linkAltOverridden = true;
+  }
+  if (existing.supplier != null && String(existing.supplier).trim() !== "") {
+    merged.supplier = existing.supplier;
   }
   return merged;
 }
@@ -297,9 +309,10 @@ export function buildProjectItemsAfterBuilderSave({
       if (gen.id) matchedGeneratedIds.add(gen.id);
     } else {
       // No match: preserve existing rather than dropping when generated still has
-      // same-section material peers (extra duplicate left over after pairing).
+      // same-section material peers (extra duplicate left over after pairing),
+      // or when the row carries SpecEditor / procurement activity.
       const peers = generated.filter((g) => sameBuilderSectionMaterial(ex, g));
-      if (peers.length > 0) {
+      if (peers.length > 0 || projectItemHasAdminActivity(ex)) {
         items.push(ex);
         resultIds.add(ex.id);
       } else {
