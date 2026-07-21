@@ -1,7 +1,6 @@
 import {
   addProjectScheme,
   listProjectSchemes,
-  removeProjectScheme,
 } from "./clientSchemes.js";
 
 /** Display title derived from a pasted screenshot filename. */
@@ -10,43 +9,79 @@ export function schemeTitleFromPasteFile(file) {
 }
 
 /**
- * Remove a paste-created placeholder only when it still exists and has no url.
- * Kept for defensive cleanup if a caller still adds a card before upload.
+ * Capture an immutable paste attempt bound to a project/generation.
+ * Write callback is frozen at begin(); live manualParams are read only if still current.
  */
-export function rollbackEmptySchemeCard(manualParams, id) {
-  const list = listProjectSchemes(manualParams);
-  const scheme = list.find((s) => s.id === id || s.key === id);
-  if (!scheme) return { manualParams, removed: false };
-  if (String(scheme.url || "").trim()) return { manualParams, removed: false };
-  return { manualParams: removeProjectScheme(manualParams, id), removed: true };
+export function beginSchemePasteAttempt({
+  projectId,
+  generation,
+  getGeneration,
+  getProjectId,
+  isMounted,
+  getManualParams,
+  onChange,
+}) {
+  const captured = {
+    projectId: String(projectId || ""),
+    generation: Number(generation),
+    onChange,
+    getManualParams,
+  };
+  return {
+    ...captured,
+    isCurrent() {
+      if (typeof isMounted === "function" && !isMounted()) return false;
+      if (Number(getGeneration()) !== captured.generation) return false;
+      if (String(getProjectId() || "") !== captured.projectId) return false;
+      return typeof captured.onChange === "function";
+    },
+  };
 }
 
 /**
- * Upload clipboard image first, then append a filled scheme card.
- * On upload failure no card is created — avoids empty «Нет файла» leftovers
- * from racing projectUpdate PATCH revisions.
+ * Upload clipboard image first, then append a filled scheme card — only if attempt is still current.
+ * Stale context after project switch/unmount: no onChange; uploaded file remains an orphan for retention.
  */
-export async function pasteClipboardSchemeImage({
-  manualParams,
-  file,
-  uploadFile,
-  onChange,
-  getManualParams,
-}) {
-  if (!file || typeof uploadFile !== "function" || typeof onChange !== "function") {
-    return { ok: false, id: null };
+export async function pasteClipboardSchemeImage({ file, uploadFile, attempt }) {
+  if (!file || typeof uploadFile !== "function" || !attempt) {
+    return { ok: false, id: null, reason: "invalid" };
   }
-  const readMp = typeof getManualParams === "function" ? getManualParams : () => manualParams;
 
   const result = await uploadFile(file);
-  const base = readMp();
-  const withNew = addProjectScheme(base, {
+
+  if (!attempt.isCurrent()) {
+    return {
+      ok: false,
+      stale: true,
+      orphanUploadUrl: result?.url || null,
+      id: null,
+    };
+  }
+
+  const latest =
+    typeof attempt.getManualParams === "function" ? attempt.getManualParams() : {};
+  const withNew = addProjectScheme(latest, {
     title: schemeTitleFromPasteFile(file),
     mimeType: result.mimeType || file.type || "image/png",
     url: result.url,
   });
   const newId = listProjectSchemes(withNew).at(-1)?.id;
-  if (!newId) return { ok: false, id: null };
-  onChange(withNew);
-  return { ok: true, id: newId, url: result.url, mimeType: result.mimeType || file.type || "image/png" };
+  if (!newId) return { ok: false, id: null, reason: "missing-id" };
+
+  if (!attempt.isCurrent()) {
+    return {
+      ok: false,
+      stale: true,
+      orphanUploadUrl: result?.url || null,
+      id: null,
+    };
+  }
+
+  attempt.onChange(withNew);
+  return {
+    ok: true,
+    id: newId,
+    url: result.url,
+    mimeType: result.mimeType || file.type || "image/png",
+  };
 }

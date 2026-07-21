@@ -1771,6 +1771,8 @@ function SpecTab({
           mimeType={floorPlanMimeType || "image/*"}
           onChange={onFloorPlanChange}
           onTitleChange={onFloorPlanTitleChange}
+          projectId={project.id}
+          identityKey={`${project.id}:${floorPlanUrl || "empty"}`}
         />
         {(hasFarmItems || rooms.length > 0) && (
           <div style={{ marginTop: 12 }}>
@@ -1791,6 +1793,7 @@ function SpecTab({
         <ClientSchemesEditor
           manualParams={manualParams}
           onChange={onManualParamsChange}
+          projectId={project.id}
         />
       </Collapsible>
 

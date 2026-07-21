@@ -1159,6 +1159,7 @@ export default function ProjectBuilderPage() {
             onChange={setSchemesManualParams}
             showClientVisibility
             title="Схемы проекта"
+            projectId={loadedProjectId || "builder-new"}
           />
 
           <div className="toolbar" style={{ marginTop: 16 }}>
@@ -1472,6 +1473,7 @@ export default function ProjectBuilderPage() {
             onChange={setSchemesManualParams}
             showClientVisibility={false}
             title="Схемы проекта"
+            projectId={loadedProjectId || "builder-new"}
           />
 
           <div className="card" style={{ padding: 14, marginBottom: 14 }}>

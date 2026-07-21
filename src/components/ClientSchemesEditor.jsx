@@ -14,7 +14,7 @@ import {
   removeProjectScheme,
   updateProjectScheme,
 } from "../lib/clientSchemes.js";
-import { pasteClipboardSchemeImage } from "../lib/schemeClipboardPaste.js";
+import { beginSchemePasteAttempt, pasteClipboardSchemeImage } from "../lib/schemeClipboardPaste.js";
 
 function SchemeTitleInput({ value, onCommit }) {
   const [draft, setDraft] = useState(value);
@@ -74,6 +74,7 @@ export default function ClientSchemesEditor({
   showClientVisibility = true,
   title = null,
   intro = null,
+  projectId = "",
 }) {
   const mp = manualParams && typeof manualParams === "object" ? manualParams : {};
   const schemes = listProjectSchemes(mp);
@@ -81,6 +82,25 @@ export default function ClientSchemesEditor({
   const [uploading, setUploading] = useState(null);
   const mpRef = useRef(mp);
   mpRef.current = mp;
+  const projectIdRef = useRef(String(projectId || ""));
+  projectIdRef.current = String(projectId || "");
+  const generationRef = useRef(0);
+  const mountedRef = useRef(true);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    generationRef.current += 1;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    generationRef.current += 1;
+    projectIdRef.current = String(projectId || "");
+  }, [projectId]);
 
   const filled = filledSchemeSlots(mp);
   const heading = title ?? (showClientVisibility ? null : "Схемы проекта");
@@ -92,15 +112,25 @@ export default function ClientSchemesEditor({
 
   const upload = async (id, file, baseMp = mpRef.current) => {
     if (!file || uploading) return;
+    const attemptProjectId = projectIdRef.current;
+    const attemptGeneration = generationRef.current;
+    const capturedOnChange = onChangeRef.current;
     setUploading(id);
     try {
       const result = await api.uploadProjectScheme(file);
+      if (
+        !mountedRef.current ||
+        generationRef.current !== attemptGeneration ||
+        projectIdRef.current !== attemptProjectId
+      ) {
+        return;
+      }
       const latest = mpRef.current;
       const targetMp = listProjectSchemes(latest).some((s) => s.id === id || s.key === id)
         ? latest
         : baseMp;
       if (!listProjectSchemes(targetMp).some((s) => s.id === id || s.key === id)) return;
-      onChange(
+      capturedOnChange(
         updateProjectScheme(targetMp, id, {
           url: result.url,
           mimeType: result.mimeType || file.type || "image/*",
@@ -108,7 +138,9 @@ export default function ClientSchemesEditor({
         })
       );
     } catch (e) {
-      alert(e.message || "Не удалось загрузить");
+      if (mountedRef.current && generationRef.current === attemptGeneration) {
+        alert(e.message || "Не удалось загрузить");
+      }
     } finally {
       setUploading(null);
     }
@@ -119,19 +151,31 @@ export default function ClientSchemesEditor({
     onImage: async (file) => {
       if (uploading) return;
       setUploading("paste");
+      const write = onChangeRef.current;
+      const attempt = beginSchemePasteAttempt({
+        projectId: projectIdRef.current,
+        generation: generationRef.current,
+        getGeneration: () => generationRef.current,
+        getProjectId: () => projectIdRef.current,
+        isMounted: () => mountedRef.current,
+        getManualParams: () => mpRef.current,
+        // Capture write target for THIS project at paste start.
+        onChange: (next) => {
+          mpRef.current = next;
+          write(next);
+        },
+      });
       try {
-        await pasteClipboardSchemeImage({
-          manualParams: mpRef.current,
+        const outcome = await pasteClipboardSchemeImage({
           file,
           uploadFile: (f) => api.uploadProjectScheme(f),
-          getManualParams: () => mpRef.current,
-          onChange: (next) => {
-            mpRef.current = next;
-            onChange(next);
-          },
+          attempt,
         });
+        if (outcome?.stale) return;
       } catch (e) {
-        alert(e.message || "Не удалось загрузить");
+        if (attempt.isCurrent()) {
+          alert(e.message || "Не удалось загрузить");
+        }
       } finally {
         setUploading(null);
       }
