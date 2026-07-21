@@ -14,6 +14,7 @@ import {
   removeProjectScheme,
   updateProjectScheme,
 } from "../lib/clientSchemes.js";
+import { pasteClipboardSchemeImage } from "../lib/schemeClipboardPaste.js";
 
 function SchemeTitleInput({ value, onCommit }) {
   const [draft, setDraft] = useState(value);
@@ -94,8 +95,13 @@ export default function ClientSchemesEditor({
     setUploading(id);
     try {
       const result = await api.uploadProjectScheme(file);
+      const latest = mpRef.current;
+      const targetMp = listProjectSchemes(latest).some((s) => s.id === id || s.key === id)
+        ? latest
+        : baseMp;
+      if (!listProjectSchemes(targetMp).some((s) => s.id === id || s.key === id)) return;
       onChange(
-        updateProjectScheme(baseMp, id, {
+        updateProjectScheme(targetMp, id, {
           url: result.url,
           mimeType: result.mimeType || file.type || "image/*",
           createdAt: new Date().toISOString(),
@@ -111,15 +117,24 @@ export default function ClientSchemesEditor({
   const { pasteZoneProps } = useClipboardImagePaste({
     disabled: !!uploading,
     onImage: async (file) => {
-      const base = mpRef.current;
-      const withNew = addProjectScheme(base, {
-        title: (file.name || "Скриншот").replace(/\.[^.]+$/, "") || "Скриншот",
-        mimeType: file.type || "image/png",
-      });
-      const newId = listProjectSchemes(withNew).at(-1)?.id;
-      if (!newId) return;
-      onChange(withNew);
-      await upload(newId, file, withNew);
+      if (uploading) return;
+      setUploading("paste");
+      try {
+        await pasteClipboardSchemeImage({
+          manualParams: mpRef.current,
+          file,
+          uploadFile: (f) => api.uploadProjectScheme(f),
+          getManualParams: () => mpRef.current,
+          onChange: (next) => {
+            mpRef.current = next;
+            onChange(next);
+          },
+        });
+      } catch (e) {
+        alert(e.message || "Не удалось загрузить");
+      } finally {
+        setUploading(null);
+      }
     },
   });
 
