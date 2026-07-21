@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { photoSrc } from "../lib/api.js";
+import { isPdfScheme, schemeOpenRel } from "../lib/schemeMedia.js";
 
 /** Полноэкранный просмотр схемы — Esc или клик по фону закрывает */
 export default function FloorPlanViewer({
@@ -19,7 +20,10 @@ export default function FloorPlanViewer({
     ? Math.min(Math.max(0, Number(activeIndex) || 0), list.length - 1)
     : 0;
   const active = list ? list[idx] : null;
-  const src = photoSrc(active?.accessUrl || active?.url || url);
+  const activeUrl = active?.accessUrl || active?.url || url;
+  const pdf = isPdfScheme(active || { mimeType: "", url: activeUrl }, activeUrl);
+  const src = !pdf ? photoSrc(activeUrl) : "";
+  const href = photoSrc(activeUrl);
   const heading = active
     ? `${active.title || title} · ${idx + 1} из ${list.length}`
     : title;
@@ -55,7 +59,7 @@ export default function FloorPlanViewer({
     };
   }, [open, onClose, canNav, idx, list, onActiveIndexChange]);
 
-  if (!open || !src) return null;
+  if (!open || !href) return null;
 
   return (
     <div className="floor-plan-fullscreen" onClick={onClose} role="dialog" aria-modal="true" aria-label={heading}>
@@ -82,12 +86,14 @@ export default function FloorPlanViewer({
               </button>
             </div>
           )}
-          <div className="floor-plan-fullscreen__nav" aria-label="Масштаб">
-            <button type="button" className="btn btn-sm" onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))}>−</button>
-            <span>{Math.round(zoom * 100)}%</span>
-            <button type="button" className="btn btn-sm" onClick={() => setZoom((z) => Math.min(5, z + 0.25))}>+</button>
-            <button type="button" className="btn btn-sm" onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}>Сбросить</button>
-          </div>
+          {!pdf && (
+            <div className="floor-plan-fullscreen__nav" aria-label="Масштаб">
+              <button type="button" className="btn btn-sm" onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))}>−</button>
+              <span>{Math.round(zoom * 100)}%</span>
+              <button type="button" className="btn btn-sm" onClick={() => setZoom((z) => Math.min(5, z + 0.25))}>+</button>
+              <button type="button" className="btn btn-sm" onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}>Сбросить</button>
+            </div>
+          )}
         </div>
         <button type="button" className="btn btn-sm" onClick={onClose}>
           ✕ Закрыть
@@ -96,12 +102,21 @@ export default function FloorPlanViewer({
       <div
         className="floor-plan-fullscreen__body"
         onClick={(e) => e.stopPropagation()}
-        onWheel={(e) => { e.preventDefault(); setZoom((z) => Math.min(5, Math.max(0.5, z + (e.deltaY < 0 ? 0.2 : -0.2)))); }}
-        onPointerDown={(e) => { dragRef.current = { clientX: e.clientX, clientY: e.clientY, originX: offset.x, originY: offset.y }; e.currentTarget.setPointerCapture(e.pointerId); }}
-        onPointerMove={(e) => { if (!dragRef.current) return; setOffset({ x: dragRef.current.originX + e.clientX - dragRef.current.clientX, y: dragRef.current.originY + e.clientY - dragRef.current.clientY }); }}
-        onPointerUp={() => { dragRef.current = null; }}
+        onWheel={pdf ? undefined : (e) => { e.preventDefault(); setZoom((z) => Math.min(5, Math.max(0.5, z + (e.deltaY < 0 ? 0.2 : -0.2)))); }}
+        onPointerDown={pdf ? undefined : (e) => { dragRef.current = { clientX: e.clientX, clientY: e.clientY, originX: offset.x, originY: offset.y }; e.currentTarget.setPointerCapture(e.pointerId); }}
+        onPointerMove={pdf ? undefined : (e) => { if (!dragRef.current) return; setOffset({ x: dragRef.current.originX + e.clientX - dragRef.current.clientX, y: dragRef.current.originY + e.clientY - dragRef.current.clientY }); }}
+        onPointerUp={pdf ? undefined : () => { dragRef.current = null; }}
       >
-        <img src={src} alt={heading} className="floor-plan-fullscreen__img" draggable="false" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }} />
+        {pdf ? (
+          <div style={{ textAlign: "center", padding: 40 }}>
+            <p style={{ marginBottom: 16 }}><strong>PDF</strong> — {heading}</p>
+            <a className="btn" href={href} target="_blank" rel={schemeOpenRel()}>
+              Открыть PDF
+            </a>
+          </div>
+        ) : (
+          <img src={src} alt={heading} className="floor-plan-fullscreen__img" draggable="false" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }} />
+        )}
       </div>
       {canNav && (
         <div className="floor-plan-fullscreen__thumbs" onClick={(e) => e.stopPropagation()}>
@@ -113,13 +128,17 @@ export default function FloorPlanViewer({
               onClick={() => onActiveIndexChange(i)}
               title={s.title || `Схема ${i + 1}`}
             >
-              <img src={photoSrc(s.url)} alt="" />
+              {isPdfScheme(s) ? (
+                <span style={{ display: "grid", placeItems: "center", width: "100%", height: "100%", fontSize: 11, fontWeight: 700 }}>PDF</span>
+              ) : (
+                <img src={photoSrc(s.accessUrl || s.url)} alt="" />
+              )}
             </button>
           ))}
         </div>
       )}
       <p className="floor-plan-fullscreen__hint muted">
-        Esc или клик по фону — закрыть · колесо — масштаб · перетаскивание — перемещение{canNav ? " · ← → переключение схем" : ""}
+        Esc или клик по фону — закрыть{pdf ? "" : " · колесо — масштаб · перетаскивание — перемещение"}{canNav ? " · ← → переключение схем" : ""}
       </p>
     </div>
   );

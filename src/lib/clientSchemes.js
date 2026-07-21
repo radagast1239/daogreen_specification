@@ -297,34 +297,84 @@ export function patchSchemeVisibility(manualParams, key, visible) {
  * FloorPlanField read: when projectSchemes[] exists, first entry url; else legacy floorPlanUrl.
  */
 export function getFloorPlanUrl(manualParams = {}) {
+  return getFloorPlanEntry(manualParams).url;
+}
+
+/** Primary floor-plan entry (url + title + mimeType). */
+export function getFloorPlanEntry(manualParams = {}) {
   const mp = asMp(manualParams);
   if (Array.isArray(mp.projectSchemes)) {
     const first = listProjectSchemes(mp)[0];
-    return String(first?.url || "").trim();
+    if (first) {
+      return {
+        id: first.id,
+        url: String(first.url || "").trim(),
+        title: String(first.title || "").trim() || CLIENT_SCHEME_DEFS[0]?.label || "Схема помещения",
+        mimeType: String(first.mimeType || "image/*"),
+      };
+    }
   }
-  return String(mp.floorPlanUrl || "").trim();
+  const url = String(mp.floorPlanUrl || "").trim();
+  const names = mp.schemeNames && typeof mp.schemeNames === "object" ? mp.schemeNames : {};
+  return {
+    id: "floorPlanUrl",
+    url,
+    title: String(names.floorPlanUrl || "").trim() || CLIENT_SCHEME_DEFS[0]?.label || "Схема помещения",
+    mimeType: "image/*",
+  };
 }
 
 /**
  * FloorPlanField write: sync projectSchemes[0] when array model active; always mirror floorPlanUrl.
+ * @param {object} [meta] optional { title, mimeType }
  */
-export function setFloorPlanUrl(manualParams, url) {
+export function setFloorPlanUrl(manualParams, url, meta = {}) {
   const mp = asMp(manualParams);
   const nextUrl = String(url || "").trim();
+  const patch = { url: nextUrl };
+  if (meta.title != null) patch.title = String(meta.title || "").trim();
+  if (meta.mimeType) patch.mimeType = String(meta.mimeType);
   if (Array.isArray(mp.projectSchemes)) {
     const list = listProjectSchemes(mp);
     let next;
     if (!list.length) {
       next = addProjectScheme(mp, {
         id: "floorPlanUrl",
-        title: CLIENT_SCHEME_DEFS[0]?.label || "Общая схема помещения",
+        title: patch.title || CLIENT_SCHEME_DEFS[0]?.label || "Общая схема помещения",
         url: nextUrl,
         clientVisible: true,
+        mimeType: patch.mimeType || "image/*",
       });
     } else {
-      next = updateProjectScheme(mp, list[0].id, { url: nextUrl });
+      next = updateProjectScheme(mp, list[0].id, patch);
     }
     return { ...next, floorPlanUrl: nextUrl };
   }
-  return { ...mp, floorPlanUrl: nextUrl };
+  const out = { ...mp, floorPlanUrl: nextUrl };
+  if (meta.title != null) {
+    out.schemeNames = { ...(mp.schemeNames || {}), floorPlanUrl: String(meta.title || "").trim() };
+  }
+  return out;
+}
+
+export function setFloorPlanTitle(manualParams, title) {
+  const mp = asMp(manualParams);
+  const nextTitle = String(title || "").trim();
+  if (!nextTitle) return mp;
+  if (Array.isArray(mp.projectSchemes)) {
+    const list = listProjectSchemes(mp);
+    if (!list.length) {
+      return addProjectScheme(mp, {
+        id: "floorPlanUrl",
+        title: nextTitle,
+        url: String(mp.floorPlanUrl || "").trim(),
+        clientVisible: true,
+      });
+    }
+    return updateProjectScheme(mp, list[0].id, { title: nextTitle });
+  }
+  return {
+    ...mp,
+    schemeNames: { ...(mp.schemeNames || {}), floorPlanUrl: nextTitle },
+  };
 }

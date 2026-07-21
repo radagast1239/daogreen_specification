@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { photoSrc } from "../lib/api.js";
 import FloorPlanViewer from "./FloorPlanViewer.jsx";
 import { findSchemeIndexByKey } from "../lib/clientSchemes.js";
+import { isPdfScheme } from "../lib/schemeMedia.js";
 
 /**
  * Плавающая миниатюра или кнопка — открывает схему.
@@ -48,7 +49,8 @@ export default function FloorPlanPin({
 
   const activeIndex = findSchemeIndexByKey(schemes, activeKey);
   const active = schemes[activeIndex] || schemes[0];
-  const src = photoSrc(active.url);
+  const activeIsPdf = isPdfScheme(active);
+  const src = activeIsPdf ? "" : photoSrc(active.url);
   const multi = schemes.length > 1;
   const pinLabel = multi ? "Схемы" : "Схема";
 
@@ -92,7 +94,11 @@ export default function FloorPlanPin({
           role="menuitem"
           onClick={() => openActiveViewer(s.key)}
         >
-          <img src={photoSrc(s.url)} alt="" className="floor-plan-pin__option-img" />
+          {isPdfScheme(s) ? (
+            <span className="floor-plan-pin__option-img" style={{ display: "grid", placeItems: "center", fontWeight: 700, fontSize: 11 }}>PDF</span>
+          ) : (
+            <img src={photoSrc(s.url)} alt="" className="floor-plan-pin__option-img" />
+          )}
           <span className="floor-plan-pin__option-meta">
             <strong>{s.title || `Схема ${i + 1}`}</strong>
             <span className="muted">
@@ -131,7 +137,11 @@ export default function FloorPlanPin({
         aria-label={pinLabel}
         aria-expanded={multi ? selectorOpen : undefined}
       >
-        <img src={src} alt="" className="floor-plan-pin__img" />
+        {src ? (
+          <img src={src} alt="" className="floor-plan-pin__img" />
+        ) : (
+          <span className="floor-plan-pin__img" style={{ display: "grid", placeItems: "center", fontWeight: 700, fontSize: 12 }}>PDF</span>
+        )}
         <span className="floor-plan-pin__label">{pinLabel}</span>
         {multi && <span className="floor-plan-pin__badge">{schemes.length}</span>}
       </button>

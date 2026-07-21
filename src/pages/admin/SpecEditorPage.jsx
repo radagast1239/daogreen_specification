@@ -50,6 +50,7 @@ import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
 import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
 import { clientLink, photoSrc } from "../../lib/api.js";
 import AuthMediaImg from "../../components/AuthMediaImg.jsx";
+import { useClipboardImagePaste } from "../../lib/useClipboardImagePaste.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import ProjectCurrencyFields, { currencyFieldsForApi } from "../../components/ProjectCurrencyFields.jsx";
 import { normalizeProjectCurrency } from "../../../shared/projectCurrency.js";
@@ -94,7 +95,13 @@ import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
 import { clientLinkActiveState } from "../../../shared/clientProjectLoadState.js";
 import { copyToClipboard } from "../../lib/copyText.js";
 import { createDebouncedTask } from "../../lib/debouncedTask.js";
-import { getFloorPlanUrl, listUploadedSchemes, setFloorPlanUrl } from "../../lib/clientSchemes.js";
+import {
+  getFloorPlanEntry,
+  getFloorPlanUrl,
+  listUploadedSchemes,
+  setFloorPlanTitle,
+  setFloorPlanUrl,
+} from "../../lib/clientSchemes.js";
 import { itemHasAdminComments, itemHasClientNote, itemHasInternalNote } from "../../lib/specItemComments.js";
 import {
   compositionGroupLabel,
@@ -397,16 +404,21 @@ export default function SpecEditorPage() {
     return actions.projectUpdate(project.id, { manualParams: { ...mp, [key]: value } });
   };
 
-  const floorPlanUrl = getFloorPlanUrl(project.manualParams);
+  const floorPlanEntry = getFloorPlanEntry(project.manualParams);
+  const floorPlanUrl = floorPlanEntry.url || getFloorPlanUrl(project.manualParams);
   const uploadedSchemes = useMemo(
     () => listUploadedSchemes(project.manualParams),
     [project.manualParams]
   );
   const showFloorPlanPin = uploadedSchemes.length > 0 && workspaceView === "design";
 
-  const saveFloorPlanUrl = (url) => {
+  const saveFloorPlanUrl = (url, meta = {}) => {
     const mp = project.manualParams && typeof project.manualParams === "object" ? project.manualParams : {};
-    return actions.projectUpdate(project.id, { manualParams: setFloorPlanUrl(mp, url) });
+    return actions.projectUpdate(project.id, { manualParams: setFloorPlanUrl(mp, url, meta) });
+  };
+  const saveFloorPlanTitle = (title) => {
+    const mp = project.manualParams && typeof project.manualParams === "object" ? project.manualParams : {};
+    return actions.projectUpdate(project.id, { manualParams: setFloorPlanTitle(mp, title) });
   };
   const doPublishVersion = async (force = false, releaseComment = "") => {
     try {
@@ -1173,7 +1185,10 @@ export default function SpecEditorPage() {
             actions={actions}
             saveRooms={saveRooms}
             floorPlanUrl={floorPlanUrl}
+            floorPlanTitle={floorPlanEntry.title}
+            floorPlanMimeType={floorPlanEntry.mimeType}
             onFloorPlanChange={saveFloorPlanUrl}
+            onFloorPlanTitleChange={saveFloorPlanTitle}
             manualParams={project.manualParams}
             onManualParamsChange={(mp) => actions.projectUpdate(project.id, { manualParams: mp })}
             highlightItemId={highlightItemId}
@@ -1260,11 +1275,62 @@ const DOC_TYPES = [
   ["other", "Прочее"],
 ];
 
+function DocTitleInput({ value, onCommit }) {
+  const [draft, setDraft] = useState(value);
+  const editingRef = useRef(false);
+  const cancelCommitRef = useRef(false);
+
+  useEffect(() => {
+    if (!editingRef.current) setDraft(value);
+  }, [value]);
+
+  const commit = () => {
+    editingRef.current = false;
+    if (cancelCommitRef.current) {
+      cancelCommitRef.current = false;
+      setDraft(value);
+      return;
+    }
+    const next = String(draft || "").trim();
+    if (!next) {
+      setDraft(value);
+      return;
+    }
+    if (next !== value) onCommit(next);
+    setDraft(next);
+  };
+
+  return (
+    <input
+      className="spec-cell-input"
+      value={draft}
+      aria-label="Название документа"
+      onFocus={() => {
+        editingRef.current = true;
+        cancelCommitRef.current = false;
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") {
+          cancelCommitRef.current = true;
+          e.currentTarget.blur();
+        }
+      }}
+      style={{ width: "min(320px, 100%)", fontSize: 13 }}
+    />
+  );
+}
+
 function ProjectDocuments({ projectId }) {
   const { confirm, success, error } = useToast();
   const [docs, setDocs] = useState([]);
   const [docType, setDocType] = useState("other");
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const docTypeRef = useRef(docType);
+  docTypeRef.current = docType;
 
   const load = () =>
     api
@@ -1278,15 +1344,23 @@ function ProjectDocuments({ projectId }) {
   }, [projectId]);
 
   const upload = async (file) => {
-    if (!file) return;
+    if (!file || uploading) return;
+    setUploading(true);
     try {
-      await api.uploadProjectDocument(projectId, file, docType);
+      await api.uploadProjectDocument(projectId, file, docTypeRef.current);
       success("Файл загружен");
       load();
     } catch (e) {
       error(e.message);
+    } finally {
+      setUploading(false);
     }
   };
+
+  const { pasteZoneProps } = useClipboardImagePaste({
+    disabled: uploading,
+    onImage: (file) => upload(file),
+  });
 
   const remove = async (d) => {
     if (!(await confirm({ title: "Удалить документ?", message: d.filename, confirmLabel: "Удалить" }))) return;
@@ -1294,41 +1368,52 @@ function ProjectDocuments({ projectId }) {
     load();
   };
 
+  const rename = async (d, filename) => {
+    try {
+      await api.renameDocument(d.id, filename);
+      setDocs((prev) => prev.map((x) => (x.id === d.id ? { ...x, filename } : x)));
+      success("Название обновлено");
+    } catch (e) {
+      error(e.message);
+    }
+  };
+
   const typeLabel = (t) => DOC_TYPES.find(([k]) => k === t)?.[1] || t;
 
   return (
     <Collapsible title="Документы проекта" subtitle={loading ? "…" : `${docs.length} файлов`} defaultOpen={false}>
-      <div className="row wrap" style={{ gap: 8, marginBottom: 12 }}>
-        <select value={docType} onChange={(e) => setDocType(e.target.value)} style={{ width: "auto" }}>
-          {DOC_TYPES.map(([k, l]) => (
-            <option key={k} value={k}>{l}</option>
-          ))}
-        </select>
-        <label className="btn btn-sm">
-          Загрузить файл
-          <input type="file" hidden onChange={(e) => upload(e.target.files?.[0])} />
-        </label>
+      <div className="card" style={{ padding: 12, marginBottom: 12 }} {...pasteZoneProps}>
+        <div className="row wrap" style={{ gap: 8, marginBottom: 8 }}>
+          <select value={docType} onChange={(e) => setDocType(e.target.value)} style={{ width: "auto" }}>
+            {DOC_TYPES.map(([k, l]) => (
+              <option key={k} value={k}>{l}</option>
+            ))}
+          </select>
+          <label className="btn btn-sm">
+            {uploading ? "Загрузка…" : "Загрузить файл"}
+            <input type="file" hidden disabled={uploading} onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ""; }} />
+          </label>
+          <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>
+            Загрузите файл или вставьте скриншот Ctrl+V
+          </span>
+        </div>
+        {!docs.length ? (
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>Счета, КП и инструкции — видны клиенту во вкладке «Документы».</p>
+        ) : (
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+            {docs.map((d) => (
+              <li key={d.id} style={{ marginBottom: 8 }}>
+                <span className="chip chip--neutral" style={{ marginRight: 6 }}>{typeLabel(d.type)}</span>
+                <DocTitleInput value={d.filename} onCommit={(name) => rename(d, name)} />
+                <a href={photoSrc(d.url)} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 8 }}>
+                  Открыть
+                </a>
+                <button className="btn btn-ghost btn-sm" style={{ marginLeft: 6 }} onClick={() => remove(d)}>✕</button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-      {!docs.length ? (
-        <p className="muted" style={{ fontSize: 13, margin: 0 }}>Счета, КП и инструкции — видны клиенту во вкладке «Документы».</p>
-      ) : (
-        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
-          {docs.map((d) => (
-            <li key={d.id} style={{ marginBottom: 6 }}>
-              <span className="chip chip--neutral" style={{ marginRight: 6 }}>{typeLabel(d.type)}</span>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                style={{ padding: 0, fontWeight: 600, textDecoration: "underline" }}
-                onClick={() => api.openAdminFile(d.id, d.filename).catch((e) => error(e.message))}
-              >
-                {d.filename}
-              </button>
-              <button className="btn btn-ghost btn-sm" style={{ marginLeft: 6 }} onClick={() => remove(d)}>✕</button>
-            </li>
-          ))}
-        </ul>
-      )}
     </Collapsible>
   );
 }
@@ -1340,7 +1425,10 @@ function SpecTab({
   actions,
   saveRooms,
   floorPlanUrl,
+  floorPlanTitle,
+  floorPlanMimeType,
   onFloorPlanChange,
+  onFloorPlanTitleChange,
   manualParams,
   onManualParamsChange,
   highlightItemId,
@@ -1677,7 +1765,13 @@ function SpecTab({
         hidden={workspaceView !== "design"}
       >
       <Collapsible title="Схема, комнаты и электропотребление" defaultOpen={hasFarmItems || rooms.length > 0 || !!floorPlanUrl}>
-        <FloorPlanField value={floorPlanUrl || ""} onChange={onFloorPlanChange} />
+        <FloorPlanField
+          value={floorPlanUrl || ""}
+          title={floorPlanTitle || "Схема помещения"}
+          mimeType={floorPlanMimeType || "image/*"}
+          onChange={onFloorPlanChange}
+          onTitleChange={onFloorPlanTitleChange}
+        />
         {(hasFarmItems || rooms.length > 0) && (
           <div style={{ marginTop: 12 }}>
             <RoomsEditor rooms={rooms} onChange={(next) => saveRooms(next)} compact />

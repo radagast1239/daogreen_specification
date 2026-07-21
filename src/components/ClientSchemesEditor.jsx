@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { t } from "../../shared/clientI18n.js";
 import { api, photoSrc } from "../lib/api.js";
 import FloorPlanViewer from "./FloorPlanViewer.jsx";
+import { useClipboardImagePaste } from "../lib/useClipboardImagePaste.js";
+import { isPdfScheme, SCHEME_FILE_ACCEPT, schemeOpenRel } from "../lib/schemeMedia.js";
 import {
   addProjectScheme,
   clientVisibleSchemes,
@@ -75,21 +77,29 @@ export default function ClientSchemesEditor({
   const schemes = listProjectSchemes(mp);
   const [viewer, setViewer] = useState(null);
   const [uploading, setUploading] = useState(null);
+  const mpRef = useRef(mp);
+  mpRef.current = mp;
 
   const filled = filledSchemeSlots(mp);
   const heading = title ?? (showClientVisibility ? null : "Схемы проекта");
   const description =
     intro ??
     (showClientVisibility
-      ? "Добавляйте схемы без лимита. Галочка «Клиенту» управляет показом в клиентской ссылке."
+      ? "Добавляйте схемы без лимита (картинка или PDF). Загрузите файл или вставьте скриншот Ctrl+V. Галочка «Клиенту» управляет показом в клиентской ссылке."
       : "Добавляйте, переименовывайте и упорядочивайте схемы. Каждая сохраняется в проекте (manualParams.projectSchemes).");
 
-  const upload = async (id, file) => {
-    if (!file) return;
+  const upload = async (id, file, baseMp = mpRef.current) => {
+    if (!file || uploading) return;
     setUploading(id);
     try {
-      const { url } = await api.uploadPhoto(file);
-      onChange(updateProjectScheme(mp, id, { url, mimeType: file.type || "image/*", createdAt: new Date().toISOString() }));
+      const result = await api.uploadProjectScheme(file);
+      onChange(
+        updateProjectScheme(baseMp, id, {
+          url: result.url,
+          mimeType: result.mimeType || file.type || "image/*",
+          createdAt: new Date().toISOString(),
+        })
+      );
     } catch (e) {
       alert(e.message || "Не удалось загрузить");
     } finally {
@@ -97,14 +107,35 @@ export default function ClientSchemesEditor({
     }
   };
 
+  const { pasteZoneProps } = useClipboardImagePaste({
+    disabled: !!uploading,
+    onImage: async (file) => {
+      const base = mpRef.current;
+      const withNew = addProjectScheme(base, {
+        title: (file.name || "Скриншот").replace(/\.[^.]+$/, "") || "Скриншот",
+        mimeType: file.type || "image/png",
+      });
+      const newId = listProjectSchemes(withNew).at(-1)?.id;
+      if (!newId) return;
+      onChange(withNew);
+      await upload(newId, file, withNew);
+    },
+  });
+
   const openScheme = (id) => {
     const idx = filled.findIndex((s) => s.id === id || s.key === id);
     if (idx < 0) return;
+    const scheme = filled[idx];
+    if (isPdfScheme(scheme)) {
+      const href = photoSrc(scheme.url);
+      if (href) window.open(href, "_blank", "noopener,noreferrer");
+      return;
+    }
     setViewer({ schemes: filled, activeIndex: idx });
   };
 
   return (
-    <div className="client-schemes-editor" style={{ marginBottom: 14 }}>
+    <div className="client-schemes-editor" style={{ marginBottom: 14 }} {...pasteZoneProps}>
       {heading && (
         <h4 style={{ margin: "0 0 6px", fontSize: 14 }}>{heading}</h4>
       )}
@@ -113,7 +144,9 @@ export default function ClientSchemesEditor({
       </p>
       <div className="client-schemes-grid">
         {schemes.map((scheme, index) => {
-          const src = scheme.url ? photoSrc(scheme.url) : "";
+          const pdf = isPdfScheme(scheme);
+          const src = scheme.url && !pdf ? photoSrc(scheme.url) : "";
+          const href = scheme.url ? photoSrc(scheme.url) : "";
           return (
             <div key={scheme.id} className="client-scheme-card card" style={{ padding: 12 }}>
               <div className="between wrap" style={{ gap: 8, marginBottom: 8 }}>
@@ -136,7 +169,14 @@ export default function ClientSchemesEditor({
                   </label>
                 )}
               </div>
-              {src ? (
+              {pdf && href ? (
+                <div className="client-scheme-card__pdf muted" style={{ padding: "18px 10px", textAlign: "center", border: "1px dashed var(--border, #c5d9d3)", borderRadius: 8 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>PDF</div>
+                  <a className="btn btn-sm" href={href} target="_blank" rel={schemeOpenRel()}>
+                    Открыть PDF
+                  </a>
+                </div>
+              ) : src ? (
                 <button
                   type="button"
                   className="client-scheme-card__thumb"
@@ -153,7 +193,7 @@ export default function ClientSchemesEditor({
                   {uploading === scheme.id ? "…" : scheme.url ? "Заменить" : "Загрузить"}
                   <input
                     type="file"
-                    accept="image/*"
+                    accept={SCHEME_FILE_ACCEPT}
                     hidden
                     disabled={!!uploading}
                     onChange={(e) => {
@@ -163,9 +203,15 @@ export default function ClientSchemesEditor({
                   />
                 </label>
                 {scheme.url && (
-                  <button type="button" className="btn btn-sm" onClick={() => openScheme(scheme.id)}>
-                    Открыть
-                  </button>
+                  pdf ? (
+                    <a className="btn btn-sm" href={href} target="_blank" rel={schemeOpenRel()}>
+                      Открыть PDF
+                    </a>
+                  ) : (
+                    <button type="button" className="btn btn-sm" onClick={() => openScheme(scheme.id)}>
+                      Открыть
+                    </button>
+                  )
                 )}
                 <button
                   type="button"
@@ -210,6 +256,9 @@ export default function ClientSchemesEditor({
         >
           + Добавить схему
         </button>
+        <span className="muted" style={{ fontSize: 11, alignSelf: "center" }}>
+          Ctrl+V — новый скриншот как отдельная схема
+        </span>
       </div>
       {viewer && (
         <FloorPlanViewer
@@ -237,24 +286,46 @@ export function ClientSchemesViewer({ manualParams, images, language = "ru" }) {
 
   if (!schemes.length) return null;
 
+  const imageSchemes = schemes.filter((s) => !isPdfScheme(s));
+
   return (
     <div className="client-schemes-viewer card" style={{ padding: 16, marginBottom: 16 }}>
       <strong style={{ fontSize: 14 }}>{t(language, "client.schemes.viewer.title")}</strong>
       <p className="muted" style={{ fontSize: 12, margin: "4px 0 12px" }}>
-        {t(language, "client.schemes.viewer.hint")}
+        Нажмите на схему, чтобы открыть. PDF открывается в новой вкладке.
       </p>
       <div className="client-schemes-viewer__grid">
         {schemes.map((def, i) => {
-          const src = photoSrc(def.accessUrl || def.url);
-          if (!src) return null;
+          const href = photoSrc(def.accessUrl || def.url);
+          if (!href) return null;
+          if (isPdfScheme(def)) {
+            return (
+              <a
+                key={def.id || def.key}
+                className="client-scheme-view-btn"
+                href={href}
+                target="_blank"
+                rel={schemeOpenRel()}
+                style={{ textDecoration: "none", color: "inherit" }}
+              >
+                <div style={{ display: "grid", placeItems: "center", minHeight: 96, background: "var(--surface-2, #f3f6f5)" }}>
+                  <span style={{ fontWeight: 700 }}>PDF</span>
+                </div>
+                <span>{def.title || def.label}</span>
+              </a>
+            );
+          }
           return (
             <button
               key={def.id || def.key}
               type="button"
               className="client-scheme-view-btn"
-              onClick={() => setViewer({ schemes, activeIndex: i })}
+              onClick={() => {
+                const idx = imageSchemes.findIndex((s) => (s.id || s.key) === (def.id || def.key));
+                setViewer({ schemes: imageSchemes, activeIndex: Math.max(0, idx) });
+              }}
             >
-              <img src={src} alt="" />
+              <img src={href} alt="" />
               <span>{def.title || def.label}</span>
             </button>
           );

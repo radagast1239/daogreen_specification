@@ -13,7 +13,11 @@ import { getReportsR1Payload } from "../services/reportsR1.js";
 import { listAdminUsers, createAdminUser, deactivateAdminUser, revokeAllAdminSessions } from "../auth.js";
 import { brandSettingsResponse } from "../services/clientBrand.js";
 import { publishRulesSettingsPayload } from "../services/publishRules.js";
-import { multerFileFilter } from "../services/uploadFilter.js";
+import {
+  multerFileFilter,
+  assertSchemeMediaBuffer,
+  SCHEME_MEDIA_MAX_BYTES,
+} from "../services/uploadFilter.js";
 import { saveFile } from "../storage/index.js";
 import {
   assertCanDeleteOrOverwriteAsset,
@@ -49,6 +53,13 @@ const docUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
   fileFilter: multerFileFilter({ allowDocs: true }),
+});
+
+/** Project floor / client schemes only — JPEG/PNG/WebP/PDF, no SVG. Not used by materials. */
+const schemeMediaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: SCHEME_MEDIA_MAX_BYTES },
+  fileFilter: multerFileFilter({ schemeMedia: true }),
 });
 
 const router = Router();
@@ -355,6 +366,38 @@ router.post("/projects/:id/documents", docUpload.single("file"), async (req, res
       return res.status(e.status || 400).json({ error: e.code, code: e.code, message: e.message });
     }
     res.status(500).json({ error: e.message });
+  }
+});
+
+/** Rename display title of a project document (updates files.filename only). */
+router.patch("/documents/:id", (req, res) => {
+  const row = db.prepare("SELECT id, filename FROM files WHERE id = ?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: "Not found" });
+  const next = String(req.body?.filename || "").trim();
+  if (!next) return res.status(400).json({ error: "filename required" });
+  if (next.length > 240) return res.status(400).json({ error: "filename too long" });
+  if (/[\\/\0]/.test(next)) return res.status(400).json({ error: "invalid filename" });
+  db.prepare("UPDATE files SET filename = ? WHERE id = ?").run(next, req.params.id);
+  res.json({ id: req.params.id, filename: next });
+});
+
+/**
+ * Dedicated scheme media upload (floor plan + client schemes).
+ * Does not widen materials /upload-photo.
+ */
+router.post("/project-schemes/upload", schemeMediaUpload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file" });
+  try {
+    const { mimeType, ext } = assertSchemeMediaBuffer(req.file.buffer, {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+    });
+    const filename = `${nanoid(12)}${ext}`;
+    const url = await saveFile(req.file.buffer, filename);
+    res.status(201).json({ url, filename, mimeType, originalName: req.file.originalname || "" });
+  } catch (e) {
+    const status = e.status || 500;
+    res.status(status).json({ error: e.message || "Upload failed" });
   }
 });
 

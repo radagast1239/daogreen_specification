@@ -148,6 +148,20 @@ export const api = {
     if (!res.ok) throw new Error(data.error || "Upload failed");
     return data;
   },
+  /** Floor plan + client schemes (JPEG/PNG/WebP/PDF). Does not widen materials photo upload. */
+  uploadProjectScheme: async (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${API}/api/admin/project-schemes/upload`, {
+      method: "POST",
+      headers: adminFetchHeaders(),
+      body: fd,
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Upload failed");
+    return data;
+  },
   bulkPhotos: async (files) => {
     const fd = new FormData();
     for (const f of files) fd.append("files", f);
@@ -398,6 +412,8 @@ export const api = {
     if (!res.ok) throw new Error(data.error || "Upload failed");
     return data;
   },
+  renameDocument: (id, filename) =>
+    request(`/api/admin/documents/${id}`, { method: "PATCH", body: { filename } }),
   deleteDocument: (id) => request(`/api/admin/documents/${id}`, { method: "DELETE" }),
   /** Open authenticated admin file (blob) — private uploads are not on /uploads static. */
   openAdminFile: async (fileId, filename) => {
