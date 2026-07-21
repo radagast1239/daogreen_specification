@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Temp-env browser/API preview for builder reconcile P0.
+ * Temp-env API preview for builder reconcile edge fixes.
  * No production DB/uploads.
  */
 import fs from "fs";
@@ -11,11 +11,10 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
-const tempRoot = path.join(os.tmpdir(), `daogreen-builder-reconcile-preview-${Date.now()}`);
+const tempRoot = path.join(os.tmpdir(), `daogreen-builder-edge-preview-${Date.now()}`);
 const dbPath = path.join(tempRoot, "preview.db");
 const uploadRoot = path.join(tempRoot, "uploads");
-const API_PORT = 49851;
-const WEB_PORT = 49852;
+const API_PORT = 49871;
 const ADMIN_KEY = "preview-admin-key-builder-reconcile";
 
 fs.mkdirSync(uploadRoot, { recursive: true });
@@ -29,8 +28,6 @@ const env = {
   NODE_ENV: "development",
   ADMIN_KEY,
   ADMIN_ACCESS_MODE: "key",
-  CORS_ORIGIN: `http://127.0.0.1:${WEB_PORT}`,
-  VITE_BASE_PATH: "/",
 };
 
 function sleep(ms) {
@@ -69,227 +66,211 @@ async function api(method, pathname, body) {
   return data;
 }
 
-function spawnNode(args, name) {
-  const child = spawn(process.execPath, args, {
-    cwd: root,
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout.on("data", (d) => process.stdout.write(`[${name}] ${d}`));
-  child.stderr.on("data", (d) => process.stderr.write(`[${name}] ${d}`));
-  return child;
-}
-
 const report = { steps: [], ok: true };
 
 function step(name, detail) {
   report.steps.push({ name, ...detail });
   console.log("STEP", name, JSON.stringify(detail));
+  if (detail && detail.ok === false) report.ok = false;
 }
 
 async function main() {
-  const backend = spawnNode(["backend/src/index.js"], "api");
-  await waitHealth(`http://127.0.0.1:${API_PORT}/api/health`);
-
-  // Seed material
-  const mat = await api("POST", "/api/admin/materials", {
-    name: "Труба preview",
-    unit: "м",
-    category: "Каркас",
-    basePrice: 100,
-    supplier: "Каталог",
-    link: "https://example.test/tube",
-    status: "active",
-    module: "general",
-  }).catch(async () => {
-    // some envs use different create path
-    const list = await api("GET", "/api/materials");
-    return list[0] || list.materials?.[0];
+  const backend = spawn(process.execPath, ["backend/src/index.js"], {
+    cwd: root,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
   });
+  backend.stdout.on("data", (d) => process.stdout.write(`[api] ${d}`));
+  backend.stderr.on("data", (d) => process.stderr.write(`[api] ${d}`));
+  await waitHealth(`http://127.0.0.1:${API_PORT}/api/health`);
 
   const materials = await api("GET", "/api/materials");
   const materialList = Array.isArray(materials) ? materials : materials.materials || [];
-  const m = mat?.id ? mat : materialList[0];
-  if (!m?.id) throw new Error("no material");
+  const m = materialList[0];
+  const m2 = materialList[1] || materialList[0];
 
-  const created = await api("POST", "/api/projects", {
-    name: "Preview Farm",
-    client: "Preview Client",
-    status: "active",
-    city: "Test",
-    area: 10,
-    items: [
-      {
-        id: "st_preview__ln1",
-        materialId: m.id,
-        name: m.name,
-        module: "Стеллаж 1",
-        section: "Стеллаж 1",
-        qty: 2,
-        price: Number(m.basePrice) || 100,
-        unit: m.unit || "шт.",
-        category: m.category || "Прочее",
-        supplier: m.supplier || "",
-        link: m.link || "",
-        includedInProject: true,
-        enabled: true,
-        visibleToClient: true,
-        approved: true,
-        status: "not_bought",
-      },
-    ],
-    stellageConfigs: [{ id: "st_preview", name: "Стеллаж 1", count: 1 }],
-    manualParams: {
-      projectSchemes: [{ id: "sch1", title: "Схема preview", clientVisible: true, order: 1 }],
-      floorPlanTitle: "План preview",
-      publishedRelease: { version: 1, frozenAt: "2026-01-01T00:00:00Z" },
-    },
+  const mkItem = (id, mat, extra = {}) => ({
+    id,
+    materialId: mat.id,
+    name: mat.name,
+    module: "Стеллаж 1",
+    section: "Стеллаж 1",
+    qty: 2,
+    price: Number(mat.basePrice) || 100,
+    unit: mat.unit || "шт.",
+    category: mat.category || "Прочее",
+    supplier: mat.supplier || "",
+    link: mat.link || "",
+    includedInProject: true,
+    enabled: true,
+    visibleToClient: true,
+    approved: true,
+    status: "not_bought",
+    ...extra,
   });
 
-  let rev = created.revision;
-  const itemId = created.items[0].id;
-
-  const patched = await api("PATCH", `/api/projects/${created.id}/items/${itemId}`, {
+  // Scenario A: full builder edits including schemes/power/cooling
+  const a = await api("POST", "/api/projects", {
+    name: "A Farm",
+    client: "C",
+    status: "active",
+    items: [mkItem("st_a__ln1", m)],
+    stellageConfigs: [{ id: "st_a", name: "Стеллаж 1", count: 1 }],
+    rooms: [{ id: "r1", name: "Old", area: 5 }],
+    manualParams: {
+      publishedRelease: { version: 2, frozenAt: "t0" },
+      projectSchemes: [{ id: "sch1", title: "Old" }],
+    },
+  });
+  let rev = a.revision;
+  const patched = await api("PATCH", `/api/projects/${a.id}/items/st_a__ln1`, {
     expectedRevision: rev,
     status: "bought",
+    clientComment: "keep-a",
     visibleToClient: false,
     visible: false,
     approved: false,
     showToClient: false,
     clientVisible: false,
-    actualPrice: 42,
-    clientComment: "preview-note",
-    responsible: "buyer",
-    supplier: "SpecSupplier",
-    name: "Труба (admin)",
-    nameOverridden: true,
-    price: 777,
   });
   rev = patched.revision;
 
-  await api("PATCH", `/api/projects/${created.id}`, {
-    expectedRevision: rev,
-    status: "on_review",
-  }).then((p) => {
-    rev = p.revision;
-  });
-
-  // Stale builder wipe attempt WITH builderSave reconcile
-  const afterBuilder = await api("PATCH", `/api/projects/${created.id}`, {
-    expectedRevision: rev,
-    builderSave: true,
-    builderSaveMode: "title",
-    name: "Preview Farm RENAMED",
-    items: [
-      {
-        id: itemId,
-        materialId: m.id,
-        name: m.name,
-        module: "Стеллаж 1",
-        section: "Стеллаж 1",
-        qty: 99,
-        price: 100,
-        status: "not_bought",
-        visibleToClient: true,
-        supplier: "Каталог",
-      },
-    ],
-    manualParams: {
-      builderWizard: { lastStep: "review" },
-      publishedRelease: { version: 99 },
-      projectSchemes: [{ id: "sch1", title: "WIPED" }],
-      floorPlanTitle: "WIPED",
-    },
-    status: "active",
-  });
-
-  const item = afterBuilder.items.find((i) => i.id === itemId);
-  const checks = {
-    name: afterBuilder.name === "Preview Farm RENAMED",
-    status: afterBuilder.status === "on_review",
-    itemStatus: item?.status === "bought",
-    visible: item?.visibleToClient === false,
-    actualPrice: item?.actualPrice === 42,
-    note: item?.clientComment === "preview-note",
-    supplier: item?.supplier === "SpecSupplier",
-    title: item?.name === "Труба (admin)",
-    price: item?.price === 777,
-    qty: item?.qty === 2,
-    scheme: afterBuilder.manualParams?.projectSchemes?.[0]?.title === "Схема preview",
-    release: afterBuilder.manualParams?.publishedRelease?.version === 1,
-    floorTitle: afterBuilder.manualParams?.floorPlanTitle === "План preview",
-  };
-  step("title-only-builder-save", checks);
-  if (Object.values(checks).some((v) => !v)) {
-    report.ok = false;
-    report.failed = checks;
-  }
-
-  // Qty change preserves admin
-  rev = afterBuilder.revision;
-  const afterQty = await api("PATCH", `/api/projects/${created.id}`, {
+  const aAfter = await api("PATCH", `/api/projects/${a.id}`, {
     expectedRevision: rev,
     builderSave: true,
     builderSaveMode: "full",
-    name: "Preview Farm RENAMED",
-    items: [
-      {
-        ...item,
-        qty: 6,
-        status: "not_bought",
-        visibleToClient: true,
-        name: m.name,
-        supplier: "Каталог",
-        price: 100,
-        actualPrice: null,
-        clientComment: "",
-      },
-    ],
-    stellageConfigs: [{ id: "st_preview", name: "Стеллаж 1", count: 3 }],
-    manualParams: afterBuilder.manualParams,
+    name: "A Farm RENAMED",
+    items: [mkItem("st_a__ln1", m, { qty: 6 })],
+    stellageConfigs: [{ id: "st_a", name: "Стеллаж 1", count: 3 }],
+    rooms: [{ id: "r1", name: "New Room", area: 18 }],
+    manualParams: {
+      publishedRelease: { version: 99 },
+      projectSchemes: [{ id: "sch1", title: "Edited Scheme", clientVisible: true }],
+      farmPower: { kw: 11 },
+      coolingFarm: { mode: "new" },
+      builderWizard: { lastStep: "review" },
+    },
     status: "active",
   });
-  const item2 = afterQty.items.find((i) => i.id === itemId);
-  const qtyChecks = {
-    qty: item2?.qty === 6,
-    status: item2?.status === "bought",
-    visible: item2?.visibleToClient === false,
-    note: item2?.clientComment === "preview-note",
-    idSame: item2?.id === itemId,
-  };
-  step("qty-recalc-preserves-admin", qtyChecks);
-  if (Object.values(qtyChecks).some((v) => !v)) {
-    report.ok = false;
-    report.qtyFailed = qtyChecks;
-  }
+  const aItem = aAfter.items.find((i) => i.id === "st_a__ln1");
+  step("A-full-builder-edits", {
+    ok:
+      aAfter.name === "A Farm RENAMED" &&
+      aAfter.stellageConfigs[0].count === 3 &&
+      aAfter.rooms[0].name === "New Room" &&
+      aAfter.manualParams.projectSchemes[0].title === "Edited Scheme" &&
+      aAfter.manualParams.farmPower.kw === 11 &&
+      aAfter.manualParams.coolingFarm.mode === "new" &&
+      aAfter.manualParams.publishedRelease.version === 2 &&
+      aItem.status === "bought" &&
+      aItem.clientComment === "keep-a" &&
+      aItem.qty === 6,
+  });
 
-  // Stale revision 409
+  // Scenario B: first add schemes/power/cooling
+  const b = await api("POST", "/api/projects", {
+    name: "B Farm",
+    client: "C",
+    status: "active",
+    items: [mkItem("st_b__ln1", m)],
+    stellageConfigs: [{ id: "st_b", name: "Стеллаж 1", count: 1 }],
+    manualParams: {},
+  });
+  const bAfter = await api("PATCH", `/api/projects/${b.id}`, {
+    expectedRevision: b.revision,
+    builderSave: true,
+    builderSaveMode: "full",
+    name: "B Farm",
+    items: [mkItem("st_b__ln1", m)],
+    stellageConfigs: [{ id: "st_b", name: "Стеллаж 1", count: 1 }],
+    manualParams: {
+      projectSchemes: [{ id: "n", title: "First" }],
+      farmPower: { kw: 1 },
+      coolingFarm: { mode: "b" },
+    },
+    status: "active",
+  });
+  step("B-first-add", {
+    ok:
+      bAfter.manualParams.projectSchemes?.[0]?.title === "First" &&
+      bAfter.manualParams.farmPower?.kw === 1 &&
+      bAfter.manualParams.coolingFarm?.mode === "b",
+  });
+
+  // Scenario C/D: ghost vs purchased preserve
+  const c = await api("POST", "/api/projects", {
+    name: "C Farm",
+    client: "C",
+    status: "active",
+    items: [
+      mkItem("st_c__keep", m),
+      mkItem("st_c__hide", m2, { name: "HideOnly" }),
+      mkItem("st_c__buy", m2, { name: "BuyMe" }),
+    ],
+    stellageConfigs: [{ id: "st_c", name: "Стеллаж 1", count: 1 }],
+    manualParams: {},
+  });
+  rev = c.revision;
+  let r = await api("PATCH", `/api/projects/${c.id}/items/st_c__hide`, {
+    expectedRevision: rev,
+    visibleToClient: false,
+    visible: false,
+    approved: false,
+    showToClient: false,
+    clientVisible: false,
+  });
+  rev = r.revision;
+  r = await api("PATCH", `/api/projects/${c.id}/items/st_c__buy`, {
+    expectedRevision: rev,
+    status: "bought",
+    clientComment: "cfg",
+  });
+  rev = r.revision;
+
+  const onlyKeep = {
+    expectedRevision: rev,
+    builderSave: true,
+    builderSaveMode: "full",
+    name: "C Farm",
+    items: [mkItem("st_c__keep", m)],
+    stellageConfigs: [{ id: "st_c", name: "Стеллаж 1", count: 1 }],
+    manualParams: {},
+    status: "active",
+  };
+  let cAfter = await api("PATCH", `/api/projects/${c.id}`, onlyKeep);
+  const ids1 = cAfter.items.map((i) => i.id);
+  rev = cAfter.revision;
+  onlyKeep.expectedRevision = rev;
+  cAfter = await api("PATCH", `/api/projects/${c.id}`, onlyKeep);
+  const ids2 = cAfter.items.map((i) => i.id);
+  step("C-D-ghost-vs-purchased", {
+    ok:
+      !ids1.includes("st_c__hide") &&
+      ids1.includes("st_c__buy") &&
+      ids2.filter((id) => id === "st_c__buy").length === 1 &&
+      cAfter.items.find((i) => i.id === "st_c__buy")?.status === "bought",
+    ids1,
+    ids2,
+  });
+
+  // Scenario E: 409
   let got409 = false;
   try {
-    await api("PATCH", `/api/projects/${created.id}`, {
+    await api("PATCH", `/api/projects/${c.id}`, {
       expectedRevision: 1,
       builderSave: true,
-      builderSaveMode: "title",
+      builderSaveMode: "full",
       name: "HACK",
+      items: [mkItem("st_c__keep", m)],
     });
   } catch (e) {
     got409 = e.status === 409;
   }
-  step("stale-revision-409", { got409 });
-  if (!got409) report.ok = false;
-
-  // Publication immutable
-  const still = await api("GET", `/api/projects/${created.id}`);
-  step("publication-immutable", {
-    version: still.manualParams?.publishedRelease?.version === 1,
-  });
+  step("E-stale-409", { ok: got409, got409 });
 
   report.tempRoot = tempRoot;
-  report.apiPort = API_PORT;
-  report.projectId = created.id;
   fs.writeFileSync(path.join(tempRoot, "preview-report.json"), JSON.stringify(report, null, 2));
   console.log("PREVIEW_REPORT", JSON.stringify(report, null, 2));
-
   backend.kill();
   process.exit(report.ok ? 0 : 1);
 }

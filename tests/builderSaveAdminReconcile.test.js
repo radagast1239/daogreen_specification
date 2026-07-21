@@ -323,7 +323,7 @@ describe("builder save admin-state reconcile (P0)", () => {
     expect(items.find((i) => i.id === "st_1__new").status).toBe("not_bought");
   });
 
-  it("17-21 documents untouched; schemes/status/release survive full builderSave", () => {
+  it("17-21 publishedRelease immutable; builder-owned schemes accepted from full save", () => {
     const created = createProject({
       name: "P0",
       client: "C",
@@ -337,7 +337,6 @@ describe("builder save admin-state reconcile (P0)", () => {
       },
     });
     db.prepare("UPDATE projects SET status = ? WHERE id = ?").run("sent_to_client", created.id);
-    // documents live in files table when present; ensure builder save does not require them
     const beforeRelease = JSON.stringify(loadProject(created.id).manualParams.publishedRelease);
 
     builderUpdate(created.id, {
@@ -347,17 +346,17 @@ describe("builder save admin-state reconcile (P0)", () => {
       manualParams: {
         builderWizard: { lastStep: "review" },
         publishedRelease: { version: 99, frozenAt: "stale" },
-        projectSchemes: [{ id: "s1", title: "WIPED", clientVisible: true }],
-        floorPlanTitle: "WIPED",
+        projectSchemes: [{ id: "s1", title: "Builder Scheme", clientVisible: true }],
+        floorPlanTitle: "Builder Floor",
       },
       status: "active",
     });
     const after = loadProject(created.id);
     expect(after.status).toBe("sent_to_client");
     expect(JSON.stringify(after.manualParams.publishedRelease)).toBe(beforeRelease);
-    expect(after.manualParams.projectSchemes[0].title).toBe("T1");
-    expect(after.manualParams.projectSchemes[0].clientVisible).toBe(false);
-    expect(after.manualParams.floorPlanTitle).toBe("FP");
+    expect(after.manualParams.projectSchemes[0].title).toBe("Builder Scheme");
+    expect(after.manualParams.projectSchemes[0].clientVisible).toBe(true);
+    expect(after.manualParams.floorPlanTitle).toBe("Builder Floor");
     expect(after.manualParams.builderWizard.lastStep).toBe("review");
   });
 
