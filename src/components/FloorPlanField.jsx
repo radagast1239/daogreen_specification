@@ -4,81 +4,122 @@ import FloorPlanViewer from "./FloorPlanViewer.jsx";
 import { useClipboardImagePaste } from "../lib/useClipboardImagePaste.js";
 import { isPdfScheme, SCHEME_FILE_ACCEPT, schemeOpenRel } from "../lib/schemeMedia.js";
 import {
-  createTitleSaveGate,
+  createFloorPlanTitleQueue,
+  nextTitleDraftFromProps,
   resolveSchemeTitleCommit,
 } from "../lib/schemeTitleDraft.js";
 
-/** Local draft title input — same commit semantics as client-scheme SchemeTitleInput. */
-function FloorPlanTitleInput({ value, onCommit }) {
+/** Local draft title input — identity-bound queued commits (no cross-project callback reuse). */
+function FloorPlanTitleInput({
+  value,
+  onCommit,
+  identityKey,
+  projectId,
+  onSaveError,
+}) {
   const [draft, setDraft] = useState(value);
+  const [saveError, setSaveError] = useState("");
   const editingRef = useRef(false);
   const cancelCommitRef = useRef(false);
-  const saveGateRef = useRef(createTitleSaveGate());
   const savedValueRef = useRef(value);
-  const pendingSaveRef = useRef(null);
-  const savingRef = useRef(false);
-  const onCommitRef = useRef(onCommit);
-  onCommitRef.current = onCommit;
+  const activeIdentityRef = useRef(identityKey);
+  const queueRef = useRef(createFloorPlanTitleQueue());
+  const onCommitCaptureRef = useRef(onCommit);
+  const onSaveErrorRef = useRef(onSaveError);
+
+  // Keep latest props for enqueue capture at commit time (not after await).
+  onCommitCaptureRef.current = onCommit;
+  onSaveErrorRef.current = onSaveError;
   savedValueRef.current = value;
 
   useEffect(() => {
-    if (!editingRef.current) setDraft(value);
-  }, [value]);
+    activeIdentityRef.current = identityKey;
+    editingRef.current = false;
+    cancelCommitRef.current = false;
+    setSaveError("");
+    setDraft(String(value ?? ""));
+    savedValueRef.current = value;
+  }, [identityKey]);
 
-  const flushSaves = async () => {
-    if (savingRef.current) return;
-    savingRef.current = true;
-    try {
-      while (pendingSaveRef.current != null) {
-        const nextValue = pendingSaveRef.current;
-        pendingSaveRef.current = null;
-        const token = saveGateRef.current.begin();
-        if (typeof onCommitRef.current !== "function") continue;
-        if (nextValue === savedValueRef.current) continue;
-        await Promise.resolve(onCommitRef.current(nextValue));
-        void saveGateRef.current.isLatest(token);
-      }
-    } finally {
-      savingRef.current = false;
-      if (pendingSaveRef.current != null) await flushSaves();
-    }
-  };
+  useEffect(() => {
+    setDraft((current) =>
+      nextTitleDraftFromProps({
+        editing: editingRef.current,
+        incomingValue: value,
+        currentDraft: current,
+      })
+    );
+    if (!editingRef.current) savedValueRef.current = value;
+  }, [value]);
 
   const commit = () => {
     editingRef.current = false;
     if (cancelCommitRef.current) {
       cancelCommitRef.current = false;
       setDraft(savedValueRef.current);
+      setSaveError("");
       return;
     }
     const resolved = resolveSchemeTitleCommit(draft, savedValueRef.current);
     setDraft(resolved.display);
-    if (!resolved.shouldSave || typeof onCommitRef.current !== "function") return;
-    // Latest queued value wins; in-flight save finishes then flushes the newest title.
-    pendingSaveRef.current = resolved.value;
-    void flushSaves();
+    if (!resolved.shouldSave) return;
+
+    const jobIdentity = String(identityKey || "");
+    const jobProjectId = String(projectId || "");
+    // Capture project-bound commit at enqueue — never read live onCommitRef after await.
+    const capturedCommit = onCommitCaptureRef.current;
+    if (typeof capturedCommit !== "function") return;
+
+    setSaveError("");
+    queueRef.current.enqueue({
+      identityKey: jobIdentity,
+      projectId: jobProjectId,
+      value: resolved.value,
+      commit: capturedCommit,
+      onSuccess: (job) => {
+        if (activeIdentityRef.current !== job.identityKey) return;
+        savedValueRef.current = job.value;
+        setSaveError("");
+      },
+      onError: (error, job) => {
+        if (activeIdentityRef.current !== job.identityKey) return;
+        const message = error?.message || "Не удалось сохранить название";
+        setSaveError(message);
+        setDraft(job.value);
+        if (typeof onSaveErrorRef.current === "function") {
+          onSaveErrorRef.current(error, job);
+        } else {
+          alert(message);
+        }
+      },
+    });
   };
 
   return (
-    <input
-      className="spec-cell-input"
-      value={draft}
-      aria-label="Название схемы помещения"
-      onFocus={() => {
-        editingRef.current = true;
-        cancelCommitRef.current = false;
-      }}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") event.currentTarget.blur();
-        if (event.key === "Escape") {
-          cancelCommitRef.current = true;
-          event.currentTarget.blur();
-        }
-      }}
-      style={{ marginTop: 6, width: "100%", maxWidth: 420, fontWeight: 600, fontSize: 13 }}
-    />
+    <div>
+      <input
+        className="spec-cell-input"
+        value={draft}
+        aria-label="Название схемы помещения"
+        onFocus={() => {
+          editingRef.current = true;
+          cancelCommitRef.current = false;
+        }}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape") {
+            cancelCommitRef.current = true;
+            event.currentTarget.blur();
+          }
+        }}
+        style={{ marginTop: 6, width: "100%", maxWidth: 420, fontWeight: 600, fontSize: 13 }}
+      />
+      {saveError ? (
+        <p style={{ color: "var(--danger)", fontSize: 12, margin: "4px 0 0" }}>{saveError}</p>
+      ) : null}
+    </div>
   );
 }
 
@@ -89,12 +130,16 @@ export default function FloorPlanField({
   title = "Схема помещения",
   onTitleChange,
   mimeType = "image/*",
+  projectId = "",
+  identityKey = "",
 }) {
   const [uploading, setUploading] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const pdf = isPdfScheme(mimeType, value);
   const src = value && !pdf ? photoSrc(value) : "";
   const href = value ? photoSrc(value) : "";
+  const resolvedIdentity =
+    identityKey || `${projectId || "project"}:${value || "empty"}`;
 
   const uploadFile = useCallback(
     async (file) => {
@@ -137,7 +182,12 @@ export default function FloorPlanField({
         <div style={{ flex: "1 1 220px", minWidth: 0 }}>
           <h4 style={{ margin: 0, fontSize: 14 }}>Схема помещения</h4>
           {typeof onTitleChange === "function" ? (
-            <FloorPlanTitleInput value={title} onCommit={onTitleChange} />
+            <FloorPlanTitleInput
+              value={title}
+              onCommit={onTitleChange}
+              identityKey={resolvedIdentity}
+              projectId={projectId}
+            />
           ) : null}
           <p className="muted" style={{ fontSize: 12, margin: "4px 0 0", maxWidth: 640 }}>
             План с трубами, стеллажами и зонами — общая схема объекта. Загрузите файл или вставьте скриншот
@@ -208,3 +258,6 @@ export default function FloorPlanField({
     </div>
   );
 }
+
+/** Exported for focused runtime tests (same queue the input uses). */
+export { createFloorPlanTitleQueue, resolveSchemeTitleCommit, nextTitleDraftFromProps };
