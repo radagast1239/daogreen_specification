@@ -2,27 +2,33 @@
  * Server-side reconciliation for project-builder saves.
  *
  * Incoming builder payloads may carry a stale SpecEditor snapshot. Admin-owned
- * item fields and project-level media/publication state must come from the live
- * DB row; the builder may only apply builder-owned geometry/qty intent.
+ * item fields and publication state must come from the live DB row; builder-owned
+ * manualParams / geometry are taken from the payload when the key is present.
  */
 
 import { buildProjectItemsAfterBuilderSave } from "./buildProjectItemsAfterBuilderSave.js";
 import { isDraftProject } from "./projectLifecycle.js";
 
-/** Nested manualParams keys owned by SpecEditor / publication — never overwritten by builder. */
-export const ADMIN_MANUAL_PARAM_KEYS = [
+/**
+ * Always restored from live DB on builder save — immutable publication.
+ * Builder must never overwrite these with a stale hydrated snapshot.
+ */
+export const ADMIN_ONLY_MANUAL_PARAM_KEYS = [
   "publishedRelease",
+];
+
+/**
+ * Builder may edit these; accept incoming value when the key is present
+ * (including explicit empty / first-time add).
+ */
+export const BUILDER_OWNED_MANUAL_PARAM_KEYS = [
   "projectSchemes",
   "schemeNames",
   "floorPlanUrl",
   "floorPlanTitle",
-  "schemePipesUrl",
-  "schemeStellagesUrl",
-  "schemeTechnicalUrl",
-  "schemeElectricalUrl",
-  "consumablesCartUrl",
   "farmPower",
   "coolingFarm",
+  "builderWizard",
 ];
 
 export function isBuilderProjectSave(patch = {}) {
@@ -37,21 +43,38 @@ export function isBuilderTitleOnlySave(patch = {}) {
   return mode === "title" || mode === "title-only";
 }
 
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 /**
- * Preserve SpecEditor / publication nested keys from the live DB manualParams.
- * Builder may update builderWizard and geometry scalars.
+ * Merge manualParams for full builder save.
+ *
+ * - Admin-only keys (publishedRelease): always from DB.
+ * - Any other key present on the incoming payload (hasOwnProperty): take incoming
+ *   value as-is (allows update, first add, and explicit empty clear).
+ * - Keys absent from incoming: keep current DB value (never delete silently).
  */
 export function mergeManualParamsForBuilderSave(dbParams = {}, patchParams = {}) {
   const base = dbParams && typeof dbParams === "object" ? dbParams : {};
   const patch = patchParams && typeof patchParams === "object" ? patchParams : {};
-  const merged = { ...base, ...patch };
-  for (const key of ADMIN_MANUAL_PARAM_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(base, key)) {
+  const merged = { ...base };
+
+  for (const key of Object.keys(patch)) {
+    if (ADMIN_ONLY_MANUAL_PARAM_KEYS.includes(key)) continue;
+    if (hasOwn(patch, key)) {
+      merged[key] = patch[key];
+    }
+  }
+
+  for (const key of ADMIN_ONLY_MANUAL_PARAM_KEYS) {
+    if (hasOwn(base, key)) {
       merged[key] = base[key];
     } else {
       delete merged[key];
     }
   }
+
   return merged;
 }
 
