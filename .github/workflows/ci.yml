@@ -31,3 +31,16 @@ jobs:
 
       - name: Backend syntax check
         run: node --check backend/src/index.js
+
+      - name: Shell scripts LF + bash -n
+        run: |
+          node scripts/check-shell-files.mjs
+          failed=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if ! bash -n "$f"; then
+              echo "bash -n failed: $f"
+              failed=1
+            fi
+          done < <(git ls-files '*.sh')
+          exit $failed
