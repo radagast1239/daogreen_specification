@@ -28,6 +28,7 @@ import {
 import { clientPurchaseStatuses } from "../services/referenceData.js";
 import { clientAuthMiddleware } from "../services/clientAuth.js";
 import { loadClientBrand } from "../services/clientBrand.js";
+import { refreshFrameBomProject } from "../services/frameBomRefresh.js";
 import { clientCatalogForProject } from "../services/clientCatalog.js";
 import { normalizePipeCuts, resolvePipeCuts } from "../../../shared/profilePipeCuts.js";
 import { normalizeBreakerSpecs, resolveBreakerSpecs } from "../../../shared/breakerSpecs.js";
@@ -319,7 +320,7 @@ function itemToParams(it, projectId) {
  * `BEGIN IMMEDIATE`, поэтому вложенный вызов публичного saveItems() внутри
  * другой транзакции упал бы с "cannot start a transaction within a transaction".
  */
-function saveItemsWithin(projectId, items, options = {}) {
+export function saveItemsWithin(projectId, items, options = {}) {
   validateProjectItemsForSave(items, {
     allowLegacyMissingMaterialId: options.allowLegacyMissingMaterialId !== false,
   });
@@ -1503,6 +1504,34 @@ api.delete("/:id/items/:itemId", (req, res) => {
     if (!changed) return res.status(404).json({ error: "Not found" });
     res.json({ ok: true, revision: changed.revision });
   } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
+});
+
+api.post("/:id/frame-bom/refresh", (req, res) => {
+  try {
+    const result = refreshFrameBomProject(req.params.id, req.body || {}, { saveItemsWithin });
+    res.json({
+      ...result.project,
+      revision: result.revision,
+      summary: result.summary,
+      plan: result.plan,
+    });
+  } catch (e) {
+    const known = [
+      "FRAME_BOM_REFRESH_CONFLICT",
+      "FRAME_BOM_REFRESH_UNSAFE_DELETE",
+      "FRAME_BOM_REFRESH_INVALID",
+      "PROJECT_REVISION_CONFLICT",
+    ];
+    if (known.includes(e?.code)) {
+      const status = e.status || (e.code === "FRAME_BOM_REFRESH_INVALID" ? 400 : 409);
+      return res.status(status).json({
+        error: e.code,
+        code: e.code,
+        message: e.message,
+      });
+    }
+    return res.status(400).json({ error: e.message });
+  }
 });
 
 function linkExpiresAt() {

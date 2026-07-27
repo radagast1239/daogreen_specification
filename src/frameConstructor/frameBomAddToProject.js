@@ -295,13 +295,15 @@ export async function deleteProjectItemsByIds(projectId, itemIds, deleteItem) {
 export async function applyFrameBomLegacyDedupeRepair({
   project,
   drawingContext,
-  deleteItem,
-  updateProject,
+  refreshFrameBom,
   loadProject = null,
 }) {
   const projectId = drawingContext?.projectId || project?.id;
   if (!projectId || !project?.items) {
     return { skipped: true };
+  }
+  if (typeof refreshFrameBom !== "function") {
+    throw new Error("refreshFrameBom API is required for atomic BOM refresh.");
   }
 
   const plan = buildLegacyFrameBomDedupePlan(
@@ -315,28 +317,27 @@ export async function applyFrameBomLegacyDedupeRepair({
     throw err;
   }
 
-  const deleteResult = await deleteProjectItemsByIds(projectId, plan.removeItemIds, deleteItem);
-  if (deleteResult.errors.length) {
-    const err = new Error(
-      `Не удалось удалить ${deleteResult.errors.length} legacy-позиций BOM.`,
-    );
-    err.deleteErrors = deleteResult.errors;
-    throw err;
-  }
+  const mergeOpts = buildFrameBomMergeOptions(drawingContext, null);
+  const result = await refreshFrameBom(projectId, {
+    expectedRevision: Number(project.revision) || 0,
+    moduleRackKey: mergeOpts.moduleRackKey,
+    stellageId: mergeOpts.stellageId,
+    drawingId: mergeOpts.drawingId,
+    rackLabel: mergeOpts.rackLabel,
+    mode: "legacy_dedupe",
+  });
 
-  const updated = await updateProject(projectId, { items: plan.cleanedItems });
-  const reloaded = loadProject ? await loadProject(projectId) : updated;
-
+  const updated = loadProject ? await loadProject(projectId) : result;
   return {
-    plan,
-    updated: reloaded,
-    deleteResult,
-    summary: {
+    plan: result.plan || plan,
+    updated,
+    deleteResult: { deleted: plan.removeItemIds, errors: [] },
+    summary: result.summary || {
       title: FRAME_BOM_REFRESH_SUCCESS_TITLE,
       removedCount: plan.removeItemIds.length,
       addedCount: 0,
       upsertCount: 0,
-      deletedIds: deleteResult.deleted,
+      deletedIds: plan.removeItemIds,
       mode: "legacy_dedupe",
     },
   };
@@ -393,12 +394,11 @@ export async function applyResidualFrameBomTwinRepair({
 
 /**
  * @param {{
- *   project: { items?: object[], id?: string },
+ *   project: { items?: object[], id?: string, revision?: number },
  *   purchaseDraft: object[],
  *   drawingContext: object,
  *   materials?: object[]|null,
- *   deleteItem: (projectId: string, itemId: string) => Promise<void>,
- *   updateProject: (projectId: string, patch: object) => Promise<object>,
+ *   refreshFrameBom: (projectId: string, body: object) => Promise<object>,
  *   loadProject?: (projectId: string) => Promise<object>,
  * }} params
  */
@@ -407,51 +407,54 @@ export async function applyFrameBomRefreshRepair({
   purchaseDraft,
   drawingContext,
   materials = null,
-  deleteItem,
-  updateProject,
+  refreshFrameBom,
   loadProject = null,
 }) {
   const projectId = drawingContext?.projectId || project?.id;
   if (!projectId || !project?.items) {
     return { skipped: true };
   }
+  if (typeof refreshFrameBom !== "function") {
+    throw new Error("refreshFrameBom API is required for atomic BOM refresh.");
+  }
 
   const rackCount = resolveFrameBomRackCount(project, drawingContext);
   const scaledDraft = scaleFrameBomDraftForRackCount(purchaseDraft, rackCount);
+  const mergeOpts = buildFrameBomMergeOptions({ ...drawingContext, projectId }, materials);
   const plan = buildFrameBomRepairPlan(
     project.items,
     scaledDraft,
-    buildFrameBomMergeOptions({ ...drawingContext, projectId }, materials),
+    mergeOpts,
   );
 
   if (plan.blocked) {
     const err = new Error(plan.blockedReason || "BOM не обновлён.");
     err.missingMaterialIds = plan.missingMaterialIds || [];
+    err.code = "FRAME_BOM_REFRESH_INVALID";
     throw err;
   }
 
-  const deleteResult = await deleteProjectItemsByIds(projectId, plan.removeItemIds, deleteItem);
-  if (deleteResult.errors.length) {
-    const err = new Error(
-      `Не удалось удалить ${deleteResult.errors.length} legacy-позиций BOM.`,
-    );
-    err.deleteErrors = deleteResult.errors;
-    throw err;
-  }
+  const result = await refreshFrameBom(projectId, {
+    expectedRevision: Number(project.revision) || 0,
+    moduleRackKey: mergeOpts.moduleRackKey,
+    stellageId: mergeOpts.stellageId,
+    drawingId: mergeOpts.drawingId,
+    rackLabel: mergeOpts.rackLabel,
+    purchaseDraft,
+    mode: "full",
+  });
 
-  const updated = await updateProject(projectId, { items: plan.cleanedItems });
-  const reloaded = loadProject ? await loadProject(projectId) : updated;
-
+  const updated = loadProject ? await loadProject(projectId) : result;
   return {
-    plan,
-    updated: reloaded,
-    deleteResult,
-    summary: {
+    plan: result.plan || plan,
+    updated,
+    deleteResult: { deleted: plan.removeItemIds, errors: [] },
+    summary: result.summary || {
       title: FRAME_BOM_REFRESH_SUCCESS_TITLE,
       removedCount: plan.removeItemIds.length,
       addedCount: plan.debug?.addedCount ?? 0,
       upsertCount: plan.upsertItems.length,
-      deletedIds: deleteResult.deleted,
+      deletedIds: plan.removeItemIds,
     },
   };
 }
@@ -474,8 +477,7 @@ export async function executeFrameBomRefreshFromDrawing({
   drawingContext,
   materials = null,
   confirm = null,
-  deleteItem,
-  updateProject,
+  refreshFrameBom,
   loadProject = null,
 }) {
   const projectId = drawingContext?.projectId || project?.id;
@@ -518,8 +520,7 @@ export async function executeFrameBomRefreshFromDrawing({
     const outcome = await applyFrameBomLegacyDedupeRepair({
       project,
       drawingContext: ctx,
-      deleteItem,
-      updateProject,
+      refreshFrameBom,
       loadProject,
     });
     return { cancelled: false, ...outcome };
@@ -574,8 +575,7 @@ export async function executeFrameBomRefreshFromDrawing({
     purchaseDraft,
     drawingContext: ctx,
     materials,
-    deleteItem,
-    updateProject,
+    refreshFrameBom,
     loadProject,
   });
 

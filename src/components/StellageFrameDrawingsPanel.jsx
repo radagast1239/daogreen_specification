@@ -78,11 +78,13 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
         drawingContext: context,
         materials: catalog,
         confirm,
-        deleteItem: actions.itemDelete.bind(actions),
-        updateProject: actions.projectUpdate.bind(actions),
+        refreshFrameBom: (projectId, body) => api.refreshFrameBom(projectId, body),
         loadProject: actions.loadProject.bind(actions),
       });
       if (outcome.cancelled || outcome.skipped) return;
+      if (outcome.updated) {
+        await actions.loadProject?.(project.id);
+      }
       const safeDupes = outcome.plan?.safeDuplicateCount ?? 0;
       success(
         safeDupes > 0
@@ -90,7 +92,11 @@ export default function StellageFrameDrawingsPanel({ project, returnPath }) {
           : (outcome.summary?.title || 'BOM каркаса обновлён.'),
       );
     } catch (err) {
-      error(err?.message || 'Не удалось обновить BOM.');
+      if (err?.code === 'PROJECT_REVISION_CONFLICT' || err?.status === 409) {
+        error(err?.message || 'Проект изменился. Обновите страницу и повторите.');
+      } else {
+        error(err?.message || 'Не удалось обновить BOM.');
+      }
     } finally {
       setRefreshBusyRack('');
     }

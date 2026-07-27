@@ -178,6 +178,8 @@ export const api = {
   getProject: (id) => request(`/api/projects/${id}`),
   createProject: (data) => request("/api/projects", { method: "POST", body: data }),
   updateProject: (id, patch) => request(`/api/projects/${id}`, { method: "PATCH", body: patch }),
+  refreshFrameBom: (id, body) =>
+    request(`/api/projects/${id}/frame-bom/refresh`, { method: "POST", body }),
   deleteProject: (id) => request(`/api/projects/${id}`, { method: "DELETE" }),
   duplicateProject: (id, body) => request(`/api/projects/${id}/duplicate`, { method: "POST", body: body || {} }),
   importPreview: (id, body) => request(`/api/projects/${id}/import-preview`, { method: "POST", body }),
