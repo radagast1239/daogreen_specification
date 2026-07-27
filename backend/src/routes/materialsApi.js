@@ -24,7 +24,20 @@ import { bulkMatchUploads, importPhotosFromDir } from "../services/photoImport.j
 import { findDuplicateGroups, mergeMaterials } from "../services/materialMerge.js";
 import { getPriceHistory } from "../services/priceHistory.js";
 import { saveFile } from "../storage/index.js";
+import { MaterialCatalogError, assertReplaceAllowed } from "../services/materialReferenceGuard.js";
 import XLSX from "xlsx";
+
+function sendMaterialCatalogError(res, e) {
+  if (e instanceof MaterialCatalogError) {
+    return res.status(e.status || 409).json({
+      error: e.code,
+      code: e.code,
+      message: e.message,
+      ...(e.references ? { references: e.references } : {}),
+    });
+  }
+  return null;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, "../../uploads");
@@ -92,16 +105,25 @@ router.patch("/:id", (req, res) => {
 });
 
 router.delete("/:id", (req, res) => {
-  deleteMaterial(req.params.id);
-  res.status(204).end();
+  try {
+    const existing = getMaterial(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Not found" });
+    deleteMaterial(req.params.id);
+    res.status(204).end();
+  } catch (e) {
+    if (sendMaterialCatalogError(res, e)) return;
+    res.status(400).json({ error: e.message });
+  }
 });
 
-router.post("/import/excel", memUpload.single("file"), async (req, res) => {
+router.post("/import/excel", memUploadDocs.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file" });
   const moduleName = req.body.module || "Импорт";
   const mode = req.body.mode || "merge";
   const withPhotos = req.body.photos !== "false";
   try {
+    // Fail closed before parsing / photo side effects when replace is requested.
+    assertReplaceAllowed(mode);
     const result = parseExcelBuffer(req.file.buffer, moduleName);
     let photosLinked = 0;
     if (withPhotos) {
@@ -112,6 +134,7 @@ router.post("/import/excel", memUpload.single("file"), async (req, res) => {
     const count = bulkUpsertMaterials(result.materials, mode);
     res.json({ ...result, imported: count, photosLinked });
   } catch (e) {
+    if (sendMaterialCatalogError(res, e)) return;
     res.status(400).json({ error: e.message });
   }
 });

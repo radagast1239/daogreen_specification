@@ -74,10 +74,12 @@ async function request(path, { method = "GET", body, admin = true, token } = {})
     const err = new Error(payload?.message || data.error || `HTTP ${res.status}`);
     err.status = res.status;
     if (payload?.code) err.code = payload.code;
+    else if (typeof data.error === "string" && /^[A-Z0-9_]+$/.test(data.error)) err.code = data.error;
     if (payload?.projectId) err.projectId = payload.projectId;
     if (payload?.expectedRevision != null) err.expectedRevision = payload.expectedRevision;
     if (payload?.currentRevision != null) err.currentRevision = payload.currentRevision;
     if (data.problems) err.problems = data.problems;
+    if (payload?.references || data.references) err.references = payload?.references || data.references;
     throw err;
   }
   if (Array.isArray(data)) {
@@ -119,7 +121,14 @@ export const api = {
       credentials: "include",
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Import failed");
+    if (!res.ok) {
+      const err = new Error(data.message || data.error || "Import failed");
+      err.status = res.status;
+      if (data.code) err.code = data.code;
+      else if (typeof data.error === "string" && /^[A-Z0-9_]+$/.test(data.error)) err.code = data.error;
+      if (data.references) err.references = data.references;
+      throw err;
+    }
     return data;
   },
   uploadPhoto: async (file) => {

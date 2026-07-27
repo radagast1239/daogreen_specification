@@ -35,6 +35,10 @@ import {
   syncMaterialFarmSectionCatalog,
   removeMaterialFromFarmSectionCatalogs,
 } from "../services/syncMaterialFarmSectionCatalog.js";
+import {
+  assertReplaceAllowed,
+  assertMaterialNotInUse,
+} from "../services/materialReferenceGuard.js";
 
 const INSERT_MAT = db.prepare(`
   INSERT INTO materials (
@@ -200,12 +204,19 @@ export function updateMaterial(id, patch, { changedBy = "admin" } = {}) {
 }
 
 export function deleteMaterial(id) {
-  removeMaterialFromFarmSectionCatalogs(id);
-  db.prepare("DELETE FROM materials WHERE id = ?").run(id);
+  const materialId = String(id || "").trim();
+  if (!materialId) return;
+
+  const runDelete = db.transaction(() => {
+    assertMaterialNotInUse(db, materialId);
+    removeMaterialFromFarmSectionCatalogs(materialId);
+    db.prepare("DELETE FROM materials WHERE id = ?").run(materialId);
+  });
+  runDelete();
 }
 
 export function bulkUpsertMaterials(materials, mode = "merge") {
-  if (mode === "replace") db.prepare("DELETE FROM materials").run();
+  assertReplaceAllowed(mode);
   for (const m of materials) {
     const existing = m.id ? getMaterial(m.id) : null;
     if (existing) updateMaterial(existing.id, m);

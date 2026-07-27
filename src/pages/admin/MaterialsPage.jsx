@@ -82,7 +82,7 @@ const blank = {
 export default function MaterialsPage() {
   const { state, actions } = useStore();
   const ref = state.reference;
-  const { confirm, success } = useToast();
+  const { confirm, success, error } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = ["import", "duplicates", "quality"].includes(searchParams.get("tab"))
     ? searchParams.get("tab")
@@ -293,13 +293,23 @@ export default function MaterialsPage() {
                     onEdit={() => openMaterialEdit(m.id)}
                     onDelete={async () => {
                       if (
-                        await confirm({
+                        !(await confirm({
                           title: "Удалить позицию?",
                           message: m.name,
                           confirmLabel: "Удалить",
-                        })
+                        }))
                       )
-                        actions.materialDelete(m.id);
+                        return;
+                      try {
+                        await actions.materialDelete(m.id);
+                        success("Удалено");
+                      } catch (e) {
+                        if (e.code === "MATERIAL_IN_USE" || e.status === 409) {
+                          error(e.message || "Материал используется и не может быть удалён.");
+                        } else {
+                          error(e.message || "Не удалось удалить материал");
+                        }
+                      }
                     }}
                   />
                 ))}

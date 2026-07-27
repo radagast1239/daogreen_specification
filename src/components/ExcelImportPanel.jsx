@@ -56,7 +56,7 @@ export default function ExcelImportPanel() {
         await actions.refreshMaterials();
         success(`Фото привязано: ${r.linked}`);
       } else {
-        const r = await actions.importExcel(file, { module: module || undefined, mode: mergeMode });
+        const r = await actions.importExcel(file, { module: module || undefined, mode: "merge" });
         setResult({ type: "full", ...r });
         success(`Импортировано: ${r.imported} поз.`);
       }
@@ -125,8 +125,10 @@ export default function ExcelImportPanel() {
                 <label>Если позиция уже есть в базе</label>
                 <select value={mergeMode} onChange={(e) => setMergeMode(e.target.value)}>
                   <option value="merge">Обновить / добавить (безопасно)</option>
-                  <option value="replace">Заменить всю базу (осторожно)</option>
                 </select>
+                <p className="muted" style={{ fontSize: 11, margin: "6px 0 0" }}>
+                  Полная замена отключена для защиты существующих проектов и шаблонов.
+                </p>
               </div>
             </div>
           )}
