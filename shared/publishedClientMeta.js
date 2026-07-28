@@ -1,5 +1,7 @@
 /** Allowlisted client-facing project metadata for published releases. */
 
+import { projectClientLanguage } from "./projectClientLanguage.js";
+
 export const CLIENT_PROJECT_META_FIELDS = [
   "name",
   "client",
@@ -71,6 +73,8 @@ export function applyPublishedProjectMeta(projectMeta, liveProject = {}, { allow
     if (key === "currency") out.currency = "₽";
     else out[key] = "";
   }
+  // Language is frozen on the release snapshot; default RU for legacy rows.
+  out.clientLanguage = projectClientLanguage(use);
   return out;
 }
 

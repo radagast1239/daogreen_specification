@@ -16,6 +16,7 @@ import {
   buildReleaseSnapshotPayload,
   parseReleaseSnapshot,
 } from "../shared/projectPublishedRelease.js";
+import { applyPublishedProjectMeta } from "../shared/publishedClientMeta.js";
 import { buildNewProjectPayload } from "../shared/projectCreation.js";
 
 describe("client language model", () => {
@@ -61,5 +62,10 @@ describe("release client language", () => {
     expect(en.projectMeta.clientLanguage).toBe("en");
     expect(parseReleaseSnapshot({ items: [], projectMeta: { id: "legacy" } }).projectMeta.clientLanguage)
       .toBe("ru");
+  });
+
+  it("applies snapshotted clientLanguage onto the client DTO", () => {
+    expect(applyPublishedProjectMeta({ name: "N", clientLanguage: "en" }).clientLanguage).toBe("en");
+    expect(applyPublishedProjectMeta({ name: "N" }).clientLanguage).toBe("ru");
   });
 });
