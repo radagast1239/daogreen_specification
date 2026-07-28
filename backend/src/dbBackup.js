@@ -4,18 +4,32 @@
  *
  * Переменные:
  *   SUPABASE_URL, SUPABASE_SERVICE_KEY, DB_BACKUP_BUCKET (default: daogreen-db)
+ *
+ * Restore is fail-closed: never silently overwrite an existing local DB.
+ * Downloads land on a temp path, pass integrity+FK+counts, then atomic switch
+ * with rollback. Stale/unknown remote freshness refuses overwrite.
  */
 import fs from "fs";
 import path from "path";
+import os from "os";
 import {
   createAndVerifySqliteBackup,
   createBackupScheduler,
   rotateBackups,
   verifySqliteBackup,
+  readBackupMetadata,
+  writeBackupMetadata,
+  metadataSidecarPath,
+  safeUnlink,
+  backupError,
+  RESTORE_REMOTE_STALE,
+  RESTORE_VERIFY_FAILED,
+  RESTORE_SWITCH_FAILED,
 } from "./sqliteBackup.js";
 
 const BUCKET = process.env.DB_BACKUP_BUCKET || "daogreen-db";
 const REMOTE_FILE = "daogreen.db";
+const REMOTE_META = "daogreen.db.meta.json";
 const LOCAL_BACKUP_DIR =
   process.env.LOCAL_BACKUP_DIR ||
   (process.platform === "win32" ? null : "/opt/backups/daogreen");
@@ -28,6 +42,14 @@ function supabaseCfg() {
   const key = process.env.SUPABASE_SERVICE_KEY;
   if (!url || !key) return null;
   return { url, key };
+}
+
+function localDbExists(localPath) {
+  try {
+    return !!(localPath && fs.existsSync(localPath) && fs.statSync(localPath).size > 0);
+  } catch {
+    return false;
+  }
 }
 
 export function hasLocalBackupDir() {
@@ -55,28 +77,53 @@ export function createLocalBackup(localPath, options = {}) {
 
   const dest = options.targetPath || buildLocalBackupPath();
   const started = Date.now();
-  const result = createAndVerifySqliteBackup(localPath, dest, {
-    timeoutMs: options.timeoutMs ?? LOCAL_BACKUP_TIMEOUT_MS,
-    expectCounts: options.expectCounts,
-  });
+  console.log(`DB backup: scheduled start file=${path.basename(localPath)}`);
 
-  const finalize = (payload) => {
-    rotateBackups(LOCAL_BACKUP_DIR, LOCAL_BACKUP_KEEP_DAYS);
-    const log = {
-      ok: true,
-      path: dest,
-      size: payload.size,
-      durationMs: Date.now() - started,
-      counts: payload.verification.counts,
+  try {
+    const result = createAndVerifySqliteBackup(localPath, dest, {
+      timeoutMs: options.timeoutMs ?? LOCAL_BACKUP_TIMEOUT_MS,
+      expectCounts: options.expectCounts,
+    });
+
+    const finalize = (payload) => {
+      rotateBackups(LOCAL_BACKUP_DIR, LOCAL_BACKUP_KEEP_DAYS);
+      const log = {
+        ok: true,
+        type: "scheduled-local",
+        path: dest,
+        file: path.basename(dest),
+        size: payload.size,
+        durationMs: Date.now() - started,
+        counts: payload.verification?.counts || payload.counts,
+      };
+      console.log(
+        `DB backup: scheduled success ${JSON.stringify({
+          ok: log.ok,
+          type: log.type,
+          file: log.file,
+          size: log.size,
+          durationMs: log.durationMs,
+          counts: log.counts,
+        })}`
+      );
+      return log;
     };
-    console.log(`DB backup: ${JSON.stringify(log)}`);
-    return log;
-  };
 
-  if (result instanceof Promise) {
-    return result.then(finalize);
+    if (result instanceof Promise) {
+      return result.then(finalize).catch((err) => {
+        console.warn(
+          `DB backup: scheduled failure file=${path.basename(dest)} code=${err.code || "BACKUP_FAILED"} msg=${err.message}`
+        );
+        throw err;
+      });
+    }
+    return finalize(result);
+  } catch (err) {
+    console.warn(
+      `DB backup: scheduled failure file=${path.basename(dest)} code=${err.code || "BACKUP_FAILED"} msg=${err.message}`
+    );
+    throw err;
   }
-  return finalize(result);
 }
 
 /** @deprecated use createLocalBackup */
@@ -148,24 +195,216 @@ export async function ensureBucket() {
   return false;
 }
 
+/**
+ * Compare remote vs local freshness using metadata sidecars when available.
+ * Fail-closed: if local exists and remote freshness is unknown or older → stale.
+ */
+export function assertRemoteNotStale(localPath, remoteMeta, options = {}) {
+  if (!localDbExists(localPath)) return { ok: true, reason: "no-local" };
+  if (!remoteMeta || !remoteMeta.createdAt) {
+    throw backupError(
+      RESTORE_REMOTE_STALE,
+      "remote metadata missing — refuse to overwrite existing local DB"
+    );
+  }
+  const localMeta = options.localMeta ?? readBackupMetadata(localPath);
+  const remoteCreated = Date.parse(remoteMeta.createdAt);
+  if (!Number.isFinite(remoteCreated)) {
+    throw backupError(RESTORE_REMOTE_STALE, "remote createdAt unparseable — refuse overwrite");
+  }
+  let localCreated = localMeta?.createdAt ? Date.parse(localMeta.createdAt) : NaN;
+  if (!Number.isFinite(localCreated)) {
+    try {
+      localCreated = fs.statSync(localPath).mtimeMs;
+    } catch {
+      localCreated = Date.now();
+    }
+  }
+  if (remoteCreated < localCreated) {
+    throw backupError(
+      RESTORE_REMOTE_STALE,
+      "remote backup is older than local DB — refuse overwrite"
+    );
+  }
+  return { ok: true, reason: "remote-fresh" };
+}
+
+/**
+ * Safe cloud restore: download to temp → verify → optional stale check →
+ * backup local to rollback → atomic rename → re-verify → rollback on failure.
+ * Never writes remote bytes directly onto localPath.
+ */
+export async function restoreRemoteDbSafely(localPath, options = {}) {
+  const started = Date.now();
+  const tmpDir = options.tmpDir || path.join(os.tmpdir(), "daogreen-restore");
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const stamp = Date.now();
+  const remoteTmp = path.join(tmpDir, `remote-${stamp}.db`);
+  const rollbackPath = path.join(tmpDir, `rollback-${stamp}.db`);
+  const fetchRemote = options.fetchRemote;
+  const fetchRemoteMeta = options.fetchRemoteMeta;
+
+  const cleanupTemps = () => {
+    safeUnlink(remoteTmp);
+    safeUnlink(`${remoteTmp}-wal`);
+    safeUnlink(`${remoteTmp}-shm`);
+    safeUnlink(metadataSidecarPath(remoteTmp));
+    if (!options.keepRollback) {
+      safeUnlink(rollbackPath);
+      safeUnlink(`${rollbackPath}-wal`);
+      safeUnlink(`${rollbackPath}-shm`);
+    }
+    safeUnlink(metadataSidecarPath(rollbackPath));
+  };
+
+  try {
+    console.log(`DB backup: restore start target=${path.basename(localPath)}`);
+
+    let buf;
+    let remoteMeta = null;
+    if (typeof fetchRemote === "function") {
+      buf = await fetchRemote();
+      if (typeof fetchRemoteMeta === "function") {
+        remoteMeta = await fetchRemoteMeta();
+      }
+    } else {
+      const res = await storage(REMOTE_FILE);
+      if (!res) return { ok: false, reason: "no-supabase" };
+      if (res.status === 404) {
+        console.log("DB backup: нет файла в облаке — будет создана новая база");
+        return { ok: false, reason: "not-found" };
+      }
+      if (!res.ok) {
+        console.warn("DB backup download failed:", res.status);
+        return { ok: false, reason: "download-failed" };
+      }
+      buf = Buffer.from(await res.arrayBuffer());
+      try {
+        const metaRes = await storage(REMOTE_META);
+        if (metaRes?.ok) {
+          remoteMeta = JSON.parse(Buffer.from(await metaRes.arrayBuffer()).toString("utf8"));
+        }
+      } catch {
+        remoteMeta = null;
+      }
+    }
+
+    if (!buf || buf.length <= 0) {
+      throw backupError(RESTORE_VERIFY_FAILED, "remote backup empty");
+    }
+
+    fs.writeFileSync(remoteTmp, buf);
+    let verification;
+    try {
+      verification = verifySqliteBackup(remoteTmp, options.verifyOptions || {});
+    } catch (err) {
+      throw backupError(RESTORE_VERIFY_FAILED, err.message);
+    }
+
+    const localExists = localDbExists(localPath);
+    if (localExists) {
+      // Fail-closed: existing local is never auto-overwritten without fresh metadata.
+      if (options.allowOverwriteExisting === true) {
+        assertRemoteNotStale(localPath, remoteMeta, options);
+      } else {
+        throw backupError(
+          RESTORE_REMOTE_STALE,
+          "local DB exists — refuse silent remote overwrite"
+        );
+      }
+    }
+
+    fs.mkdirSync(path.dirname(localPath), { recursive: true });
+
+    if (localExists) {
+      try {
+        createAndVerifySqliteBackup(localPath, rollbackPath, {
+          writeMetadata: true,
+          timeoutMs: LOCAL_BACKUP_TIMEOUT_MS,
+        });
+      } catch (err) {
+        throw backupError(
+          RESTORE_SWITCH_FAILED,
+          `could not create rollback backup: ${err.message}`
+        );
+      }
+      try {
+        safeUnlink(localPath);
+        safeUnlink(`${localPath}-wal`);
+        safeUnlink(`${localPath}-shm`);
+        fs.renameSync(remoteTmp, localPath);
+      } catch (err) {
+        // Rollback
+        try {
+          if (fs.existsSync(rollbackPath)) {
+            safeUnlink(localPath);
+            fs.copyFileSync(rollbackPath, localPath);
+          }
+        } catch {
+          /* ignore */
+        }
+        throw backupError(RESTORE_SWITCH_FAILED, `atomic switch failed: ${err.message}`);
+      }
+    } else {
+      fs.renameSync(remoteTmp, localPath);
+    }
+
+    try {
+      if (typeof options.injectPostSwitchError === "string") {
+        throw new Error(options.injectPostSwitchError);
+      }
+      verifySqliteBackup(localPath, options.verifyOptions || {});
+      if (remoteMeta) {
+        writeBackupMetadata(localPath, { ...verification, ...remoteMeta, size: verification.size });
+      } else {
+        writeBackupMetadata(localPath, verification);
+      }
+    } catch (err) {
+      if (fs.existsSync(rollbackPath)) {
+        safeUnlink(localPath);
+        fs.copyFileSync(rollbackPath, localPath);
+      }
+      throw backupError(RESTORE_SWITCH_FAILED, `post-switch verify failed: ${err.message}`);
+    }
+
+    const log = {
+      ok: true,
+      type: "cloud-restore",
+      file: path.basename(localPath),
+      size: buf.length,
+      counts: verification.counts,
+      durationMs: Date.now() - started,
+      hadLocal: localExists,
+    };
+    console.log(`DB backup: restore success ${JSON.stringify(log)}`);
+    cleanupTemps();
+    return log;
+  } catch (err) {
+    cleanupTemps();
+    console.warn(
+      `DB backup: restore failure file=${path.basename(localPath)} code=${err.code || "RESTORE_FAILED"} msg=${err.message}`
+    );
+    throw err;
+  }
+}
+
+/**
+ * @deprecated Prefer restoreRemoteDbSafely. Kept for callers; never writes onto existing local.
+ */
 export async function downloadDb(localPath) {
-  const cfg = supabaseCfg();
-  if (!cfg) return false;
-  fs.mkdirSync(path.dirname(localPath), { recursive: true });
-  const res = await storage(REMOTE_FILE);
-  if (!res) return false;
-  if (res.status === 404) {
-    console.log("DB backup: нет файла в облаке — будет создана новая база");
+  if (localDbExists(localPath)) {
+    console.log(
+      `DB backup: local DB present (${path.basename(localPath)}) — skip remote download`
+    );
     return false;
   }
-  if (!res.ok) {
-    console.warn("DB backup download failed:", res.status, await res.text());
+  try {
+    const result = await restoreRemoteDbSafely(localPath);
+    return !!(result && result.ok);
+  } catch (err) {
+    console.warn(`DB backup download failed: ${err.code || ""} ${err.message}`);
     return false;
   }
-  const buf = Buffer.from(await res.arrayBuffer());
-  fs.writeFileSync(localPath, buf);
-  console.log(`DB backup: загружено ${buf.length} байт из Supabase`);
-  return true;
 }
 
 export async function uploadDb(localPath) {
@@ -173,45 +412,57 @@ export async function uploadDb(localPath) {
   if (!cfg || !fs.existsSync(localPath)) return false;
 
   const tmpPath = path.join(path.dirname(localPath), `.upload-${Date.now()}.db`);
+  const started = Date.now();
   try {
-    createAndVerifySqliteBackup(localPath, tmpPath, { timeoutMs: LOCAL_BACKUP_TIMEOUT_MS });
+    console.log(`DB backup: upload start file=${path.basename(localPath)}`);
+    const verified = createAndVerifySqliteBackup(localPath, tmpPath, {
+      timeoutMs: LOCAL_BACKUP_TIMEOUT_MS,
+    });
     const body = fs.readFileSync(tmpPath);
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const archivePath = `backups/daogreen-${stamp}.db`;
+    const metaBody = JSON.stringify(
+      verified.metadata ||
+        writeBackupMetadata(tmpPath, verified.verification || { counts: verified.counts, size: body.length }),
+      null,
+      2
+    );
 
-    async function put(pathname) {
+    async function put(pathname, payload, contentType) {
       let res = await storage(pathname, {
         method: "POST",
-        body,
-        contentType: "application/x-sqlite3",
+        body: payload,
+        contentType,
       });
       if (!res.ok) {
         res = await storage(pathname, {
           method: "PUT",
-          body,
-          contentType: "application/x-sqlite3",
+          body: payload,
+          contentType,
         });
       }
       return res.ok;
     }
 
-    const archived = await put(archivePath);
-    const latest = await put(REMOTE_FILE);
+    const archived = await put(archivePath, body, "application/x-sqlite3");
+    const latest = await put(REMOTE_FILE, body, "application/x-sqlite3");
     if (!latest) {
       console.warn("DB backup upload failed for latest copy");
       return false;
     }
+    await put(REMOTE_META, metaBody, "application/json");
+    await put(`backups/daogreen-${stamp}.db.meta.json`, metaBody, "application/json");
     console.log(
-      `DB backup: сохранено ${body.length} байт в Supabase` +
-        (archived ? ` (+ архив ${archivePath})` : "")
+      `DB backup: upload success bytes=${body.length} durationMs=${Date.now() - started}` +
+        (archived ? ` archive=${archivePath}` : "")
     );
     return true;
+  } catch (err) {
+    console.warn(`DB backup upload failure code=${err.code || ""} msg=${err.message}`);
+    return false;
   } finally {
-    try {
-      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-    } catch {
-      /* ignore */
-    }
+    safeUnlink(tmpPath);
+    safeUnlink(metadataSidecarPath(tmpPath));
   }
 }
 
@@ -236,10 +487,34 @@ export function startDbBackupLoop(localPath, intervalMs = 60_000) {
   return shutdown;
 }
 
+/**
+ * On startup: restore from remote ONLY when local DB is absent.
+ * Never silently overwrite an existing local file.
+ * Runs before initDb (caller must not open the DB first).
+ */
 export async function initRemoteDb(localPath) {
-  if (!supabaseCfg()) return;
+  if (!supabaseCfg()) return { ok: false, reason: "no-supabase" };
   await ensureBucket();
-  await downloadDb(localPath);
+  if (localDbExists(localPath)) {
+    console.log(
+      `DB backup: local DB present (${path.basename(localPath)}) — skip remote restore`
+    );
+    return { ok: true, skipped: true, reason: "local-present" };
+  }
+  try {
+    return await restoreRemoteDbSafely(localPath);
+  } catch (err) {
+    console.warn(
+      `DB backup: initRemoteDb failed code=${err.code || ""} msg=${err.message}`
+    );
+    return { ok: false, reason: err.code || "restore-failed" };
+  }
 }
 
-export { createAndVerifySqliteBackup as createSqliteBackup, verifySqliteBackup, rotateBackups, createBackupScheduler };
+export {
+  createAndVerifySqliteBackup as createSqliteBackup,
+  verifySqliteBackup,
+  rotateBackups,
+  createBackupScheduler,
+  restoreRemoteDbSafely as restoreRemoteDb,
+};

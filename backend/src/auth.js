@@ -1,4 +1,4 @@
-import { db } from "./db.js";
+import { db, getDbPath } from "./db.js";
 import {
   getAdminAccessMode,
   readAdminSessionFromRequest,
@@ -16,6 +16,7 @@ import {
   generateAdminApiKey,
   keyHintFromPlaintext,
 } from "./services/adminKeyCrypto.js";
+import { ensurePreMigrationBackup } from "./sqliteBackup.js";
 
 const ENV_KEY = process.env.ADMIN_KEY || "";
 const IP_ALLOWLIST = (process.env.ADMIN_IP_ALLOWLIST || "")
@@ -38,6 +39,9 @@ function addCol(table, col, def) {
  * 1. Remove auto-created env-primary row (ENV key must not live in SQLite)
  * 2. Hash any remaining plaintext api_key values
  * 3. Ensure key_hint column exists
+ *
+ * When plaintext keys or env-primary exist, a verified pre-migration backup is required
+ * (marker: preMigrationBackup.adminKeys.v1). Failure aborts with PRE_MIGRATION_BACKUP_REQUIRED.
  */
 export function migrateAdminKeys() {
   db.exec(`
@@ -50,6 +54,13 @@ export function migrateAdminKeys() {
     );
   `);
   addCol("admin_users", "key_hint", "TEXT DEFAULT ''");
+
+  const envPrimary = db.prepare("SELECT 1 AS ok FROM admin_users WHERE id = ?").get("env-primary");
+  const rowsPreview = db.prepare("SELECT id, api_key FROM admin_users").all();
+  const hasPlaintext = rowsPreview.some((row) => isLegacyPlaintextAdminKey(row.api_key));
+  if (envPrimary || hasPlaintext) {
+    ensurePreMigrationBackup(getDbPath(), "preMigrationBackup.adminKeys.v1");
+  }
 
   const migrate = db.transaction(() => {
     db.prepare("DELETE FROM admin_users WHERE id = ?").run("env-primary");

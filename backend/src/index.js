@@ -1,13 +1,14 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { initRemoteDb, startDbBackupLoop, startLocalBackupLoop, backupStatus } from "./dbBackup.js";
-import { initDb, db, getDbPath } from "./db.js";
-import { adminAuthMiddleware } from "./auth.js";
+import { initDb, db } from "./db.js";
 import { getAdminAccessMode } from "./adminSession.js";
 import { applySecurityMiddleware } from "./middleware/security.js";
+import { ensurePreMigrationBackup } from "./sqliteBackup.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
@@ -17,8 +18,20 @@ const dbPath = path.resolve(
 );
 process.env.DATABASE_PATH = dbPath;
 
+// 1) remote restore only if local absent  2) pre-migration backup  3) initDb  4) auth migrate
 await initRemoteDb(dbPath);
+try {
+  if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
+    ensurePreMigrationBackup(dbPath, "preMigrationBackup.schema.v1");
+  }
+} catch (err) {
+  console.error(`[startup] ${err.code || "PRE_MIGRATION_BACKUP_REQUIRED"}: ${err.message}`);
+  process.exit(1);
+}
 initDb();
+// Import auth AFTER initRemoteDb/initDb so migrateAdminKeys does not create an empty local DB
+// before a cloud restore, and so pre-migration backup can run first.
+const { adminAuthMiddleware } = await import("./auth.js");
 const { initActivityLog } = await import("./services/activityLog.js");
 initActivityLog();
 

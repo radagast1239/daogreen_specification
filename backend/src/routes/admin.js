@@ -38,6 +38,10 @@ import {
   UploadValidationError,
 } from "../services/uploadValidation.js";
 import { sendSafeUploadFile } from "../services/secureFileServe.js";
+import {
+  createVerifiedDownloadBackup,
+  safeUnlink,
+} from "../sqliteBackup.js";
 
 const uploadDir = resolveUploadRoot();
 if (uploadDir) fs.mkdirSync(uploadDir, { recursive: true });
@@ -225,9 +229,40 @@ router.get("/settings", (_req, res) => {
 });
 
 router.get("/backup", (_req, res) => {
-  const p = getDbPath();
-  if (!fs.existsSync(p)) return res.status(404).json({ error: "DB not found" });
-  res.download(p, `daogreen-backup-${new Date().toISOString().slice(0, 10)}.db`);
+  const livePath = getDbPath();
+  if (!livePath || !fs.existsSync(livePath)) {
+    return res.status(404).json({ error: "DB not found", code: "DB_NOT_FOUND" });
+  }
+  let snapshotPath = null;
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    safeUnlink(snapshotPath);
+  };
+  try {
+    const snapshot = createVerifiedDownloadBackup(livePath);
+    snapshotPath = snapshot.path;
+    if (!snapshotPath || snapshotPath === livePath) {
+      cleanup();
+      return res.status(500).json({ error: "Backup failed", code: "BACKUP_LIVE_PATH_REFUSED" });
+    }
+    res.download(snapshotPath, snapshot.downloadName, (err) => {
+      cleanup();
+      if (err && !res.headersSent) {
+        res.status(500).json({ error: "Backup download failed", code: "BACKUP_DOWNLOAD_FAILED" });
+      }
+    });
+    res.on("close", cleanup);
+  } catch (err) {
+    cleanup();
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "Backup failed",
+        code: err.code || "BACKUP_FAILED",
+      });
+    }
+  }
 });
 
 router.get("/analytics", (_req, res) => {

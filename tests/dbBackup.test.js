@@ -42,7 +42,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(tempRoot, { recursive: true, force: true });
+  try {
+    fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  } catch {
+    /* ignore Windows lock races */
+  }
 });
 
 describe("sqliteBackup", () => {
@@ -167,6 +171,56 @@ describe("sqliteBackup", () => {
     expect(fs.existsSync(path.join(dir, "daogreen_bad.tmp"))).toBe(true);
     expect(isValidBackupFilename("daogreen_2026.db")).toBe(true);
     expect(isValidBackupFilename("daogreen_2026.db.tmp")).toBe(false);
+  });
+
+  it("retention never deletes the newest valid backup even if past keepDays", () => {
+    const dir = path.join(tempRoot, "retention-keep-one");
+    fs.mkdirSync(dir, { recursive: true });
+    const only = path.join(dir, "daogreen_only.db");
+    fs.writeFileSync(only, "only-valid");
+    fs.utimesSync(only, new Date("2019-01-01"), new Date("2019-01-01"));
+
+    const { removed, keptNewest } = rotateBackups(dir, 14, { now: Date.now() });
+    expect(removed).toEqual([]);
+    expect(keptNewest).toBe(only);
+    expect(fs.existsSync(only)).toBe(true);
+  });
+
+  it("verifySqliteBackup runs foreign_key_check and schema-aware counts", () => {
+    const sourcePath = path.join(tempRoot, "fk-ok.db");
+    makeDb(sourcePath);
+    const backupPath = path.join(tempRoot, "fk-ok-backup.db");
+    createAndVerifySqliteBackup(sourcePath, backupPath);
+    const verification = verifySqliteBackup(backupPath);
+    expect(verification.integrity).toBe("ok");
+    expect(verification.counts.materials).toBe(1);
+    expect(verification.counts.projects).toBe(1);
+    expect(verification.counts.project_items).toBe(1);
+    expect(verification.skippedTables).toContain("spec_versions");
+  });
+
+  it("verifySqliteBackup fails with BACKUP_FOREIGN_KEYS_FAILED", () => {
+    const badPath = path.join(tempRoot, "fk-bad.db");
+    const db = new DatabaseSync(badPath);
+    try {
+      db.exec("PRAGMA foreign_keys = OFF");
+      db.exec(`
+        CREATE TABLE parents (id TEXT PRIMARY KEY);
+        CREATE TABLE children (
+          id TEXT PRIMARY KEY,
+          parent_id TEXT NOT NULL REFERENCES parents(id)
+        );
+        INSERT INTO children (id, parent_id) VALUES ('c1', 'missing');
+      `);
+    } finally {
+      db.close();
+    }
+    try {
+      verifySqliteBackup(badPath);
+      expect.unreachable("should throw");
+    } catch (err) {
+      expect(err.code).toBe("BACKUP_FOREIGN_KEYS_FAILED");
+    }
   });
 });
 
