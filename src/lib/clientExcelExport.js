@@ -13,12 +13,31 @@ import {
 } from "../../shared/clientPurchaseRows.js";
 import { excelCurrencyNumFmt, formatMoneyAmount, roundMoney } from "../../shared/moneyCalc.js";
 import { excelCellText, safeExcelHyperlinkTarget } from "../../shared/excelSafeLink.js";
+import {
+  normalizeProjectCurrency,
+  isExcelNumFmtSafeSymbol,
+  resolveMoneyDisplaySymbol,
+} from "../../shared/projectCurrency.js";
 
 export const CLIENT_EXCEL_BRAND = "#116355";
 export const CLIENT_EXCEL_BRAND_RGB = "116355";
 
+function projectCurrencyContext(project) {
+  const desc = normalizeProjectCurrency(project);
+  const symbol = resolveMoneyDisplaySymbol(desc);
+  const safe = isExcelNumFmtSafeSymbol(symbol);
+  return {
+    desc,
+    symbol,
+    code: desc.currencyCode,
+    safe,
+    numFmt: safe ? excelCurrencyNumFmt(symbol) : "#,##0",
+  };
+}
+
+/** @deprecated prefer projectCurrencyContext — kept for call sites expecting a symbol string */
 function projectCurrency(project) {
-  return project?.currency || "₽";
+  return projectCurrencyContext(project).symbol;
 }
 
 /** Читаемые ширины колонок (символы Excel) — по эталону клиента. */
@@ -417,7 +436,10 @@ function statusLabel(rowOrStatus, purchaseStatuses) {
 
 function applyRubFormats(ws, headerNames, numericHeaders = ["Цена", "Сумма", "Бюджет", "Куплено", "Осталось", "Факт. цена"], currency = "₽") {
   if (!ws?.["!ref"]) return ws;
-  const numFmt = excelCurrencyNumFmt(currency);
+  const ctx = typeof currency === "object" && currency?.numFmt
+    ? currency
+    : projectCurrencyContext({ currency });
+  const numFmt = ctx.numFmt || excelCurrencyNumFmt(typeof currency === "string" ? currency : "₽");
   const cols = numericHeaders
     .map((h) => headerNames.indexOf(h))
     .filter((i) => i >= 0);
@@ -552,7 +574,7 @@ function sheetFromRowsWithLinks(rows, linkHeader = "Ссылка", linkText = "�
 function instructionSheet(project, items, branding, merged) {
   const budget = (items || []).reduce((s, i) => s + lineGross(i), 0);
   const unique = merged?.length ?? 0;
-  const currency = projectCurrency(project);
+  const currencyCtx = projectCurrencyContext(project);
   const rows = [
     {
       Блок: "Проект",
@@ -561,6 +583,14 @@ function instructionSheet(project, items, branding, merged) {
     {
       Блок: "Клиент",
       Текст: project?.client || "—",
+    },
+    {
+      Блок: "Валюта",
+      Текст: excelCellText(
+        currencyCtx.safe
+          ? `${currencyCtx.code} (${currencyCtx.symbol})`
+          : `Валюта: ${currencyCtx.code}`,
+      ),
     },
     {
       Блок: "Версия",
@@ -572,7 +602,7 @@ function instructionSheet(project, items, branding, merged) {
     },
     {
       Блок: "Итого",
-      Текст: `${formatMoneyAmount(budget, currency)} · уникальных позиций: ${unique}`,
+      Текст: `${formatMoneyAmount(budget, currencyCtx.symbol)} · уникальных позиций: ${unique}`,
     },
     {
       Блок: "Компания",
@@ -625,7 +655,7 @@ function instructionSheet(project, items, branding, merged) {
         "Если позиции нет в наличии или не подходит — отметьте в онлайн-версии «Нужна помощь» или напишите Daogreen: подберём замену.",
     },
   ];
-  return sheetFromRows(rows, { Блок: 18, Текст: 92 }, { freeze: true, currency });
+  return sheetFromRows(rows, { Блок: 18, Текст: 92 }, { freeze: true, currency: currencyCtx });
 }
 
 function summarySheet(project, items, branding, purchaseStatuses, merged) {
@@ -633,11 +663,19 @@ function summarySheet(project, items, branding, purchaseStatuses, merged) {
   const spent = items.filter((i) => isBoughtStatus(i.status)).reduce((s, i) => s + lineGross(i), 0);
   const bought = items.filter((i) => isBoughtStatus(i.status)).length;
   const progress = items.length ? Math.round((bought / items.length) * 100) : 0;
-  const currency = projectCurrency(project);
+  const currencyCtx = projectCurrencyContext(project);
   const rows = [
     { Поле: "Проект", Значение: project.name },
     { Поле: "Клиент", Значение: project.client || "" },
     { Поле: "Город", Значение: project.city || "" },
+    {
+      Поле: "Валюта",
+      Значение: excelCellText(
+        currencyCtx.safe
+          ? `${currencyCtx.code} (${currencyCtx.symbol})`
+          : `Валюта: ${currencyCtx.code}`,
+      ),
+    },
     { Поле: "Версия", Значение: project.version > 1 ? `v${project.version}` : "v1" },
     { Поле: "Дата выгрузки", Значение: new Date().toLocaleDateString("ru-RU") },
     { Поле: "Компания", Значение: branding.companyName || "Daogreen" },
@@ -648,7 +686,7 @@ function summarySheet(project, items, branding, purchaseStatuses, merged) {
     { Поле: "Позиций (детально)", Значение: items.length },
     { Поле: "Уникальных к закупке", Значение: merged?.length ?? "" },
   ];
-  return sheetFromRows(rows, { Поле: 26, Значение: 28 }, { freeze: true, currency });
+  return sheetFromRows(rows, { Поле: 26, Значение: 28 }, { freeze: true, currency: currencyCtx });
 }
 
 function mergedByCategorySheet(merged, purchaseStatuses, currency = "₽") {
@@ -696,7 +734,7 @@ function mergedForRole(items, role, project = null) {
 }
 
 function moduleDetailSheet(items, project, purchaseStatuses) {
-  const currency = projectCurrency(project);
+  const currency = projectCurrencyContext(project);
   const groups = groupBy(items, "module");
   const rows = [];
   let n = 0;
@@ -738,7 +776,7 @@ function moduleDetailSheet(items, project, purchaseStatuses) {
 }
 
 export function buildClientWorkbook(project, items, { purchaseStatuses = [], branding = {}, versionInfo } = {}) {
-  const currency = projectCurrency(project);
+  const currency = projectCurrencyContext(project);
   const purchaseItems = (items || []).filter((i) => i.itemRole !== "installation");
   const installItems = (items || []).filter(
     (i) => i.itemRole === "installation" || i.category === "Работы и доставка"
@@ -806,7 +844,12 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
 export function buildClientExcelStylesXml(currency = "₽") {
   const bodySz = CLIENT_EXCEL_BODY_FONT_SIZE;
   const headSz = CLIENT_EXCEL_HEADER_FONT_SIZE;
-  const fmt = excelCurrencyNumFmt(currency)
+  const fmtRaw = typeof currency === "object" && currency?.numFmt
+    ? currency.numFmt
+    : (isExcelNumFmtSafeSymbol(String(currency ?? "₽"))
+      ? excelCurrencyNumFmt(currency)
+      : "#,##0");
+  const fmt = String(fmtRaw)
     .replace(/&/g, "&amp;")
     .replace(/"/g, "&quot;");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -951,7 +994,7 @@ export function patchClientExcelXlsxArray(arrayBuf, currency = "₽") {
 export function writeClientWorkbookArray(project, items, options = {}) {
   const wb = buildClientWorkbook(project, items, options);
   const raw = XLSX.write(wb, { bookType: "xlsx", type: "array", cellStyles: true });
-  return patchClientExcelXlsxArray(raw, projectCurrency(project));
+  return patchClientExcelXlsxArray(raw, projectCurrencyContext(project));
 }
 
 export function downloadClientWorkbook(project, items, options = {}) {

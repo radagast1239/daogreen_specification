@@ -40,6 +40,7 @@ function parseSummaryColumn(raw) {
     return {};
   }
 }
+import { normalizeProjectCurrency } from "../../../shared/projectCurrency.js";
 
 export function loadVersionRow(projectId, versionId) {
   const row = db
@@ -113,6 +114,10 @@ const CLIENT_PROJECT_META_KEYS = [
   "client",
   "city",
   "currency",
+  "currencyCode",
+  "currencyName",
+  "currencyCustom",
+  "currencySymbol",
   "vat",
   "comment",
   "area",
@@ -147,6 +152,19 @@ function metaFromSnapshot(projectMeta, workingProject) {
   if (meta.vat != null) out.vat = !!meta.vat;
   if (meta.comment != null) out.comment = meta.comment;
   if (meta.versionNumber != null) out.version = Number(meta.versionNumber) || 0;
+  // Freeze currency from snapshot meta only (never live working project currency).
+  const cur = normalizeProjectCurrency({
+    currency: meta.currency,
+    currencyCode: meta.currencyCode,
+    currencySymbol: meta.currencySymbol,
+    currencyName: meta.currencyName,
+    currencyCustom: meta.currencyCustom,
+  });
+  out.currency = cur.currencySymbol;
+  out.currencyCode = cur.currencyCode;
+  out.currencySymbol = cur.currencySymbol;
+  out.currencyName = cur.currencyName;
+  out.currencyCustom = !!cur.currencyCustom;
   out.id = workingProject?.id || meta.id || "";
   out.revision = Number(workingProject?.revision) || 1;
   return out;
@@ -403,19 +421,24 @@ export function getProjectReleaseInfo(project) {
     : null;
   const meta = publishedSnapshot?.projectMeta || null;
   const publishedSnapshotMeta = meta
-    ? {
-        name: meta.name || "",
-        client: meta.client || "",
-        city: meta.city || "",
-        currency: meta.currency || "₽",
-        vat: !!meta.vat,
-        stellageCounts: Array.isArray(meta.stellageCounts)
-          ? meta.stellageCounts
-          : (publishedSnapshot?.stellageCounts || []),
-        versionNumber: Number(meta.versionNumber) || Number(release?.versionNumber) || 0,
-        comment: meta.comment || "",
-        id: meta.id || project?.id || "",
-      }
+    ? (() => {
+        const cur = normalizeProjectCurrency(meta);
+        return {
+          name: meta.name || "",
+          client: meta.client || "",
+          city: meta.city || "",
+          currency: cur.currencySymbol,
+          currencyCode: cur.currencyCode,
+          currencyName: cur.currencyName,
+          currencyCustom: !!cur.currencyCustom,
+          currencySymbol: cur.currencySymbol,
+          vat: !!meta.vat,
+          stellageCounts: Array.isArray(meta.stellageCounts) ? meta.stellageCounts : (publishedSnapshot?.stellageCounts || []),
+          versionNumber: Number(meta.versionNumber) || Number(release?.versionNumber) || 0,
+          comment: meta.comment || "",
+          id: meta.id || project?.id || "",
+        };
+      })()
     : null;
   const legacyIncomplete = release ? isLegacyReleaseIncomplete(publishedSnapshot || {}) : false;
   return {

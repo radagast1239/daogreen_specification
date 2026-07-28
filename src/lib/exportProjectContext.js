@@ -4,6 +4,7 @@
  */
 
 import { projectForClientPdfExport, projectForClientExcelExport } from "./clientExportProject.js";
+import { normalizeProjectCurrency } from "../../shared/projectCurrency.js";
 
 function pickPublishedMeta(project = {}, snapshotParsed = null) {
   const fromDto = project.publishedSnapshotMeta;
@@ -44,8 +45,14 @@ function pickPublishedDocuments(project = {}, snapshotParsed = null) {
  */
 export function buildDraftExportProject(project = {}) {
   const name = project?.name || "";
+  const cur = normalizeProjectCurrency(project);
   return {
     ...project,
+    currency: cur.currencySymbol,
+    currencyCode: cur.currencyCode,
+    currencySymbol: cur.currencySymbol,
+    currencyName: cur.currencyName,
+    currencyCustom: !!cur.currencyCustom,
     exportKind: "draft",
     exportTitleSuffix: "рабочая версия",
     name,
@@ -67,13 +74,18 @@ export function buildPublishedExportProject(project = {}, snapshotParsed = null)
     Number(project?.publishedRelease?.versionNumber) ||
     Number(meta.versionNumber) ||
     0;
+  const cur = normalizeProjectCurrency(meta);
 
   return {
     id: meta.id || project.id || "",
     name: meta.name || "",
     client: meta.client || "",
     city: meta.city || "",
-    currency: meta.currency || "₽",
+    currency: cur.currencySymbol,
+    currencyCode: cur.currencyCode,
+    currencySymbol: cur.currencySymbol,
+    currencyName: cur.currencyName,
+    currencyCustom: !!cur.currencyCustom,
     vat: !!meta.vat,
     comment: meta.comment || "",
     items,

@@ -7,6 +7,8 @@ import { api } from "../../lib/api.js";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
 import { resolveCategories } from "../../lib/categories.js";
 import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
+import ProjectCurrencyFields, { applyCurrencyDescToForm } from "../../components/ProjectCurrencyFields.jsx";
+import { DEFAULT_PROJECT_CURRENCY } from "../../../shared/projectCurrency.js";
 import BuilderStellageFrameDrawingRow from "../../components/BuilderStellageFrameDrawingRow.jsx";
 import {
   DRAFT_PROJECT_FRAME_DRAWING_SECTION_HINT,
@@ -175,7 +177,11 @@ export default function ProjectBuilderPage() {
     height: "",
     sowingArea: "",
     type: "проточка",
-    currency: "₽",
+    currency: DEFAULT_PROJECT_CURRENCY.symbol,
+    currencyCode: DEFAULT_PROJECT_CURRENCY.code,
+    currencySymbol: DEFAULT_PROJECT_CURRENCY.symbol,
+    currencyName: DEFAULT_PROJECT_CURRENCY.name,
+    currencyCustom: false,
     vat: false,
     comment: "",
     manualParams: { ...DEFAULT_MANUAL_PARAMS, projectKind: PROJECT_KIND.CLIENT },
@@ -1119,6 +1125,10 @@ export default function ProjectBuilderPage() {
               Высота, м
               <input type="number" value={form.height} onChange={(e) => set("height", e.target.value)} />
             </label>
+            <ProjectCurrencyFields
+              value={form}
+              onChange={(desc) => setForm((f) => applyCurrencyDescToForm(f, desc))}
+            />
             <label className="full">
               Описание
               <textarea rows={2} value={form.comment} onChange={(e) => set("comment", e.target.value)} />

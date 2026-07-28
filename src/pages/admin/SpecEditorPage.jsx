@@ -50,6 +50,8 @@ import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
 import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
 import { clientLink, photoSrc } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
+import ProjectCurrencyFields, { currencyFieldsForApi } from "../../components/ProjectCurrencyFields.jsx";
+import { normalizeProjectCurrency } from "../../../shared/projectCurrency.js";
 import { Progress, Stat, Empty, ClientLinkModal, StatusChip } from "../../components/ui.jsx";
 import Breadcrumbs from "../../components/Breadcrumbs.jsx";
 import Collapsible from "../../components/Collapsible.jsx";
@@ -157,6 +159,8 @@ export default function SpecEditorPage() {
   const [statusSaving, setStatusSaving] = useState(false);
   const [specModalOpen, setSpecModalOpen] = useState(false);
   const [createOnboardingDismissed, setCreateOnboardingDismissed] = useState(false);
+  const [currencyDraft, setCurrencyDraft] = useState(null);
+  const [currencySaving, setCurrencySaving] = useState(false);
   const clearSpecSelectionRef = useRef(null);
   const applySpecSelectionRef = useRef(null);
   const itemRefreshRef = useRef(null);
@@ -186,6 +190,23 @@ export default function SpecEditorPage() {
     });
     return buildProjectSendReadiness(checklist);
   }, [project, state.materials, publishCheck]);
+
+  const currencyValue = currencyDraft || normalizeProjectCurrency(project || {});
+
+  const saveProjectCurrency = async () => {
+    if (!project?.id || currencySaving) return;
+    setCurrencySaving(true);
+    try {
+      const fields = currencyFieldsForApi(currencyValue);
+      await actions.projectUpdate(project.id, fields);
+      setCurrencyDraft(null);
+      success("Валюта проекта сохранена");
+    } catch (e) {
+      error(e.message || "Не удалось сохранить валюту");
+    } finally {
+      setCurrencySaving(false);
+    }
+  };
 
   const applyAllCatalogUpdates = async () => {
     /* kept for workspace parity tests — panel owns bulk update UX */

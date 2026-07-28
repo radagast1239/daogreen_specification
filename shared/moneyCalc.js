@@ -40,25 +40,37 @@ export function roundMoney(n) {
   return Math.round(v ?? 0);
 }
 
+function resolveCurrencySymbolArg(currencyOrSymbol) {
+  if (currencyOrSymbol && typeof currencyOrSymbol === "object") {
+    const fromObj = currencyOrSymbol.currencySymbol;
+    if (fromObj != null && fromObj !== "") return String(fromObj);
+    return "₽";
+  }
+  if (currencyOrSymbol == null || currencyOrSymbol === "") return "₽";
+  return String(currencyOrSymbol);
+}
+
 /**
  * Locale money string. Currency symbol is a parameter — no hardcoded ₽ inside.
+ * Accepts a symbol string or a currency descriptor `{ currencySymbol }`.
  * @param {*} n
- * @param {string} [currencySymbol="₽"]
+ * @param {string|object} [currencyOrSymbol="₽"]
  * @returns {string}
  */
-export function formatMoneyAmount(n, currencySymbol = "₽") {
+export function formatMoneyAmount(n, currencyOrSymbol = "₽") {
   const v = roundMoney(n);
-  const cur = currencySymbol == null || currencySymbol === "" ? "₽" : String(currencySymbol);
+  const cur = resolveCurrencySymbolArg(currencyOrSymbol);
   return `${v.toLocaleString("ru-RU")} ${cur}`;
 }
 
 /**
  * Excel numFmt for a currency suffix (RUB default looks like legacy '#,##0" ₽"').
- * @param {string} [symbol="₽"]
+ * Accepts a symbol string or a currency descriptor `{ currencySymbol }`.
+ * @param {string|object} [currencyOrSymbol="₽"]
  * @returns {string}
  */
-export function excelCurrencyNumFmt(symbol = "₽") {
-  const s = symbol == null || symbol === "" ? "₽" : String(symbol);
+export function excelCurrencyNumFmt(currencyOrSymbol = "₽") {
+  const s = resolveCurrencySymbolArg(currencyOrSymbol);
   // Escape double-quotes inside format string
   const escaped = s.replace(/"/g, '""');
   return `#,##0" ${escaped}"`;

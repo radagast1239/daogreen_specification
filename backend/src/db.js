@@ -11,6 +11,7 @@ import { resolveMaterialFarmSections } from "../../shared/materialFarmSections.j
 import { normalizeItemFlags, resolveItemType, resolveEffectiveSupplier } from "../../shared/itemTypes.js";
 import { runSqlMigrations } from "./migrations/runner.js";
 import { resolveProjectPlanFields } from "./plannerPlanState.js";
+import { normalizeProjectCurrency } from "../../shared/projectCurrency.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.DATABASE_PATH || path.join(__dirname, "../data/daogreen.db");
@@ -571,6 +572,8 @@ export function rowToProject(row, items = []) {
   // PHASE 0B: повреждённый planner_plan диагностируется явно и НЕ превращается
   // молча в пустой план (см. backend/src/plannerPlanState.js).
   const planFields = resolveProjectPlanFields(row.planner_plan, floorPlan);
+  // Attach normalized currency fields on DTO only — never write back on GET.
+  const desc = normalizeProjectCurrency({ currency: row.currency, manualParams });
   return {
     id: row.id,
     name: row.name,
@@ -580,7 +583,12 @@ export function rowToProject(row, items = []) {
     height: row.height,
     sowingArea: row.sowing_area,
     type: row.type,
-    currency: row.currency,
+    // Column remains display-symbol source of truth; extras are derived for UI.
+    currency: row.currency || desc.currencySymbol,
+    currencyCode: desc.currencyCode,
+    currencySymbol: desc.currencySymbol,
+    currencyName: desc.currencyName,
+    currencyCustom: !!desc.currencyCustom,
     vat: !!row.vat,
     comment: row.comment,
     status: row.status,

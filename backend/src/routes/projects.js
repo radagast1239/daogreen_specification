@@ -66,6 +66,10 @@ import {
   isPublishWorkflowStatus,
   parsePublishedRelease,
 } from "../../../shared/projectPublishedRelease.js";
+import {
+  resolveCurrencyPersistFromBody,
+  defaultCurrencyPersist,
+} from "../../../shared/projectCurrency.js";
 import { validateProjectItemsForSave, validateSingleProjectItem } from "../services/projectItemValidation.js";
 import {
   buildClientProjectFromRelease,
@@ -415,6 +419,20 @@ export function listProjects() {
   });
 }
 
+function stripIncomingCurrencyMeta(manualParams) {
+  if (!manualParams || typeof manualParams !== "object") return {};
+  const { currencyMeta: _ignored, ...rest } = manualParams;
+  return rest;
+}
+
+function mergeCurrencyIntoManualParams(manualParams, currencyPersist) {
+  const mp = { ...(manualParams || {}) };
+  if (currencyPersist?.manualParamsPatch?.currencyMeta) {
+    mp.currencyMeta = currencyPersist.manualParamsPatch.currencyMeta;
+  }
+  return mp;
+}
+
 export function createProject(body) {
   const materials = listMaterials();
   const modules = listModules();
@@ -423,10 +441,18 @@ export function createProject(body) {
     ? body.items
     : buildItemsFromModules(materials, modules, selected);
 
+  const currencyPersist = resolveCurrencyPersistFromBody(body) || defaultCurrencyPersist();
+  const manualParams = mergeCurrencyIntoManualParams(
+    stripIncomingCurrencyMeta(body.manualParams || {}),
+    currencyPersist,
+  );
+
   const id = uid("p");
   INSERT_PROJECT.run(projectInsertRow({
     ...body,
     id,
+    currency: currencyPersist.currency,
+    manualParams,
     clientToken: clientToken(),
     selectedModules: selected,
   }));
@@ -461,8 +487,33 @@ export function updateProject(id, patch) {
     // Внутри транзакции чтение видит собственные незакоммиченные записи,
     // поэтому publish-валидация по-прежнему проверяет НОВЫЕ позиции.
     const base = safePatch.items ? loadProject(id) : cur;
-    let manualParams = { ...(base.manualParams || {}), ...(safePatch.manualParams || {}) };
-    let merged = { ...base, ...safePatch, id, manualParams };
+    const currencyPersist = resolveCurrencyPersistFromBody(safePatch);
+    const patchMp = safePatch.manualParams
+      ? stripIncomingCurrencyMeta(safePatch.manualParams)
+      : null;
+    let manualParams = {
+      ...(base.manualParams || {}),
+      ...(patchMp || {}),
+    };
+    // Keep existing currencyMeta unless this patch validates a new currency.
+    if (base.manualParams?.currencyMeta && !currencyPersist) {
+      manualParams.currencyMeta = base.manualParams.currencyMeta;
+    }
+    if (currencyPersist) {
+      manualParams = mergeCurrencyIntoManualParams(manualParams, currencyPersist);
+    }
+    let merged = {
+      ...base,
+      ...safePatch,
+      id,
+      manualParams,
+      ...(currencyPersist ? { currency: currencyPersist.currency } : {}),
+    };
+    delete merged.currencyCode;
+    delete merged.currencySymbol;
+    delete merged.currencyName;
+    delete merged.currencyCustom;
+    delete merged.currencyInfo;
 
     if (safePatch.status != null && safePatch.status !== base.status && isPublishWorkflowStatus(safePatch.status)) {
       // Build the release from the complete PATCH candidate. This keeps images and
@@ -510,12 +561,32 @@ export function duplicateProject(id, body = {}) {
     mode,
   });
 
+  // Copy currency + currencyMeta; allow body override via validated currency fields.
+  const currencyPersist = resolveCurrencyPersistFromBody({
+    currency: src.currency,
+    currencyCode: src.currencyCode,
+    currencySymbol: src.currencySymbol,
+    currencyName: src.currencyName,
+    currencyCustom: src.currencyCustom,
+    manualParams: { currencyMeta: src.manualParams?.currencyMeta },
+    ...body,
+  }) || defaultCurrencyPersist();
+
+  const clonedMp = stripIncomingCurrencyMeta(src.manualParams || {});
+  // Drop published release pointer from clone.
+  delete clonedMp.publishedRelease;
+
   return createProject({
     ...meta,
     name: (body.name || `${src.name} (копия)`).trim(),
     client: body.client != null ? body.client : "",
     city: body.city != null ? body.city : src.city,
     area: body.area != null ? body.area : src.area,
+    currency: currencyPersist.currency,
+    currencyCode: currencyPersist.manualParamsPatch.currencyMeta.code,
+    currencySymbol: currencyPersist.manualParamsPatch.currencyMeta.symbol,
+    currencyName: currencyPersist.manualParamsPatch.currencyMeta.name,
+    currencyCustom: currencyPersist.manualParamsPatch.currencyMeta.custom,
     items,
     selectedModules: src.selectedModules,
     zones: src.zones,
@@ -527,7 +598,7 @@ export function duplicateProject(id, body = {}) {
         sortOrder,
       })),
     })),
-    manualParams: src.manualParams,
+    manualParams: mergeCurrencyIntoManualParams(clonedMp, currencyPersist),
     rooms: remapRoomsSelectedItemIds(src.rooms, idMap),
   });
 }
@@ -1106,6 +1177,9 @@ api.post("/", (req, res) => {
     res.status(201).json(createProject(req.body));
   } catch (e) {
     if (revisionErrorResponse(res, e)) return;
+    if (e.code === "PROJECT_CURRENCY_INVALID") {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
     res.status(400).json({ error: e.message });
   }
 });
@@ -1122,6 +1196,9 @@ api.patch("/:id", (req, res) => {
     }
     if (e.code === "ITEM_VALIDATION") {
       return res.status(400).json({ error: e.message, details: e.details, code: e.code });
+    }
+    if (e.code === "PROJECT_CURRENCY_INVALID") {
+      return res.status(400).json({ error: e.message, code: e.code });
     }
     return res.status(400).json({ error: e.message, code: e.code });
   }

@@ -15,6 +15,7 @@ import {
 } from "./publishedAssetPin.js";
 import { leanStellageCounts } from "./profilePipeCuts.js";
 import { normalizeDocumentManifest } from "./publishedDocumentManifest.js";
+import { normalizeProjectCurrency } from "./projectCurrency.js";
 import { CLIENT_LIVE_PURCHASE_OVERLAY_FIELDS } from "./publishedLiveOverlays.js";
 
 export const RELEASE_SCHEMA_V1 = "release_v1";
@@ -131,8 +132,14 @@ export function buildReleaseSnapshotPayload(project, items = project?.items || [
   const pinnedFrameDrawings = normalizePinnedFrameDrawings(extras.pinnedFrameDrawings || []);
   const stellageCounts = resolveStellageCounts(project, extras);
   const documentManifest = resolveDocumentManifest(extras);
+  const cur = normalizeProjectCurrency(project);
   const projectMeta = {
     ...buildPublishedProjectMeta(project),
+    currency: cur.currencySymbol,
+    currencyCode: cur.currencyCode,
+    currencyName: cur.currencyName,
+    currencyCustom: !!cur.currencyCustom,
+    currencySymbol: cur.currencySymbol,
     stellageCounts,
     ...(extras.projectMeta && typeof extras.projectMeta === "object" ? extras.projectMeta : {}),
   };

@@ -1,7 +1,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import QRCode from "qrcode";
-import { money, formatQty, buildClientPurchaseMergedRows } from "../store/helpers.js";
+import { formatQty, buildClientPurchaseMergedRows } from "../store/helpers.js";
 import { lineGross, isBoughtStatus } from "./itemHelpers.js";
 import { rowsForResponsibleRole } from "./responsibleResolve.js";
 import { getClientSectionLabelMap } from "../../shared/clientSections.js";
@@ -16,6 +16,14 @@ import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdf
 import { buildPdfPhotoMap, pdfPhotoTableHooks, PDF_PHOTO_COL_WIDTH_MM } from "./pdfImageHelpers.js";
 import { safePdfText, safePdfPhotoCell } from "./pdfSafeValue.js";
 import { buildClientPdfRowLabel } from "../../shared/clientPurchaseRows.js";
+import { formatMoneyForPdf, normalizeProjectCurrency } from "../../shared/projectCurrency.js";
+
+function pdfMoney(amount, projectOrCurrency) {
+  if (projectOrCurrency && typeof projectOrCurrency === "object" && !Array.isArray(projectOrCurrency)) {
+    return formatMoneyForPdf(amount, normalizeProjectCurrency(projectOrCurrency));
+  }
+  return formatMoneyForPdf(amount, normalizeProjectCurrency({ currency: projectOrCurrency }));
+}
 
 function mergeOpts(project) {
   return { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] };
@@ -134,7 +142,7 @@ export function buildPdfCoverData(project = {}, items = [], branding = {}, optio
     city: project?.city || "—",
     version: project?.version ?? 1,
     generatedDate: new Date().toLocaleDateString("ru-RU"),
-    totalAmount: money(budget, project?.currency || "₽"),
+    totalAmount: pdfMoney(budget, project),
     itemCount: merged.length,
     contacts: parts.length ? parts.join(" · ") : branding.companyName || "Daogreen",
     priorityLines,
@@ -241,8 +249,8 @@ async function tableForShort(doc, rows, project, startY, brandRgb) {
 export function clientPdfMoneyOrTbd(row, currency) {
   const total = formatClientLineTotal(row);
   if (total === CLIENT_PRICE_TBD) return CLIENT_PRICE_TBD;
-  if (total === "") return money(0, currency);
-  return money(total, currency);
+  if (total === "") return pdfMoney(0, currency);
+  return pdfMoney(total, currency);
 }
 
 function drawTitleBlock(doc, project, branding, brandRgb, subtitle) {
@@ -269,9 +277,9 @@ function budgetLines(doc, items, project, y) {
   const budget = items.reduce((s, i) => s + lineGross(i), 0);
   const spent = items.filter((i) => isBoughtStatus(i.status)).reduce((s, i) => s + lineGross(i), 0);
   doc.setFontSize(10);
-  doc.text(`Итого: ${money(budget, project.currency)}`, 14, y);
-  doc.text(`Куплено: ${money(spent, project.currency)}`, 72, y);
-  doc.text(`Осталось: ${money(Math.max(budget - spent, 0), project.currency)}`, 130, y);
+  doc.text(`Итого: ${pdfMoney(budget, project)}`, 14, y);
+  doc.text(`Куплено: ${pdfMoney(spent, project)}`, 72, y);
+  doc.text(`Осталось: ${pdfMoney(Math.max(budget - spent, 0), project)}`, 130, y);
   const bought = items.filter((i) => isBoughtStatus(i.status)).length;
   const progress = items.length ? Math.round((bought / items.length) * 100) : 0;
   doc.text(`Готовность: ${progress}%`, 14, y + 7);
@@ -497,7 +505,7 @@ function categorySummaryTable(doc, merged, project, y, brandRgb) {
     body: sections.map(([title, list]) => {
       const sum = list.reduce((s, r) => s + (r.sumVat || 0), 0);
       const done = list.filter((r) => (r.sourceItems || []).every((i) => isBoughtStatus(i.status))).length;
-      return [title, list.length, money(sum, project.currency), list.length ? `${Math.round((done / list.length) * 100)}%` : "0%"];
+      return [title, list.length, pdfMoney(sum, project), list.length ? `${Math.round((done / list.length) * 100)}%` : "0%"];
     }),
     styles: { fontSize: 8, ...pdfTableFontStyles() },
     headStyles: { fillColor: brandRgb, ...pdfTableHeadFontStyles() },
@@ -520,7 +528,7 @@ async function supplierBlocks(doc, rows, project, y, brandRgb, purchaseStatuses,
   for (const g of groupRowsBySupplier(rows)) {
     y = ensureSpace(doc, y, 30);
     doc.setFontSize(10);
-    doc.text(`${g.supplier} — ${g.count} поз. · ${money(g.sum, project.currency)}`, 14, y);
+    doc.text(`${g.supplier} — ${g.count} поз. · ${pdfMoney(g.sum, project)}`, 14, y);
     y += 4;
     y = await tableForMerged(doc, g.rows, project, y, brandRgb, purchaseStatuses, true, pdfOpts);
   }
@@ -604,7 +612,7 @@ async function renderFullPdf(doc, project, items, branding, brandRgb, purchaseSt
     y = ensureSpace(doc, y, 30);
     const sum = list.reduce((s, r) => s + (r.sumVat || 0), 0);
     doc.setFontSize(10);
-    doc.text(`${title} — ${money(sum, project.currency)}`, 14, y);
+    doc.text(`${title} — ${pdfMoney(sum, project)}`, 14, y);
     y += 4;
     y = await tableForMerged(doc, list, project, y, brandRgb, purchaseStatuses, true, pdfOpts);
   }
@@ -708,7 +716,7 @@ async function renderSpecialistPdf(doc, project, items, branding, brandRgb, purc
     y = ensureSpace(doc, y, 30);
     doc.setFontSize(10);
     const sum = list.reduce((s, r) => s + (r.sumVat || 0), 0);
-    doc.text(`${title} — ${money(sum, project.currency)}`, 14, y);
+    doc.text(`${title} — ${pdfMoney(sum, project)}`, 14, y);
     y += 4;
     y = await tableForMerged(doc, list, project, y, brandRgb, purchaseStatuses, false, pdfOpts);
   }

@@ -478,6 +478,8 @@ export function farmSectionLinesFromProject(project, sections = [], farmCatalogs
 }
 
 export function builderFormFromProject(project) {
+  const currencyCode = project?.currencyCode;
+  const currencySymbol = project?.currency || project?.currencySymbol || "₽";
   return {
     name: project?.name || "",
     client: project?.client || "",
@@ -486,7 +488,11 @@ export function builderFormFromProject(project) {
     height: project?.height ?? "",
     sowingArea: project?.sowingArea ?? "",
     type: project?.type || "проточка",
-    currency: project?.currency || "₽",
+    currency: currencySymbol,
+    currencyCode: currencyCode || undefined,
+    currencySymbol: project?.currencySymbol || currencySymbol,
+    currencyName: project?.currencyName || undefined,
+    currencyCustom: !!project?.currencyCustom,
     vat: !!project?.vat,
     comment: project?.comment || "",
     manualParams: { ...DEFAULT_MANUAL_PARAMS, ...(project?.manualParams || {}) },
