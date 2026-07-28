@@ -1,0 +1,134 @@
+/**
+ * Pin client-visible project documents into uploads/releases/{projectId}/{versionId}/.
+ * Fail-closed per file: missing sources are omitted (not borrowed from other projects).
+ */
+import fs from "fs";
+import path from "path";
+import { createHash } from "crypto";
+import { fileURLToPath } from "url";
+import { buildDocumentManifestEntry } from "../../../shared/publishedDocumentManifest.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export function resolveUploadRoot() {
+  if (process.env.UPLOAD_ROOT) return path.resolve(process.env.UPLOAD_ROOT);
+  return path.join(__dirname, "../../uploads");
+}
+
+function sanitizeFileName(name, fallback = "file") {
+  const base = String(name || fallback)
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  return base || fallback;
+}
+
+function uploadsRelativeFromUrl(url) {
+  const u = String(url || "").replace(/\\/g, "/");
+  if (!u.startsWith("/uploads/")) return null;
+  const rel = u.slice("/uploads/".length).replace(/^\/+/, "");
+  if (!rel || rel.includes("..")) return null;
+  return rel;
+}
+
+function sha256File(absPath) {
+  const hash = createHash("sha256");
+  hash.update(fs.readFileSync(absPath));
+  return hash.digest("hex");
+}
+
+/**
+ * Copy each live client document into the release folder and build manifest entries.
+ * @param {object} opts
+ * @param {string} opts.projectId
+ * @param {string} opts.versionId
+ * @param {object[]} opts.liveDocuments from getClientProjectDocuments
+ * @param {string} [opts.uploadRoot]
+ * @returns {{ documentManifest: object[], pinnedCount: number, skippedCount: number }}
+ */
+export function pinClientDocumentsForRelease({
+  projectId,
+  versionId,
+  liveDocuments = [],
+  uploadRoot = resolveUploadRoot(),
+} = {}) {
+  const pid = String(projectId || "").trim();
+  const vid = String(versionId || "").trim();
+  if (!pid || !vid) {
+    return { documentManifest: [], pinnedCount: 0, skippedCount: (liveDocuments || []).length };
+  }
+
+  const releaseDir = path.join(uploadRoot, "releases", pid, vid);
+  fs.mkdirSync(releaseDir, { recursive: true });
+
+  const documentManifest = [];
+  let pinnedCount = 0;
+  let skippedCount = 0;
+  const usedNames = new Set();
+
+  for (const doc of liveDocuments || []) {
+    const rel = uploadsRelativeFromUrl(doc?.url);
+    if (!rel) {
+      skippedCount++;
+      continue;
+    }
+    // Never pin files that already live under another project's release tree as "source"
+    // unless they belong to this project's live /uploads path (checked via abs existence).
+    const srcAbs = path.join(uploadRoot, rel);
+    if (!fs.existsSync(srcAbs) || !fs.statSync(srcAbs).isFile()) {
+      skippedCount++;
+      continue;
+    }
+
+    const ext = path.extname(srcAbs) || path.extname(doc.filename || "") || "";
+    let safeName = sanitizeFileName(doc.filename || path.basename(srcAbs), `doc-${doc.id || "x"}`);
+    if (ext && !safeName.toLowerCase().endsWith(ext.toLowerCase())) {
+      safeName = `${safeName}${ext}`;
+    }
+    let unique = safeName;
+    let n = 1;
+    while (usedNames.has(unique.toLowerCase())) {
+      const stem = safeName.slice(0, Math.max(1, safeName.length - ext.length));
+      unique = `${stem}-${n}${ext}`;
+      n += 1;
+    }
+    usedNames.add(unique.toLowerCase());
+
+    const destAbs = path.join(releaseDir, unique);
+    try {
+      fs.copyFileSync(srcAbs, destAbs);
+    } catch {
+      skippedCount++;
+      continue;
+    }
+
+    let sha256 = "";
+    let size = 0;
+    try {
+      const st = fs.statSync(destAbs);
+      size = st.size;
+      sha256 = sha256File(destAbs);
+    } catch {
+      /* optional */
+    }
+
+    const pinnedUrl = `/uploads/releases/${pid}/${vid}/${unique}`.replace(/\\/g, "/");
+    const entry = buildDocumentManifestEntry(doc, {
+      sourceFileId: doc.id,
+      url: pinnedUrl,
+      filename: unique,
+      size,
+      sha256,
+      uploadedAt: doc.uploadedAt,
+    });
+    if (!entry) {
+      skippedCount++;
+      continue;
+    }
+    documentManifest.push(entry);
+    pinnedCount++;
+  }
+
+  return { documentManifest, pinnedCount, skippedCount };
+}

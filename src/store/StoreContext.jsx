@@ -495,8 +495,9 @@ export function StoreProvider({ children }) {
       async loadClientProject(token) {
         return apiClient.getClientProject(token);
       },
-      async clientPatchCooling(token, safetyFactor) {
-        return apiClient.patchClientCooling(token, safetyFactor);
+      async clientPatchCooling(_token, _safetyFactor) {
+        // Engineering cooling factor is immutable for clients after publish.
+        return { ok: false, code: "CLIENT_ENGINEERING_MUTATION_FORBIDDEN" };
       },
       async bulkPatchItems(projectId, body) {
         return runProjectWrite(projectId, (expectedRevision) =>

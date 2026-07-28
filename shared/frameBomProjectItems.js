@@ -660,7 +660,7 @@ export function enrichProjectItemFromMaterial(item, materials = []) {
     techNote: item.techNote || base.techNote,
     clientNote: bomClientNote || item.clientNote || base.clientNote,
     comment: bomClientNote || item.comment || item.clientNote || base.clientNote,
-    price: Number(item.price) > 0 ? Number(item.price) : Number(base.price) || 0,
+    price: item.price != null && item.price !== "" ? Number(item.price) : Number(base.price) || 0,
     supplier: (item.supplier || "").trim() || base.supplier || "",
     link: (item.link || "").trim() || base.link || "",
     linkAlt: (item.linkAlt || "").trim() || base.linkAlt || "",

@@ -179,3 +179,4 @@ export function patchWithPipeCuts(obj, cuts) {
     clientNote: pipeCutsClientNote(normalized) || obj?.clientNote || "",
   };
 }
+

@@ -13,10 +13,14 @@ import {
   normalizePinnedFrameDrawings,
   pinnedFrameDrawingsFingerprint,
 } from "./publishedAssetPin.js";
+import { leanStellageCounts } from "./profilePipeCuts.js";
+import { normalizeDocumentManifest } from "./publishedDocumentManifest.js";
 import { CLIENT_LIVE_PURCHASE_OVERLAY_FIELDS } from "./publishedLiveOverlays.js";
 
+export const RELEASE_SCHEMA_V1 = "release_v1";
 export const RELEASE_SCHEMA_V2 = "release_v2";
 export const RELEASE_SCHEMA_V3 = "release_v3";
+export const RELEASE_SCHEMA_V4 = "release_v4";
 
 function cloneJson(value, fallback) {
   try {
@@ -96,30 +100,65 @@ export function buildPublishedReleaseMeta(versionRow, workflowStatus = "") {
   };
 }
 
+function resolveStellageCounts(project, extras = {}) {
+  if (Array.isArray(extras.stellageCounts)) {
+    return leanStellageCounts(extras.stellageCounts);
+  }
+  return leanStellageCounts(project?.stellageConfigs || project?.stellageCounts || []);
+}
+
+function resolveDocumentManifest(extras = {}) {
+  if (Array.isArray(extras.documentManifest)) {
+    return normalizeDocumentManifest(extras.documentManifest);
+  }
+  return [];
+}
+
 /**
  * Full release snapshot payload stored in spec_versions.snapshot.
- * release_v3 adds assetsPinned + pinnedFrameDrawings + hashed imageManifest.
- * Backward compatible: legacy rows may be a bare items[] array; release_v2 still readable.
+ * release_v4 adds stellageCounts + documentManifest while preserving v3 pinned assets.
+ * Backward compatible: legacy rows may be a bare items[] array.
  */
 export function buildReleaseSnapshotPayload(project, items = project?.items || [], extras = {}) {
   const list = Array.isArray(items) ? items : [];
-  const schema = extras.schema || RELEASE_SCHEMA_V3;
-  const assetsPinned = extras.assetsPinned != null ? !!extras.assetsPinned : schema === RELEASE_SCHEMA_V3;
+  const schema = extras.schema || RELEASE_SCHEMA_V4;
+  const assetsPinned = extras.assetsPinned != null
+    ? !!extras.assetsPinned
+    : schema === RELEASE_SCHEMA_V3 || schema === RELEASE_SCHEMA_V4;
   const imageManifest = extras.imageManifest != null
     ? normalizeClientImageManifest(extras.imageManifest)
     : buildClientImageManifest(project);
   const pinnedFrameDrawings = normalizePinnedFrameDrawings(extras.pinnedFrameDrawings || []);
+  const stellageCounts = resolveStellageCounts(project, extras);
+  const documentManifest = resolveDocumentManifest(extras);
+  const projectMeta = {
+    ...buildPublishedProjectMeta(project),
+    stellageCounts,
+    ...(extras.projectMeta && typeof extras.projectMeta === "object" ? extras.projectMeta : {}),
+  };
+  // Keep stellageCounts consistent even if extras.projectMeta overwrote them incorrectly.
+  projectMeta.stellageCounts = leanStellageCounts(projectMeta.stellageCounts?.length
+    ? projectMeta.stellageCounts
+    : stellageCounts);
   return {
     schema,
     assetsPinned,
     publishedAt: extras.publishedAt || new Date().toISOString(),
-    projectMeta: extras.projectMeta || buildPublishedProjectMeta(project),
+    projectMeta,
     items: list.map((it) => ({ ...it })),
     imageManifest,
     coolingRooms: buildPublishedCoolingRooms(project?.rooms),
     farmPower: buildFarmPowerSnapshot(project?.manualParams?.farmPower, project?.rooms),
     pinnedFrameDrawings,
+    stellageCounts: projectMeta.stellageCounts,
+    documentManifest,
   };
+}
+
+function pickStellageCounts(raw, projectMeta) {
+  if (Array.isArray(raw?.stellageCounts)) return leanStellageCounts(raw.stellageCounts);
+  if (Array.isArray(projectMeta?.stellageCounts)) return leanStellageCounts(projectMeta.stellageCounts);
+  return [];
 }
 
 export function parseReleaseSnapshot(raw) {
@@ -133,6 +172,8 @@ export function parseReleaseSnapshot(raw) {
     assetsPinned: false,
     schema: null,
     publishedAt: "",
+    stellageCounts: [],
+    documentManifest: [],
   };
   if (!raw) return empty;
   if (Array.isArray(raw)) {
@@ -144,21 +185,50 @@ export function parseReleaseSnapshot(raw) {
     };
   }
   if (typeof raw === "object" && Array.isArray(raw.items)) {
+    const projectMeta = raw.projectMeta || null;
     const schema = raw.schema || RELEASE_SCHEMA_V2;
-    const assetsPinned = raw.assetsPinned === true || schema === RELEASE_SCHEMA_V3;
+    const stellageCounts = pickStellageCounts(raw, projectMeta);
+    const documentManifest = normalizeDocumentManifest(raw.documentManifest || []);
     return {
+      ...empty,
       items: raw.items,
-      projectMeta: raw.projectMeta || null,
+      projectMeta,
       schema,
       publishedAt: raw.publishedAt || "",
       imageManifest: normalizeClientImageManifest(raw.imageManifest),
       coolingRooms: buildPublishedCoolingRooms(raw.coolingRooms),
       farmPower: normalizeFarmPower(raw.farmPower),
       pinnedFrameDrawings: normalizePinnedFrameDrawings(raw.pinnedFrameDrawings || []),
-      assetsPinned,
+      assetsPinned: raw.assetsPinned === true
+        || schema === RELEASE_SCHEMA_V3
+        || schema === RELEASE_SCHEMA_V4,
+      stellageCounts,
+      documentManifest,
     };
   }
   return empty;
+}
+
+/**
+ * True when snapshot lacks v4 immutability markers (stellageCounts + documentManifest arrays).
+ * release_v4 always stores both arrays (possibly empty).
+ */
+export function isLegacyReleaseIncomplete(parsed) {
+  if (!parsed || typeof parsed !== "object") return true;
+  const schema = parsed.schema;
+  if (schema === "legacy_items_array" || schema === RELEASE_SCHEMA_V1 || !schema) return true;
+  if (schema === RELEASE_SCHEMA_V4) {
+    // v4 always has both arrays present after parse; treat missing as incomplete.
+    const hasCounts = Array.isArray(parsed.stellageCounts)
+      || Array.isArray(parsed.projectMeta?.stellageCounts);
+    const hasManifest = Array.isArray(parsed.documentManifest);
+    return !hasCounts || !hasManifest;
+  }
+  // Unknown older object schemas without markers → incomplete.
+  const hasCounts = Array.isArray(parsed.stellageCounts)
+    || Array.isArray(parsed.projectMeta?.stellageCounts);
+  const hasManifest = Array.isArray(parsed.documentManifest);
+  return !(hasCounts && hasManifest);
 }
 
 /** True when client must use pinned drawings (not latest live). */
@@ -172,7 +242,7 @@ export function releaseHasPinnedAssets(snapshot) {
         : parseReleaseSnapshot(snapshot);
   if (!parsed) return false;
   if (parsed.assetsPinned === true) return true;
-  return parsed.schema === RELEASE_SCHEMA_V3;
+  return parsed.schema === RELEASE_SCHEMA_V3 || parsed.schema === RELEASE_SCHEMA_V4;
 }
 
 export function releaseSnapshotItems(rawSnapshot) {
@@ -193,7 +263,7 @@ export function clientItemsFromReleaseSnapshot(items = []) {
 }
 
 /**
- * Overlay live purchase fields onto published snapshot (status, actualPrice, clientComment).
+ * Overlay live purchase fields onto published snapshot.
  * Catalog/commercial fields stay from snapshot.
  */
 export function mergeLivePurchaseOverlay(snapshotItems = [], liveItems = []) {

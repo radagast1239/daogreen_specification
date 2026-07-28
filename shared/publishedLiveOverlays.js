@@ -8,6 +8,11 @@ export const CLIENT_LIVE_PURCHASE_OVERLAY_FIELDS = Object.freeze([
   "status",
   "actualPrice",
   "clientComment",
+  "replacementLink",
+  "replacementPhotoUrl",
+  "replacementPrice",
+  "replacementComment",
+  "replacementProposedAt",
 ]);
 
 /**
@@ -16,7 +21,7 @@ export const CLIENT_LIVE_PURCHASE_OVERLAY_FIELDS = Object.freeze([
  */
 export const CLIENT_LIVE_RESPONSE_CHANNELS = Object.freeze({
   branding: "intentional_global_settings",
-  purchaseOverlay: "status_actualPrice_clientComment",
+  purchaseOverlay: "status_actualPrice_clientComment_replacement",
   projectId: "routing",
   revision: "optimistic_locking",
   clientToken: "auth",

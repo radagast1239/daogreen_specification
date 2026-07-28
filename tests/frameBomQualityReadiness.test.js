@@ -49,7 +49,8 @@ const frameBomItem = (over = {}) => ({
   name: "Труба профильная 20/20/1,5 мм",
   qty: 2,
   unit: "м",
-  price: 0,
+  // Missing price (not explicit free 0) — enrich fills from catalog.
+  price: null,
   supplier: "",
   link: "",
   photoUrl: "",
@@ -77,7 +78,7 @@ describe("frame_bom quality / readiness pipeline", () => {
   });
 
   it("frame_bom item without price triggers no_price after enrich when catalog has no price", () => {
-    const item = frameBomItem({ price: 0 });
+    const item = frameBomItem({ price: null });
     const mat = catalogMaterial({ basePrice: 0 });
     const enriched = enrichItemForPublishCheck(item, mat);
     const res = runPrePublishCheck([enriched]);
@@ -85,7 +86,7 @@ describe("frame_bom quality / readiness pipeline", () => {
   });
 
   it("frame_bom item with stale snapshot passes price/photo/url/supplier from catalog", () => {
-    const item = frameBomItem();
+    const item = frameBomItem({ price: null, supplier: "", link: "", photoUrl: "" });
     const mat = catalogMaterial();
     const enriched = enrichItemForPublishCheck(item, mat);
     expect(enriched.price).toBe(120);
@@ -119,7 +120,7 @@ describe("frame_bom quality / readiness pipeline", () => {
     const labels = Object.values(READINESS_ISSUE_LABELS).join(" ");
     expect(labels).not.toMatch(/frame_bom|sourceKey|drawingId/i);
 
-    const item = frameBomItem({ price: 0 });
+    const item = frameBomItem({ price: null });
     const mat = catalogMaterial({ basePrice: 0 });
     const res = runPrePublishCheck([enrichItemForPublishCheck(item, mat)]);
     const problemText = JSON.stringify(res.problems);

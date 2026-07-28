@@ -157,7 +157,7 @@ describe("published release snapshot", () => {
     patchItem("p1", "it1", { name: materialName, name_overridden: false });
     expect(loadProject("p1").items.find((it) => it.id === "it1")).toMatchObject({ name: "Test material", nameOverridden: false });
   });
-  it("publish creates release_v1 snapshot with client-visible items and commercial fields", () => {
+  it("publish creates release_v4 snapshot with client-visible items and commercial fields", () => {
     seedProject("p1", {
       items: [clientItem("it1", "mat1", { actualPrice: 88, clientComment: "note" })],
     });
@@ -167,7 +167,7 @@ describe("published release snapshot", () => {
 
     const row = loadVersionRow("p1", version.id);
     const parsed = parseReleaseSnapshot(JSON.parse(row.snapshot));
-    expect(parsed.schema).toBe("release_v3");
+    expect(parsed.schema).toBe("release_v4");
     expect(parsed.assetsPinned).toBe(true);
     expect(parsed.items).toHaveLength(1);
     expect(parsed.items[0].supplier).toBe("Supplier A");
@@ -175,6 +175,8 @@ describe("published release snapshot", () => {
     expect(parsed.items[0].actualPrice).toBe(88);
     expect(parsed.projectMeta.currency).toBe("₽");
     expect(parsed.projectMeta.vat).toBe(true);
+    expect(Array.isArray(parsed.stellageCounts)).toBe(true);
+    expect(Array.isArray(parsed.documentManifest)).toBe(true);
 
     const after = loadProject("p1");
     expect(after.manualParams.publishedRelease.versionId).toBe(version.id);
@@ -419,9 +421,11 @@ describe("buildReleaseSnapshotPayload (pure)", () => {
       { id: "p1", name: "Proj", currency: "₽", vat: true, version: 3 },
       [clientItem("it1", "mat1", { visibleToClient: true })],
     );
-    expect(payload.schema).toBe("release_v3");
+    expect(payload.schema).toBe("release_v4");
     expect(payload.assetsPinned).toBe(true);
     expect(payload.items.every((it) => lineVisibleToClient(it) || true)).toBe(true);
     expect(payload.projectMeta.versionNumber).toBe(3);
+    expect(Array.isArray(payload.stellageCounts)).toBe(true);
+    expect(Array.isArray(payload.documentManifest)).toBe(true);
   });
 });

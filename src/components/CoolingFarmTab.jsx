@@ -25,13 +25,14 @@ function filterSections(variant) {
 }
 
 function rowEditable(row, variant) {
-  if (variant === "admin") return !!row.input;
-  if (variant === "client") return row.key === "safetyFactor";
+  if (variant !== "client") return !!row.input;
+  // Client may view cooling calc but cannot mutate engineering safetyFactor.
   return false;
 }
 
 function rowReadOnly(row, variant) {
-  return !rowEditable(row, variant);
+  if (variant !== "client") return !row.input;
+  return true;
 }
 
 export default function CoolingFarmTab({
@@ -86,9 +87,7 @@ export default function CoolingFarmTab({
     const next = { ...inputs, [key]: value };
     if (onInputsChange) onInputsChange(next);
     else setInternalInputs(next);
-    if (isClient && key === "safetyFactor" && onSafetyFactorChange) {
-      onSafetyFactorChange(Number(value) || 1);
-    }
+    // Client engineering mutations are forbidden — do not call onSafetyFactorChange save path.
   };
 
   const save = async () => {

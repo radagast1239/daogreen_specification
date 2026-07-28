@@ -10,7 +10,11 @@ import { createHash } from "crypto";
 import { diffReleaseSnapshots } from "../shared/releaseHistoryDiff.js";
 import { clientExportHeader } from "../shared/publishedClientMeta.js";
 import { projectForClientPdfExport, projectForClientExcelExport } from "../src/lib/clientExportProject.js";
-import { buildReleaseSnapshotPayload, RELEASE_SCHEMA_V3 } from "../shared/projectPublishedRelease.js";
+import {
+  buildReleaseSnapshotPayload,
+  RELEASE_SCHEMA_V3,
+  RELEASE_SCHEMA_V4,
+} from "../shared/projectPublishedRelease.js";
 
 const require = createRequire(import.meta.url);
 const express = require("../backend/node_modules/express");
@@ -219,7 +223,7 @@ describe("historical preview", () => {
     expect(preview.project.items[0].qty).toBe(2);
     expect(preview.project.items[0].price).toBe(100);
     expect(preview.project.items[0].status).toBe("not_bought");
-    expect(preview.schema).toBe(RELEASE_SCHEMA_V3);
+    expect(preview.schema).toBe(RELEASE_SCHEMA_V4);
     expect(preview.assetsPinned).toBe(true);
     expect(preview.project.readOnly).toBe(true);
     expect(Object.keys(preview.project).some((k) => /password|tokenSecret|absPath/i.test(k))).toBe(false);

@@ -4,10 +4,12 @@ import {
   buildReleaseSnapshotPayload,
   clientItemsFromReleaseSnapshot,
   detectUnpublishedChanges,
+  isLegacyReleaseIncomplete,
   isPublishWorkflowStatus,
   mergeLivePurchaseOverlay,
   parsePublishedRelease,
   parseReleaseSnapshot,
+  RELEASE_SCHEMA_V4,
   releaseSnapshotItems,
   releaseSnapshotImageManifest,
   releaseHasPinnedAssets,
@@ -21,6 +23,7 @@ import { normalizePurchaseStatus, getPurchaseStatusLabel } from "../../../shared
 import { applyPublishedProjectMeta } from "../../../shared/publishedClientMeta.js";
 import { leanStellageCounts } from "../../../shared/profilePipeCuts.js";
 import { documentsFromPinnedFrameDrawings } from "../../../shared/publishedAssetPin.js";
+import { normalizeDocumentManifest } from "../../../shared/publishedDocumentManifest.js";
 import { publishedPlannedTotal } from "../../../shared/publishedPurchaseTotals.js";
 import { formatReleaseSummaryText } from "../../../shared/releaseHistoryDiff.js";
 import {
@@ -67,20 +70,21 @@ export function loadLatestVersionRow(projectId) {
   return loadVersionRow(projectId, row.id);
 }
 
-export function loadPublishedSnapshotItems(project) {
-  const release = parsePublishedRelease(project?.manualParams);
-  if (!release) return [];
-  const ver = loadVersionRow(project.id, release.versionId);
-  if (!ver) return [];
-  return releaseSnapshotItems(ver.snapshot);
-}
-
 export function loadPublishedReleaseSnapshot(project) {
   const release = parsePublishedRelease(project?.manualParams);
   if (!release) return null;
   const ver = loadVersionRow(project.id, release.versionId);
   if (!ver) return null;
-  return parseReleaseSnapshot(JSON.parse(ver.snapshot || "[]"));
+  try {
+    return parseReleaseSnapshot(JSON.parse(ver.snapshot || "[]"));
+  } catch {
+    return parseReleaseSnapshot([]);
+  }
+}
+
+export function loadPublishedSnapshotItems(project) {
+  const parsed = loadPublishedReleaseSnapshot(project);
+  return parsed?.items || [];
 }
 
 export function prepareSnapshotItemForClient(item) {
@@ -94,64 +98,88 @@ export function prepareSnapshotItemForClient(item) {
   };
 }
 
-/**
- * Build client project DTO from immutable snapshot.
- * Live project is NOT spread — only allowlisted meta (snapshot-first) + intentional purchase overlay.
- *
- * Options:
- * - overlayLive: merge live purchase status/actualPrice/clientComment (default true for current client link)
- * - historicalMode: force overlayLive=false; annotate DTO; no silent latest-drawing fallback
- * - versionRow: { id, versionNumber, createdAt, createdBy } for historical annotations
- */
-export function buildClientProjectFromRelease(workingProject, snapshot, {
+/** Merge only approved live purchase fields onto a frozen release item. */
+export function prepareClientMutationItemResponse(snapshotItem, liveItem) {
+  const merged = mergeLivePurchaseOverlay(
+    [snapshotItem || {}],
+    [liveItem || snapshotItem || {}],
+  )[0];
+  return prepareSnapshotItemForClient(merged);
+}
+
+const CLIENT_PROJECT_META_KEYS = [
+  "id",
+  "name",
+  "client",
+  "city",
+  "currency",
+  "vat",
+  "comment",
+  "area",
+  "height",
+  "sowingArea",
+  "type",
+  "status",
+  "version",
+  "revision",
+  "createdAt",
+  "updatedAt",
+  "lastClientActivityAt",
+  "clientTokenExpiresAt",
+  "purchaseStartedAt",
+  "installationDoneAt",
+];
+
+function metaFromSnapshot(projectMeta, workingProject) {
+  const meta = projectMeta && typeof projectMeta === "object" ? projectMeta : {};
+  const out = {};
+  for (const key of CLIENT_PROJECT_META_KEYS) {
+    if (meta[key] !== undefined) out[key] = meta[key];
+    else if (workingProject?.[key] !== undefined && ["id", "revision", "createdAt", "updatedAt", "lastClientActivityAt", "clientTokenExpiresAt", "purchaseStartedAt", "installationDoneAt", "status"].includes(key)) {
+      out[key] = workingProject[key];
+    }
+  }
+  // Prefer snapshotted commercial header fields when present.
+  if (meta.name != null) out.name = meta.name;
+  if (meta.client != null) out.client = meta.client;
+  if (meta.city != null) out.city = meta.city;
+  if (meta.currency != null) out.currency = meta.currency;
+  if (meta.vat != null) out.vat = !!meta.vat;
+  if (meta.comment != null) out.comment = meta.comment;
+  if (meta.versionNumber != null) out.version = Number(meta.versionNumber) || 0;
+  out.id = workingProject?.id || meta.id || "";
+  out.revision = Number(workingProject?.revision) || 1;
+  return out;
+}
+
+export function buildClientProjectFromRelease(workingProject, snapshotItemsOrParsed, {
   overlayLive = true,
   historicalMode = false,
   versionRow = null,
 } = {}) {
-  const parsed = parseReleaseSnapshot(
-    Array.isArray(snapshot)
-      ? snapshot
-      : snapshot && typeof snapshot === "object" && Array.isArray(snapshot.items)
-        ? {
-            schema: snapshot.schema,
-            assetsPinned: snapshot.assetsPinned,
-            projectMeta: snapshot.projectMeta,
-            items: snapshot.items,
-            imageManifest: snapshot.imageManifest,
-            coolingRooms: snapshot.coolingRooms,
-            farmPower: snapshot.farmPower,
-            pinnedFrameDrawings: snapshot.pinnedFrameDrawings,
-            publishedAt: snapshot.publishedAt,
-          }
-        : snapshot,
-  );
-
-  const effectiveOverlay = historicalMode ? false : overlayLive;
+  const parsed = snapshotItemsOrParsed?.items
+    ? parseReleaseSnapshot(snapshotItemsOrParsed)
+    : parseReleaseSnapshot(snapshotItemsOrParsed);
   const snapshotItems = parsed.items || [];
-  const clientImages = parsed.imageManifest || { projectSchemes: [], rackImages: [] };
-  const coolingRooms = parsed.coolingRooms || [];
-  const farmPower = parsed.farmPower || { devices: [] };
   const liveItems = workingProject?.items || [];
+  const effectiveOverlay = historicalMode ? false : overlayLive;
   const merged = effectiveOverlay
     ? mergeLivePurchaseOverlay(snapshotItems, liveItems)
     : snapshotItems;
   const clientItems = clientItemsFromReleaseSnapshot(merged).map(prepareSnapshotItemForClient);
 
   const hasProjectMeta = !!(parsed.projectMeta && typeof parsed.projectMeta === "object");
-  // Legacy items[] without projectMeta → live allowlist fallback (not in strict historical mode).
   const allowLiveFallback = !historicalMode && !hasProjectMeta && parsed.schema === "legacy_items_array";
   const metaFields = applyPublishedProjectMeta(parsed.projectMeta, workingProject, { allowLiveFallback });
-
   const release = parsePublishedRelease(workingProject?.manualParams);
   const assetsPinned = releaseHasPinnedAssets(parsed);
   const schema = parsed.schema || null;
-  const isLegacy = schema === "legacy_items_array" || (!assetsPinned && schema !== RELEASE_SCHEMA_V3);
-
+  const legacyIncomplete = isLegacyReleaseIncomplete(parsed);
   const compatibilityWarnings = [];
-  if (historicalMode && isLegacy) {
+  if (historicalMode && legacyIncomplete) {
     compatibilityWarnings.push({
       code: "LEGACY_SNAPSHOT",
-      message: "Старая публикация: часть данных восстановлена через совместимость.",
+      message: "Старая публикация неполна; требуется повторная публикация.",
     });
   }
   if (historicalMode && !assetsPinned) {
@@ -174,20 +202,23 @@ export function buildClientProjectFromRelease(workingProject, snapshot, {
   return {
     id: workingProject?.id || parsed.projectMeta?.id || "",
     ...metaFields,
-    rooms: coolingRooms,
-    farmPower,
+    rooms: parsed.coolingRooms || [],
+    farmPower: parsed.farmPower || { devices: [] },
     items: clientItems,
-    // Lean rack counts for purchase pipe-cut scaling (not full stellageConfigs).
-    stellageCounts: leanStellageCounts(
-      historicalMode
-        ? (parsed.projectMeta?.stellageCounts || [])
-        : (workingProject?.stellageConfigs || parsed.projectMeta?.stellageCounts || []),
-    ),
+    stellageCounts: legacyIncomplete
+      ? []
+      : leanStellageCounts(parsed.stellageCounts?.length
+        ? parsed.stellageCounts
+        : parsed.projectMeta?.stellageCounts || []),
+    documentManifest: legacyIncomplete
+      ? []
+      : normalizeDocumentManifest(parsed.documentManifest || []),
     publishedRelease: historicalMode ? historicalRelease : release,
     isPublishedRelease: true,
-    clientImages,
-    pinnedFrameDrawings: assetsPinned ? (parsed.pinnedFrameDrawings || []) : (historicalMode ? [] : (parsed.pinnedFrameDrawings || [])),
+    clientImages: parsed.imageManifest || { projectSchemes: [], rackImages: [] },
+    pinnedFrameDrawings: assetsPinned ? (parsed.pinnedFrameDrawings || []) : [],
     assetsPinned,
+    legacyReleaseIncomplete: legacyIncomplete,
     releaseSchema: schema,
     purchaseStartedAt: historicalMode ? "" : (workingProject?.purchaseStartedAt || ""),
     installationDoneAt: historicalMode ? "" : (workingProject?.installationDoneAt || ""),
@@ -205,7 +236,7 @@ export function buildClientProjectFromRelease(workingProject, snapshot, {
     historicalSchema: schema,
     historicalAssetsPinned: assetsPinned,
     historicalCompatibility: {
-      isLegacy,
+      isLegacy: legacyIncomplete,
       warnings: compatibilityWarnings,
       branding: historicalMode ? "live_global_branding" : null,
     },
@@ -327,21 +358,17 @@ export function listVersionSummaries(projectId) {
   return rows.map((r) => summarizeVersionRow(r, publishedId));
 }
 
-export function resolveClientDocumentsForRelease(projectId, snapshot) {
-  const parsed = snapshot?.items ? snapshot : parseReleaseSnapshot(snapshot);
-  if (releaseHasPinnedAssets(parsed) && (parsed.pinnedFrameDrawings || []).length >= 0 && parsed.assetsPinned) {
-    // v3: only pinned drawings (may be empty list — intentional)
-    const pinnedDocs = documentsFromPinnedFrameDrawings(parsed.pinnedFrameDrawings || []);
-    // Keep non-frame project files (legacy attachments) from live files table
-    const otherFiles = db.prepare(`
-      SELECT id, type, filename, url, uploaded_at as uploadedAt
-      FROM files
-      WHERE project_id = ? AND type != 'frame_drawing'
-      ORDER BY uploaded_at DESC
-    `).all(projectId);
-    return [...pinnedDocs, ...otherFiles];
-  }
-  return null; // signal caller to use legacy latest selection
+/**
+ * Documents for a client GET: snapshot manifest only.
+ * Legacy / incomplete releases → [] (no live fallback).
+ */
+export function resolveClientDocumentsForRelease(projectIdOrSnapshot, maybeSnapshot) {
+  const snapshot = maybeSnapshot === undefined ? projectIdOrSnapshot : maybeSnapshot;
+  const parsed = snapshot?.items != null && !Array.isArray(snapshot)
+    ? snapshot
+    : parseReleaseSnapshot(snapshot);
+  if (isLegacyReleaseIncomplete(parsed)) return [];
+  return normalizeDocumentManifest(parsed.documentManifest || []);
 }
 
 export function getProjectReleaseInfo(project) {
@@ -390,6 +417,7 @@ export function getProjectReleaseInfo(project) {
         id: meta.id || project?.id || "",
       }
     : null;
+  const legacyIncomplete = release ? isLegacyReleaseIncomplete(publishedSnapshot || {}) : false;
   return {
     publishedRelease: release,
     publishedSnapshotItems: publishedItems,
@@ -405,6 +433,8 @@ export function getProjectReleaseInfo(project) {
       totalDelta:
         plannedTotalPublished != null ? plannedTotalCurrent - plannedTotalPublished : plannedTotalCurrent,
     },
+    legacyReleaseIncomplete: legacyIncomplete,
+    needsRepublish: legacyIncomplete,
     releaseSchema: publishedSnapshot?.schema || null,
   };
 }
@@ -442,22 +472,23 @@ export function shouldPublishOnStatusChange(currentProject, nextStatus) {
 }
 
 /**
- * Prepare release_v3 snapshot JSON. Hashes assets BEFORE any DB write.
+ * Prepare release_v4 snapshot JSON. Hashes assets BEFORE any DB write.
  * Throws PUBLISH_ASSET_MISSING if a local client-visible binary is absent.
  */
-export function prepareReleaseSnapshotPayload(project) {
+export function prepareReleaseSnapshotPayload(project, extras = {}) {
   const imageManifest = enrichImageManifestForPublish(project);
   const pinnedFrameDrawings = buildPinnedFrameDrawingsForPublish(project.id);
   return buildReleaseSnapshotPayload(project, project?.items || [], {
-    schema: RELEASE_SCHEMA_V3,
+    schema: RELEASE_SCHEMA_V4,
     assetsPinned: true,
     imageManifest,
     pinnedFrameDrawings,
+    ...extras,
   });
 }
 
-export function buildReleaseSnapshotJson(project) {
-  return JSON.stringify(prepareReleaseSnapshotPayload(project));
+export function buildReleaseSnapshotJson(project, extras = {}) {
+  return JSON.stringify(prepareReleaseSnapshotPayload(project, extras));
 }
 
 export {
@@ -467,4 +498,6 @@ export {
   parsePublishedRelease,
   isPublishWorkflowStatus,
   releaseHasPinnedAssets,
+  isLegacyReleaseIncomplete,
+  RELEASE_SCHEMA_V4,
 };

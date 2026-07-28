@@ -100,17 +100,22 @@ describe("PDF export options", () => {
 
 describe("clientPdfMoneyOrTbd", () => {
   it('cooling_spec без цены возвращает "цена уточняется"', () => {
-    const row = { price: 0, sumVat: 0, sourceItems: [{ kind: "cooling_spec" }] };
+    const row = { price: null, sumVat: 0, sourceItems: [{ kind: "cooling_spec" }] };
     expect(clientPdfMoneyOrTbd(row, "₽")).toBe("цена уточняется");
   });
 
-  it("обычная строка без цены остаётся денежным форматом 0 ₽", () => {
+  it("обычная строка с явной ценой 0 остаётся денежным форматом 0 ₽", () => {
     const row = { price: 0, sumVat: 0, qty: 1, sourceItems: [{ kind: "material" }] };
     expect(clientPdfMoneyOrTbd(row, "₽")).toBe("0 ₽");
   });
 
+  it("cooling_spec с явной ценой 0 показывает 0 ₽ (не TBD)", () => {
+    const row = { price: 0, sumVat: 0, qty: 1, sourceItems: [{ kind: "cooling_spec" }] };
+    expect(clientPdfMoneyOrTbd(row, "₽")).toBe("0 ₽");
+  });
+
   it("cooling_spec без цены в client_short (та же колонка суммы) — «цена уточняется»", () => {
-    const row = { price: 0, sumVat: 0, sourceItems: [{ kind: "cooling_spec" }] };
+    const row = { price: "", sumVat: 0, sourceItems: [{ kind: "cooling_spec" }] };
     expect(getShortPdfTableHead()).not.toContain("Фото");
     expect(clientPdfMoneyOrTbd(row, "₽")).toBe("цена уточняется");
   });

@@ -22,8 +22,6 @@ import {
   listActivity,
   logItemPatch,
   logProjectEvent,
-  sanitizeItemForClient,
-  sanitizeProjectForClient,
 } from "../services/activityLog.js";
 import { clientPurchaseStatuses } from "../services/referenceData.js";
 import { clientAuthMiddleware } from "../services/clientAuth.js";
@@ -78,6 +76,7 @@ import {
   loadPublishedSnapshotItems,
   loadPublishedReleaseSnapshot,
   loadVersionRow,
+  prepareClientMutationItemResponse,
   prepareReleaseSnapshotPayload,
   resolveClientDocumentsForRelease,
   shouldPublishOnStatusChange,
@@ -88,6 +87,7 @@ import { clientExportHeader } from "../../../shared/publishedClientMeta.js";
 import * as XLSX from "xlsx";
 import { assertCanDeleteOrOverwriteAsset } from "../services/publishedAssetRetention.js";
 import { publishedPlannedTotal } from "../../../shared/publishedPurchaseTotals.js";
+import { pinClientDocumentsForRelease } from "../services/releaseDocumentPinning.js";
 
 const router = Router();
 
@@ -683,8 +683,15 @@ function createVersionRecord(projectId, project, {
       throw err;
     }
   }
-  // Hash/read assets BEFORE any DB write. Failure must leave no partial version.
-  const payload = snapshotPayload || prepareReleaseSnapshotPayload(project);
+  const versionId = uid("v");
+  const liveDocuments = getClientProjectDocuments(projectId);
+  const { documentManifest } = pinClientDocumentsForRelease({
+    projectId,
+    versionId,
+    liveDocuments,
+  });
+  // Hash/read assets before the version-row write.
+  const payload = prepareReleaseSnapshotPayload(project, { documentManifest });
   const snapshotJson = JSON.stringify(payload);
 
   const prev = db
@@ -755,7 +762,6 @@ function createVersionRecord(projectId, project, {
   };
   const versionNumber = prev ? Number(prev.version_number) + 1 : 1;
 
-  const versionId = uid("v");
   db.prepare(`
     INSERT INTO spec_versions (id, project_id, version_number, created_by, summary, snapshot, release_comment)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1639,7 +1645,8 @@ function serveClientProject(req, res) {
     });
   }
 
-  const snapshotItems = loadPublishedSnapshotItems(p);
+  const parsedSnapshot = loadPublishedReleaseSnapshot(p);
+  const snapshotItems = parsedSnapshot?.items || [];
   if (!snapshotItems.length) {
     return res.status(403).json({
       error: "Published release snapshot missing",
@@ -1647,19 +1654,17 @@ function serveClientProject(req, res) {
     });
   }
 
-  const publishedSnapshot = loadPublishedReleaseSnapshot(p);
-  const clientProject = buildClientProjectFromRelease(p, publishedSnapshot, { overlayLive: true });
+  const clientProject = buildClientProjectFromRelease(p, parsedSnapshot, { overlayLive: true });
   const versions = listVersions(p.id);
   const versionInfoRaw = versions.find((v) => v.id === release.versionId) || versions[0] || null;
   // Admin-only fields must never reach the client DTO.
   const versionInfo = versionInfoRaw
     ? (({ releaseComment: _rc, ...safe }) => safe)(versionInfoRaw)
     : null;
-  // release_v3: pinned drawings only. Legacy: latest visible (compatibility).
-  const pinnedDocuments = resolveClientDocumentsForRelease(p.id, publishedSnapshot);
-  const documents = pinnedDocuments != null ? pinnedDocuments : getClientProjectDocuments(p.id);
+  const documents = resolveClientDocumentsForRelease(parsedSnapshot);
   const activity = listActivity(p.id, { clientOnly: true });
 
+  res.setHeader("Cache-Control", "private, no-store");
   res.json({
     project: clientProject,
     projectId: p.id,
@@ -1751,7 +1756,11 @@ function patchClientItem(req, res) {
       return it;
     });
     if (!changed?.value) return res.status(404).json({ error: "Not found" });
-    res.json({ ...sanitizeItemForClient(changed.value), revision: changed.revision, projectId: p.id });
+    res.json({
+      ...prepareClientMutationItemResponse(snapBefore, changed.value),
+      revision: changed.revision,
+      projectId: p.id,
+    });
   } catch (e) {
     if (!clientWriteError(res, e)) res.status(400).json({ error: e.message, code: e.code });
   }
@@ -1799,7 +1808,8 @@ function bulkPatchClientItems(req, res) {
     });
     if (!changed?.value) return res.status(404).json({ error: "Not found" });
     res.json({
-      updated: changed.value.updated.map(sanitizeItemForClient),
+      updated: changed.value.updated.map((it) =>
+        prepareClientMutationItemResponse(clientSnapshotItem(p, it.id) || it, it)),
       skipped: changed.value.skipped,
       revision: changed.revision,
       projectId: p.id,
@@ -1842,7 +1852,11 @@ function proposeClientReplacement(req, res) {
       return it;
     });
     if (!changed?.value) return res.status(404).json({ error: "Not found" });
-    res.json({ ...sanitizeItemForClient(changed.value), revision: changed.revision, projectId: p.id });
+    res.json({
+      ...prepareClientMutationItemResponse(clientSnapshotItem(p, changed.value.id) || before, changed.value),
+      revision: changed.revision,
+      projectId: p.id,
+    });
   } catch (e) {
     if (!clientWriteError(res, e)) res.status(400).json({ error: e.message, code: e.code });
   }
@@ -1896,40 +1910,12 @@ function reviewItemReplacement(req, res) {
 }
 
 function patchClientCooling(req, res) {
-  try {
-    const p = loadClientProjectOrRespond(req, res);
-    if (!p) return;
-    const sf = Number(req.body?.safetyFactor);
-    if (!Number.isFinite(sf) || sf < 1 || sf > 2.5) {
-      return res.status(400).json({ error: "Invalid safetyFactor" });
-    }
-    const changed = mutateWithRevision(p.id, req.body?.expectedRevision, () => {
-      const mp = typeof p.manualParams === "object" && p.manualParams ? { ...p.manualParams } : {};
-      const cf = mp.coolingFarm && typeof mp.coolingFarm === "object" ? { ...mp.coolingFarm } : {};
-      const oldSf = cf.safetyFactor;
-      cf.safetyFactor = sf;
-      mp.coolingFarm = cf;
-      db.prepare("UPDATE projects SET manual_params = ?, updated_at = datetime('now') WHERE id = ?").run(
-        JSON.stringify(mp),
-        p.id
-      );
-      if (oldSf !== sf) {
-        logProjectEvent({
-          projectId: p.id,
-          actor: "client",
-          summary: `Клиент: запасной коэфф. ${oldSf ?? "—"} → ${sf}`,
-        });
-      }
-      db.prepare(
-        "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-      ).run(p.id);
-      return mp;
-    });
-    if (!changed) return res.status(404).json({ error: "Not found" });
-    res.json({ manualParams: changed.value, revision: changed.revision, projectId: p.id });
-  } catch (e) {
-    if (!clientWriteError(res, e)) res.status(400).json({ error: e.message, code: e.code });
-  }
+  const p = loadClientProjectOrRespond(req, res);
+  if (!p) return;
+  return res.status(403).json({
+    error: "CLIENT_ENGINEERING_MUTATION_FORBIDDEN",
+    code: "CLIENT_ENGINEERING_MUTATION_FORBIDDEN",
+  });
 }
 
 // Client router — основной путь /api/client/p/:token

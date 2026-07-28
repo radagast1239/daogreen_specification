@@ -132,16 +132,24 @@ export function clientRowHasTechnicalFields(row) {
   return clientPdfRowHasTechnicalFields(row);
 }
 
-/** Сплит-система без заполненной цены. */
+/** Explicit unit price present (including finite 0). null/undefined/'' = missing. */
+export function hasExplicitClientUnitPrice(row) {
+  const raw = row?.price;
+  if (raw == null || raw === "") return false;
+  return Number.isFinite(Number(raw));
+}
+
+/** Сплит-система без заполненной цены. Explicit price 0 is not TBD. */
 export function isClientCoolingPriceUnset(row) {
   const rep = row?.sourceItems?.[0] || row;
   if (!isCoolingSpecItem(rep)) return false;
-  return !(Number(row?.price) > 0) && !(Number(row?.sumVat) > 0);
+  if (hasExplicitClientUnitPrice(row)) return false;
+  return !(Number(row?.sumVat) > 0);
 }
 
-/** Есть ли у строки цена за единицу (не путать с бесплатным price=0 в базе без snapshot). */
+/** Есть ли у строки цена за единицу (включая явную цену 0). */
 export function hasClientUnitPrice(row) {
-  return Number(row?.price) > 0;
+  return hasExplicitClientUnitPrice(row);
 }
 
 /**

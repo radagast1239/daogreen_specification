@@ -249,13 +249,10 @@ export const api = {
       admin: false,
       token,
     }),
-  patchClientCooling: (token, safetyFactor, expectedRevision) =>
-    request(`/api/client/p/${encodeURIComponent(token)}/cooling`, {
-      method: "PATCH",
-      body: { safetyFactor, expectedRevision },
-      admin: false,
-      token,
-    }),
+  patchClientCooling: async (_token, _safetyFactor) => ({
+    ok: false,
+    code: "CLIENT_ENGINEERING_MUTATION_FORBIDDEN",
+  }),
   proposeClientReplacement: (token, itemId, body) =>
     request(`/api/client/p/${encodeURIComponent(token)}/items/${encodeURIComponent(itemId)}/propose-replacement`, {
       method: "POST",

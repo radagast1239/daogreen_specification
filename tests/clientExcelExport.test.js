@@ -92,7 +92,7 @@ const fullItems = [
     responsible: "climate",
     clientSection: "climate",
     kind: "cooling_spec",
-    price: 0,
+    price: null,
     link: "https://example.com/split",
   }),
   mkItem({ id: "cl", name: "Мебель клиента", responsible: "client", clientSection: "manipulation" }),
