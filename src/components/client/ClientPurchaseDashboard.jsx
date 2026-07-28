@@ -1,18 +1,19 @@
 import React from "react";
 import { money } from "../../store/helpers.js";
 import { clientPurchaseDashboard, supplierPurchaseProgress } from "../../../shared/clientPurchaseStats.js";
+import { t } from "../../../shared/clientI18n.js";
 
-export default function ClientPurchaseDashboard({ items, currency, onModeSelect }) {
+export default function ClientPurchaseDashboard({ items, currency, onModeSelect, language = "ru" }) {
   const dash = clientPurchaseDashboard(items);
   const suppliers = supplierPurchaseProgress(items);
 
   const kpis = [
-    { key: "total", label: "Всего", value: dash.totalCount, sub: money(dash.totalSum, currency) },
-    { key: "bought", label: "Куплено", value: dash.boughtCount, sub: money(dash.boughtSum, currency) },
-    { key: "remaining", label: "Осталось", value: dash.remainingCount, sub: money(dash.remainingSum, currency) },
-    { key: "ordered", label: "Заказано", value: dash.orderedCount },
-    { key: "need_help", label: "Нужна помощь", value: dash.needHelpCount, attention: true },
-    { key: "replacement_check", label: "Замены на проверке", value: dash.replacementCount, attention: true },
+    { key: "total", value: dash.totalCount, sub: money(dash.totalSum, currency) },
+    { key: "bought", value: dash.boughtCount, sub: money(dash.boughtSum, currency) },
+    { key: "remaining", value: dash.remainingCount, sub: money(dash.remainingSum, currency) },
+    { key: "ordered", value: dash.orderedCount },
+    { key: "need_help", value: dash.needHelpCount, attention: true },
+    { key: "replacement_check", value: dash.replacementCount, attention: true },
   ];
 
   return (
@@ -26,7 +27,7 @@ export default function ClientPurchaseDashboard({ items, currency, onModeSelect 
             style={{ textAlign: "left", cursor: onModeSelect ? "pointer" : "default" }}
             onClick={() => onModeSelect?.(k.key)}
           >
-            <div className="k">{k.label}</div>
+            <div className="k">{t(language, `client.dashboard.${k.key === "need_help" ? "needHelp" : k.key === "replacement_check" ? "replacementCheck" : k.key}`)}</div>
             <div className="v num" style={{ color: k.attention && k.value ? "var(--warn)" : undefined }}>
               {k.value}
             </div>
@@ -42,21 +43,15 @@ export default function ClientPurchaseDashboard({ items, currency, onModeSelect 
       {suppliers.length > 0 && (
         <div className="card" style={{ marginTop: 14, padding: 0, overflow: "hidden" }}>
           <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)" }}>
-            <strong style={{ fontSize: 14 }}>Прогресс по поставщикам</strong>
+            <strong style={{ fontSize: 14 }}>{t(language, "client.dashboard.supplierProgressTitle")}</strong>
           </div>
           <div style={{ overflowX: "auto" }}>
             <table className="spec" style={{ margin: 0, fontSize: 13 }}>
               <thead>
                 <tr>
-                  <th>Поставщик</th>
-                  <th className="right">Всего</th>
-                  <th className="right">Куплено</th>
-                  <th className="right">Заказано</th>
-                  <th className="right">Осталось</th>
-                  <th className="right">Помощь</th>
-                  <th className="right">Сумма</th>
-                  <th className="right">Куплено ₽</th>
-                  <th className="right">Осталось ₽</th>
+                  {["supplier", "total", "bought", "ordered", "remaining", "help", "sum", "boughtSum", "remainingSum"].map((key) => (
+                    <th key={key} className={key === "supplier" ? undefined : "right"}>{t(language, `client.dashboard.headers.${key}`)}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>

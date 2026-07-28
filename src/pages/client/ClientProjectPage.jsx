@@ -37,6 +37,7 @@ import {
 import {
   clientProjectLoadMessageI18n,
   normalizeClientLanguage,
+  t,
 } from "../../../shared/clientI18n.js";
 
 function clientPageStyle(branding) {
@@ -168,14 +169,14 @@ export default function ClientProjectPage() {
   if (err)
     return (
       <div className="client-wrap" style={{ paddingTop: 60 }}>
-        <Empty title="Не удалось загрузить проект" hint="Попробуйте обновить страницу позже." />
+        <Empty title={t(clientLanguage, "client.error.loadFailed.title")} hint={t(clientLanguage, "client.error.loadFailed.hint")} />
       </div>
     );
 
   if (!data)
     return (
       <div className="client-wrap" style={{ paddingTop: 60 }}>
-        <div className="muted">Загрузка…</div>
+        <div className="muted">{t(clientLanguage, "client.common.loading")}</div>
       </div>
     );
 
@@ -200,7 +201,7 @@ export default function ClientProjectPage() {
   const purchaseItems = clientPurchaseItems({ items: visibleItems });
   const purchaseDash = clientPurchaseDashboard(purchaseItems);
   const hasPurchase = visibleItems.length > 0;
-  const clientTabs = clientTabDefs(branding);
+  const clientTabs = clientTabDefs(branding, clientLanguage);
   const activeTab = clientTabs.some(([k]) => k === tab) ? tab : clientTabs[0]?.[0] || "overview";
   const stellageGroups = data.catalog?.stellageGroups?.length
     ? data.catalog.stellageGroups
@@ -360,7 +361,7 @@ export default function ClientProjectPage() {
         <h1>{project.name}</h1>
         <p>
           {branding.companyName || "Daogreen"} · {project.client}
-          {project.city ? ` · ${project.city}` : ""} · спецификация закупки
+          {project.city ? ` · ${project.city}` : ""} · {t(clientLanguage, "client.printHeader.specificationSuffix")}
         </p>
       </div>
 
@@ -380,7 +381,7 @@ export default function ClientProjectPage() {
               <div className="client-topbar__mark">{(branding.companyName || "D").charAt(0)}</div>
             )}
             <div className="client-topbar__titles">
-              <div className="client-topbar__eyebrow">{branding.companyName || heroEyebrow(branding)}</div>
+              <div className="client-topbar__eyebrow">{branding.companyName || heroEyebrow(branding, clientLanguage)}</div>
               <h1 className="client-topbar__title">{project.name}</h1>
               <p className="client-topbar__sub">
                 {project.client}
@@ -393,7 +394,7 @@ export default function ClientProjectPage() {
             type="button"
             className="client-topbar__toggle btn btn-ghost btn-sm"
             aria-expanded={topbarExpanded}
-            aria-label={topbarExpanded ? "Свернуть шапку" : "Развернуть шапку"}
+            aria-label={t(clientLanguage, topbarExpanded ? "client.topbar.collapseAria" : "client.topbar.expandAria")}
             onClick={() => setTopbarExpanded((v) => !v)}
           >
             {topbarExpanded ? "▲" : "▼"}
@@ -406,7 +407,7 @@ export default function ClientProjectPage() {
               PDF
             </button>
             <button type="button" className="btn btn-sm btn-primary" onClick={() => openPurchase("categories")}>
-              К списку
+              {t(clientLanguage, "client.topbar.goToList")}
             </button>
           </div>
         </div>
@@ -417,9 +418,9 @@ export default function ClientProjectPage() {
           <div className="client-topbar__meta">
             <span className="num">{totals.progress}%</span>
             <span className="muted">
-              · куплено {purchaseDash.boughtCount} из {purchaseDash.totalCount}
+              · {t(clientLanguage, "client.topbar.boughtCount", { bought: purchaseDash.boughtCount, total: purchaseDash.totalCount })}
             </span>
-            <span className="muted">· {money(totals.remaining, project.currency)} осталось</span>
+            <span className="muted">· {t(clientLanguage, "client.topbar.remainingAmount", { amount: money(totals.remaining, project.currency) })}</span>
             {versionInfo && delta != null && delta !== 0 && (
               <span className="client-topbar__delta">
                 v{versionInfo.versionNumber}: {delta > 0 ? "+" : ""}
@@ -430,13 +431,13 @@ export default function ClientProjectPage() {
         </div>
       </header>
 
-      <ClientSchemesViewer images={project.clientImages?.projectSchemes || []} />
+      <ClientSchemesViewer images={project.clientImages?.projectSchemes || []} language={clientLanguage} />
       <ClientRackImagesViewer images={project.clientImages?.rackImages || []} />
       {!hasPurchase && (
         <div className="card" style={{ padding: 16, marginBottom: 16, borderColor: "var(--accent)" }}>
-          <strong>Список закупки пока пуст</strong>
+          <strong>{t(clientLanguage, "client.empty.purchaseListEmpty.title")}</strong>
           <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
-            Ссылка работает — администратор ещё не опубликовал позиции (нужны галочка, количество и утверждение в спецификации).
+            {t(clientLanguage, "client.empty.purchaseListEmpty.hint")}
           </p>
         </div>
       )}
@@ -451,6 +452,7 @@ export default function ClientProjectPage() {
       {(activeTab === "purchase") && hasPurchase && (
         <>
           <ClientPurchaseGuide
+            language={clientLanguage}
             projectId={project.id}
             itemCount={purchaseItems.length}
             uniqueCount={mergedPurchaseRows(purchaseItems, { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] }).length}
@@ -458,11 +460,12 @@ export default function ClientProjectPage() {
           <div className="client-purchase-toolbar no-print">
             <input
               className="client-purchase-toolbar__search"
-              placeholder="Поиск: название или поставщик…"
+              placeholder={t(clientLanguage, "client.purchase.searchPlaceholder")}
               value={purchaseQuery}
               onChange={(e) => setPurchaseQuery(e.target.value)}
             />
             <ClientPurchaseViewToggles
+              language={clientLanguage}
               layout={purchaseLayout}
               compact={clientCompact}
               onLayoutChange={(next) => {
@@ -476,9 +479,9 @@ export default function ClientProjectPage() {
             />
           </div>
           <div className="client-supplier-bar no-print">
-            <strong style={{ fontSize: 13 }}>Поставщик:</strong>
+            <strong style={{ fontSize: 13 }}>{t(clientLanguage, "client.purchase.supplierFilter")}</strong>
             <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} style={{ width: "auto" }}>
-              <option value="">Все поставщики ({visibleItems.length})</option>
+              <option value="">{t(clientLanguage, "client.purchase.allSuppliers", { count: visibleItems.length })}</option>
               {suppliers.map((s) => {
                 const cnt = visibleItems.filter((i) => i.supplier === s).length;
                 return (
@@ -490,11 +493,14 @@ export default function ClientProjectPage() {
             </select>
             {supplierFilter && (
               <span className="muted" style={{ fontSize: 13 }}>
-                Показано {filteredCount} позиций от «{supplierFilter}»
+                {t(clientLanguage, "client.purchase.filteredSupplier", { count: filteredCount, supplier: supplierFilter })}
               </span>
             )}
             <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>
-              Куплено / заказано {purchaseItems.filter((i) => isClosedPurchaseStatus(i.status)).length} из {purchaseItems.length}
+              {t(clientLanguage, "client.purchase.closedCount", {
+                count: purchaseItems.filter((i) => isClosedPurchaseStatus(i.status)).length,
+                total: purchaseItems.length,
+              })}
             </span>
           </div>
         </>
@@ -507,16 +513,18 @@ export default function ClientProjectPage() {
           qrUrl={qrUrl}
           onExportExcel={exportExcel}
           onOpenPdf={() => setPdfExportOpen(true)}
+          language={clientLanguage}
         />
       )}
 
       {!hasPurchase && activeTab !== "docs" ? (
-        <Empty title="Спецификация готовится" hint="Позиции появятся после утверждения администратором." />
+        <Empty title={t(clientLanguage, "client.empty.specNotReady.title")} hint={t(clientLanguage, "client.empty.specNotReady.hint")} />
       ) : activeTab !== "docs" ? (
         <>
           {activeTab === "overview" && (
             <ClientOverviewPanel
               project={project}
+              language={clientLanguage}
               totals={totals}
               items={purchaseItems}
               branding={branding}
@@ -528,6 +536,7 @@ export default function ClientProjectPage() {
           {activeTab === "purchase" && (
             <ClientPurchasePanel
               project={project}
+              language={clientLanguage}
               items={purchaseItems}
               mode={purchaseMode}
               onModeChange={handlePurchaseModeChange}
@@ -561,12 +570,14 @@ export default function ClientProjectPage() {
         itemName={replacementItem?.name}
         onClose={() => setReplacementItem(null)}
         onSubmit={proposeReplacement}
+        language={clientLanguage}
       />
       <ClientPdfExportModal
         open={pdfExportOpen}
         items={visibleItems}
         onClose={() => setPdfExportOpen(false)}
         onExport={exportPdf}
+        language={clientLanguage}
       />
       {revisionConflict && (
         <Modal
@@ -602,7 +613,7 @@ function ClientBrandFooter({ branding }) {
   );
 }
 
-function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
+function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf, language }) {
   const [excelBusy, setExcelBusy] = useState(false);
   const frameGroups = groupClientFrameDocuments(documents || []);
   const otherDocs = (documents || []).filter((d) => d.type !== "frame_drawing");
@@ -617,16 +628,15 @@ function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
   };
   return (
     <div className="card" style={{ padding: 22, marginTop: 16 }}>
-      <h3>Документы</h3>
+      <h3>{t(language, "client.docs.title")}</h3>
       <p className="muted" style={{ fontSize: 13 }}>
-        Excel — полная книга закупки (11 листов). PDF — выберите формат: компактный список или полный
-        комплект с разделами и специалистами.
+        {t(language, "client.docs.description")}
       </p>
       <div style={{ marginTop: 14 }}>
         <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>Excel</div>
         <div className="row wrap" style={{ gap: 8 }}>
           <button type="button" className="btn" onClick={runExcel} disabled={excelBusy}>
-            {excelBusy ? "Собираем Excel…" : "Скачать книгу закупки"}
+            {excelBusy ? t(language, "client.docs.buildingExcel") : t(language, "client.docs.downloadExcel")}
           </button>
         </div>
       </div>
@@ -634,16 +644,16 @@ function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
         <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>PDF</div>
         <div className="row wrap" style={{ gap: 8 }}>
           <button type="button" className="btn btn-primary" onClick={onOpenPdf} disabled={excelBusy}>
-            Скачать PDF…
+            {t(language, "client.docs.downloadPdf")}
           </button>
           <button type="button" className="btn" onClick={printPDF} disabled={excelBusy}>
-            Печать страницы
+            {t(language, "client.docs.printPage")}
           </button>
         </div>
       </div>
       {frameGroups.length > 0 && (
         <div style={{ marginTop: 16 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>Чертежи и схемы</div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>{t(language, "client.docs.drawingsTitle")}</div>
           {frameGroups.map((group) => (
             <div key={group.label} style={{ marginBottom: 12 }}>
               <div className="muted" style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{group.label}</div>
@@ -658,7 +668,7 @@ function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
                     ) : null}
                     {d.uploadedAt ? (
                       <span className="muted" style={{ fontSize: 12 }}>
-                        {" "}· {new Date(d.uploadedAt).toLocaleDateString("ru-RU")}
+                        {" "}· {new Date(d.uploadedAt).toLocaleDateString(t(language, "client.pdf.dateLocale"))}
                       </span>
                     ) : null}
                   </li>

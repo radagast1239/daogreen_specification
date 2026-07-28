@@ -153,6 +153,11 @@ const DICTIONARY = Object.freeze({
 
     "client.price.tbd": "цена уточняется",
     "client.price.missing": "Без цены",
+    "client.priority.urgent": "Срочно",
+    "client.priority.before_install": "До монтажа",
+    "client.priority.before_launch": "До запуска",
+    "client.priority.later": "Позже",
+    "client.priority.optional": "Опционально",
 
     "client.notes.nftChannel": "Используется как NFT-канал в схеме стеллажа.",
 
@@ -212,7 +217,7 @@ const DICTIONARY = Object.freeze({
     "client.purchasePanel.closedCount": "{n} заказано/куплено",
     "client.purchasePanel.closedCountStandalone": "{n} заказано/куплено",
     "client.purchasePanel.readyOnly": "Только готовые к покупке",
-    "client.purchasePanel.showClosed": "Показать заказанные и купленые{n, select, withCount { ({count})} other {}}",
+    "client.purchasePanel.showClosed": "Показать заказанные и купленные{suffix}",
     "client.purchasePanel.closedHint": "Всё, что отмечено «Заказано» или «Куплено». После оплаты — одна кнопка на позиции, повторное нажатие — «Куплено».",
     "client.purchasePanel.listHint": "Полный список по крупным блокам — стеллажи, сантехника, электрика и т.д. Одинаковые позиции уже объединены.",
     "client.purchasePanel.suppliersHint": "Все поставщики свёрнуты — нажмите на название, чтобы развернуть список позиций.",
@@ -238,6 +243,10 @@ const DICTIONARY = Object.freeze({
     "client.sectionCard.itemCount": "{n} позиций",
     "client.sectionCard.itemCountShort": "{n} поз.",
     "client.sectionCard.supplierCount": "{n} поставщиков",
+    "client.buyNow.instructions": "Откройте раздел, перейдите по ссылкам товаров и отметьте статус: Заказано, Куплено или Нужна помощь.",
+    "client.purchasePanel.specialists": "Специалисты:",
+    "client.purchasePanel.noFilterItems": "Нет позиций по фильтру",
+    "client.purchasePanel.uniqueCount": "{n} уникальных позиций",
 
     "client.overview.total": "Всего",
     "client.overview.bought": "Куплено",
@@ -250,6 +259,7 @@ const DICTIONARY = Object.freeze({
     "client.overview.sectionMeta": "{n} поз. · готово {pct}%",
     "client.overview.qrTitle": "QR-код проекта",
     "client.overview.qrHint": "{company} · отсканируйте для открытия на телефоне",
+    "client.overview.activityTitle": "Что менялось (вы и Daogreen)",
 
     "client.dashboard.total": "Всего",
     "client.dashboard.bought": "Куплено",
@@ -407,6 +417,11 @@ const DICTIONARY = Object.freeze({
     "client.pdf.filenameProject": "project",
     "client.pdf.filenameTemplate": "Спецификация_{name}{version}{suffix}",
     "client.pdf.dateLocale": "ru-RU",
+    "client.role.plumber": "сантехника",
+    "client.role.electrician": "электрика",
+    "client.role.installer": "монтажника",
+    "client.role.climate": "специалиста по климату",
+    "client.role.client": "клиента",
 
     "client.pdfExport.modalTitle": "Скачать PDF",
     "client.pdfExport.generating": "Собираем…",
@@ -414,7 +429,8 @@ const DICTIONARY = Object.freeze({
     "client.pdfExport.recommended": "Рекомендуем",
     "client.pdfExport.manyPages": "Много страниц",
     "client.pdfExport.specialistGroupTitle": "Отдельные списки",
-    "client.pdfExport.intro": "В закупке {n} уникальных позиций{hasMerge, select, true { (одинаковые с разных стеллажей уже объединены)} other {}}. Выберите вариант PDF.",
+    "client.pdfExport.intro": "В закупке {n} уникальных позиций. Выберите вариант PDF.",
+    "client.pdfExport.introMerged": "В закупке {n} уникальных позиций (одинаковые с разных стеллажей уже объединены). Выберите вариант PDF.",
     "client.pdfExport.fullNote": "Позиции не дублируются в закупке: кран с 5 стеллажей = 1 строка в списке, но в полном PDF он может встретиться в общем списке, в разделе «Полив» и у сантехника — это один и тот же товар.",
     "client.pdfExport.options.clientShort.label": "Короткий список закупки",
     "client.pdfExport.options.clientShort.summary": "Компактный список без фото.",
@@ -511,6 +527,8 @@ const DICTIONARY = Object.freeze({
     "client.excel.instruction.moduleDetail": "Лист «{sheet}» — для проверки расчёта, не для закупки.",
     "client.excel.instruction.priceTbd": "В колонках «Цена» и «Сумма» может стоять «{tbd}» или «{missing}» — это не ошибка. Так отмечены позиции без цены в базе или с ручным подбором (часто климат).",
     "client.excel.instruction.needHelp": "Если позиции нет в наличии или не подходит — отметьте в онлайн-версии «Нужна помощь» или напишите Daogreen: подберём замену.",
+    "client.excel.instruction.priceTbdTitle": "Цена уточняется",
+    "client.excel.instruction.unavailableTitle": "Если товара нет",
 
     "client.excel.summary.project": "Проект",
     "client.excel.summary.client": "Клиент",
@@ -551,6 +569,7 @@ const DICTIONARY = Object.freeze({
     "client.docs.description": "Excel — полная книга закупки. PDF — выберите формат: компактный список или полный комплект с разделами и специалистами.",
     "client.docs.excelSection": "Excel",
     "client.docs.downloadExcel": "Скачать книгу закупки",
+    "client.docs.buildingExcel": "Собираем Excel…",
     "client.docs.pdfSection": "PDF",
     "client.docs.downloadPdf": "Скачать PDF…",
     "client.docs.printPage": "Печать страницы",
@@ -583,6 +602,14 @@ const DICTIONARY = Object.freeze({
     "client.topbar.versionDelta.positive": "v{version}: +{amount}",
     "client.topbar.versionDelta.negative": "v{version}: {amount}",
     "client.printHeader.specificationSuffix": "спецификация закупки",
+    "client.purchase.searchPlaceholder": "Поиск: название или поставщик…",
+    "client.purchase.supplierFilter": "Поставщик:",
+    "client.purchase.allSuppliers": "Все поставщики ({count})",
+    "client.purchase.filteredSupplier": "Показано {count} позиций от «{supplier}»",
+    "client.purchase.closedCount": "Куплено / заказано {count} из {total}",
+    "client.tab.overview": "Обзор",
+    "client.tab.purchase": "Купить сейчас",
+    "client.tab.docs": "Документы",
 
     "client.empty.purchaseListEmpty.title": "Список закупки пока пуст",
     "client.empty.purchaseListEmpty.hint": "Ссылка работает — администратор ещё не опубликовал позиции (нужны галочка, количество и утверждение в спецификации).",
@@ -752,6 +779,11 @@ const DICTIONARY = Object.freeze({
 
     "client.price.tbd": "price TBD",
     "client.price.missing": "No price",
+    "client.priority.urgent": "Urgent",
+    "client.priority.before_install": "Before installation",
+    "client.priority.before_launch": "Before launch",
+    "client.priority.later": "Later",
+    "client.priority.optional": "Optional",
 
     "client.notes.nftChannel": "Used as NFT channel in the rack scheme.",
 
@@ -811,7 +843,7 @@ const DICTIONARY = Object.freeze({
     "client.purchasePanel.closedCount": "{n} ordered/purchased",
     "client.purchasePanel.closedCountStandalone": "{n} ordered/purchased",
     "client.purchasePanel.readyOnly": "Only ready to buy",
-    "client.purchasePanel.showClosed": "Show ordered and purchased{hasCount, select, withCount { ({count})} other {}}",
+    "client.purchasePanel.showClosed": "Show ordered and purchased{suffix}",
     "client.purchasePanel.closedHint": "Everything marked Ordered or Purchased. After payment, one click per item; click again to mark Purchased.",
     "client.purchasePanel.listHint": "Full list by major blocks — racks, plumbing, electrics, etc. Duplicate items are already merged.",
     "client.purchasePanel.suppliersHint": "All suppliers are collapsed — click a name to expand the item list.",
@@ -837,6 +869,10 @@ const DICTIONARY = Object.freeze({
     "client.sectionCard.itemCount": "{n} items",
     "client.sectionCard.itemCountShort": "{n} items",
     "client.sectionCard.supplierCount": "{n} suppliers",
+    "client.buyNow.instructions": "Open a section, follow product links, and mark the status: Ordered, Purchased, or Need help.",
+    "client.purchasePanel.specialists": "Specialists:",
+    "client.purchasePanel.noFilterItems": "No items match the filter",
+    "client.purchasePanel.uniqueCount": "{n} unique items",
 
     "client.overview.total": "Total",
     "client.overview.bought": "Purchased",
@@ -849,6 +885,7 @@ const DICTIONARY = Object.freeze({
     "client.overview.sectionMeta": "{n} items · {pct}% done",
     "client.overview.qrTitle": "Project QR code",
     "client.overview.qrHint": "{company} · scan to open on your phone",
+    "client.overview.activityTitle": "What changed (you and Daogreen)",
 
     "client.dashboard.total": "Total",
     "client.dashboard.bought": "Purchased",
@@ -1006,6 +1043,11 @@ const DICTIONARY = Object.freeze({
     "client.pdf.filenameProject": "project",
     "client.pdf.filenameTemplate": "Specification_{name}{version}{suffix}",
     "client.pdf.dateLocale": "en-GB",
+    "client.role.plumber": "plumber",
+    "client.role.electrician": "electrician",
+    "client.role.installer": "installer",
+    "client.role.climate": "climate specialist",
+    "client.role.client": "client",
 
     "client.pdfExport.modalTitle": "Download PDF",
     "client.pdfExport.generating": "Generating…",
@@ -1013,7 +1055,8 @@ const DICTIONARY = Object.freeze({
     "client.pdfExport.recommended": "Recommended",
     "client.pdfExport.manyPages": "Many pages",
     "client.pdfExport.specialistGroupTitle": "Separate lists",
-    "client.pdfExport.intro": "{n} unique items in the purchase list{hasMerge, select, true { (identical items from different racks are already merged)} other {}}. Choose a PDF variant.",
+    "client.pdfExport.intro": "{n} unique items in the purchase list. Choose a PDF variant.",
+    "client.pdfExport.introMerged": "{n} unique items in the purchase list (identical items from different racks are already merged). Choose a PDF variant.",
     "client.pdfExport.fullNote": "Items are not duplicated in the purchase list: one faucet across 5 racks = 1 row in the list, but in the full PDF it may appear in the full list, in the Irrigation section, and under the plumber — it is the same product.",
     "client.pdfExport.options.clientShort.label": "Short purchase list",
     "client.pdfExport.options.clientShort.summary": "Compact list without photos.",
@@ -1110,6 +1153,8 @@ const DICTIONARY = Object.freeze({
     "client.excel.instruction.moduleDetail": "Sheet «{sheet}» — for calculation check, not for purchasing.",
     "client.excel.instruction.priceTbd": "Columns «Price» and «Amount» may show «{tbd}» or «{missing}» — this is not an error. These mark items without a base price or requiring manual selection (often climate).",
     "client.excel.instruction.needHelp": "If an item is out of stock or unsuitable — mark Need help in the online version or write to Daogreen: we will find a replacement.",
+    "client.excel.instruction.priceTbdTitle": "Price TBD",
+    "client.excel.instruction.unavailableTitle": "If an item is unavailable",
 
     "client.excel.summary.project": "Project",
     "client.excel.summary.client": "Client",
@@ -1150,6 +1195,7 @@ const DICTIONARY = Object.freeze({
     "client.docs.description": "Excel — full purchase workbook. PDF — choose a format: compact list or full kit with sections and specialists.",
     "client.docs.excelSection": "Excel",
     "client.docs.downloadExcel": "Download workbook",
+    "client.docs.buildingExcel": "Building Excel…",
     "client.docs.pdfSection": "PDF",
     "client.docs.downloadPdf": "Download PDF…",
     "client.docs.printPage": "Print page",
@@ -1182,6 +1228,14 @@ const DICTIONARY = Object.freeze({
     "client.topbar.versionDelta.positive": "v{version}: +{amount}",
     "client.topbar.versionDelta.negative": "v{version}: {amount}",
     "client.printHeader.specificationSuffix": "purchase specification",
+    "client.purchase.searchPlaceholder": "Search by name or supplier…",
+    "client.purchase.supplierFilter": "Supplier:",
+    "client.purchase.allSuppliers": "All suppliers ({count})",
+    "client.purchase.filteredSupplier": "Showing {count} items from “{supplier}”",
+    "client.purchase.closedCount": "Purchased / ordered {count} of {total}",
+    "client.tab.overview": "Overview",
+    "client.tab.purchase": "Buy now",
+    "client.tab.docs": "Documents",
 
     "client.empty.purchaseListEmpty.title": "Purchase list is empty",
     "client.empty.purchaseListEmpty.hint": "The link is active — the administrator has not published items yet (visibility, quantity, and approval are needed in the specification).",
@@ -1280,6 +1334,30 @@ export function tUnit(language, rawUnit) {
   const key = STANDARD_UNIT_MAP[String(rawUnit).trim().toLowerCase()];
   if (!key) return String(rawUnit);
   return t(language, key);
+}
+
+const CLIENT_SECTION_I18N_SUFFIX = {
+  stellage: "stellage",
+  trays_channels: "traysChannels",
+  irrigation: "irrigation",
+  drainage: "drainage",
+  pumps: "pumps",
+  tanks: "tanks",
+  water_prep: "waterPrep",
+  lighting: "lighting",
+  electrics: "electrics",
+  automation: "automation",
+  climate: "climate",
+  manipulation: "manipulation",
+  consumables: "consumables",
+  tools: "tools",
+  works_delivery: "worksDelivery",
+  works: "works",
+};
+
+export function tSection(language, sectionId, fallback = "") {
+  const suffix = CLIENT_SECTION_I18N_SUFFIX[sectionId];
+  return suffix ? t(language, `client.sections.${suffix}.label`) : fallback || sectionId;
 }
 
 export function tError(language, code) {

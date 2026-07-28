@@ -15,6 +15,7 @@ import {
 import { getPurchaseStatusTone, isPurchaseStatusNeedsAttention } from "../../../shared/purchaseStatusRules.js";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { DebouncedInput } from "./ClientDebouncedField.jsx";
+import { t, tStatus, tUnit } from "../../../shared/clientI18n.js";
 
 export default function ClientItemCard({
   it,
@@ -24,6 +25,7 @@ export default function ClientItemCard({
   purchaseStatuses = PURCHASE_STATUSES,
   onProposeReplacement,
   compact = false,
+  language = "ru",
 }) {
   const img = !compact ? itemImageUrl(it) : "";
   const gross = lineGross(it);
@@ -31,13 +33,16 @@ export default function ClientItemCard({
   const coolingSpec = isCoolingSpecItem(it);
   const unitPrice = formatClientUnitPrice(it);
   const lineTotal = formatClientLineTotal(it);
-  const unitPriceLabel = typeof unitPrice === "number" ? money(unitPrice, currency) : unitPrice;
+  const localizedPrice = (value) => value === "цена уточняется"
+    ? t(language, "client.price.tbd")
+    : value === "Без цены" ? t(language, "client.price.missing") : value;
+  const unitPriceLabel = typeof unitPrice === "number" ? money(unitPrice, currency) : localizedPrice(unitPrice);
   const lineTotalLabel =
     lineTotal === ""
       ? ""
       : typeof lineTotal === "number"
         ? money(lineTotal, currency)
-        : lineTotal;
+        : localizedPrice(lineTotal);
 
   return (
     <div className={"card card-item" + (bought ? " card-item--bought" : "") + (compact ? " card-item--compact" : "")}>
@@ -53,14 +58,14 @@ export default function ClientItemCard({
           <strong style={{ fontSize: compact ? 13 : 14 }}>{it.name}</strong>
           {bought ? (
             <span className="chip chip--ok chip-dot" style={{ fontSize: 11 }}>
-              Готово
+              {t(language, "client.itemCard.done")}
             </span>
           ) : (
             <Chip
               kind={getPurchaseStatusTone(it.status)}
               dot={isPurchaseStatusNeedsAttention(it.status)}
             >
-              {resolveClientPurchaseStatusLabel(it)}
+              {tStatus(language, it.status) === it.status ? resolveClientPurchaseStatusLabel(it) : tStatus(language, it.status)}
             </Chip>
           )}
         </div>
@@ -68,13 +73,13 @@ export default function ClientItemCard({
           <div style={{ fontSize: 12, marginTop: 2, color: "var(--brand)" }}>{materialSpecLabel(it)}</div>
         )}
         <div className="client-qty-row">
-          <span className="client-qty-badge" title="Количество">
+          <span className="client-qty-badge" title={t(language, "client.purchaseTable.qtyTitle")}>
             <span className="num">{num(it.qty)}</span>
-            <span className="client-qty-badge__unit">{it.unit || "шт."}</span>
+            <span className="client-qty-badge__unit">{tUnit(language, it.unit || "шт.")}</span>
           </span>
           {!compact && (it.vatRate || 0) > 0 && (
             <span className="muted" style={{ fontSize: 12 }}>
-              НДС {it.vatRate}%
+              {t(language, "client.itemCard.vat", { rate: it.vatRate })}
             </span>
           )}
           {compact && lineTotalLabel && (
@@ -85,25 +90,25 @@ export default function ClientItemCard({
         </div>
         {!compact && (
             <div style={{ fontSize: 12.5, marginTop: 4 }}>
-              Цена: <span className="num">{unitPriceLabel}</span>
+              {t(language, "client.itemCard.priceLabel", { price: unitPriceLabel })}
               {lineTotalLabel ? (
                 <>
-                  /ед · Сумма: <b className="num">{lineTotalLabel}</b>
+                  {" "}{t(language, "client.itemCard.sumLabel", { sum: lineTotalLabel })}
                 </>
               ) : null}
               {vat > 0 && typeof unitPrice === "number" && (
-                <span className="muted"> (в т.ч. НДС {money(vat, currency)})</span>
+                <span className="muted"> {t(language, "client.itemCard.vatIncluded", { amount: money(vat, currency) })}</span>
               )}
             </div>
           )}
         {!compact && it.supplier && (
           <div style={{ fontSize: 12.5, marginTop: 4 }}>
-            <b>Поставщик:</b> {it.supplier}
+            <b>{t(language, "client.itemCard.supplierLabel")}</b> {it.supplier}
           </div>
         )}
         {!compact && it.clientNote && (
           <div className="client-admin-note" style={{ fontSize: 12.5, marginTop: 6 }}>
-            <b>{coolingSpec ? "Спецификация:" : "Комментарий Daogreen:"}</b> {it.clientNote}
+            <b>{t(language, coolingSpec ? "client.itemCard.specLabel" : "client.itemCard.commentLabel")}</b> {it.clientNote}
           </div>
         )}
         {it.link && (
@@ -114,12 +119,13 @@ export default function ClientItemCard({
             className="btn btn-sm"
             style={{ marginTop: compact ? 6 : 8, display: "inline-block" }}
           >
-            {compact ? "Ссылка ↗" : "Открыть ссылку ↗"}
+            {t(language, compact ? "client.itemCard.linkShort" : "client.itemCard.linkLong")}
           </a>
         )}
 
         {!bought ? (
           <ClientStatusActions
+            language={language}
             status={it.status}
             onStatusChange={(next) => patch(it.id, { status: next })}
             onNeedReplacement={onProposeReplacement ? () => onProposeReplacement(it) : undefined}
@@ -131,19 +137,19 @@ export default function ClientItemCard({
             style={{ marginTop: 10 }}
             onClick={() => patch(it.id, { status: "not_bought" })}
           >
-            Вернуть в список
+            {t(language, "client.itemCard.revert")}
           </button>
         )}
         {it.status === "replacement_check" && (
           <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Замена на проверке — Daogreen рассмотрит предложение.
+            {t(language, "client.itemCard.replacementCheckHint")}
           </p>
         )}
 
         {!compact && !bought && (
           <div className="row no-print" style={{ marginTop: 10, gap: 8, flexWrap: "wrap" }}>
             <div className="field" style={{ flex: "0 0 150px" }}>
-              <label>Факт. цена</label>
+              <label>{t(language, "client.itemCard.actualPriceLabel")}</label>
               <DebouncedInput
                 type="number"
                 value={it.actualPrice ?? ""}
@@ -152,7 +158,7 @@ export default function ClientItemCard({
               />
             </div>
             <div className="field" style={{ flex: 1, minWidth: 160 }}>
-              <label>Комментарий</label>
+              <label>{t(language, "client.itemCard.clientCommentLabel")}</label>
               <DebouncedInput
                 value={it.clientComment || ""}
                 onCommit={(val) => patch(it.id, { clientComment: val })}

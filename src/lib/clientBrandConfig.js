@@ -239,19 +239,22 @@ export function clientBrandToSettings(brand) {
   };
 }
 
-export function clientTabDefs(brand) {
+export function clientTabDefs(brand, language = "ru") {
   const visible = new Set(normalizeVisibleTabIds(brand?.clientVisibleTabs || DEFAULT_VISIBLE_TAB_IDS));
-  const tabs = CLIENT_TAB_OPTIONS.filter((t) => !t.legacy && visible.has(t.id)).map((t) => [t.id, t.label]);
+  const tabs = CLIENT_TAB_OPTIONS
+    .filter((tab) => !tab.legacy && visible.has(tab.id))
+    .map((tab) => [tab.id, t(language, `client.tab.${tab.id}`)]);
   if (tabs.length) return tabs;
   return [
-    ["purchase", "Купить сейчас"],
-    ["docs", "Документы"],
+    ["purchase", t(language, "client.tab.purchase")],
+    ["docs", t(language, "client.tab.docs")],
   ];
 }
 
-export function heroEyebrow(brand) {
+export function heroEyebrow(brand, language = "ru") {
   const company = brand?.companyName || "Daogreen";
   const tpl = brand?.clientHeroEyebrow?.trim();
   if (tpl) return tpl.replace(/\{company\}/gi, company);
-  return `${company} · закупочный список`;
+  return t(language, "client.brand.heroEyebrow", { company });
 }
+import { t } from "../../shared/clientI18n.js";

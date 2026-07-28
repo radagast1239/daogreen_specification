@@ -6,8 +6,9 @@ import {
   getClientPdfExportStats,
   pdfExportOptionStats,
 } from "../../lib/clientPdfExportMeta.js";
+import { t } from "../../../shared/clientI18n.js";
 
-export default function ClientPdfExportModal({ open, items, onClose, onExport }) {
+export default function ClientPdfExportModal({ open, items, onClose, onExport, language = "ru" }) {
   const [selected, setSelected] = useState(DEFAULT_CLIENT_PDF_OPTION);
   const [exporting, setExporting] = useState(false);
 
@@ -31,7 +32,11 @@ export default function ClientPdfExportModal({ open, items, onClose, onExport })
   };
 
   const renderOption = (opt) => {
-    const statLine = pdfExportOptionStats(opt.id, stats);
+    const statLine = pdfExportOptionStats(opt.id, stats, language);
+    const optionKey = opt.id === "client_short" ? "clientShort"
+      : opt.id === "client_full" ? "clientFull"
+        : opt.id === "client_purchase" ? "clientPurchase"
+          : opt.id === "client_role" ? "clientRole" : opt.id;
     const disabled =
       (opt.id === "plumber" && !stats.plumberMerged) ||
       (opt.id === "electric" && !stats.electricMerged) ||
@@ -59,19 +64,19 @@ export default function ClientPdfExportModal({ open, items, onClose, onExport })
         />
         <div className="client-pdf-export-option__body">
           <div className="client-pdf-export-option__head">
-            <strong>{opt.label}</strong>
-            {opt.recommended && <span className="chip chip--ok">Рекомендуем</span>}
+            <strong>{t(language, `client.pdfExport.options.${optionKey}.label`)}</strong>
+            {opt.recommended && <span className="chip chip--ok">{t(language, "client.pdfExport.recommended")}</span>}
             {opt.largeFile && stats.fullPdfTableRows > stats.mergedCount * 1.5 && (
-              <span className="chip chip--amber">Много страниц</span>
+              <span className="chip chip--amber">{t(language, "client.pdfExport.manyPages")}</span>
             )}
           </div>
           <div className="client-pdf-export-option__stat">{statLine}</div>
-          <p className="client-pdf-export-option__summary">{opt.summary}</p>
+          <p className="client-pdf-export-option__summary">{t(language, `client.pdfExport.options.${optionKey}.summary`)}</p>
           {active && (
             <div className="client-pdf-export-option__detail">
-              <p>{opt.detail}</p>
+              <p>{t(language, `client.pdfExport.options.${optionKey}.description`)}</p>
               <p className="muted" style={{ marginBottom: 0, fontSize: 12 }}>
-                {opt.useWhen}
+                {t(language, `client.pdfExport.options.${optionKey}.useWhen`)}
               </p>
             </div>
           )}
@@ -82,40 +87,34 @@ export default function ClientPdfExportModal({ open, items, onClose, onExport })
 
   return (
     <Modal
-      title="Скачать PDF"
+      title={t(language, "client.pdfExport.modalTitle")}
       onClose={onClose}
       footer={
         <>
           <button type="button" className="btn" onClick={onClose} disabled={exporting}>
-            Отмена
+            {t(language, "client.common.cancel")}
           </button>
           <button type="button" className="btn btn-primary" onClick={download} disabled={exporting}>
-            {exporting ? "Собираем…" : "Скачать PDF"}
+            {t(language, exporting ? "client.pdfExport.generating" : "client.pdfExport.downloadButton")}
           </button>
         </>
       }
     >
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-        В закупке <strong>{stats.mergedCount}</strong> уникальных позиций
-        {stats.savedByMerge > 0 && (
-          <> (одинаковые с разных стеллажей уже объединены)</>
-        )}
-        . Выберите вариант PDF.
+        {t(language, stats.savedByMerge > 0 ? "client.pdfExport.introMerged" : "client.pdfExport.intro", { n: stats.mergedCount })}
       </p>
 
       <div className="client-pdf-export-options">
         {CLIENT_PDF_EXPORT_OPTIONS.filter((o) => o.group !== "specialist").map(renderOption)}
         <div className="client-pdf-export-group-title" style={{ fontSize: 13, fontWeight: 600, margin: "10px 0 4px" }}>
-          Отдельные списки
+          {t(language, "client.pdfExport.specialistGroupTitle")}
         </div>
         {CLIENT_PDF_EXPORT_OPTIONS.filter((o) => o.group === "specialist").map(renderOption)}
       </div>
 
       {selectedOption?.id === "client_full" && stats.savedByMerge > 0 && (
         <p className="client-pdf-export-note">
-          Позиции не дублируются в закупке: кран с 5 стеллажей = 1 строка в списке, но в полном PDF
-          он может встретиться в общем списке, в разделе «Полив» и у сантехника — это один и тот же
-          товар.
+          {t(language, "client.pdfExport.fullNote")}
         </p>
       )}
     </Modal>

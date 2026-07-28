@@ -1,15 +1,16 @@
 import React, { useState } from "react";
 import { isBoughtStatus } from "../../lib/itemHelpers.js";
+import { t } from "../../../shared/clientI18n.js";
 
 const OTHER_ACTIONS = [
-  { id: "have", label: "Уже есть", title: "Уже на объекте — уйдёт из списка закупки" },
-  { id: "need_help", label: "Нужна помощь", attention: true, title: "Нужна помощь Daogreen" },
+  { id: "have", key: "have" },
+  { id: "need_help", key: "needHelp", attention: true },
 ];
 
-function closedActionLabel(status) {
-  if (status === "ordered") return "Заказано";
-  if (isBoughtStatus(status)) return "Куплено";
-  return "Заказано/Куплено";
+function closedActionLabel(language, status) {
+  if (status === "ordered") return t(language, "client.statusAction.ordered.label");
+  if (isBoughtStatus(status)) return t(language, "client.statusAction.bought.label");
+  return t(language, "client.statusAction.closed.label");
 }
 
 function nextClosedStatus(status) {
@@ -18,10 +19,10 @@ function nextClosedStatus(status) {
   return "ordered";
 }
 
-function closedActionTitle(status) {
-  if (status === "ordered") return "Товар получен — нажмите, чтобы отметить «Куплено»";
-  if (isBoughtStatus(status)) return "Нажмите, чтобы вернуть статус «Заказано»";
-  return "Оформлен заказ — позиция уйдёт в «Заказано/Куплено»";
+function closedActionTitle(language, status) {
+  if (status === "ordered") return t(language, "client.statusAction.ordered.title");
+  if (isBoughtStatus(status)) return t(language, "client.statusAction.bought.title");
+  return t(language, "client.statusAction.closed.title");
 }
 
 export default function ClientStatusActions({
@@ -29,6 +30,7 @@ export default function ClientStatusActions({
   onStatusChange,
   onNeedReplacement,
   disabled = false,
+  language = "ru",
 }) {
   const current = status || "not_bought";
   const [pending, setPending] = useState(null);
@@ -65,11 +67,11 @@ export default function ClientStatusActions({
             (closedActive ? " btn-active" : "") +
             (pending === "ordered" || pending === "bought" ? " btn--pending" : "")
           }
-          title={closedActionTitle(current)}
+          title={closedActionTitle(language, current)}
           disabled={disabled || !!pending}
           onClick={runClosed}
         >
-          {pending === "ordered" || pending === "bought" ? "…" : closedActionLabel(current)}
+          {pending === "ordered" || pending === "bought" ? "…" : closedActionLabel(language, current)}
         </button>
         {OTHER_ACTIONS.map((action) => {
           const active = current === action.id;
@@ -82,11 +84,11 @@ export default function ClientStatusActions({
               key={action.id}
               type="button"
               className={className}
-              title={action.title}
+              title={t(language, `client.statusAction.${action.key}.title`)}
               disabled={disabled || !!pending}
               onClick={() => run(action.id)}
             >
-              {pending === action.id ? "…" : action.label}
+              {pending === action.id ? "…" : t(language, `client.statusAction.${action.key}.label`)}
             </button>
           );
         })}
@@ -94,11 +96,11 @@ export default function ClientStatusActions({
           <button
             type="button"
             className="btn btn-sm"
-            title="Предложить другой товар на замену"
+            title={t(language, "client.statusAction.replace.title")}
             disabled={disabled || !!pending || current === "replacement_check"}
             onClick={onNeedReplacement}
           >
-            Нужна замена
+            {t(language, "client.statusAction.replace.label")}
           </button>
         )}
       </div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { t } from "../../shared/clientI18n.js";
 import { api, photoSrc } from "../lib/api.js";
 import FloorPlanViewer from "./FloorPlanViewer.jsx";
 import {
@@ -227,7 +228,7 @@ export default function ClientSchemesEditor({
 }
 
 /** Просмотр схем на клиентской странице */
-export function ClientSchemesViewer({ manualParams, images }) {
+export function ClientSchemesViewer({ manualParams, images, language = "ru" }) {
   const schemes = (Array.isArray(images) ? images : clientVisibleSchemes(manualParams)).map((s) => ({
     ...s,
     label: s.title || s.label,
@@ -238,9 +239,9 @@ export function ClientSchemesViewer({ manualParams, images }) {
 
   return (
     <div className="client-schemes-viewer card" style={{ padding: 16, marginBottom: 16 }}>
-      <strong style={{ fontSize: 14 }}>Схемы проекта</strong>
+      <strong style={{ fontSize: 14 }}>{t(language, "client.schemes.viewer.title")}</strong>
       <p className="muted" style={{ fontSize: 12, margin: "4px 0 12px" }}>
-        Нажмите на схему, чтобы открыть на весь экран.
+        {t(language, "client.schemes.viewer.hint")}
       </p>
       <div className="client-schemes-viewer__grid">
         {schemes.map((def, i) => {

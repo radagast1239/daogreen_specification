@@ -18,7 +18,7 @@ import {
   isExcelNumFmtSafeSymbol,
   resolveMoneyDisplaySymbol,
 } from "../../shared/projectCurrency.js";
-import { t } from "../../shared/clientI18n.js";
+import { t, tSection, tStatus, tUnit } from "../../shared/clientI18n.js";
 import { projectClientLanguage } from "../../shared/projectClientLanguage.js";
 
 export const CLIENT_EXCEL_BRAND = "#116355";
@@ -436,6 +436,70 @@ function statusLabel(rowOrStatus, purchaseStatuses) {
   return purchaseStatuses.find((s) => s.id === id)?.label || resolveClientPurchaseStatusLabel(id);
 }
 
+const EXCEL_HEADER_KEYS = Object.freeze({
+  "№": "num",
+  Фото: "photo",
+  Наименование: "name",
+  Позиция: "position",
+  Описание: "description",
+  "Комментарий Daogreen": "commentDaogreen",
+  "Комментарий клиента": "commentClient",
+  "Откуда взялось": "source",
+  "Кол-во": "qty",
+  "Кол-во всего": "qtyTotal",
+  Кол: "qtyShort",
+  "Ед.": "unit",
+  Ед: "unitShort",
+  Цена: "price",
+  Сумма: "sum",
+  "Факт. цена": "actualPrice",
+  Поставщик: "supplier",
+  Ссылка: "link",
+  "Открыть товар": "openLink",
+  "Статус закупки": "status",
+  Раздел: "section",
+  Подраздел: "subsection",
+  Модуль: "module",
+  Блок: "block",
+  Текст: "text",
+  Поле: "field",
+  Значение: "value",
+  Бюджет: "budget",
+  Куплено: "bought",
+  Осталось: "remaining",
+  Готовность: "readiness",
+});
+
+function localizeWorksheetSystemCells(ws, language, purchaseStatuses = []) {
+  if (language !== "en" || !ws?.["!ref"]) return ws;
+  const defaultStatusIds = ["not_bought", "searching", "ordered", "bought", "delivered", "have", "need_help", "not_fit", "replacement_check"];
+  const range = XLSX.utils.decode_range(ws["!ref"]);
+  for (let col = range.s.c; col <= range.e.c; col++) {
+    const headCell = ws[XLSX.utils.encode_cell({ r: range.s.r, c: col })];
+    const originalHeader = String(headCell?.v ?? "");
+    const headerKey = EXCEL_HEADER_KEYS[originalHeader];
+    if (headCell && headerKey) headCell.v = t(language, `client.excel.header.${headerKey}`);
+    for (let row = range.s.r + 1; row <= range.e.r; row++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: row, c: col })];
+      if (!cell || cell.t !== "s") continue;
+      if (headerKey === "unit" || headerKey === "unitShort") cell.v = tUnit(language, cell.v);
+      if (headerKey === "status") {
+        const status = purchaseStatuses.find((entry) => entry.label === cell.v);
+        const defaultId = defaultStatusIds.find((id) => t("ru", `client.status.${id}`) === cell.v);
+        if (status?.id || defaultId) cell.v = tStatus(language, status?.id || defaultId);
+      }
+      if (headerKey === "section") {
+        const section = getClientSections({ includeHidden: true }).find((entry) => entry.label === cell.v);
+        if (section) cell.v = tSection(language, section.id, cell.v);
+      }
+      if ((headerKey === "link" || headerKey === "openLink") && cell.v === "Открыть") {
+        cell.v = t(language, "client.excel.openLink");
+      }
+    }
+  }
+  return ws;
+}
+
 function applyRubFormats(ws, headerNames, numericHeaders = ["Цена", "Сумма", "Бюджет", "Куплено", "Осталось", "Факт. цена"], currency = "₽") {
   if (!ws?.["!ref"]) return ws;
   const ctx = typeof currency === "object" && currency?.numFmt
@@ -574,119 +638,135 @@ function sheetFromRowsWithLinks(rows, linkHeader = "Ссылка", linkText = "�
 }
 
 function instructionSheet(project, items, branding, merged) {
+  const language = projectClientLanguage(project);
   const budget = (items || []).reduce((s, i) => s + lineGross(i), 0);
   const unique = merged?.length ?? 0;
   const currencyCtx = projectCurrencyContext(project);
   const rows = [
     {
-      Блок: "Проект",
+      Блок: t(language, "client.excel.instruction.project"),
       Текст: project?.name || "—",
     },
     {
-      Блок: "Клиент",
+      Блок: t(language, "client.excel.instruction.client"),
       Текст: project?.client || "—",
     },
     {
-      Блок: "Валюта",
+      Блок: t(language, "client.excel.instruction.currency"),
       Текст: excelCellText(
         currencyCtx.safe
           ? `${currencyCtx.code} (${currencyCtx.symbol})`
-          : `Валюта: ${currencyCtx.code}`,
+          : `${t(language, "client.excel.instruction.currency")}: ${currencyCtx.code}`,
       ),
     },
     {
-      Блок: "Версия",
+      Блок: t(language, "client.excel.instruction.version"),
       Текст: project?.version > 1 ? `v${project.version}` : "v1",
     },
     {
-      Блок: "Дата",
-      Текст: new Date().toLocaleDateString("ru-RU"),
+      Блок: t(language, "client.excel.instruction.date"),
+      Текст: new Date().toLocaleDateString(t(language, "client.pdf.dateLocale")),
     },
     {
-      Блок: "Итого",
+      Блок: t(language, "client.excel.instruction.total"),
       Текст: `${formatMoneyAmount(budget, currencyCtx.symbol)} · уникальных позиций: ${unique}`,
     },
     {
-      Блок: "Компания",
+      Блок: t(language, "client.excel.instruction.company"),
       Текст: branding?.companyName || "Daogreen",
     },
     {
-      Блок: "Как пользоваться",
-      Текст:
-        "Покупайте по поставщикам или разделам. Статусы и актуальные ссылки можно смотреть в онлайн-версии.",
+      Блок: t(language, "client.excel.instruction.howToUse"),
+      Текст: t(language, "client.excel.instruction.lead"),
     },
     {
-      Блок: "О файле",
-      Текст:
-        "Это рабочий список закупки Daogreen. Одинаковые позиции из разных модулей объединены в одну строку с общим количеством — не покупайте дубликаты.",
+      Блок: t(language, "client.excel.instruction.aboutFile"),
+      Текст: t(language, "client.excel.instruction.aboutFileText"),
     },
     {
-      Блок: "Как пользоваться",
-      Текст: "Начните с листа «03 К закупке по поставщикам» — удобно идти магазин за магазином.",
+      Блок: t(language, "client.excel.instruction.howToUse"),
+      Текст: t(language, "client.excel.instruction.startSupplier", {
+        sheet: t(language, "client.excel.sheetName.suppliers"),
+      }),
     },
     {
-      Блок: "Как пользоваться",
-      Текст: "Лист «04 К закупке по разделам» — тот же список, сгруппированный по блокам фермы.",
+      Блок: t(language, "client.excel.instruction.howToUse"),
+      Текст: t(language, "client.excel.instruction.bySection", {
+        sheet: t(language, "client.excel.sheetName.bySection"),
+      }),
     },
     {
-      Блок: "Как пользоваться",
-      Текст:
-        "Позиции без ссылки на товар остаются в обычных листах закупки. Пустая ссылка — нормально (телефон, завод, местная база), отдельный лист для них не нужен.",
+      Блок: t(language, "client.excel.instruction.howToUse"),
+      Текст: t(language, "client.excel.instruction.noLink"),
     },
     {
-      Блок: "Как пользоваться",
-      Текст:
-        "Листы 06–10 — срезы по ответственным: 06 Сантехник, 07 Электрик, 08 Монтажник, 09 Климат, 10 Клиент.",
+      Блок: t(language, "client.excel.instruction.howToUse"),
+      Текст: t(language, "client.excel.instruction.roles", {
+        sheets: "06–10",
+        labels: [
+          t(language, "client.excel.sheetName.plumber"),
+          t(language, "client.excel.sheetName.electric"),
+          t(language, "client.excel.sheetName.installer"),
+          t(language, "client.excel.sheetName.climate"),
+          t(language, "client.excel.sheetName.client"),
+        ].join(", "),
+      }),
     },
     {
-      Блок: "Как пользоваться",
-      Текст: "Лист «10б Монтаж» — монтажные работы (если есть в проекте).",
+      Блок: t(language, "client.excel.instruction.howToUse"),
+      Текст: t(language, "client.excel.instruction.install", {
+        sheet: t(language, "client.excel.sheetName.install"),
+      }),
     },
     {
-      Блок: "Как пользоваться",
-      Текст: "Лист «11 Детализация по модулям» — для проверки расчёта, не для закупки.",
+      Блок: t(language, "client.excel.instruction.howToUse"),
+      Текст: t(language, "client.excel.instruction.moduleDetail", {
+        sheet: t(language, "client.excel.sheetName.moduleDetail"),
+      }),
     },
     {
-      Блок: "Цена уточняется",
-      Текст:
-        `В колонках «Цена» и «Сумма» может стоять «${CLIENT_PRICE_TBD}» или «${CLIENT_PRICE_MISSING}» — это не ошибка. Так отмечены позиции без цены в базе или с ручным подбором (часто климат).`,
+      Блок: t(language, "client.excel.instruction.priceTbdTitle"),
+      Текст: t(language, "client.excel.instruction.priceTbd", {
+        tbd: language === "en" ? "price TBD" : CLIENT_PRICE_TBD,
+        missing: language === "en" ? "No price" : CLIENT_PRICE_MISSING,
+      }),
     },
     {
-      Блок: "Если товара нет",
-      Текст:
-        "Если позиции нет в наличии или не подходит — отметьте в онлайн-версии «Нужна помощь» или напишите Daogreen: подберём замену.",
+      Блок: t(language, "client.excel.instruction.unavailableTitle"),
+      Текст: t(language, "client.excel.instruction.needHelp"),
     },
   ];
   return sheetFromRows(rows, { Блок: 18, Текст: 92 }, { freeze: true, currency: currencyCtx });
 }
 
 function summarySheet(project, items, branding, purchaseStatuses, merged) {
+  const language = projectClientLanguage(project);
   const budget = items.reduce((s, i) => s + lineGross(i), 0);
   const spent = items.filter((i) => isBoughtStatus(i.status)).reduce((s, i) => s + lineGross(i), 0);
   const bought = items.filter((i) => isBoughtStatus(i.status)).length;
   const progress = items.length ? Math.round((bought / items.length) * 100) : 0;
   const currencyCtx = projectCurrencyContext(project);
   const rows = [
-    { Поле: "Проект", Значение: project.name },
-    { Поле: "Клиент", Значение: project.client || "" },
-    { Поле: "Город", Значение: project.city || "" },
+    { Поле: t(language, "client.excel.summary.project"), Значение: project.name },
+    { Поле: t(language, "client.excel.summary.client"), Значение: project.client || "" },
+    { Поле: t(language, "client.excel.summary.city"), Значение: project.city || "" },
     {
-      Поле: "Валюта",
+      Поле: t(language, "client.excel.summary.currency"),
       Значение: excelCellText(
         currencyCtx.safe
           ? `${currencyCtx.code} (${currencyCtx.symbol})`
-          : `Валюта: ${currencyCtx.code}`,
+          : `${t(language, "client.excel.summary.currency")}: ${currencyCtx.code}`,
       ),
     },
-    { Поле: "Версия", Значение: project.version > 1 ? `v${project.version}` : "v1" },
-    { Поле: "Дата выгрузки", Значение: new Date().toLocaleDateString("ru-RU") },
-    { Поле: "Компания", Значение: branding.companyName || "Daogreen" },
-    { Поле: "Бюджет", Значение: roundMoney(budget) },
-    { Поле: "Куплено", Значение: roundMoney(spent) },
-    { Поле: "Осталось", Значение: roundMoney(Math.max(budget - spent, 0)) },
-    { Поле: "Готовность", Значение: `${progress}%` },
-    { Поле: "Позиций (детально)", Значение: items.length },
-    { Поле: "Уникальных к закупке", Значение: merged?.length ?? "" },
+    { Поле: t(language, "client.excel.summary.version"), Значение: project.version > 1 ? `v${project.version}` : "v1" },
+    { Поле: t(language, "client.excel.summary.exportDate"), Значение: new Date().toLocaleDateString(t(language, "client.pdf.dateLocale")) },
+    { Поле: t(language, "client.excel.summary.company"), Значение: branding.companyName || "Daogreen" },
+    { Поле: t(language, "client.excel.summary.budget"), Значение: roundMoney(budget) },
+    { Поле: t(language, "client.excel.summary.bought"), Значение: roundMoney(spent) },
+    { Поле: t(language, "client.excel.summary.remaining"), Значение: roundMoney(Math.max(budget - spent, 0)) },
+    { Поле: t(language, "client.excel.summary.readiness"), Значение: `${progress}%` },
+    { Поле: t(language, "client.excel.summary.itemsDetailed"), Значение: items.length },
+    { Поле: t(language, "client.excel.summary.itemsUnique"), Значение: merged?.length ?? "" },
   ];
   return sheetFromRows(rows, { Поле: 26, Значение: 28 }, { freeze: true, currency: currencyCtx });
 }
@@ -736,6 +816,7 @@ function mergedForRole(items, role, project = null) {
 }
 
 function moduleDetailSheet(items, project, purchaseStatuses) {
+  const language = projectClientLanguage(project);
   const currency = projectCurrencyContext(project);
   const groups = groupBy(items, "module");
   const rows = [];
@@ -743,8 +824,8 @@ function moduleDetailSheet(items, project, purchaseStatuses) {
   for (const [mod, list] of groups) {
     rows.push({
       "№": "",
-      Модуль: mod || "Без модуля",
-      Наименование: `— ${list.length} поз. —`,
+      Модуль: mod || t(language, "client.excel.moduleDetail.noModule"),
+      Наименование: t(language, "client.excel.moduleDetail.groupCount", { n: list.length }),
       Ед: "",
       Кол: "",
       Цена: "",
@@ -788,7 +869,11 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
   const wb = XLSX.utils.book_new();
 
   const append = (ws, name) => {
-    if (ws) XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+    if (ws) XLSX.utils.book_append_sheet(
+      wb,
+      localizeWorksheetSystemCells(ws, language, purchaseStatuses),
+      name.replace(/[\\/?*[\]:]/g, "_").slice(0, 31),
+    );
   };
 
   append(instructionSheet(project, purchaseItems, branding, merged), t(language, "client.excel.sheetName.instruction"));
