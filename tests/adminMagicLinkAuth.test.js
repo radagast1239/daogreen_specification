@@ -532,6 +532,31 @@ describe("magic-link frontend hash helpers", () => {
     expect(imageSource).not.toContain('credentials: "include"');
   });
 
+  it("admin request helper sends credentials include for admin calls only", () => {
+    const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const apiSource = fs.readFileSync(path.join(root, "src/lib/api.js"), "utf8");
+    expect(apiSource).toContain('credentials: admin ? "include" : "same-origin"');
+    expect(apiSource).toContain("revokeAllSessions");
+    expect(apiSource).not.toMatch(/credentials:\s*"include"[\s\S]{0,120}X-Client-Token/);
+  });
+
+  it("SettingsPage shows keyHint and one-time key copy UX", () => {
+    const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const settings = fs.readFileSync(path.join(root, "src/pages/admin/SettingsPage.jsx"), "utf8");
+    expect(settings).toContain("keyHint");
+    expect(settings).toContain("Скопируйте ключ сейчас");
+    expect(settings).toContain("Выйти на всех устройствах");
+    expect(settings).toContain("revokeAllSessions");
+    expect(settings).not.toContain("apiKey.slice");
+  });
+
+  it("login screen remains available as key fallback", () => {
+    const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const login = fs.readFileSync(path.join(root, "src/pages/admin/LoginPage.jsx"), "utf8");
+    expect(login).toContain("Ключ из");
+    expect(login).toContain("ADMIN_KEY");
+  });
+
   it("magic exchange rate limiter returns 429 at the non-production threshold", async () => {
     const { default: rateLimitedAuthApi } = await import("../backend/src/routes/authApi.js");
     const app = express();

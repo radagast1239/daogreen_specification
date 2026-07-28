@@ -8,6 +8,8 @@ import {
   createAdminSessionToken,
   serializeAdminSessionCookie,
   clearAdminSessionCookie,
+  getAllowedAdminOrigins,
+  isAllowedAdminOrigin,
 } from "../adminSession.js";
 
 const MAGIC_TOKEN_MAX = 512;
@@ -27,33 +29,15 @@ function publicMisconfigured(res) {
   return res.status(503).json({ error: getMagicLinkConfigurationError() || "Magic-link authentication is unavailable" });
 }
 
-function readAllowedOrigins() {
-  const isProduction = isProd();
-  const corsOrigins = process.env.CORS_ORIGIN?.split(",").map((s) => s.trim()).filter(Boolean);
-  const defaultProdOrigins = [PRODUCTION_ORIGIN];
-  return isProduction
-    ? defaultProdOrigins
-    : corsOrigins?.length
-    ? corsOrigins
-    : ["http://localhost:5173", "http://localhost:4173", "http://127.0.0.1:5173", "http://127.0.0.1:4173"];
-}
-
 function originAllowed(req) {
   const origin = req.headers.origin;
+  // Magic-link exchange: missing Origin allowed only outside production (dev smoke helpers).
   if (!origin || origin === "null") return !isProd();
-  if (isProd() && origin !== PRODUCTION_ORIGIN) return false;
-  const allowed = readAllowedOrigins();
-  if (allowed.includes(origin)) return true;
-  // Local smoke helpers
-  if (!isProd()) {
-    try {
-      const u = new URL(origin);
-      if (u.hostname === "localhost" || u.hostname === "127.0.0.1") return true;
-    } catch {
-      return false;
-    }
-  }
-  return false;
+  // Production magic-link: exact HTTPS origin only (stricter than general CORS list).
+  if (isProd()) return origin === PRODUCTION_ORIGIN;
+  if (isAllowedAdminOrigin(origin)) return true;
+  const allowed = getAllowedAdminOrigins();
+  return allowed.includes(origin);
 }
 
 function hostAllowed(req) {

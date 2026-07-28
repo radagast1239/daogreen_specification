@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { initRemoteDb, startDbBackupLoop, startLocalBackupLoop, backupStatus } from "./dbBackup.js";
 import { initDb, db, getDbPath } from "./db.js";
 import { adminAuthMiddleware } from "./auth.js";
+import { getAdminAccessMode } from "./adminSession.js";
 import { applySecurityMiddleware } from "./middleware/security.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,6 +39,7 @@ const { default: presetsApi } = await import("./routes/presets.js");
 const { default: suppliersApi } = await import("./routes/suppliersApi.js");
 const { default: mediaApi } = await import("./routes/media.js");
 const { default: frameDrawingsApi } = await import("./routes/frameDrawings.js");
+const { default: authApi } = await import("./routes/authApi.js");
 
 const isProd = process.env.NODE_ENV === "production";
 const corsOrigins = process.env.CORS_ORIGIN?.split(",").map((s) => s.trim()).filter(Boolean);
@@ -83,7 +85,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-const { default: authApi } = await import("./routes/authApi.js");
+// Magic-link exchange + logout — no admin middleware (sets/clears session cookie).
 app.use("/api/auth", authApi);
 
 app.use("/api/materials", adminAuth, materialsApi);
@@ -125,8 +127,12 @@ app.use((err, _req, res, _next) => {
 
 const server = app.listen(PORT, () => {
   console.log(`Daogreen Spec API → http://localhost:${PORT}`);
-  const keyHint = process.env.ADMIN_KEY || "(multi-key mode)";
-  console.log(`Admin key: ${typeof keyHint === "string" && keyHint.length > 8 ? `${keyHint.slice(0, 8)}…` : keyHint}`);
+  const mode = getAdminAccessMode();
+  console.log(
+    mode === "magic-link"
+      ? "Admin authentication configured: magic-link"
+      : "Admin authentication configured: key fallback"
+  );
 });
 
 async function gracefulShutdown(signal) {

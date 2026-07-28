@@ -10,7 +10,7 @@ import { loadProject, loadProjectItems, rowToProject } from "../db.js";
 import { projectTotals } from "../services/buildItems.js";
 import { getAnalytics } from "../services/analytics.js";
 import { getReportsR1Payload } from "../services/reportsR1.js";
-import { listAdminUsers, upsertAdminUser, deactivateAdminUser } from "../auth.js";
+import { listAdminUsers, createAdminUser, deactivateAdminUser, revokeAllAdminSessions } from "../auth.js";
 import { brandSettingsResponse } from "../services/clientBrand.js";
 import { publishRulesSettingsPayload } from "../services/publishRules.js";
 import { multerFileFilter } from "../services/uploadFilter.js";
@@ -243,14 +243,27 @@ router.get("/admin-users", (_req, res) => {
 });
 
 router.post("/admin-users", (req, res) => {
-  const { name, apiKey, active } = req.body;
-  if (!name?.trim() || !apiKey?.trim()) return res.status(400).json({ error: "name and apiKey required" });
-  res.status(201).json(upsertAdminUser({ name: name.trim(), apiKey: apiKey.trim(), active: active !== false }));
+  const { name, active } = req.body || {};
+  if (!name?.trim()) return res.status(400).json({ error: "name required" });
+  try {
+    // Server always generates the key; client-supplied apiKey is ignored.
+    const created = createAdminUser({ name: name.trim(), active: active !== false });
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || "Failed to create admin user", code: err.code });
+  }
 });
 
 router.delete("/admin-users/:id", (req, res) => {
   deactivateAdminUser(req.params.id);
   res.json({ ok: true });
+});
+
+router.post("/session/revoke-all", (req, res) => {
+  const isProd = process.env.NODE_ENV === "production";
+  const { version, clearCookie } = revokeAllAdminSessions({ isProd });
+  res.setHeader("Set-Cookie", clearCookie);
+  res.json({ ok: true, version });
 });
 
 router.get("/projects/:id/documents", (req, res) => {

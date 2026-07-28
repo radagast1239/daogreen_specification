@@ -64,6 +64,7 @@ async function request(path, { method = "GET", body, admin = true, token } = {})
     method,
     headers,
     body: effectiveBody != null ? JSON.stringify(effectiveBody) : undefined,
+    // Cookie sessions need credentials on admin calls; client-token mode stays same-origin.
     credentials: admin ? "include" : "same-origin",
   });
 
@@ -359,8 +360,20 @@ export const api = {
   getAnalytics: () => request("/api/admin/analytics"),
   getReportsR1: () => request("/api/admin/reports"),
   getAdminUsers: () => request("/api/admin/admin-users"),
-  createAdminUser: (data) => request("/api/admin/admin-users", { method: "POST", body: data }),
+  createAdminUser: (data) => request("/api/admin/admin-users", { method: "POST", body: { name: data?.name, active: data?.active } }),
   deleteAdminUser: (id) => request(`/api/admin/admin-users/${id}`, { method: "DELETE" }),
+  revokeAllSessions: () => request("/api/admin/session/revoke-all", { method: "POST", body: {} }),
+  logoutAdminSession: () =>
+    fetch(`${API}/api/auth/logout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: "{}",
+    }).then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      return data;
+    }),
   getDuplicates: () => request("/api/materials/meta/duplicates"),
   mergeMaterials: (keepId, duplicateId) =>
     request("/api/materials/merge", { method: "POST", body: { keepId, duplicateId } }),
