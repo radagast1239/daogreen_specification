@@ -1,27 +1,24 @@
-import { DONE_STATUSES } from "../data/modules.js";
 import {
-  lineNet,
-  lineVat,
-  lineGross,
-  clientVisibleItems,
   projectBudgetItems,
   clientPurchaseItems,
 } from "../lib/itemHelpers.js";
 import { lineVisibleToClient } from "../../shared/itemTypes.js";
 import {
-  shouldCountInPurchaseBudget,
   normalizePurchaseStatus,
   isPurchaseStatusCompleted,
 } from "../../shared/purchaseStatusRules.js";
+import {
+  computeItemsMoney,
+  computeLineMoney,
+  formatMoneyAmount,
+  lineActualGross,
+} from "../../shared/moneyCalc.js";
 
 import { uid as makeUid } from "../lib/ids.js";
 
 export const uid = makeUid;
 
-export const money = (n, currency = "₽") => {
-  const v = Math.round(Number(n) || 0);
-  return v.toLocaleString("ru-RU") + " " + currency;
-};
+export const money = (n, currency = "₽") => formatMoneyAmount(n, currency);
 
 export const num = (n) => {
   const v = Number(n) || 0;
@@ -42,43 +39,28 @@ export const formatQty = (qty, unit) => {
   return Number.isInteger(r) ? String(r) : String(r).replace(".", ",");
 };
 
-const factGross = (it) => {
-  const q = Number(it.qty) || 0;
-  const p = it.actualPrice != null ? Number(it.actualPrice) : Number(it.price) || 0;
-  const net = q * p;
-  return net + net * ((Number(it.vatRate) || 0) / 100);
-};
-
 export function projectTotals(project) {
-  const budgetItems = projectBudgetItems(project);
-  const budgetNet = budgetItems.reduce((s, i) => s + lineNet(i), 0);
-  const vatAmount = budgetItems.reduce((s, i) => s + lineVat(i), 0);
-  const budget = budgetNet + vatAmount;
-  const visible = clientVisibleItems(project);
+  const budgetAgg = computeItemsMoney(projectBudgetItems(project), { priceMode: "planned" });
+  const budgetNet = budgetAgg.netTotal;
+  const vatAmount = budgetAgg.vatTotal;
+  const budget = budgetAgg.grossTotal;
   const purchasePool = clientPurchaseItems(project);
-  const obligationPool = purchasePool.filter((i) => shouldCountInPurchaseBudget(i));
-  const done = purchasePool.filter((i) => DONE_STATUSES.includes(normalizePurchaseStatus(i)));
-  const spent = done
-    .filter((i) => {
-      const s = normalizePurchaseStatus(i);
-      return s === "bought" || s === "delivered";
-    })
-    .reduce((s, i) => s + factGross(i), 0);
+  const purchaseAgg = computeItemsMoney(purchasePool, {
+    priceMode: "planned",
+    contributeCheck: false,
+  });
+  const spent = purchaseAgg.purchasedTotal;
+  const remaining = purchaseAgg.remainingTotal;
   const doneCount = purchasePool.filter((i) => isPurchaseStatusCompleted(i)).length;
   const total = purchasePool.length;
   const progress = total ? Math.round((doneCount / total) * 100) : 0;
-  const openObligationGross = obligationPool
-    .filter((i) => {
-      const s = normalizePurchaseStatus(i);
-      return s !== "bought" && s !== "delivered";
-    })
-    .reduce((s, i) => s + lineGross(i), 0);
-  const remaining = Math.max(openObligationGross - spent, 0);
   const overrun = Math.max(spent - budget, 0);
   let economy = 0;
-  for (const i of done) {
-    const planned = lineGross(i);
-    const actual = factGross(i);
+  for (const i of purchasePool) {
+    const s = normalizePurchaseStatus(i);
+    if (s !== "bought" && s !== "delivered" && s !== "have") continue;
+    const planned = computeLineMoney(i, { priceMode: "planned", contributeCheck: false }).gross;
+    const actual = lineActualGross(i);
     if (actual < planned) economy += planned - actual;
   }
   return { budgetNet, vatAmount, budget, spent, remaining, overrun, economy, progress, total, doneCount };

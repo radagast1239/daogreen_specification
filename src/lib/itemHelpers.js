@@ -53,18 +53,15 @@ export function itemImageUrl(it) {
 
 export const VAT_RATES = [0, 5, 20];
 
-export function lineNet(it) {
-  if (!lineContributesToSum(it)) return 0;
-  return (Number(it.qty) || 0) * (Number(it.price) || 0);
-}
-
-export function lineVat(it) {
-  return lineNet(it) * ((Number(it.vatRate) || 0) / 100);
-}
-
-export function lineGross(it) {
-  return lineNet(it) + lineVat(it);
-}
+export {
+  lineNet,
+  lineVat,
+  lineGross,
+  computeLineMoney,
+  computeItemsMoney,
+  roundMoney,
+  formatMoneyAmount,
+} from "../../shared/moneyCalc.js";
 
 export function isPurchaseDone(it) {
   return DONE_STATUSES.includes(it?.status);

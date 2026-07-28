@@ -2,12 +2,10 @@
 
 import { buildClientPurchaseMergedRows } from "./clientPurchaseMerged.js";
 import { lineContributesToSum, lineVisibleToClient } from "./itemTypes.js";
-import { effectiveItemPrice } from "./materialCatalogSnapshot.js";
+import { computeLineMoney, roundMoney } from "./moneyCalc.js";
 
 function lineGross(it) {
-  if (!lineContributesToSum(it)) return 0;
-  const net = (Number(it.qty) || 0) * effectiveItemPrice(it);
-  return net + net * ((Number(it.vatRate) || 0) / 100);
+  return computeLineMoney(it, { priceMode: "actual" }).gross;
 }
 
 function adminPool(project) {
@@ -29,7 +27,7 @@ function summarizeRows(rows) {
   for (const it of rows) total += lineGross(it);
   return {
     count: rows.length,
-    total: Math.round(total),
+    total: roundMoney(total),
   };
 }
 
@@ -41,7 +39,7 @@ function summarizeMerged(rows) {
   }
   return {
     count: rows.length,
-    total: Math.round(total),
+    total: roundMoney(total),
   };
 }
 

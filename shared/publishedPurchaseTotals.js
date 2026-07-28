@@ -1,35 +1,28 @@
 /** Planned (published snapshot) vs actual purchase totals — do not mix labels. */
 
 import { lineContributesToSum, lineVisibleToClient } from "./itemTypes.js";
+import { computeLineMoney, roundMoney } from "./moneyCalc.js";
 
 function visiblePurchaseLines(items = []) {
   return (items || []).filter((it) => lineVisibleToClient(it) && lineContributesToSum(it));
 }
 
-function linePlannedGross(it) {
-  const unit = Number(it.price) || 0;
-  const net = (Number(it.qty) || 0) * unit;
-  return net + net * ((Number(it.vatRate) || 0) / 100);
-}
-
-function lineActualGross(it) {
-  const unit = it.actualPrice != null && it.actualPrice !== "" ? Number(it.actualPrice) : Number(it.price) || 0;
-  const net = (Number(it.qty) || 0) * unit;
-  return net + net * ((Number(it.vatRate) || 0) / 100);
-}
-
 /** Frozen planned total from published snapshot prices. */
 export function publishedPlannedTotal(items = []) {
   let total = 0;
-  for (const it of visiblePurchaseLines(items)) total += linePlannedGross(it);
-  return Math.round(total);
+  for (const it of visiblePurchaseLines(items)) {
+    total += computeLineMoney(it, { priceMode: "planned" }).gross;
+  }
+  return roundMoney(total);
 }
 
 /** Live actual purchase total (actualPrice overlay allowed). */
 export function actualPurchaseTotal(items = []) {
   let total = 0;
-  for (const it of visiblePurchaseLines(items)) total += lineActualGross(it);
-  return Math.round(total);
+  for (const it of visiblePurchaseLines(items)) {
+    total += computeLineMoney(it, { priceMode: "actual" }).gross;
+  }
+  return roundMoney(total);
 }
 
 /**

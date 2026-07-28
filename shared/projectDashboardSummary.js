@@ -7,6 +7,7 @@ import {
   isPurchasableLineType,
   isCoolingSpecItem,
 } from "./itemTypes.js";
+import { lineGross } from "./moneyCalc.js";
 import {
   computeReadinessStats,
   runPrePublishCheck,
@@ -57,11 +58,6 @@ function hasNoClientSubsection(it) {
   const subs = subsectionsForSection(section);
   if (!section || !subs.length) return false;
   return !subsection || !isSubsectionValid(section, subsection);
-}
-
-function lineGross(it) {
-  const net = (Number(it.qty) || 0) * (Number(it.price) || 0);
-  return net + net * ((Number(it.vatRate) || 0) / 100);
 }
 
 function emptyPurchaseStatusCounts() {

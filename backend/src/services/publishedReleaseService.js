@@ -374,9 +374,29 @@ export function getProjectReleaseInfo(project) {
   const plannedTotalPublished = publishedItems.length
     ? publishedPlannedTotal(publishedItems)
     : null;
+  const meta = publishedSnapshot?.projectMeta || null;
+  const publishedSnapshotMeta = meta
+    ? {
+        name: meta.name || "",
+        client: meta.client || "",
+        city: meta.city || "",
+        currency: meta.currency || "₽",
+        vat: !!meta.vat,
+        stellageCounts: Array.isArray(meta.stellageCounts)
+          ? meta.stellageCounts
+          : (publishedSnapshot?.stellageCounts || []),
+        versionNumber: Number(meta.versionNumber) || Number(release?.versionNumber) || 0,
+        comment: meta.comment || "",
+        id: meta.id || project?.id || "",
+      }
+    : null;
   return {
     publishedRelease: release,
     publishedSnapshotItems: publishedItems,
+    publishedSnapshotMeta,
+    publishedStellageCounts:
+      publishedSnapshot?.stellageCounts || publishedSnapshotMeta?.stellageCounts || [],
+    publishedDocumentManifest: publishedSnapshot?.documentManifest || [],
     hasUnpublishedChanges: unpublished.hasChanges,
     unpublishedSummary: {
       ...unpublished,
@@ -385,6 +405,7 @@ export function getProjectReleaseInfo(project) {
       totalDelta:
         plannedTotalPublished != null ? plannedTotalCurrent - plannedTotalPublished : plannedTotalCurrent,
     },
+    releaseSchema: publishedSnapshot?.schema || null,
   };
 }
 

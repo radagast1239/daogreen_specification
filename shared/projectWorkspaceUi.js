@@ -220,8 +220,8 @@ export function resolveFrameBomUiStatus({
 export const PROJECT_HEADER_PRIMARY_ACTIONS = [
   { key: "client_link", label: "Клиентская ссылка" },
   { key: "copy_link", label: "Скопировать ссылку" },
-  { key: "pdf", label: "PDF" },
-  { key: "excel", label: "Excel" },
+  { key: "pdf", label: "PDF клиента" },
+  { key: "excel", label: "Excel клиента" },
 ];
 
 /** Второстепенные действия в «Ещё». */
@@ -235,5 +235,5 @@ export const PROJECT_HEADER_MORE_ACTIONS = [
   { key: "approve_all", label: "Показать всё клиенту" },
   { key: "qr_link", label: "QR / Шаблон ссылки" },
   { key: "reset_link", label: "Сбросить ссылку" },
-  { key: "internal_excel", label: "Внутренний Excel" },
+  { key: "internal_excel", label: "Excel (рабочая)" },
 ];

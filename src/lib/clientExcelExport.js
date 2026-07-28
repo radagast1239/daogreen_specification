@@ -11,10 +11,15 @@ import {
   formatClientUnitPrice,
   resolveClientPurchaseStatusLabel,
 } from "../../shared/clientPurchaseRows.js";
+import { excelCurrencyNumFmt, formatMoneyAmount, roundMoney } from "../../shared/moneyCalc.js";
+import { excelCellText, safeExcelHyperlinkTarget } from "../../shared/excelSafeLink.js";
 
 export const CLIENT_EXCEL_BRAND = "#116355";
 export const CLIENT_EXCEL_BRAND_RGB = "116355";
-const RUB_NUMFMT = '#,##0" ₽"';
+
+function projectCurrency(project) {
+  return project?.currency || "₽";
+}
 
 /** Читаемые ширины колонок (символы Excel) — по эталону клиента. */
 export const CLIENT_EXCEL_COL_WIDTHS = {
@@ -410,8 +415,9 @@ function statusLabel(rowOrStatus, purchaseStatuses) {
   return purchaseStatuses.find((s) => s.id === id)?.label || resolveClientPurchaseStatusLabel(id);
 }
 
-function applyRubFormats(ws, headerNames, numericHeaders = ["Цена", "Сумма", "Бюджет", "Куплено", "Осталось", "Факт. цена"]) {
+function applyRubFormats(ws, headerNames, numericHeaders = ["Цена", "Сумма", "Бюджет", "Куплено", "Осталось", "Факт. цена"], currency = "₽") {
   if (!ws?.["!ref"]) return ws;
+  const numFmt = excelCurrencyNumFmt(currency);
   const cols = numericHeaders
     .map((h) => headerNames.indexOf(h))
     .filter((i) => i >= 0);
@@ -423,12 +429,12 @@ function applyRubFormats(ws, headerNames, numericHeaders = ["Цена", "Сум�
       const cell = ws[ref];
       if (!cell) continue;
       if (cell.t === "n") {
-        cell.z = RUB_NUMFMT;
+        cell.z = numFmt;
         continue;
       }
       if (typeof cell.v === "number" && Number.isFinite(cell.v)) {
         cell.t = "n";
-        cell.z = RUB_NUMFMT;
+        cell.z = numFmt;
       }
     }
   }
@@ -478,15 +484,15 @@ function mergedDataRow(r, index, purchaseStatuses) {
 }
 
 /** Лист со склеенными строками и кликабельными ссылками */
-function sheetFromMergedRows(rows, purchaseStatuses) {
+function sheetFromMergedRows(rows, purchaseStatuses, currency = "₽") {
   if (!rows?.length) return null;
   const dataRows = rows.map((r, i) => mergedDataRow(r, i, purchaseStatuses));
   const linkCol = MERGED_HEADERS.indexOf("Открыть товар");
-  const body = dataRows.map((r) => MERGED_HEADERS.map((h) => r[h] ?? ""));
+  const body = dataRows.map((r) => MERGED_HEADERS.map((h) => excelCellText(r[h] ?? "")));
   const ws = XLSX.utils.aoa_to_sheet([MERGED_HEADERS, ...body]);
 
   for (let i = 0; i < dataRows.length; i++) {
-    const link = dataRows[i]._link;
+    const link = safeExcelHyperlinkTarget(dataRows[i]._link);
     if (!link) continue;
     const ref = XLSX.utils.encode_cell({ r: i + 1, c: linkCol });
     const prev = ws[ref] || {};
@@ -498,16 +504,16 @@ function sheetFromMergedRows(rows, purchaseStatuses) {
     };
   }
 
-  applyRubFormats(ws, MERGED_HEADERS, ["Сумма", "Факт. цена", "Цена"]);
+  applyRubFormats(ws, MERGED_HEADERS, ["Сумма", "Факт. цена", "Цена"], currency);
   return applyPresentation(ws, MERGED_HEADERS, dataRows, { filter: true, freeze: true });
 }
 
-function sheetFromRows(rows, colWidths = {}, { filter = false, freeze = false } = {}) {
+function sheetFromRows(rows, colWidths = {}, { filter = false, freeze = false, currency = "₽" } = {}) {
   if (!rows?.length) return null;
   const headers = Object.keys(rows[0]).filter((k) => !k.startsWith("_"));
-  const data = [headers, ...rows.map((r) => headers.map((h) => r[h] ?? ""))];
+  const data = [headers, ...rows.map((r) => headers.map((h) => excelCellText(r[h] ?? "")))];
   const ws = XLSX.utils.aoa_to_sheet(data);
-  applyRubFormats(ws, headers);
+  applyRubFormats(ws, headers, undefined, currency);
   applyPresentation(ws, headers, rows, { filter, freeze });
   // allow explicit overrides after presentation defaults
   if (Object.keys(colWidths).length) {
@@ -518,22 +524,22 @@ function sheetFromRows(rows, colWidths = {}, { filter = false, freeze = false } 
   return ws;
 }
 
-function sheetFromRowsWithLinks(rows, linkHeader = "Ссылка", linkText = "Открыть", colWidths = {}) {
+function sheetFromRowsWithLinks(rows, linkHeader = "Ссылка", linkText = "Открыть", colWidths = {}, currency = "₽") {
   if (!rows?.length) return null;
   const headers = Object.keys(rows[0]).filter((k) => !k.startsWith("_"));
   const linkCol = headers.indexOf(linkHeader);
-  const body = rows.map((r) => headers.map((h) => r[h] ?? ""));
+  const body = rows.map((r) => headers.map((h) => excelCellText(r[h] ?? "")));
   const ws = XLSX.utils.aoa_to_sheet([headers, ...body]);
   if (linkCol >= 0) {
     for (let i = 0; i < rows.length; i++) {
-      const link = rows[i]._link;
+      const link = safeExcelHyperlinkTarget(rows[i]._link);
       if (!link) continue;
       const ref = XLSX.utils.encode_cell({ r: i + 1, c: linkCol });
       const prev = ws[ref] || {};
       ws[ref] = { ...prev, v: linkText, t: "s", l: { Target: link, Tooltip: link } };
     }
   }
-  applyRubFormats(ws, headers, ["Сумма", "Цена"]);
+  applyRubFormats(ws, headers, ["Сумма", "Цена"], currency);
   applyPresentation(ws, headers, rows, { filter: true, freeze: true });
   if (Object.keys(colWidths).length) {
     ws["!cols"] = headers.map((h) => ({
@@ -546,6 +552,7 @@ function sheetFromRowsWithLinks(rows, linkHeader = "Ссылка", linkText = "�
 function instructionSheet(project, items, branding, merged) {
   const budget = (items || []).reduce((s, i) => s + lineGross(i), 0);
   const unique = merged?.length ?? 0;
+  const currency = projectCurrency(project);
   const rows = [
     {
       Блок: "Проект",
@@ -565,7 +572,7 @@ function instructionSheet(project, items, branding, merged) {
     },
     {
       Блок: "Итого",
-      Текст: `${Math.round(budget)} ₽ · уникальных позиций: ${unique}`,
+      Текст: `${formatMoneyAmount(budget, currency)} · уникальных позиций: ${unique}`,
     },
     {
       Блок: "Компания",
@@ -618,7 +625,7 @@ function instructionSheet(project, items, branding, merged) {
         "Если позиции нет в наличии или не подходит — отметьте в онлайн-версии «Нужна помощь» или напишите Daogreen: подберём замену.",
     },
   ];
-  return sheetFromRows(rows, { Блок: 18, Текст: 92 }, { freeze: true });
+  return sheetFromRows(rows, { Блок: 18, Текст: 92 }, { freeze: true, currency });
 }
 
 function summarySheet(project, items, branding, purchaseStatuses, merged) {
@@ -626,6 +633,7 @@ function summarySheet(project, items, branding, purchaseStatuses, merged) {
   const spent = items.filter((i) => isBoughtStatus(i.status)).reduce((s, i) => s + lineGross(i), 0);
   const bought = items.filter((i) => isBoughtStatus(i.status)).length;
   const progress = items.length ? Math.round((bought / items.length) * 100) : 0;
+  const currency = projectCurrency(project);
   const rows = [
     { Поле: "Проект", Значение: project.name },
     { Поле: "Клиент", Значение: project.client || "" },
@@ -633,17 +641,17 @@ function summarySheet(project, items, branding, purchaseStatuses, merged) {
     { Поле: "Версия", Значение: project.version > 1 ? `v${project.version}` : "v1" },
     { Поле: "Дата выгрузки", Значение: new Date().toLocaleDateString("ru-RU") },
     { Поле: "Компания", Значение: branding.companyName || "Daogreen" },
-    { Поле: "Бюджет", Значение: Math.round(budget) },
-    { Поле: "Куплено", Значение: Math.round(spent) },
-    { Поле: "Осталось", Значение: Math.round(Math.max(budget - spent, 0)) },
+    { Поле: "Бюджет", Значение: roundMoney(budget) },
+    { Поле: "Куплено", Значение: roundMoney(spent) },
+    { Поле: "Осталось", Значение: roundMoney(Math.max(budget - spent, 0)) },
     { Поле: "Готовность", Значение: `${progress}%` },
     { Поле: "Позиций (детально)", Значение: items.length },
     { Поле: "Уникальных к закупке", Значение: merged?.length ?? "" },
   ];
-  return sheetFromRows(rows, { Поле: 26, Значение: 28 }, { freeze: true });
+  return sheetFromRows(rows, { Поле: 26, Значение: 28 }, { freeze: true, currency });
 }
 
-function mergedByCategorySheet(merged, purchaseStatuses) {
+function mergedByCategorySheet(merged, purchaseStatuses, currency = "₽") {
   const order = [...getClientSections().map((s) => s.label), "Уточнить категорию", "Прочее"];
   const sorted = [...merged].sort((a, b) => {
     const la = a.clientSectionLabel || "";
@@ -655,10 +663,10 @@ function mergedByCategorySheet(merged, purchaseStatuses) {
     if (sub !== 0) return sub;
     return (a.name || "").localeCompare(b.name || "", "ru");
   });
-  return sheetFromMergedRows(sorted, purchaseStatuses);
+  return sheetFromMergedRows(sorted, purchaseStatuses, currency);
 }
 
-function supplierMergedSheet(merged) {
+function supplierMergedSheet(merged, currency = "₽") {
   const rows = merged.map((r) => ({
     Поставщик: r.supplier || "—",
     Позиция: r.name,
@@ -677,7 +685,7 @@ function supplierMergedSheet(merged) {
     Раздел: 20,
     "Комментарий Daogreen": 55,
     Ссылка: 10,
-  });
+  }, currency);
 }
 
 function mergedForRole(items, role, project = null) {
@@ -688,6 +696,7 @@ function mergedForRole(items, role, project = null) {
 }
 
 function moduleDetailSheet(items, project, purchaseStatuses) {
+  const currency = projectCurrency(project);
   const groups = groupBy(items, "module");
   const rows = [];
   let n = 0;
@@ -699,7 +708,7 @@ function moduleDetailSheet(items, project, purchaseStatuses) {
       Ед: "",
       Кол: "",
       Цена: "",
-      Сумма: Math.round(list.reduce((s, i) => s + lineGross(i), 0)),
+      Сумма: roundMoney(list.reduce((s, i) => s + lineGross(i), 0)),
       Поставщик: "",
       "Статус закупки": "",
       Ссылка: "",
@@ -714,7 +723,7 @@ function moduleDetailSheet(items, project, purchaseStatuses) {
         Ед: it.unit,
         Кол: formatQty(it.qty, it.unit),
         Цена: it.price,
-        Сумма: Math.round(lineGross(it)),
+        Сумма: roundMoney(lineGross(it)),
         Поставщик: it.supplier || "",
         "Статус закупки": statusLabel(it, purchaseStatuses),
         Ссылка: it.link ? "Открыть" : "—",
@@ -725,10 +734,11 @@ function moduleDetailSheet(items, project, purchaseStatuses) {
   return sheetFromRowsWithLinks(rows, "Ссылка", "Открыть", {
     Модуль: 22,
     Наименование: 44,
-  });
+  }, currency);
 }
 
 export function buildClientWorkbook(project, items, { purchaseStatuses = [], branding = {}, versionInfo } = {}) {
+  const currency = projectCurrency(project);
   const purchaseItems = (items || []).filter((i) => i.itemRole !== "installation");
   const installItems = (items || []).filter(
     (i) => i.itemRole === "installation" || i.category === "Работы и доставка"
@@ -742,8 +752,8 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
 
   append(instructionSheet(project, purchaseItems, branding, merged), "01 Инструкция");
   append(summarySheet(project, purchaseItems, branding, purchaseStatuses, merged), "02 Итоги");
-  append(supplierMergedSheet(merged), "03 К закупке по поставщикам");
-  append(mergedByCategorySheet(merged, purchaseStatuses), "04 К закупке по разделам");
+  append(supplierMergedSheet(merged, currency), "03 К закупке по поставщикам");
+  append(mergedByCategorySheet(merged, purchaseStatuses, currency), "04 К закупке по разделам");
   // no_link позиции остаются только в обычных листах 03/04/… — отдельный «05 Без ссылок» не создаём.
 
   for (const [sheetName, role] of [
@@ -754,24 +764,37 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
     ["10 Клиент", "client"],
   ]) {
     const roleMerged = mergedForRole(purchaseItems, role, project);
-    if (roleMerged.length) append(sheetFromMergedRows(roleMerged, purchaseStatuses), sheetName);
+    if (roleMerged.length) append(sheetFromMergedRows(roleMerged, purchaseStatuses, currency), sheetName);
   }
 
   if (installItems.length) {
-    append(sheetFromMergedRows(buildClientPurchaseMergedRows(installItems, { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] }), purchaseStatuses), "10б Монтаж");
+    append(
+      sheetFromMergedRows(
+        buildClientPurchaseMergedRows(installItems, {
+          stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [],
+        }),
+        purchaseStatuses,
+        currency,
+      ),
+      "10б Монтаж",
+    );
   }
 
   append(moduleDetailSheet(purchaseItems, project, purchaseStatuses), "11 Детализация по модулям");
 
   if (versionInfo?.summary) {
     append(
-      sheetFromRows([
-        {
-          Версия: versionInfo.versionNumber,
-          Дата: versionInfo.createdAt || "",
-          Изменение: versionInfo.summary.delta ?? "",
-        },
-      ]),
+      sheetFromRows(
+        [
+          {
+            Версия: versionInfo.versionNumber,
+            Дата: versionInfo.createdAt || "",
+            Изменение: versionInfo.summary.delta ?? "",
+          },
+        ],
+        {},
+        { currency }
+      ),
       "12 Изменения"
     );
   }
@@ -780,13 +803,16 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
 }
 
 /** SheetJS CE почти не пишет стили — подменяем styles.xml на канон Daogreen. */
-export function buildClientExcelStylesXml() {
+export function buildClientExcelStylesXml(currency = "₽") {
   const bodySz = CLIENT_EXCEL_BODY_FONT_SIZE;
   const headSz = CLIENT_EXCEL_HEADER_FONT_SIZE;
+  const fmt = excelCurrencyNumFmt(currency)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
   <numFmts count="1">
-    <numFmt numFmtId="165" formatCode="#,##0&quot; ₽&quot;"/>
+    <numFmt numFmtId="165" formatCode="${fmt}"/>
   </numFmts>
   <fonts count="3" x14ac:knownFonts="1">
     <font><sz val="${bodySz}"/><color theme="1"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>
@@ -904,10 +930,10 @@ function patchSheetCurrencyCells(sheetXml) {
 }
 
 /** Пропатчить готовый xlsx: канонические стили Daogreen + wrap/borders/header. */
-export function patchClientExcelXlsxArray(arrayBuf) {
+export function patchClientExcelXlsxArray(arrayBuf, currency = "₽") {
   const u8 = arrayBuf instanceof Uint8Array ? arrayBuf : new Uint8Array(arrayBuf);
   const files = unzipSync(u8);
-  files["xl/styles.xml"] = strToU8(buildClientExcelStylesXml());
+  files["xl/styles.xml"] = strToU8(buildClientExcelStylesXml(currency));
 
   for (const key of Object.keys(files)) {
     if (!/^xl\/worksheets\/sheet\d+\.xml$/.test(key)) continue;
@@ -925,7 +951,7 @@ export function patchClientExcelXlsxArray(arrayBuf) {
 export function writeClientWorkbookArray(project, items, options = {}) {
   const wb = buildClientWorkbook(project, items, options);
   const raw = XLSX.write(wb, { bookType: "xlsx", type: "array", cellStyles: true });
-  return patchClientExcelXlsxArray(raw);
+  return patchClientExcelXlsxArray(raw, projectCurrency(project));
 }
 
 export function downloadClientWorkbook(project, items, options = {}) {

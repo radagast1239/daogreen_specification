@@ -1,21 +1,27 @@
 import * as XLSX from "xlsx";
 import { triggerDownload } from "./exportDownload.js";
+import { excelCellText, safeExcelHyperlinkTarget } from "../../shared/excelSafeLink.js";
 
-/** Скачать .xlsx с колонками (ссылки — гиперссылки) */
+/** Скачать .xlsx с колонками (ссылки — только безопасные http/https гиперссылки) */
 export function downloadXlsx(filename, rows, sheetName = "Спецификация", linkHeaders = ["Ссылка", "Фото", "Открыть товар"]) {
   if (!rows?.length) return;
   const headers = Object.keys(rows[0]).filter((k) => !k.startsWith("_"));
-  const data = [headers, ...rows.map((r) => headers.map((h) => r[h] ?? ""))];
+  const data = [
+    headers,
+    ...rows.map((r) => headers.map((h) => excelCellText(r[h] ?? ""))),
+  ];
   const ws = XLSX.utils.aoa_to_sheet(data);
   for (const linkHeader of linkHeaders) {
     const linkCol = headers.indexOf(linkHeader);
     if (linkCol < 0) continue;
     for (let i = 0; i < rows.length; i++) {
-      const link = rows[i]._link || (linkHeader === "Фото" ? rows[i]._photo : null);
+      const rawLink = rows[i]._link || (linkHeader === "Фото" ? rows[i]._photo : null);
+      const link = safeExcelHyperlinkTarget(rawLink);
       if (!link) continue;
       const ref = XLSX.utils.encode_cell({ r: i + 1, c: linkCol });
+      const label = excelCellText(rows[i][linkHeader] || "Открыть");
       ws[ref] = {
-        v: rows[i][linkHeader] || "Открыть",
+        v: label,
         t: "s",
         l: { Target: link, Tooltip: link },
       };

@@ -16,19 +16,9 @@ import {
   mergeClientItemNotes,
   resolveClientItemNote,
 } from "./clientPurchaseRows.js";
-import { lineContributesToSum } from "./itemTypes.js";
 import { buildPurchaseStatusSummary } from "./purchaseStatusRules.js";
 import { isFrameBomLine } from "./frameBomProjectItems.js";
-
-function lineNet(it) {
-  if (!lineContributesToSum(it)) return 0;
-  return (Number(it.qty) || 0) * (Number(it.price) || 0);
-}
-
-function lineGross(it) {
-  const net = lineNet(it);
-  return net + net * ((Number(it.vatRate) || 0) / 100);
-}
+import { lineGross, lineNet } from "./moneyCalc.js";
 
 function resolveMergedSupplier(items) {
   for (const it of items || []) {

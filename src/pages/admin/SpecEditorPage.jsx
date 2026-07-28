@@ -435,21 +435,30 @@ export default function SpecEditorPage() {
 
   const exportSpec = async () => {
     const { downloadXlsx } = await import("../../lib/exportXlsx.js");
-    const rows = project.items.map((it) => ({
-      Фото: absolutePhotoUrl(it.imageUrl || it.photoUrl),
-      Модуль: it.module,
-      Категория: it.category,
-      Наименование: it.name,
-      Ед: it.unit,
-      Кол: it.qty,
-      Цена: it.price,
-      Сумма: Math.round((it.qty || 0) * (it.price || 0)),
-      Ссылка: it.link,
-      Видно: it.visible ? "да" : "нет",
-      Утверждено: it.approved ? "да" : "нет",
-      Источник: it.source === "planner" ? `план: ${it.sourceType || ""}` : "ручная/модуль",
-    }));
-    downloadXlsx(`${project.name}_спецификация`, rows);
+    const { computeLineMoney, roundMoney } = await import("../../../shared/moneyCalc.js");
+    const draft = { ...project, exportKind: "draft" };
+    const currency = draft.currency || "₽";
+    const rows = (draft.items || []).map((it) => {
+      const money = computeLineMoney(it, { priceMode: "planned" });
+      return {
+        Фото: absolutePhotoUrl(it.imageUrl || it.photoUrl),
+        Модуль: it.module,
+        Категория: it.category,
+        Наименование: it.name,
+        Ед: it.unit,
+        Кол: it.qty,
+        Цена: it.price,
+        "НДС %": it.vatRate ?? 0,
+        Сумма: roundMoney(money.gross),
+        Ссылка: it.link,
+        _link: it.link || "",
+        _photo: absolutePhotoUrl(it.imageUrl || it.photoUrl) || "",
+        Видно: it.visible ? "да" : "нет",
+        Утверждено: it.approved ? "да" : "нет",
+        Источник: it.source === "planner" ? `план: ${it.sourceType || ""}` : "ручная/модуль",
+      };
+    });
+    downloadXlsx(`${draft.name || "project"}_спецификация_рабочая_${currency}`, rows);
   };
 
   const url = project.clientToken ? clientLink(project.clientToken) : "";
@@ -477,20 +486,17 @@ export default function SpecEditorPage() {
 
   const exportClientPdf = async () => {
     try {
-      const pool = project.publishedRelease && project.publishedSnapshotItems?.length
-        ? project.publishedSnapshotItems
-        : project.items;
-      const visibleItems = filterItemsForViewMode(pool, "client");
+      const { projectForAdminClientPdfExport, resolveAdminClientExportProject } = await import("../../lib/exportProjectContext.js");
+      const exportProject = resolveAdminClientExportProject(project);
+      const visibleItems = filterItemsForViewMode(exportProject.items || [], "client");
       if (!visibleItems.length) {
         error("Нет позиций для клиента");
         return;
       }
-      const exportProject = project.publishedRelease
-        ? { ...project, items: pool, version: project.publishedRelease.versionNumber }
-        : project;
       const { generateClientPurchasePdf } = await import("../../lib/clientPdfExport.js");
+      const pdfProject = projectForAdminClientPdfExport(project);
       await generateClientPurchasePdf({
-        project: exportProject,
+        project: pdfProject,
         items: visibleItems,
         branding: { companyName },
         purchaseStatuses: PURCHASE_STATUSES,
@@ -505,23 +511,20 @@ export default function SpecEditorPage() {
 
   const exportClientExcel = async () => {
     try {
-      const pool = project.publishedRelease && project.publishedSnapshotItems?.length
-        ? project.publishedSnapshotItems
-        : project.items;
-      const visibleItems = filterItemsForViewMode(pool, "client");
+      const { projectForAdminClientExcelExport, resolveAdminClientExportProject } = await import("../../lib/exportProjectContext.js");
+      const exportProject = resolveAdminClientExportProject(project);
+      const visibleItems = filterItemsForViewMode(exportProject.items || [], "client");
       if (!visibleItems.length) {
         error("Нет позиций для клиента");
         return;
       }
-      const exportProject = project.publishedRelease
-        ? { ...project, items: pool, version: project.publishedRelease.versionNumber }
-        : project;
       const { downloadClientWorkbook } = await import("../../lib/clientExcelExport.js");
+      const excelProject = projectForAdminClientExcelExport(project);
       await new Promise((r) => setTimeout(r, 0));
-      downloadClientWorkbook(exportProject, visibleItems, {
+      downloadClientWorkbook(excelProject, visibleItems, {
         purchaseStatuses: PURCHASE_STATUSES,
         branding: { companyName },
-        versionInfo: exportProject.version > 0 ? { versionNumber: exportProject.version } : null,
+        versionInfo: excelProject.version > 0 ? { versionNumber: excelProject.version } : null,
       });
     } catch (e) {
       error(e.message || "Ошибка Excel");
@@ -2305,6 +2308,7 @@ function MergedTab({ project }) {
   const mergedScrollRef = useRef(null);
   const exportMerged = async () => {
     const { downloadXlsx } = await import("../../lib/exportXlsx.js");
+    const { roundMoney } = await import("../../../shared/moneyCalc.js");
     downloadXlsx(
       `${project.name}_общий_список`,
       rows.map((r) => ({
@@ -2312,8 +2316,9 @@ function MergedTab({ project }) {
         Ед: r.unit,
         Кол: r.qty,
         Цена: r.price,
-        Сумма: Math.round(r.sum),
+        Сумма: roundMoney(r.sumVat ?? r.sum),
         Источники: r.sources.map((s) => `${s.module}: ${num(s.qty)}`).join("; "),
+        _link: r.link || "",
       }))
     );
   };

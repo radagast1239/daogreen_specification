@@ -70,6 +70,13 @@ export default function ProjectHqBar({
     [project, items, publishCheck]
   );
 
+  const pdfLabel = project?.publishedRelease?.versionNumber
+    ? `PDF клиента (опубл. v${project.publishedRelease.versionNumber})`
+    : "PDF клиента (рабочая)";
+  const excelLabel = project?.publishedRelease?.versionNumber
+    ? `Excel клиента (опубл. v${project.publishedRelease.versionNumber})`
+    : "Excel клиента (рабочая)";
+
   const purchaseSummary = useMemo(
     () => buildClientPurchaseSummary(items, materials),
     [items, materials]
@@ -195,10 +202,10 @@ export default function ProjectHqBar({
             {PROJECT_HEADER_PRIMARY_ACTIONS[1].label}
           </button>
           <button type="button" className="btn btn-sm" disabled={pdfDisabled} onClick={onExportPdf}>
-            {PROJECT_HEADER_PRIMARY_ACTIONS[2].label}
+            {pdfLabel}
           </button>
           <button type="button" className="btn btn-sm" disabled={excelDisabled} onClick={onExportExcel}>
-            {PROJECT_HEADER_PRIMARY_ACTIONS[3].label}
+            {excelLabel}
           </button>
             </>
           )}

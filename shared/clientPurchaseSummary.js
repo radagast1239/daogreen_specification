@@ -27,11 +27,6 @@ function purchasablePool(items) {
   });
 }
 
-function lineGross(it) {
-  const net = (Number(it.qty) || 0) * (Number(it.price) || 0);
-  return net + net * ((Number(it.vatRate) || 0) / 100);
-}
-
 export function resolveClientDeliverySourceLabel(item) {
   if (item?.frameBom || isFrameBomLine(item)) return FRAME_BOM_ADMIN_SOURCE_LABEL;
   return "Из спецификации";

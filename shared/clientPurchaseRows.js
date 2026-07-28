@@ -8,6 +8,7 @@ import {
   normalizePurchaseStatus,
 } from "./purchaseStatusRules.js";
 import { purchaseMergeKey as computePurchaseMergeKey } from "./purchaseMerge.js";
+import { computeLineMoney, roundMoney } from "./moneyCalc.js";
 
 export const NFT_CHANNEL_CLIENT_NOTE = "Используется как NFT-канал в схеме стеллажа.";
 export const CLIENT_PRICE_TBD = "цена уточняется";
@@ -161,12 +162,9 @@ export function formatClientLineTotal(row) {
   if (isClientCoolingPriceUnset(row)) return CLIENT_PRICE_TBD;
   if (!hasClientUnitPrice(row)) return "";
   const sumVat = Number(row.sumVat);
-  if (Number.isFinite(sumVat) && sumVat > 0) return Math.round(sumVat);
-  const qty = Number(row.qty) || 0;
-  const price = Number(row.price) || 0;
-  const vat = Number(row.vatRate) || 0;
-  const net = qty * price;
-  return Math.round(net + net * (vat / 100));
+  if (Number.isFinite(sumVat) && sumVat > 0) return roundMoney(sumVat);
+  const money = computeLineMoney(row, { priceMode: "planned", contributeCheck: false });
+  return roundMoney(money.gross);
 }
 
 export function formatPipeCutsNote(pipeCuts) {
