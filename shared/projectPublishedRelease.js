@@ -16,6 +16,7 @@ import {
 import { leanStellageCounts } from "./profilePipeCuts.js";
 import { normalizeDocumentManifest } from "./publishedDocumentManifest.js";
 import { normalizeProjectCurrency } from "./projectCurrency.js";
+import { projectClientLanguage } from "./projectClientLanguage.js";
 import { CLIENT_LIVE_PURCHASE_OVERLAY_FIELDS } from "./publishedLiveOverlays.js";
 
 export const RELEASE_SCHEMA_V1 = "release_v1";
@@ -140,6 +141,7 @@ export function buildReleaseSnapshotPayload(project, items = project?.items || [
     currencyName: cur.currencyName,
     currencyCustom: !!cur.currencyCustom,
     currencySymbol: cur.currencySymbol,
+    clientLanguage: projectClientLanguage(project),
     stellageCounts,
     ...(extras.projectMeta && typeof extras.projectMeta === "object" ? extras.projectMeta : {}),
   };
@@ -192,7 +194,9 @@ export function parseReleaseSnapshot(raw) {
     };
   }
   if (typeof raw === "object" && Array.isArray(raw.items)) {
-    const projectMeta = raw.projectMeta || null;
+    const projectMeta = raw.projectMeta
+      ? { ...raw.projectMeta, clientLanguage: projectClientLanguage(raw.projectMeta) }
+      : null;
     const schema = raw.schema || RELEASE_SCHEMA_V2;
     const stellageCounts = pickStellageCounts(raw, projectMeta);
     const documentManifest = normalizeDocumentManifest(raw.documentManifest || []);

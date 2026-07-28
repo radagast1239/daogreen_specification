@@ -32,9 +32,12 @@ import { groupClientFrameDocuments } from "../../../shared/frameDrawingTargets.j
 import { api } from "../../lib/api.js";
 import {
   classifyClientProjectLoadError,
-  clientProjectLoadMessage,
   CLIENT_LOAD_ERROR,
 } from "../../../shared/clientProjectLoadState.js";
+import {
+  clientProjectLoadMessageI18n,
+  normalizeClientLanguage,
+} from "../../../shared/clientI18n.js";
 
 function clientPageStyle(branding) {
   const brand = branding.brandColor || "#116355";
@@ -71,6 +74,16 @@ export default function ClientProjectPage() {
     typeof window !== "undefined" ? !window.matchMedia("(max-width: 860px)").matches : true
   );
   const [revisionConflict, setRevisionConflict] = useState(null);
+  const clientLanguage = normalizeClientLanguage(data?.project?.clientLanguage);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const previous = document.documentElement.lang;
+    document.documentElement.lang = clientLanguage;
+    return () => {
+      document.documentElement.lang = previous;
+    };
+  }, [clientLanguage]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -122,7 +135,7 @@ export default function ClientProjectPage() {
   }
 
   if (err === "expired") {
-    const msg = clientProjectLoadMessage(CLIENT_LOAD_ERROR.EXPIRED);
+    const msg = clientProjectLoadMessageI18n(clientLanguage, "EXPIRED");
     return (
       <div className="client-wrap" style={{ paddingTop: 60 }}>
         <Empty title={msg.title} hint={msg.hint} />
@@ -131,7 +144,7 @@ export default function ClientProjectPage() {
   }
 
   if (err === "not_published") {
-    const msg = clientProjectLoadMessage(CLIENT_LOAD_ERROR.NOT_PUBLISHED);
+    const msg = clientProjectLoadMessageI18n(clientLanguage, "NOT_PUBLISHED");
     return (
       <div className="client-wrap" style={{ paddingTop: 60 }}>
         <Empty title={msg.title} hint={msg.hint} />
@@ -141,7 +154,10 @@ export default function ClientProjectPage() {
 
   if (err === "notfound" || err === "network") {
     const kind = err === "notfound" ? CLIENT_LOAD_ERROR.NOT_FOUND : CLIENT_LOAD_ERROR.NETWORK;
-    const msg = clientProjectLoadMessage(kind);
+    const msg = clientProjectLoadMessageI18n(
+      clientLanguage,
+      kind === CLIENT_LOAD_ERROR.NOT_FOUND ? "NOT_FOUND" : "NETWORK",
+    );
     return (
       <div className="client-wrap" style={{ paddingTop: 60 }}>
         <Empty title={msg.title} hint={msg.hint} />

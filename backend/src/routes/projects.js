@@ -70,6 +70,10 @@ import {
   resolveCurrencyPersistFromBody,
   defaultCurrencyPersist,
 } from "../../../shared/projectCurrency.js";
+import {
+  normalizeProjectClientLanguage,
+  resolveClientLanguagePatch,
+} from "../../../shared/projectClientLanguage.js";
 import { validateProjectItemsForSave, validateSingleProjectItem } from "../services/projectItemValidation.js";
 import {
   buildClientProjectFromRelease,
@@ -446,6 +450,8 @@ export function createProject(body) {
     stripIncomingCurrencyMeta(body.manualParams || {}),
     currencyPersist,
   );
+  manualParams.clientLanguage = resolveClientLanguagePatch(body)
+    ?? normalizeProjectClientLanguage(manualParams.clientLanguage);
 
   const id = uid("p");
   INSERT_PROJECT.run(projectInsertRow({
@@ -495,6 +501,8 @@ export function updateProject(id, patch) {
       ...(base.manualParams || {}),
       ...(patchMp || {}),
     };
+    const clientLanguage = resolveClientLanguagePatch(patch);
+    if (clientLanguage !== undefined) manualParams.clientLanguage = clientLanguage;
     // Keep existing currencyMeta unless this patch validates a new currency.
     if (base.manualParams?.currencyMeta && !currencyPersist) {
       manualParams.currencyMeta = base.manualParams.currencyMeta;
@@ -1177,7 +1185,7 @@ api.post("/", (req, res) => {
     res.status(201).json(createProject(req.body));
   } catch (e) {
     if (revisionErrorResponse(res, e)) return;
-    if (e.code === "PROJECT_CURRENCY_INVALID") {
+    if (e.code === "PROJECT_CURRENCY_INVALID" || e.code === "PROJECT_CLIENT_LANGUAGE_INVALID") {
       return res.status(400).json({ error: e.message, code: e.code });
     }
     res.status(400).json({ error: e.message });
@@ -1197,7 +1205,7 @@ api.patch("/:id", (req, res) => {
     if (e.code === "ITEM_VALIDATION") {
       return res.status(400).json({ error: e.message, details: e.details, code: e.code });
     }
-    if (e.code === "PROJECT_CURRENCY_INVALID") {
+    if (e.code === "PROJECT_CURRENCY_INVALID" || e.code === "PROJECT_CLIENT_LANGUAGE_INVALID") {
       return res.status(400).json({ error: e.message, code: e.code });
     }
     return res.status(400).json({ error: e.message, code: e.code });

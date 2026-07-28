@@ -1,6 +1,7 @@
 /** Guided creation of a real client project (pure helpers, no DB). */
 
 import { PROJECT_STATUS, resolveProjectStatusForSave } from "./projectStatus.js";
+import { normalizeProjectClientLanguage } from "./projectClientLanguage.js";
 
 export const PROJECT_KIND = {
   CLIENT: "client",
@@ -101,6 +102,9 @@ export function buildNewProjectPayload(formState = {}) {
 
   const manualParams = {
     ...baseManual,
+    clientLanguage: normalizeProjectClientLanguage(
+      formState.clientLanguage ?? baseManual.clientLanguage,
+    ),
     projectKind: kind,
     createScenario: scenario,
     notes: notes || baseManual.notes || "",

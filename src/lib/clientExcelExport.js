@@ -18,6 +18,8 @@ import {
   isExcelNumFmtSafeSymbol,
   resolveMoneyDisplaySymbol,
 } from "../../shared/projectCurrency.js";
+import { t } from "../../shared/clientI18n.js";
+import { projectClientLanguage } from "../../shared/projectClientLanguage.js";
 
 export const CLIENT_EXCEL_BRAND = "#116355";
 export const CLIENT_EXCEL_BRAND_RGB = "116355";
@@ -776,6 +778,7 @@ function moduleDetailSheet(items, project, purchaseStatuses) {
 }
 
 export function buildClientWorkbook(project, items, { purchaseStatuses = [], branding = {}, versionInfo } = {}) {
+  const language = projectClientLanguage(project);
   const currency = projectCurrencyContext(project);
   const purchaseItems = (items || []).filter((i) => i.itemRole !== "installation");
   const installItems = (items || []).filter(
@@ -788,18 +791,18 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
     if (ws) XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
   };
 
-  append(instructionSheet(project, purchaseItems, branding, merged), "01 Инструкция");
-  append(summarySheet(project, purchaseItems, branding, purchaseStatuses, merged), "02 Итоги");
-  append(supplierMergedSheet(merged, currency), "03 К закупке по поставщикам");
-  append(mergedByCategorySheet(merged, purchaseStatuses, currency), "04 К закупке по разделам");
+  append(instructionSheet(project, purchaseItems, branding, merged), t(language, "client.excel.sheetName.instruction"));
+  append(summarySheet(project, purchaseItems, branding, purchaseStatuses, merged), t(language, "client.excel.sheetName.summary"));
+  append(supplierMergedSheet(merged, currency), t(language, "client.excel.sheetName.suppliers"));
+  append(mergedByCategorySheet(merged, purchaseStatuses, currency), t(language, "client.excel.sheetName.bySection"));
   // no_link позиции остаются только в обычных листах 03/04/… — отдельный «05 Без ссылок» не создаём.
 
   for (const [sheetName, role] of [
-    ["06 Сантехник", "plumber"],
-    ["07 Электрик", "electrician"],
-    ["08 Монтажник", "installer"],
-    ["09 Климат", "climate"],
-    ["10 Клиент", "client"],
+    [t(language, "client.excel.sheetName.plumber"), "plumber"],
+    [t(language, "client.excel.sheetName.electric"), "electrician"],
+    [t(language, "client.excel.sheetName.installer"), "installer"],
+    [t(language, "client.excel.sheetName.climate"), "climate"],
+    [t(language, "client.excel.sheetName.client"), "client"],
   ]) {
     const roleMerged = mergedForRole(purchaseItems, role, project);
     if (roleMerged.length) append(sheetFromMergedRows(roleMerged, purchaseStatuses, currency), sheetName);
@@ -814,11 +817,11 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
         purchaseStatuses,
         currency,
       ),
-      "10б Монтаж",
+      t(language, "client.excel.sheetName.install"),
     );
   }
 
-  append(moduleDetailSheet(purchaseItems, project, purchaseStatuses), "11 Детализация по модулям");
+  append(moduleDetailSheet(purchaseItems, project, purchaseStatuses), t(language, "client.excel.sheetName.moduleDetail"));
 
   if (versionInfo?.summary) {
     append(
@@ -833,7 +836,7 @@ export function buildClientWorkbook(project, items, { purchaseStatuses = [], bra
         {},
         { currency }
       ),
-      "12 Изменения"
+      t(language, "client.excel.sheetName.changes")
     );
   }
 
@@ -1001,9 +1004,10 @@ export function downloadClientWorkbook(project, items, options = {}) {
   const projectRef = project || { name: "проект", version: 1 };
   const safeName = (projectRef.name || "проект").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
   const ver = projectRef.version > 1 ? `_v${projectRef.version}` : "";
+  const language = projectClientLanguage(projectRef);
   const out = writeClientWorkbookArray(project, items, options);
   triggerDownload(
     new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-    `Daogreen_Закупочный_лист_${safeName}${ver}.xlsx`
+    `${t(language, "client.excel.filenameTemplate", { name: safeName, version: ver })}.xlsx`
   );
 }

@@ -41,6 +41,7 @@ function parseSummaryColumn(raw) {
   }
 }
 import { normalizeProjectCurrency } from "../../../shared/projectCurrency.js";
+import { projectClientLanguage } from "../../../shared/projectClientLanguage.js";
 
 export function loadVersionRow(projectId, versionId) {
   const row = db
@@ -166,6 +167,7 @@ function metaFromSnapshot(projectMeta, workingProject) {
   out.currencyName = cur.currencyName;
   out.currencyCustom = !!cur.currencyCustom;
   out.id = workingProject?.id || meta.id || "";
+  out.clientLanguage = projectClientLanguage(meta);
   out.revision = Number(workingProject?.revision) || 1;
   return out;
 }
@@ -436,6 +438,7 @@ export function getProjectReleaseInfo(project) {
           stellageCounts: Array.isArray(meta.stellageCounts) ? meta.stellageCounts : (publishedSnapshot?.stellageCounts || []),
           versionNumber: Number(meta.versionNumber) || Number(release?.versionNumber) || 0,
           comment: meta.comment || "",
+          clientLanguage: projectClientLanguage(meta),
           id: meta.id || project?.id || "",
         };
       })()

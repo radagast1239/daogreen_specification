@@ -17,6 +17,8 @@ import { buildPdfPhotoMap, pdfPhotoTableHooks, PDF_PHOTO_COL_WIDTH_MM } from "./
 import { safePdfText, safePdfPhotoCell } from "./pdfSafeValue.js";
 import { buildClientPdfRowLabel } from "../../shared/clientPurchaseRows.js";
 import { formatMoneyForPdf, normalizeProjectCurrency } from "../../shared/projectCurrency.js";
+import { t } from "../../shared/clientI18n.js";
+import { projectClientLanguage } from "../../shared/projectClientLanguage.js";
 
 function pdfMoney(amount, projectOrCurrency) {
   if (projectOrCurrency && typeof projectOrCurrency === "object" && !Array.isArray(projectOrCurrency)) {
@@ -731,6 +733,7 @@ export async function generateClientPurchasePdf({
   mode = "client_full",
   clientToken,
 }) {
+  const language = projectClientLanguage(project);
   if (mode === "flat") {
     return generateProjectPdf({ project, items, branding, purchaseStatuses, pageUrl });
   }
@@ -786,5 +789,9 @@ export async function generateClientPurchasePdf({
   const safeName = (project.name || "проект").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
   const ver = project.version > 1 ? `_v${project.version}` : "";
   const suffix = modeSuffix[resolvedMode] ?? "";
-  doc.save(`Daogreen_Закупочный_лист_${safeName}${ver}${suffix}.pdf`);
+  doc.save(`${t(language, "client.pdf.filenameTemplate", {
+    name: safeName,
+    version: ver,
+    suffix,
+  })}.pdf`);
 }

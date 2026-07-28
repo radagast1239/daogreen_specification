@@ -405,6 +405,7 @@ const DICTIONARY = Object.freeze({
     "client.pdf.filenameSuffix.consumables": "_consumables",
     "client.pdf.filenameSuffix.clientRole": "_client",
     "client.pdf.filenameProject": "project",
+    "client.pdf.filenameTemplate": "Спецификация_{name}{version}{suffix}",
     "client.pdf.dateLocale": "ru-RU",
 
     "client.pdfExport.modalTitle": "Скачать PDF",
@@ -544,7 +545,7 @@ const DICTIONARY = Object.freeze({
     "client.excel.moduleDetail.noModule": "Без модуля",
     "client.excel.moduleDetail.groupCount": "— {n} поз. —",
     "client.excel.filenameProject": "project",
-    "client.excel.filenameTemplate": "Specification_{name}_v{version}",
+    "client.excel.filenameTemplate": "Спецификация_{name}{version}",
 
     "client.docs.title": "Документы",
     "client.docs.description": "Excel — полная книга закупки. PDF — выберите формат: компактный список или полный комплект с разделами и специалистами.",
@@ -1003,6 +1004,7 @@ const DICTIONARY = Object.freeze({
     "client.pdf.filenameSuffix.consumables": "_consumables",
     "client.pdf.filenameSuffix.clientRole": "_client",
     "client.pdf.filenameProject": "project",
+    "client.pdf.filenameTemplate": "Specification_{name}{version}{suffix}",
     "client.pdf.dateLocale": "en-GB",
 
     "client.pdfExport.modalTitle": "Download PDF",
@@ -1142,7 +1144,7 @@ const DICTIONARY = Object.freeze({
     "client.excel.moduleDetail.noModule": "No module",
     "client.excel.moduleDetail.groupCount": "— {n} items —",
     "client.excel.filenameProject": "project",
-    "client.excel.filenameTemplate": "Specification_{name}_v{version}",
+    "client.excel.filenameTemplate": "Specification_{name}{version}",
 
     "client.docs.title": "Documents",
     "client.docs.description": "Excel — full purchase workbook. PDF — choose a format: compact list or full kit with sections and specialists.",
@@ -1253,7 +1255,11 @@ export function t(language, key, params) {
 }
 
 export function tStatus(language, statusId) {
-  return t(language, `client.status.${statusId}`) || t(language, "client.status.not_bought");
+  const key = `client.status.${statusId}`;
+  if (typeof DICTIONARY[normalizeClientLanguage(language)]?.[key] !== "string") {
+    return String(statusId || "");
+  }
+  return t(language, key);
 }
 
 const STANDARD_UNIT_MAP = Object.freeze({
@@ -1278,14 +1284,21 @@ export function tUnit(language, rawUnit) {
 
 export function tError(language, code) {
   const key = `client.error.${code}`;
-  const title = t(language, `${key}.title`);
-  if (title === `[${key}.title]`) {
+  const lang = normalizeClientLanguage(language);
+  if (typeof DICTIONARY[lang]?.[`${key}.title`] !== "string") {
     return {
       title: t(language, "client.error.unknown.title"),
       hint: t(language, "client.error.unknown.hint"),
     };
   }
-  return { title, hint: t(language, `${key}.hint`) };
+  return {
+    title: t(language, `${key}.title`),
+    hint: t(language, `${key}.hint`),
+  };
+}
+
+export function clientI18nKeys(language = CLIENT_LANGUAGE_DEFAULT) {
+  return Object.keys(DICTIONARY[normalizeClientLanguage(language)] || {}).sort();
 }
 
 export function clientProjectLoadMessageI18n(language, kind) {

@@ -1142,6 +1142,16 @@ export default function SpecEditorPage() {
           hidden={!(workspaceView === "design" || (workspaceView === "spec" && tab === "spec"))}
         >
           <div className={workspaceView === "spec" && tab === "spec" ? undefined : "pw-pane--inactive"}>
+            <label className="field" style={{ maxWidth: 260, marginBottom: 14 }}>
+              Язык клиентской версии
+              <select
+                value={project.manualParams?.clientLanguage || "ru"}
+                onChange={(event) => saveManualParam("clientLanguage", event.target.value)}
+              >
+                <option value="ru">Русский</option>
+                <option value="en">English</option>
+              </select>
+            </label>
             <ProjectCoolingSummary
               project={project}
               onOpenCalc={() => {
