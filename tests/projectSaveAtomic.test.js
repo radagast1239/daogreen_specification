@@ -173,7 +173,7 @@ describe("1. успешное полное сохранение", () => {
     });
 
     const release = loadPublishedReleaseSnapshot(saved);
-    expect(release.schema).toBe("release_v3");
+    expect(release.schema).toBe("release_v4");
     expect(release.assetsPinned).toBe(true);
     expect(release.projectMeta.name).toBe("Опубликованный проект");
     expect(release.items).toMatchObject([{ id: "published-item", qty: 3, price: 8500 }]);

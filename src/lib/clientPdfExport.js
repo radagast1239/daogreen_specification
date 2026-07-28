@@ -98,7 +98,11 @@ function rowPurchaseMeta(row) {
 }
 
 /** Позиции «что купить в первую очередь» — pure helper для обложки и тестов. */
-export function pickPriorityPurchaseItems(items, maxLines = 7, project = null) {
+export function pickPriorityPurchaseItems(items, maxLines = 7, projectOrLanguage = null) {
+  const project = projectOrLanguage && typeof projectOrLanguage === "object" ? projectOrLanguage : null;
+  const language = typeof projectOrLanguage === "string"
+    ? projectOrLanguage
+    : projectClientLanguage(project);
   const purchaseItems = (items || []).filter((i) => i.itemRole !== "installation");
   const merged = buildClientPurchaseMergedRows(purchaseItems, mergeOpts(project));
   const picked = [];

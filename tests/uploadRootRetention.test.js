@@ -128,9 +128,9 @@ describe("UPLOAD_ROOT storage contract", () => {
     expect(path.resolve(localUploadDir())).toBe(path.resolve(tempUploads));
     expect(path.resolve(getUploadRoot())).toBe(path.resolve(tempUploads));
     const url = await saveFile(Buffer.from("hello-root"), "root-test.png");
-    expect(url).toBe("/uploads/root-test.png");
-    expect(fs.existsSync(path.join(tempUploads, "root-test.png"))).toBe(true);
-    expect(fs.readFileSync(path.join(tempUploads, "root-test.png"), "utf8")).toBe("hello-root");
+    expect(url).toBe("/uploads/public/root-test.png");
+    expect(fs.existsSync(path.join(tempUploads, "public", "root-test.png"))).toBe(true);
+    expect(fs.readFileSync(path.join(tempUploads, "public", "root-test.png"), "utf8")).toBe("hello-root");
   });
 
   it("static /uploads serves files from the same UPLOAD_ROOT", async () => {
@@ -212,7 +212,7 @@ describe("UPLOAD_ROOT storage contract", () => {
   });
 
   it("saveFile refuses overwrite of pinned path", async () => {
-    const url = writeUpload("same.png", "v1");
+    const url = writeUpload("public/same.png", "v1");
     db.prepare(`
       INSERT INTO projects (id, name, client_token, status, manual_params, currency, vat)
       VALUES ('p1', 'P', 'tok-ow', 'active', ?, '₽', 1)
@@ -222,7 +222,7 @@ describe("UPLOAD_ROOT storage contract", () => {
     saveItems("p1", [item("it1")]);
     createVersion("p1", "admin", { force: true });
     await expect(saveFile(Buffer.from("v2"), "same.png")).rejects.toThrow(/закреплён/);
-    expect(fs.readFileSync(path.join(tempUploads, "same.png"), "utf8")).toBe("v1");
+    expect(fs.readFileSync(path.join(tempUploads, "public", "same.png"), "utf8")).toBe("v1");
   });
 });
 

@@ -231,7 +231,8 @@ describe("frame drawing pins", () => {
     expect(latest.find((d) => d.type === "frame_drawing").url).toBe(url2);
 
     const pinnedDocs = resolveClientDocumentsForRelease("p1", snap1);
-    expect(pinnedDocs.find((d) => d.type === "frame_drawing").url).toBe(url1);
+    expect(pinnedDocs.find((d) => d.type === "frame_drawing").url)
+      .toMatch(/^\/uploads\/releases\/p1\/[^/]+\/d1\.pdf$/);
     expect(pinnedDocs.find((d) => d.type === "frame_drawing").drawingVersion).toBe(1);
 
     createVersion("p1", "admin", { force: true });
@@ -267,7 +268,7 @@ describe("frame drawing pins", () => {
       pinnedFrameDrawings: [],
     };
     const docs = resolveClientDocumentsForRelease("p1", parseReleaseSnapshot(legacySnap));
-    expect(docs).toBeNull();
+    expect(docs).toEqual([]);
   });
 });
 

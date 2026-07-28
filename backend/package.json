@@ -10,6 +10,7 @@
     "photos:excel": "node scripts/importExcelPhotosBatch.mjs",
     "farm:sync": "node scripts/syncFarmSections.mjs",
     "import:materials-map": "node scripts/importMaterialsNamingMap.js",
+    "migrate:legacy-public-uploads": "node scripts/migrateLegacyPublicUploads.mjs",
     "apply:materials-modules": "node scripts/applyMaterialsModuleMap.js",
     "seed": "node src/seed.js"
   },

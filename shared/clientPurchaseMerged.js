@@ -19,6 +19,7 @@ import {
 import { buildPurchaseStatusSummary } from "./purchaseStatusRules.js";
 import { isFrameBomLine } from "./frameBomProjectItems.js";
 import { lineGross, lineNet } from "./moneyCalc.js";
+import { lineContributesToSum } from "./itemTypes.js";
 
 function resolveMergedSupplier(items) {
   for (const it of items || []) {

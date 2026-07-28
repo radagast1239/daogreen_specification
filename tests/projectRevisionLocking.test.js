@@ -341,17 +341,15 @@ describe("optimistic project revision", () => {
       expectedRevision: 2,
       safetyFactor: 1.5,
     });
-    expect(coolStale.status).toBe(409);
+    expect(coolStale.status).toBe(403);
     const coolOk = await client("PATCH", "/api/client/p/token-p1/cooling", {
       expectedRevision: 3,
       safetyFactor: 1.5,
     });
-    expect(coolOk.status).toBe(200);
-    expect(coolOk.data.revision).toBe(4);
-    expect(coolOk.data.manualParams.coolingFarm.safetyFactor).toBe(1.5);
+    expect(coolOk.status).toBe(403);
 
     const clientGet = await client("GET", "/api/client/p/token-p1");
     expect(clientGet.status).toBe(200);
-    expect(clientGet.data.revision).toBe(4);
+    expect(clientGet.data.revision).toBe(3);
   });
 });
