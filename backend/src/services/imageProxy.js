@@ -1,10 +1,11 @@
 import fs from "fs/promises";
 import path from "path";
-import { fileURLToPath } from "url";
+import { resolveUploadRoot } from "./uploadRoot.js";
+import { uploadsRelativeFromUrl, resolvePathInsideUploadRoot } from "./uploadValidation.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadDir = path.join(__dirname, "../../uploads");
 const MAX_BYTES = 5 * 1024 * 1024;
+
+const PRIVATE_PREFIXES = ["frame-drawings/", "releases/", "projects/"];
 
 function isPrivateHost(hostname) {
   const h = String(hostname || "").toLowerCase();
@@ -21,13 +22,42 @@ function isPrivateHost(hostname) {
   return false;
 }
 
-export function parseProxyImageUrl(raw) {
+function isPrivateUploadRel(rel) {
+  const r = String(rel || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  return PRIVATE_PREFIXES.some((p) => r === p.slice(0, -1) || r.startsWith(p));
+}
+
+/**
+ * @param {string} raw
+ * @param {{ allowPrivate?: boolean }} [opts]
+ *   allowPrivate — admin media may read private prefixes; client media must not.
+ */
+export function parseProxyImageUrl(raw, opts = {}) {
+  const allowPrivate = !!opts.allowPrivate;
   const url = String(raw || "").trim();
   if (!url) return { error: "URL required" };
   if (url.startsWith("/uploads/")) {
-    const base = path.basename(url);
-    if (!base || base.includes("..")) return { error: "Invalid upload path" };
-    return { kind: "local", filePath: path.join(uploadDir, base) };
+    const rel = uploadsRelativeFromUrl(url);
+    if (!rel) return { error: "Invalid upload path" };
+    if (!allowPrivate && isPrivateUploadRel(rel)) {
+      return { error: "URL not allowed" };
+    }
+    // Public catalog: only /uploads/public/... (and legacy root files for materials — deny by default
+    // unless under public/ when not allowPrivate). Legacy root material photos: allow if not private prefix.
+    if (!allowPrivate) {
+      const isPublic = rel === "public" || rel.startsWith("public/");
+      const isLegacyRootFile = !rel.includes("/") && !isPrivateUploadRel(rel);
+      if (!isPublic && !isLegacyRootFile) {
+        return { error: "URL not allowed" };
+      }
+    }
+    try {
+      const uploadDir = resolveUploadRoot();
+      const filePath = resolvePathInsideUploadRoot(uploadDir, rel);
+      return { kind: "local", filePath, rel };
+    } catch {
+      return { error: "Invalid upload path" };
+    }
   }
   let parsed;
   try {
@@ -40,8 +70,8 @@ export function parseProxyImageUrl(raw) {
   return { kind: "remote", url: parsed.toString() };
 }
 
-export async function loadProxyImage(rawUrl) {
-  const parsed = parseProxyImageUrl(rawUrl);
+export async function loadProxyImage(rawUrl, opts = {}) {
+  const parsed = parseProxyImageUrl(rawUrl, opts);
   if (parsed.error) {
     const err = new Error(parsed.error);
     err.status = 400;

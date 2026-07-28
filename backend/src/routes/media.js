@@ -5,7 +5,8 @@ const router = Router();
 
 router.get("/image", async (req, res) => {
   try {
-    const { buffer, contentType } = await loadProxyImage(req.query.url);
+    // Admin media may read private upload prefixes (auth already applied on mount).
+    const { buffer, contentType } = await loadProxyImage(req.query.url, { allowPrivate: true });
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "private, max-age=3600");
     res.send(buffer);

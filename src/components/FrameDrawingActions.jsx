@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { photoSrc } from '../lib/api.js';
+import { api } from '../lib/api.js';
 import FrameDrawingLinkButton from './FrameDrawingLinkButton.jsx';
 import { buildFrameDrawingLink, frameDrawingBindingLabel } from '../../shared/frameDrawingContext.js';
 import { drawingStatusLabel } from '../../shared/frameDrawingTargets.js';
@@ -14,6 +14,13 @@ import {
   FRAME_BOM_UPDATE_BOM_HINT,
 } from '../frameConstructor/frameBomAddToProject.js';
 import { isPresetFrameContext } from '../lib/frameDrawingPresetUx.js';
+
+function openDrawingPdf(drawing) {
+  if (!drawing?.id) return;
+  api.openFrameDrawingPdf(drawing.id).catch(() => {
+    /* ignore — network/auth errors surface via empty tab */
+  });
+}
 
 function formatDate(iso) {
   if (!iso) return '';
@@ -154,9 +161,9 @@ export default function FrameDrawingActions({
           )}
           {!latest && presetDrawing && (
             <>
-              <a className="btn btn-sm" href={photoSrc(presetDrawing.pdfUrl)} target="_blank" rel="noreferrer">
+              <button type="button" className="btn btn-sm" onClick={() => openDrawingPdf(presetDrawing)}>
                 Чертёж пресета
-              </a>
+              </button>
               <FrameDrawingLinkButton context={baseCtx} label="Создать схему" onNavigate={onNavigate} disabled={navigateDisabled} />
             </>
           )}
@@ -217,15 +224,16 @@ export default function FrameDrawingActions({
                     {refreshBomBusy ? 'Обновляю…' : FRAME_BOM_REFRESH_BUTTON_LABEL}
                   </button>
                 )}
-                <a
+                <button
+                  type="button"
                   className="btn btn-sm btn-ghost"
-                  href={photoSrc(latest.pdfUrl)}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={() => setMoreOpen(false)}
+                  onClick={() => {
+                    setMoreOpen(false);
+                    openDrawingPdf(latest);
+                  }}
                 >
                   PDF схемы
-                </a>
+                </button>
                 <FrameDrawingLinkButton
                   context={newVersionCtx}
                   label="Новая версия"
@@ -278,9 +286,9 @@ export default function FrameDrawingActions({
         <ul style={{ margin: '6px 0 0', paddingLeft: 16, fontSize: 11 }}>
           {older.map((d) => (
             <li key={d.id} style={{ marginBottom: 4 }}>
-              <a href={photoSrc(d.pdfUrl)} target="_blank" rel="noreferrer">
+              <button type="button" className="btn-link" style={{ fontSize: 11, padding: 0 }} onClick={() => openDrawingPdf(d)}>
                 v{d.version} — {d.title}
-              </a>
+              </button>
               {' '}
               <span className="muted">{formatDate(d.updatedAt || d.createdAt)}</span>
               {' · '}

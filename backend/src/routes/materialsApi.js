@@ -25,6 +25,12 @@ import { findDuplicateGroups, mergeMaterials } from "../services/materialMerge.j
 import { getPriceHistory } from "../services/priceHistory.js";
 import { saveFile } from "../storage/index.js";
 import { MaterialCatalogError, assertReplaceAllowed } from "../services/materialReferenceGuard.js";
+import { resolveUploadRoot } from "../services/uploadRoot.js";
+import {
+  assertValidImageUpload,
+  UploadValidationError,
+} from "../services/uploadValidation.js";
+import { multerFileFilter } from "../services/uploadFilter.js";
 import XLSX from "xlsx";
 
 function sendMaterialCatalogError(res, e) {
@@ -40,10 +46,8 @@ function sendMaterialCatalogError(res, e) {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadDir = path.join(__dirname, "../../uploads");
+const uploadDir = path.join(resolveUploadRoot(), "public");
 fs.mkdirSync(uploadDir, { recursive: true });
-
-import { multerFileFilter } from "../services/uploadFilter.js";
 
 const memUpload = multer({
   storage: multer.memoryStorage(),
@@ -161,11 +165,15 @@ router.post("/import/excel-photos", memUpload.single("file"), async (req, res) =
 router.post("/upload-photo", memUpload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file" });
   try {
+    assertValidImageUpload(req.file);
     const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
     const filename = `${nanoid(12)}${ext}`;
-    const url = await saveFile(req.file.buffer, filename);
+    const url = await saveFile(req.file.buffer, filename, { visibility: "public" });
     res.json({ url, filename });
   } catch (e) {
+    if (e instanceof UploadValidationError) {
+      return res.status(e.status || 400).json({ error: e.code, code: e.code, message: e.message });
+    }
     res.status(500).json({ error: e.message });
   }
 });
@@ -176,6 +184,9 @@ router.post("/bulk-photos", memUpload.array("files", 500), async (req, res) => {
     const result = await bulkMatchUploads(req.files, uploadDir);
     res.json(result);
   } catch (e) {
+    if (e instanceof UploadValidationError) {
+      return res.status(e.status || 400).json({ error: e.code, code: e.code, message: e.message });
+    }
     res.status(500).json({ error: e.message });
   }
 });

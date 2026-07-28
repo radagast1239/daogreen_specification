@@ -62,6 +62,7 @@ import { compareProjectItems } from "../../../shared/projectCompare.js";
 import { buildImportPreview } from "../../../shared/importFromProject.js";
 import {
   buildPublishedReleaseMeta,
+  isLegacyReleaseIncomplete,
   isPublishWorkflowStatus,
   parsePublishedRelease,
 } from "../../../shared/projectPublishedRelease.js";
@@ -88,6 +89,7 @@ import * as XLSX from "xlsx";
 import { assertCanDeleteOrOverwriteAsset } from "../services/publishedAssetRetention.js";
 import { publishedPlannedTotal } from "../../../shared/publishedPurchaseTotals.js";
 import { pinClientDocumentsForRelease } from "../services/releaseDocumentPinning.js";
+import { sendSafeUploadFile } from "../services/secureFileServe.js";
 
 const router = Router();
 
@@ -1661,7 +1663,14 @@ function serveClientProject(req, res) {
   const versionInfo = versionInfoRaw
     ? (({ releaseComment: _rc, ...safe }) => safe)(versionInfoRaw)
     : null;
-  const documents = resolveClientDocumentsForRelease(parsedSnapshot);
+  const documents = resolveClientDocumentsForRelease(parsedSnapshot).map((d) => {
+    const { url: _internalUrl, ...safe } = d;
+    return {
+      ...safe,
+      // Keep filename/type for UI; open via token-scoped route only.
+      accessUrl: `/api/client/p/${encodeURIComponent(req.clientToken)}/files/${encodeURIComponent(d.id)}`,
+    };
+  });
   const activity = listActivity(p.id, { clientOnly: true });
 
   res.setHeader("Cache-Control", "private, no-store");
@@ -1918,15 +1927,60 @@ function patchClientCooling(req, res) {
   });
 }
 
+function serveClientReleaseFile(req, res) {
+  const p = loadProjectByToken(req.clientToken);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
+    return res.status(410).json({ error: "Link expired" });
+  }
+  const release = parsePublishedRelease(p.manualParams);
+  if (!release) {
+    return res.status(403).json({ error: "Project not published for client", code: "NOT_PUBLISHED" });
+  }
+  const parsedSnapshot = loadPublishedReleaseSnapshot(p);
+  if (!parsedSnapshot?.items?.length) {
+    return res.status(403).json({ error: "Published release snapshot missing", code: "PUBLISHED_SNAPSHOT_MISSING" });
+  }
+  if (isLegacyReleaseIncomplete(parsedSnapshot)) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  const assetId = String(req.params.assetId || "").trim();
+  if (!assetId || assetId.includes("..") || assetId.includes("/") || assetId.includes("\\")) {
+    return res.status(400).json({ error: "Invalid asset id" });
+  }
+
+  const docs = resolveClientDocumentsForRelease(parsedSnapshot);
+  const entry = docs.find((d) => d.id === assetId || d.sourceFileId === assetId);
+  if (!entry) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  // Pinned release files only — reject non-release paths (no live fallback).
+  const url = String(entry.url || "");
+  if (!url.startsWith(`/uploads/releases/${p.id}/`)) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  return sendSafeUploadFile(res, {
+    url,
+    filename: entry.filename,
+    inline: true,
+    cacheControl: "private, max-age=300",
+  });
+}
+
 // Client router — основной путь /api/client/p/:token
 export const clientRouter = Router();
 clientRouter.use(clientAuthMiddleware);
 
 clientRouter.get("/p/:token", serveClientProject);
+clientRouter.get("/p/:token/files/:assetId", serveClientReleaseFile);
 clientRouter.get("/p/:token/media", async (req, res) => {
   try {
     const { loadProxyImage } = await import("../services/imageProxy.js");
-    const { buffer, contentType } = await loadProxyImage(req.query.url);
+    // Client media: public catalog / remote only — private prefixes fail closed.
+    const { buffer, contentType } = await loadProxyImage(req.query.url, { allowPrivate: false });
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "private, max-age=3600");
     res.send(buffer);

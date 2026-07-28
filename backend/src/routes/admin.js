@@ -3,7 +3,6 @@ import path from "path";
 import fs from "fs";
 import multer from "multer";
 import { nanoid } from "nanoid";
-import { fileURLToPath } from "url";
 import { db, getDbPath } from "../db.js";
 import { listMaterials, listModulesAdmin, createModule, updateModule, archiveModule, restoreModule, duplicateModule } from "./materials.js";
 import { materialInModule } from "../../../shared/materialModules.js";
@@ -33,10 +32,15 @@ import {
   restoreQuarantinedFile,
 } from "../services/storageQuarantineService.js";
 import { sanitizeInventoryFile } from "../../../shared/storageInventory.js";
+import { resolveUploadRoot } from "../services/uploadRoot.js";
+import {
+  assertValidDocumentUpload,
+  UploadValidationError,
+} from "../services/uploadValidation.js";
+import { sendSafeUploadFile } from "../services/secureFileServe.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadDir = path.join(__dirname, "../uploads");
-fs.mkdirSync(uploadDir, { recursive: true });
+const uploadDir = resolveUploadRoot();
+if (uploadDir) fs.mkdirSync(uploadDir, { recursive: true });
 const docUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
@@ -253,22 +257,55 @@ router.get("/projects/:id/documents", (req, res) => {
   const rows = db
     .prepare("SELECT id, type, filename, url, uploaded_at as uploadedAt FROM files WHERE project_id = ? ORDER BY uploaded_at DESC")
     .all(req.params.id);
-  res.json(rows);
+  res.json(
+    rows.map((r) => ({
+      ...r,
+      accessUrl: `/api/admin/files/${r.id}`,
+    })),
+  );
+});
+
+router.get("/files/:fileId", (req, res) => {
+  const row = db
+    .prepare("SELECT id, project_id, type, filename, url FROM files WHERE id = ?")
+    .get(req.params.fileId);
+  if (!row) return res.status(404).json({ error: "Not found" });
+  const inline = /\.(png|jpe?g|webp|pdf)$/i.test(row.filename || row.url || "");
+  return sendSafeUploadFile(res, {
+    url: row.url,
+    filename: row.filename,
+    inline,
+    cacheControl: "private, no-store",
+  });
 });
 
 router.post("/projects/:id/documents", docUpload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file" });
   try {
+    assertValidDocumentUpload(req.file);
     const id = nanoid(12);
     const ext = path.extname(req.file.originalname).toLowerCase() || "";
     const filename = `${nanoid(10)}${ext}`;
-    const url = await saveFile(req.file.buffer, filename);
+    const url = await saveFile(req.file.buffer, filename, {
+      visibility: "private",
+      subdir: `projects/${req.params.id}`,
+    });
     const type = req.body.type || "other";
     db.prepare(
-      "INSERT INTO files (id, project_id, type, filename, url) VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO files (id, project_id, type, filename, url) VALUES (?, ?, ?, ?, ?)",
     ).run(id, req.params.id, type, req.file.originalname, url);
-    res.status(201).json({ id, type, filename: req.file.originalname, url, uploadedAt: new Date().toISOString() });
+    res.status(201).json({
+      id,
+      type,
+      filename: req.file.originalname,
+      url,
+      accessUrl: `/api/admin/files/${id}`,
+      uploadedAt: new Date().toISOString(),
+    });
   } catch (e) {
+    if (e instanceof UploadValidationError) {
+      return res.status(e.status || 400).json({ error: e.code, code: e.code, message: e.message });
+    }
     res.status(500).json({ error: e.message });
   }
 });

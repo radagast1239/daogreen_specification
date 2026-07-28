@@ -1278,7 +1278,14 @@ function ProjectDocuments({ projectId }) {
           {docs.map((d) => (
             <li key={d.id} style={{ marginBottom: 6 }}>
               <span className="chip chip--neutral" style={{ marginRight: 6 }}>{typeLabel(d.type)}</span>
-              <a href={photoSrc(d.url)} target="_blank" rel="noreferrer">{d.filename}</a>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ padding: 0, fontWeight: 600, textDecoration: "underline" }}
+                onClick={() => api.openAdminFile(d.id, d.filename).catch((e) => error(e.message))}
+              >
+                {d.filename}
+              </button>
               <button className="btn btn-ghost btn-sm" style={{ marginLeft: 6 }} onClick={() => remove(d)}>✕</button>
             </li>
           ))}

@@ -55,8 +55,16 @@ app.use(
   })
 );
 app.use(express.json({ limit: "10mb" }));
-const { localUploadDir } = await import("./storage/index.js");
-app.use("/uploads", express.static(localUploadDir()));
+const { assertUploadRootForStartup } = await import("./services/uploadRoot.js");
+let uploadRoot;
+try {
+  uploadRoot = assertUploadRootForStartup();
+} catch (err) {
+  console.error(`[startup] ${err.code || "UPLOAD_ROOT"}: ${err.message}`);
+  process.exit(1);
+}
+// Public catalog only (material photos, branding). Project/release/frame files are private.
+app.use("/uploads/public", express.static(path.join(uploadRoot, "public")));
 
 function adminAuth(req, res, next) {
   adminAuthMiddleware(req, res, next);

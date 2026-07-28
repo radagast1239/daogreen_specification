@@ -9,11 +9,16 @@ import {
   assertCanDeleteOrOverwriteAsset,
   isAssetPinnedByPublishedRelease,
 } from "../services/publishedAssetRetention.js";
-import { localUploadDir } from "../storage/index.js";
+import { resolveUploadRoot } from "../services/uploadRoot.js";
+import {
+  assertValidPdfUpload,
+  UploadValidationError,
+  FRAME_DRAWING_PDF_REQUIRED,
+} from "../services/uploadValidation.js";
 
 /** Always resolve at call time so UPLOAD_ROOT matches saveFile/static. */
 function uploadRoot() {
-  return localUploadDir();
+  return resolveUploadRoot();
 }
 
 function resolveUnderUploadRoot(relPath) {
@@ -29,7 +34,7 @@ function resolveUnderUploadRoot(relPath) {
 const pdfUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 30 * 1024 * 1024 },
-  fileFilter: multerFileFilter({ allowDocs: true }),
+  fileFilter: multerFileFilter({ pdfOnly: true }),
 });
 
 const router = Router();
@@ -55,6 +60,7 @@ function rowToDrawing(row) {
     frameConfig,
     pdfUrl: row.pdf_url,
     pdfFilename: row.pdf_filename,
+    downloadUrl: `/api/frame-drawings/${row.id}/download`,
     fileId: row.file_id || null,
     isClientVisible: !!row.is_client_visible,
     version: row.version,
@@ -121,7 +127,10 @@ function resolvePdfSubdir(body) {
 }
 
 function writePdfBuffer(buffer, body, drawingId) {
+  const root = resolveUploadRoot();
   const subdir = resolvePdfSubdir(body);
+  const absDir = path.join(root, subdir);
+  fs.mkdirSync(absDir, { recursive: true });
   const filename = `${drawingId}.pdf`;
   const rel = path.join(subdir, filename).replace(/\\/g, "/");
   const absPath = resolveUnderUploadRoot(rel);
@@ -269,11 +278,21 @@ router.get("/:id/download", (req, res) => {
   const rel = row.pdf_url.replace(/^\/uploads\/?/, "");
   const abs = resolveUnderUploadRoot(rel);
   if (!abs || !fs.existsSync(abs)) return res.status(404).json({ error: "File not found" });
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Cache-Control", "private, no-store");
   res.download(abs, row.pdf_filename || `${row.id}.pdf`);
 });
 
 router.post("/", pdfUpload.single("file"), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "PDF file required" });
+  if (!req.file) return res.status(400).json({ error: "PDF file required", code: FRAME_DRAWING_PDF_REQUIRED });
+  try {
+    assertValidPdfUpload(req.file);
+  } catch (e) {
+    if (e instanceof UploadValidationError) {
+      return res.status(e.status || 400).json({ error: e.code, code: e.code, message: e.message });
+    }
+    return res.status(400).json({ error: e.message });
+  }
   return saveDrawing(req, res, req.body || {});
 });
 

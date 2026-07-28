@@ -85,12 +85,14 @@ export async function saveMaterialImage(materialId, buffer, ext, uploadDir) {
   const safeExt = IMAGE_EXT.has(ext) ? ext : ".png";
   const destName = `${materialId}${safeExt}`;
   if (storageDriver() === "local") {
-    const dir = uploadDir || localUploadDir();
+    const root = uploadDir || localUploadDir();
+    // Prefer public/ catalog dir when caller passed upload root or public subdir.
+    const dir = path.basename(root) === "public" ? root : path.join(root, "public");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, destName), buffer);
-    return `/uploads/${destName}`;
+    return `/uploads/public/${destName}`;
   }
-  return saveFile(buffer, destName);
+  return saveFile(buffer, destName, { visibility: "public" });
 }
 
 const norm = (s) =>

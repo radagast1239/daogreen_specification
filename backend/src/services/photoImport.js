@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import { listMaterials, updateMaterial } from "../routes/materials.js";
 import { localUploadDir, saveFile, storageDriver } from "../storage/index.js";
 
-const IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
+const IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 
 export function slugify(name) {
   return (name || "")
@@ -36,8 +36,10 @@ export function matchMaterialByFile(materials, filename) {
   return null;
 }
 
-function resolveUploadDir(uploadDir) {
-  return uploadDir || localUploadDir();
+function resolvePublicUploadDir(uploadDir) {
+  const root = uploadDir || localUploadDir();
+  if (path.basename(root) === "public") return root;
+  return path.join(root, "public");
 }
 
 export function importPhotosFromDir(sourceDir, uploadDir, { copy = true } = {}) {
@@ -45,7 +47,7 @@ export function importPhotosFromDir(sourceDir, uploadDir, { copy = true } = {}) 
     return { matched: [], unmatched: [], error: `Папка не найдена: ${sourceDir}` };
   }
 
-  const destDir = resolveUploadDir(uploadDir);
+  const destDir = resolvePublicUploadDir(uploadDir);
   if (storageDriver() === "local") fs.mkdirSync(destDir, { recursive: true });
 
   const materials = listMaterials();
@@ -69,7 +71,7 @@ export function importPhotosFromDir(sourceDir, uploadDir, { copy = true } = {}) 
       const destPath = path.join(destDir, destName);
       if (copy) fs.copyFileSync(srcPath, destPath);
       else fs.renameSync(srcPath, destPath);
-      const url = `/uploads/${destName}`;
+      const url = `/uploads/public/${destName}`;
       updateMaterial(mat.id, { imageUrl: url, photoUrl: url });
       matched.push({ file, materialId: mat.id, name: mat.name, url });
     } else {
@@ -92,7 +94,7 @@ export function importPhotosFromDir(sourceDir, uploadDir, { copy = true } = {}) 
 export async function saveUploadedPhoto(file, uploadDir) {
   const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
   const destName = `${nanoid(12)}${ext}`;
-  return saveFile(file.buffer, destName);
+  return saveFile(file.buffer, destName, { visibility: "public" });
 }
 
 export async function bulkMatchUploads(files, uploadDir) {
@@ -109,7 +111,7 @@ export async function bulkMatchUploads(files, uploadDir) {
 
     const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
     const destName = `${mat.id}${ext}`;
-    const url = await saveFile(file.buffer, destName);
+    const url = await saveFile(file.buffer, destName, { visibility: "public" });
 
     updateMaterial(mat.id, { imageUrl: url, photoUrl: url });
     matched.push({ file: file.originalname, materialId: mat.id, name: mat.name, url });

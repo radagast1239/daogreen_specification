@@ -5,15 +5,11 @@
 import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
-import { fileURLToPath } from "url";
 import { buildDocumentManifestEntry } from "../../../shared/publishedDocumentManifest.js";
+import { resolveUploadRoot } from "./uploadRoot.js";
+import { uploadsRelativeFromUrl } from "./uploadValidation.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-export function resolveUploadRoot() {
-  if (process.env.UPLOAD_ROOT) return path.resolve(process.env.UPLOAD_ROOT);
-  return path.join(__dirname, "../../uploads");
-}
+export { resolveUploadRoot };
 
 function sanitizeFileName(name, fallback = "file") {
   const base = String(name || fallback)
@@ -22,14 +18,6 @@ function sanitizeFileName(name, fallback = "file") {
     .trim()
     .slice(0, 120);
   return base || fallback;
-}
-
-function uploadsRelativeFromUrl(url) {
-  const u = String(url || "").replace(/\\/g, "/");
-  if (!u.startsWith("/uploads/")) return null;
-  const rel = u.slice("/uploads/".length).replace(/^\/+/, "");
-  if (!rel || rel.includes("..")) return null;
-  return rel;
 }
 
 function sha256File(absPath) {

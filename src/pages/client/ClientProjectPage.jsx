@@ -634,7 +634,7 @@ function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
               <ul style={{ margin: 0, paddingLeft: 18 }}>
                 {group.items.map((d) => (
                   <li key={d.id} style={{ marginBottom: 8 }}>
-                    <a href={photoSrc(d.url)} target="_blank" rel="noreferrer">
+                    <a href={photoSrc(d.accessUrl || d.url)} target="_blank" rel="noreferrer">
                       {d.drawingTitle || d.filename}
                     </a>
                     {d.drawingVersion ? (
@@ -656,7 +656,7 @@ function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
         <ul style={{ marginTop: 16, paddingLeft: 18 }}>
           {otherDocs.map((d) => (
             <li key={d.id} style={{ marginBottom: 8 }}>
-              <a href={photoSrc(d.url)} target="_blank" rel="noreferrer">
+              <a href={photoSrc(d.accessUrl || d.url)} target="_blank" rel="noreferrer">
                 {d.filename}
               </a>
               <span className="muted" style={{ fontSize: 12 }}> · {d.type}</span>

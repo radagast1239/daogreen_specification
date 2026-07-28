@@ -383,6 +383,34 @@ export const api = {
     return data;
   },
   deleteDocument: (id) => request(`/api/admin/documents/${id}`, { method: "DELETE" }),
+  /** Open authenticated admin file (blob) — private uploads are not on /uploads static. */
+  openAdminFile: async (fileId, filename) => {
+    const res = await fetch(`${API}/api/admin/files/${encodeURIComponent(fileId)}`, {
+      headers: { "X-Admin-Key": getAdminKey() },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.message || `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return { filename };
+  },
+  openFrameDrawingPdf: async (drawingId) => {
+    const res = await fetch(`${API}/api/frame-drawings/${encodeURIComponent(drawingId)}/download`, {
+      headers: { "X-Admin-Key": getAdminKey() },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.message || `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  },
   getFrameDrawings: (params = {}) => {
     const qs = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => { if (v) qs.set(k, v); });

@@ -527,7 +527,9 @@ describe("client GET headers + documents", () => {
     expect(String(res.headers["cache-control"] || "")).toMatch(/private/i);
     expect(String(res.headers["cache-control"] || "")).toMatch(/no-store/i);
     expect(res.body.documents).toHaveLength(1);
-    expect(res.body.documents[0].url).toContain("/uploads/releases/p1/");
+    expect(res.body.documents[0].url).toBeUndefined();
+    expect(res.body.documents[0].accessUrl).toContain("/api/client/p/token-p1/files/");
+    expect(res.body.documents[0].accessUrl).toContain(res.body.documents[0].id);
     expect(res.body.project.stellageCounts).toEqual([]);
     expect(res.body.project.legacyReleaseIncomplete).toBe(false);
     expect(res.body.project.items[0].price).toBe(100);
