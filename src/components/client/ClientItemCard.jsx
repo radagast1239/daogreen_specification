@@ -3,7 +3,7 @@ import PhotoGallery from "../PhotoGallery.jsx";
 import { Chip } from "../ui.jsx";
 import { PURCHASE_STATUSES } from "../../data/modules.js";
 import { materialSpecLabel } from "../../lib/materialSpecs.js";
-import { itemImageUrl, lineGross, lineVat } from "../../lib/itemHelpers.js";
+import { lineGross, lineVat } from "../../lib/itemHelpers.js";
 import { money, num } from "../../store/helpers.js";
 import { isBoughtStatus } from "../../lib/itemHelpers.js";
 import { isCoolingSpecItem } from "../../../shared/itemTypes.js";
@@ -13,6 +13,7 @@ import {
   resolveClientPurchaseStatusLabel,
 } from "../../../shared/clientPurchaseRows.js";
 import { getPurchaseStatusTone, isPurchaseStatusNeedsAttention } from "../../../shared/purchaseStatusRules.js";
+import { clientPhotoSrc } from "../../lib/photoHelpers.js";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { DebouncedInput } from "./ClientDebouncedField.jsx";
 import { t, tStatus, tUnit } from "../../../shared/clientI18n.js";
@@ -26,8 +27,9 @@ export default function ClientItemCard({
   onProposeReplacement,
   compact = false,
   language = "ru",
+  clientToken = "",
 }) {
-  const img = !compact ? itemImageUrl(it) : "";
+  const img = !compact ? clientPhotoSrc(it, clientToken) : "";
   const gross = lineGross(it);
   const vat = lineVat(it);
   const coolingSpec = isCoolingSpecItem(it);

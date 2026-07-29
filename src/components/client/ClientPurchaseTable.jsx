@@ -1,7 +1,7 @@
 import React, { useRef, useState } from "react";
 import { PURCHASE_STATUSES } from "../../data/modules.js";
 import { materialSpecLabel } from "../../lib/materialSpecs.js";
-import { itemImageUrl, isPurchaseClosed } from "../../lib/itemHelpers.js";
+import { isPurchaseClosed } from "../../lib/itemHelpers.js";
 import { money, num } from "../../store/helpers.js";
 import {
   CLIENT_PRICE_MISSING,
@@ -11,6 +11,7 @@ import {
   resolveClientPurchaseStatusLabel,
 } from "../../../shared/clientPurchaseRows.js";
 import { getPurchaseStatusTone, isPurchaseStatusNeedsAttention } from "../../../shared/purchaseStatusRules.js";
+import { clientMergedPhotoSrc, clientPhotoSrc } from "../../lib/photoHelpers.js";
 import { Chip } from "../ui.jsx";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { patchMergedRow } from "../../lib/clientMergedPatch.js";
@@ -37,10 +38,10 @@ function mergedRowStatus(row) {
   return open?.status || "not_bought";
 }
 
-function MergedTableRow({ row, currency, patch, patchBulk, bought, onProposeReplacement, compact, language }) {
+function MergedTableRow({ row, currency, patch, patchBulk, bought, onProposeReplacement, compact, language, clientToken = "" }) {
   const [showPhoto, setShowPhoto] = useState(false);
   const rep = row.sourceItems?.[0];
-  const photoUrl = rep ? itemImageUrl(rep) : row.imageUrl;
+  const photoUrl = clientMergedPhotoSrc(row, clientToken);
   const hasPhoto = !!photoUrl;
   const img = !compact || showPhoto ? photoUrl : "";
   const status = mergedRowStatus(row);
@@ -136,9 +137,9 @@ function MergedTableRow({ row, currency, patch, patchBulk, bought, onProposeRepl
   );
 }
 
-function ItemTableRow({ it, currency, patch, bought, onProposeReplacement, compact, language }) {
+function ItemTableRow({ it, currency, patch, bought, onProposeReplacement, compact, language, clientToken = "" }) {
   const [showPhoto, setShowPhoto] = useState(false);
-  const photoUrl = itemImageUrl(it);
+  const photoUrl = clientPhotoSrc(it, clientToken);
   const hasPhoto = !!photoUrl;
   const img = !compact || showPhoto ? photoUrl : "";
 
@@ -234,6 +235,7 @@ export default function ClientPurchaseTable({
   onProposeReplacement,
   compact = false,
   language = "ru",
+  clientToken = "",
 }) {
   const merged = rows?.length > 0;
   const rowCount = merged ? rows.length : (items || []).length;
@@ -271,6 +273,7 @@ export default function ClientPurchaseTable({
                   onProposeReplacement={onProposeReplacement}
                   compact={compact}
                   language={language}
+                  clientToken={clientToken}
                 />
               ))
             : (items || []).map((it) => (
@@ -283,6 +286,7 @@ export default function ClientPurchaseTable({
                   onProposeReplacement={onProposeReplacement}
                   compact={compact}
                   language={language}
+                  clientToken={clientToken}
                 />
               ))}
         </tbody>

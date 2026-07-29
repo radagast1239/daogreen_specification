@@ -3,7 +3,7 @@ import PhotoGallery from "../PhotoGallery.jsx";
 import { Chip } from "../ui.jsx";
 import { PURCHASE_STATUSES } from "../../data/modules.js";
 import { materialSpecLabel } from "../../lib/materialSpecs.js";
-import { itemImageUrl, isPurchaseClosed } from "../../lib/itemHelpers.js";
+import { isPurchaseClosed } from "../../lib/itemHelpers.js";
 import { money, num } from "../../store/helpers.js";
 import { isCoolingSpecItem } from "../../../shared/itemTypes.js";
 import {
@@ -12,6 +12,7 @@ import {
   resolveClientPurchaseStatusLabel,
 } from "../../../shared/clientPurchaseRows.js";
 import { getPurchaseStatusTone, isPurchaseStatusNeedsAttention } from "../../../shared/purchaseStatusRules.js";
+import { clientMergedPhotoSrc } from "../../lib/photoHelpers.js";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { patchMergedRow } from "../../lib/clientMergedPatch.js";
 import { DebouncedInput } from "./ClientDebouncedField.jsx";
@@ -42,10 +43,11 @@ export default function ClientMergedItemCard({
   onProposeReplacement,
   compact = false,
   language = "ru",
+  clientToken = "",
 }) {
   const [showPhoto, setShowPhoto] = useState(false);
   const rep = row.sourceItems?.[0];
-  const photoUrl = rep ? itemImageUrl(rep) : row.imageUrl;
+  const photoUrl = clientMergedPhotoSrc(row, clientToken);
   const hasPhoto = !!photoUrl;
   const showImage = !compact || showPhoto;
   const img = showImage ? photoUrl : "";

@@ -49,6 +49,7 @@ import { FARM_LINE_GROUPS, farmLineGroupLabel } from "../../../shared/farmLineGr
 import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
 import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
 import { clientLink, photoSrc } from "../../lib/api.js";
+import AuthMediaImg from "../../components/AuthMediaImg.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
 import ProjectCurrencyFields, { currencyFieldsForApi } from "../../components/ProjectCurrencyFields.jsx";
 import { normalizeProjectCurrency } from "../../../shared/projectCurrency.js";
@@ -1819,7 +1820,7 @@ function SpecTab({
                     )}
                     <td data-spec-column="photo" hidden={!specificationPresetHasColumn(columnPreset, "photo")} className="spec-photo">
                       {photoSrc(it.imageUrl || it.photoUrl) ? (
-                        <img
+                        <AuthMediaImg
                           src={photoSrc(it.imageUrl || it.photoUrl)}
                           alt=""
                           className="thumb-img"

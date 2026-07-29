@@ -4,6 +4,7 @@ import { money } from "../store/helpers.js";
 import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient } from "../../shared/itemTypes.js";
 import { PURCHASE_STATUSES } from "../data/modules.js";
 import { photoSrc } from "../lib/api.js";
+import AuthMediaImg from "./AuthMediaImg.jsx";
 
 export default function SpecificationItemInspector({ item, project, materials, rooms, lineGroups, sectionOptions, onPatch, onClose, onRefreshFromBase, onDuplicate, onMove, onDelete }) {
   const closeRef = useRef(null);
@@ -33,7 +34,7 @@ export default function SpecificationItemInspector({ item, project, materials, r
       </header>
       <div className="spec-inspector__body">
         <section><h3>Основное</h3>
-          {photoSrc(item.imageUrl || item.photoUrl) && <img className="spec-inspector__photo" src={photoSrc(item.imageUrl || item.photoUrl)} alt="" />}
+          {photoSrc(item.imageUrl || item.photoUrl) && <AuthMediaImg className="spec-inspector__photo" src={photoSrc(item.imageUrl || item.photoUrl)} alt="" />}
           <label>Наименование<input value={item.name || ""} onChange={(e) => patch({ name: e.target.value, ...(item.materialId ? { nameOverridden: true } : {}) })} /></label>
           {showResetName && <><small className="spec-name-override">Изменено в проекте</small><button type="button" className="btn btn-sm btn-ghost" onClick={resetName}>Вернуть название из базы</button></>}
           <div className="spec-inspector__grid"><label>Единица<input value={item.unit || ""} onChange={(e) => patch({ unit: e.target.value })} /></label><label>Количество<input type="number" value={item.qty || 0} onChange={(e) => patch({ qty: Number(e.target.value) || 0 })} /></label></div>

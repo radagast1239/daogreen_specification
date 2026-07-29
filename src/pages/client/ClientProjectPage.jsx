@@ -558,6 +558,7 @@ export default function ClientProjectPage() {
               simple
               layout={purchaseLayout}
               compact={clientCompact}
+              clientToken={decodeURIComponent(token || "")}
             />
           )}
         </>

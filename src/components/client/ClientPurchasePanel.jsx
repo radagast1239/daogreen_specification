@@ -106,7 +106,7 @@ function sortMergedRows(rows, currency) {
   return flattenMergedBySectionOrder(rows, currency);
 }
 
-function MergedRowsList({ rows, layout, currency, patch, patchBulk, bought, purchaseStatuses, onProposeReplacement, compact, language }) {
+function MergedRowsList({ rows, layout, currency, patch, patchBulk, bought, purchaseStatuses, onProposeReplacement, compact, language, clientToken = "" }) {
   if (layout === "table") {
     return (
       <ClientPurchaseTable
@@ -119,6 +119,7 @@ function MergedRowsList({ rows, layout, currency, patch, patchBulk, bought, purc
         onProposeReplacement={onProposeReplacement}
         compact={compact}
         language={language}
+        clientToken={clientToken}
       />
     );
   }
@@ -134,6 +135,7 @@ function MergedRowsList({ rows, layout, currency, patch, patchBulk, bought, purc
       onProposeReplacement={onProposeReplacement}
       compact={compact}
       language={language}
+      clientToken={clientToken}
     />
   ));
 }
@@ -196,6 +198,7 @@ function MergedSectionGroups({
   richSections = false,
   openSectionId = null,
   language = "ru",
+  clientToken = "",
 }) {
   return groups.map((section, sectionIndex) => {
     const rich = richSections && section.totalCount > 0;
@@ -230,21 +233,21 @@ function MergedSectionGroups({
                 subtitle={`${t(language, "client.sectionCard.itemCountShort", { n: sub.count })} · ${sub.sumLabel}`}
                 defaultOpen={false}
               >
-                <MergedRowsList rows={sub.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} language={language} />
+                <MergedRowsList rows={sub.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} language={language} clientToken={clientToken} />
               </Collapsible>
             ) : (
-              <MergedRowsList key={`${section.title}-default`} rows={sub.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} language={language} />
+              <MergedRowsList key={`${section.title}-default`} rows={sub.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} language={language} clientToken={clientToken} />
             )
           )
         : section.rows && (
-            <MergedRowsList rows={section.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} language={language} />
+            <MergedRowsList rows={section.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} language={language} clientToken={clientToken} />
           )}
     </Collapsible>
     );
   });
 }
 
-function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, materials, modules, stellageGroups, onProposeReplacement, compact = false, language = "ru" }) {
+function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, materials, modules, stellageGroups, onProposeReplacement, compact = false, language = "ru", clientToken = "" }) {
   return groups.map(([title, list]) => {
     const sum = list.reduce((s, i) => s + lineGross(i), 0);
     const stellageModule = isStellageModuleTitle(title, modules);
@@ -266,19 +269,19 @@ function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, mater
                   </div>
                 )}
                 {gItems.map((it) => (
-                  <ClientItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} language={language} />
+                  <ClientItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} language={language} clientToken={clientToken} />
                 ))}
               </React.Fragment>
             ))
           : list.map((it) => (
-              <ClientItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} language={language} />
+              <ClientItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} language={language} clientToken={clientToken} />
             ))}
       </Collapsible>
     );
   });
 }
 
-export function ClientMergedList({ project, items, patch, purchaseStatuses, groupBySection = false, layout = "cards", language = "ru" }) {
+export function ClientMergedList({ project, items, patch, purchaseStatuses, groupBySection = false, layout = "cards", language = "ru", clientToken = "" }) {
   const rows = mergedPurchaseRows(items, { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] });
   if (groupBySection) {
     const groups = groupMergedBySectionHierarchy(rows, project.currency);
@@ -294,6 +297,7 @@ export function ClientMergedList({ project, items, patch, purchaseStatuses, grou
           withSubsections
           layout={layout}
           language={language}
+          clientToken={clientToken}
         />
       </div>
     );
@@ -301,7 +305,7 @@ export function ClientMergedList({ project, items, patch, purchaseStatuses, grou
   return (
     <div style={{ marginTop: 8 }}>
       <p className="muted" style={{ fontSize: 13 }}>{t(language, "client.purchasePanel.uniqueCount", { n: rows.length })}</p>
-      <MergedRowsList rows={rows} layout={layout} currency={project.currency} patch={patch} bought={false} purchaseStatuses={purchaseStatuses} language={language} />
+      <MergedRowsList rows={rows} layout={layout} currency={project.currency} patch={patch} bought={false} purchaseStatuses={purchaseStatuses} language={language} clientToken={clientToken} />
     </div>
   );
 }
@@ -330,6 +334,7 @@ export default function ClientPurchasePanel({
   targetSection = null,
   onTargetConsumed,
   language = "ru",
+  clientToken = "",
 }) {
   const [readyOnly, setReadyOnly] = useState(false);
 
@@ -418,7 +423,7 @@ export default function ClientPurchasePanel({
   }, [targetSection, simple, effectiveMode, onTargetConsumed]);
 
   const renderMergedList = (list, isBought) => {
-    const pass = { onProposeReplacement, layout, compact, patchBulk, language };
+    const pass = { onProposeReplacement, layout, compact, patchBulk, language, clientToken };
     const openFirst = simple && !isBought && effectiveMode === "categories";
     if (effectiveMode === "categories" || effectiveMode === "plumber" || effectiveMode === "with_link" || effectiveMode === "without_link") {
       const isClientCategories = simple && effectiveMode === "categories";
@@ -467,6 +472,7 @@ export default function ClientPurchasePanel({
           compact={compact}
           layout={layout}
           language={language}
+          clientToken={clientToken}
         />
       );
     }
@@ -511,6 +517,7 @@ export default function ClientPurchasePanel({
           stellageGroups={stellageGroups}
           onProposeReplacement={onProposeReplacement}
           compact={compact}
+          clientToken={clientToken}
         />
       );
     }
@@ -526,6 +533,7 @@ export default function ClientPurchasePanel({
             onProposeReplacement={onProposeReplacement}
             compact={compact}
             language={language}
+            clientToken={clientToken}
           />
         );
       }
@@ -540,6 +548,7 @@ export default function ClientPurchasePanel({
           onProposeReplacement={onProposeReplacement}
           compact={compact}
           language={language}
+          clientToken={clientToken}
         />
       ));
     }
