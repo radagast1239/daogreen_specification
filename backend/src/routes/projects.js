@@ -2188,8 +2188,9 @@ clientRouter.get("/p/:token/media", async (req, res) => {
     const release = parsePublishedRelease(p.manualParams);
     if (!release) return notFound();
     const parsedSnapshot = loadPublishedReleaseSnapshot(p);
+    // Require frozen items; do NOT hard-deny incomplete legacy release_v1 —
+    // allowlist is built only from URLs stored in this snapshot (no live fallback).
     if (!parsedSnapshot?.items?.length) return notFound();
-    if (isLegacyReleaseIncomplete(parsedSnapshot)) return notFound();
 
     let requested = "";
     const assetId = String(req.query.assetId || "").trim();
@@ -2210,6 +2211,8 @@ clientRouter.get("/p/:token/media", async (req, res) => {
     if (!canonical || !isClientMediaLocalServePath(canonical, p.id)) {
       return notFound();
     }
+    // Remote schemes never served via /media (defense in depth after allowlist).
+    if (/^https?:\/\//i.test(canonical)) return notFound();
 
     const { loadProxyImage } = await import("../services/imageProxy.js");
     const { buffer, contentType } = await loadProxyImage(canonical, {
