@@ -856,6 +856,22 @@ export default function SpecEditorPage() {
             hidePrimaryActions
           />
 
+          <div className="card" style={{ marginBottom: 16, maxWidth: 420 }} data-testid="client-language-card">
+            <label className="field" style={{ marginBottom: 0 }}>
+              Язык клиентской версии
+              <select
+                value={project.manualParams?.clientLanguage || "ru"}
+                onChange={(event) => saveManualParam("clientLanguage", event.target.value)}
+              >
+                <option value="ru">Русский</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <p className="muted" style={{ fontSize: 12, margin: "8px 0 0" }}>
+              Язык новой клиентской ссылки и документов
+            </p>
+          </div>
+
           {(() => {
             const linkState = clientLinkActiveState(project);
             if (!linkState.needsPublishBeforeClientLink) return null;
@@ -1142,16 +1158,6 @@ export default function SpecEditorPage() {
           hidden={!(workspaceView === "design" || (workspaceView === "spec" && tab === "spec"))}
         >
           <div className={workspaceView === "spec" && tab === "spec" ? undefined : "pw-pane--inactive"}>
-            <label className="field" style={{ maxWidth: 260, marginBottom: 14 }}>
-              Язык клиентской версии
-              <select
-                value={project.manualParams?.clientLanguage || "ru"}
-                onChange={(event) => saveManualParam("clientLanguage", event.target.value)}
-              >
-                <option value="ru">Русский</option>
-                <option value="en">English</option>
-              </select>
-            </label>
             <ProjectCoolingSummary
               project={project}
               onOpenCalc={() => {
