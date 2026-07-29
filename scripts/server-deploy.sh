@@ -60,7 +60,10 @@ EOF
 
 systemctl daemon-reload
 systemctl enable daogreen-spec
-systemctl restart daogreen-spec
+systemctl stop daogreen-spec || true
+echo "=== Material EN translations (dry-run → backup → apply → integrity) ==="
+"$NODE22/bin/node" "$APP_DIR/scripts/run-material-translations-deploy-step.mjs"
+systemctl start daogreen-spec
 
 sleep 2
 if curl -fsS "http://127.0.0.1:$PORT/api/health" >/dev/null; then

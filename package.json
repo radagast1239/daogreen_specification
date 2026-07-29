@@ -15,6 +15,7 @@
     "import:materials-map": "npm run import:materials-map --prefix backend",
     "apply:materials-modules": "npm run apply:materials-modules --prefix backend",
     "materials:translations:import": "npm run materials:translations:import --prefix backend",
+    "materials:translations:deploy-step": "node scripts/run-material-translations-deploy-step.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

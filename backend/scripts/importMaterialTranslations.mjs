@@ -56,7 +56,7 @@ try {
   console.error(
     `[material-translations] APPLY applied=${result.applied} errors=${result.errors?.length || 0} skipped=${result.skipped?.length || 0}`,
   );
-  process.exit(0);
+  process.exit(result.errors?.length ? 1 : 0);
 } catch (error) {
   console.error(JSON.stringify({
     ok: false,

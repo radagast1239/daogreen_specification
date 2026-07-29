@@ -44,6 +44,8 @@ const uploadFiles = [
   ...uploadDirs.flatMap((d) => collectFiles(path.join(root, d), path.join(root, d)).map((f) => `${d}/${f}`)),
   "backend/package.json",
   "package.json",
+  "backend/data/materialTranslations.en.json",
+  "scripts/run-material-translations-deploy-step.mjs",
 ];
 
 function exec(conn, cmd) {
@@ -88,12 +90,22 @@ conn
       }
 
       if (apply) {
+        // build → stop → translations (backup/dry-run/apply/integrity) → start → health
         await exec(
           conn,
-          `cd ${remoteRoot} && NODE_OPTIONS=--max-old-space-size=512 ${nodeBin}/npm run build && systemctl restart daogreen-spec && sleep 5 && curl -fsS http://127.0.0.1:3002/api/health && echo OK`
+          [
+            `cd ${remoteRoot}`,
+            `NODE_OPTIONS=--max-old-space-size=512 ${nodeBin}/npm run build`,
+            `systemctl stop daogreen-spec`,
+            `${nodeBin}/node scripts/run-material-translations-deploy-step.mjs`,
+            `systemctl start daogreen-spec`,
+            `sleep 5`,
+            `curl -fsS http://127.0.0.1:3002/api/health`,
+            `echo OK`,
+          ].join(" && "),
         );
       } else {
-        console.log("\nFiles uploaded. Run with --apply to build and restart on VPS.");
+        console.log("\nFiles uploaded. Run with --apply to build, apply translations, and restart on VPS.");
       }
       conn.end();
     } catch (e) {
