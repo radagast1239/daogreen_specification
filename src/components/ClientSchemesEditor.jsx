@@ -245,7 +245,7 @@ export function ClientSchemesViewer({ manualParams, images, language = "ru" }) {
       </p>
       <div className="client-schemes-viewer__grid">
         {schemes.map((def, i) => {
-          const src = photoSrc(def.url);
+          const src = photoSrc(def.accessUrl || def.url);
           if (!src) return null;
           return (
             <button
@@ -291,7 +291,7 @@ export function ClientRackImagesViewer({ images = [] }) {
       <div className="client-schemes-viewer__grid">
         {group.images.map((image, index) => (
           <button key={image.id} type="button" className="client-scheme-view-btn" onClick={() => setViewer({ schemes: group.images, activeIndex: index })}>
-            <img src={photoSrc(image.url)} alt="" />
+            <img src={photoSrc(image.accessUrl || image.url)} alt="" />
             <span>{image.title}</span>
           </button>
         ))}

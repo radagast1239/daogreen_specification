@@ -480,6 +480,11 @@ export const api = {
 export function photoSrc(url) {
   if (!url) return "";
   if (url.startsWith("http")) return url;
+  if (url.startsWith("/api/")) return `${API}${url}`;
+  if (url.startsWith("/uploads/public/")) return `${API}${url}`;
+  if (url.startsWith("/uploads/")) {
+    return `${API}/api/media/image?url=${encodeURIComponent(url)}`;
+  }
   return `${API}${url}`;
 }
 

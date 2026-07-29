@@ -1,4 +1,5 @@
 import { Router } from "express";
+import path from "path";
 import {
   db,
   loadProject,
@@ -98,6 +99,10 @@ import { assertCanDeleteOrOverwriteAsset } from "../services/publishedAssetReten
 import { publishedPlannedTotal } from "../../../shared/publishedPurchaseTotals.js";
 import { pinClientDocumentsForRelease } from "../services/releaseDocumentPinning.js";
 import { sendSafeUploadFile } from "../services/secureFileServe.js";
+import {
+  findProjectScopedImageAsset,
+  findManifestImageById,
+} from "../services/projectScopedMedia.js";
 
 const router = Router();
 
@@ -1661,6 +1666,27 @@ api.post("/:id/restore", (req, res) => {
   } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
+/** Admin ID-scoped project image (schemes / rack extras) — no raw /uploads reopen. */
+api.get("/:id/media/assets/:assetId", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const found = findProjectScopedImageAsset(p, req.params.assetId);
+  if (!found.ok) {
+    const status = found.code === "INVALID_ASSET_ID" ? 400 : 404;
+    return res.status(status).json({ error: found.code === "INVALID_ASSET_ID" ? "Invalid asset id" : "Not found", code: found.code });
+  }
+  const url = String(found.url || "");
+  if (!url.startsWith("/uploads/")) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  return sendSafeUploadFile(res, {
+    url,
+    filename: path.basename(url),
+    inline: true,
+    cacheControl: "private, max-age=300",
+  });
+});
+
 export default api;
 
 function loadBrandingSettings() {
@@ -1717,6 +1743,21 @@ export function getClientProjectDocuments(projectId) {
   }).filter((document) => !document.__supersededFrameDrawing);
 }
 
+function attachClientImageAccessUrls(manifest, token) {
+  const mapEntry = (img) => {
+    const id = String(img?.id || "").trim();
+    if (!id) return { ...img };
+    return {
+      ...img,
+      accessUrl: `/api/client/p/${encodeURIComponent(token)}/images/${encodeURIComponent(id)}`,
+    };
+  };
+  return {
+    projectSchemes: (manifest?.projectSchemes || []).map(mapEntry),
+    rackImages: (manifest?.rackImages || []).map(mapEntry),
+  };
+}
+
 function serveClientProject(req, res) {
   const p = loadProjectByToken(req.clientToken);
   if (!p) return res.status(404).json({ error: "Not found" });
@@ -1742,6 +1783,12 @@ function serveClientProject(req, res) {
   }
 
   const clientProject = buildClientProjectFromRelease(p, parsedSnapshot, { overlayLive: true });
+  if (clientProject?.clientImages) {
+    clientProject.clientImages = attachClientImageAccessUrls(
+      clientProject.clientImages,
+      req.clientToken,
+    );
+  }
   const versions = listVersions(p.id);
   const versionInfoRaw = versions.find((v) => v.id === release.versionId) || versions[0] || null;
   // Admin-only fields must never reach the client DTO.
@@ -2055,16 +2102,67 @@ function serveClientReleaseFile(req, res) {
   });
 }
 
+/**
+ * Client release-scoped image by frozen imageManifest id.
+ * Resolves URL from the snapshot entry only (no live project scheme lookup).
+ */
+function serveClientReleaseImage(req, res) {
+  const p = loadProjectByToken(req.clientToken);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
+    return res.status(410).json({ error: "Link expired" });
+  }
+  const release = parsePublishedRelease(p.manualParams);
+  if (!release) {
+    return res.status(403).json({ error: "Project not published for client", code: "NOT_PUBLISHED" });
+  }
+  const parsedSnapshot = loadPublishedReleaseSnapshot(p);
+  if (!parsedSnapshot?.items?.length) {
+    return res.status(403).json({ error: "Published release snapshot missing", code: "PUBLISHED_SNAPSHOT_MISSING" });
+  }
+  if (isLegacyReleaseIncomplete(parsedSnapshot)) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  const imageId = String(req.params.imageId || "").trim();
+  if (!imageId || imageId.includes("..") || imageId.includes("/") || imageId.includes("\\")) {
+    return res.status(400).json({ error: "Invalid image id" });
+  }
+
+  const entry = findManifestImageById(parsedSnapshot.imageManifest, imageId);
+  if (!entry) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  const url = String(entry.url || "").trim();
+  if (/^https:\/\//i.test(url)) {
+    return res.redirect(302, url);
+  }
+  if (!url.startsWith("/uploads/")) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  // Prefer release-pinned paths; for older snapshots that froze live upload URLs,
+  // still serve ONLY the frozen manifest URL (membership = release scope), never live project lookup.
+  return sendSafeUploadFile(res, {
+    url,
+    filename: path.basename(url) || "image",
+    inline: true,
+    cacheControl: "private, max-age=300",
+  });
+}
+
 // Client router — основной путь /api/client/p/:token
 export const clientRouter = Router();
 clientRouter.use(clientAuthMiddleware);
 
 clientRouter.get("/p/:token", serveClientProject);
 clientRouter.get("/p/:token/files/:assetId", serveClientReleaseFile);
+clientRouter.get("/p/:token/images/:imageId", serveClientReleaseImage);
 clientRouter.get("/p/:token/media", async (req, res) => {
   try {
     const { loadProxyImage } = await import("../services/imageProxy.js");
-    // Client media: public catalog / remote only — private prefixes fail closed.
+    // Client media: public catalog only — private prefixes fail closed.
     const { buffer, contentType } = await loadProxyImage(req.query.url, { allowPrivate: false });
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "private, max-age=3600");

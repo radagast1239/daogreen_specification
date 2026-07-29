@@ -40,8 +40,10 @@ let createVersion;
 let saveItems;
 let loadProject;
 let clientRouter;
+let projectsRouter;
 let adminRouter;
 let materialsRouter;
+let mediaRouter;
 let frameDrawingsRouter;
 let assertUploadRootForStartup;
 let resolveUploadRoot;
@@ -209,6 +211,7 @@ beforeAll(async () => {
   const projectsMod = await import("../backend/src/routes/projects.js");
   const adminMod = await import("../backend/src/routes/admin.js");
   const materialsMod = await import("../backend/src/routes/materialsApi.js");
+  const mediaMod = await import("../backend/src/routes/media.js");
   const frameMod = await import("../backend/src/routes/frameDrawings.js");
   const uploadRootMod = await import("../backend/src/services/uploadRoot.js");
   const imageProxyMod = await import("../backend/src/services/imageProxy.js");
@@ -221,8 +224,10 @@ beforeAll(async () => {
   createVersion = projectsMod.createVersion;
   loadProject = dbMod.loadProject;
   clientRouter = projectsMod.clientRouter;
+  projectsRouter = projectsMod.default;
   adminRouter = adminMod.default;
   materialsRouter = materialsMod.default;
+  mediaRouter = mediaMod.default;
   frameDrawingsRouter = frameMod.default;
   assertUploadRootForStartup = uploadRootMod.assertUploadRootForStartup;
   resolveUploadRoot = uploadRootMod.resolveUploadRoot;
@@ -265,7 +270,9 @@ function adminApp() {
   const app = express();
   app.use(express.json());
   app.use("/api/admin", (req, res, next) => adminAuthMiddleware(req, res, next), adminRouter);
+  app.use("/api/projects", (req, res, next) => adminAuthMiddleware(req, res, next), projectsRouter);
   app.use("/api/materials", (req, res, next) => adminAuthMiddleware(req, res, next), materialsRouter);
+  app.use("/api/media", (req, res, next) => adminAuthMiddleware(req, res, next), mediaRouter);
   app.use("/api/frame-drawings", (req, res, next) => adminAuthMiddleware(req, res, next), frameDrawingsRouter);
   app.use("/uploads/public", express.static(path.join(tempUploads, "public")));
   app.use("/uploads", (_req, res) => res.status(404).json({ error: "closed" }));
@@ -617,6 +624,8 @@ describe("imageProxy private fail-closed", () => {
     expect(parseProxyImageUrl("/uploads/projects/p1/x.jpg").error).toBeTruthy();
     expect(parseProxyImageUrl("/uploads/releases/p1/v1/x.jpg").error).toBeTruthy();
     expect(parseProxyImageUrl("/uploads/frame-drawings/p1/x.pdf").error).toBeTruthy();
+    // Legacy root files no longer allowed on client media proxy.
+    expect(parseProxyImageUrl("/uploads/legacy-root.jpg").error).toBeTruthy();
 
     expect(parseProxyImageUrl("/uploads/projects/p1/x.jpg", { allowPrivate: true }).kind).toBe("local");
   });
@@ -626,6 +635,150 @@ describe("imageProxy private fail-closed", () => {
     const parsed = parseProxyImageUrl("/uploads/public/brand/logo.jpg");
     expect(parsed.kind).toBe("local");
     expect(parsed.filePath).toContain(path.join("public", "brand", "logo.jpg"));
+  });
+});
+
+describe("admin project-scoped media", () => {
+  it("blocks unauthenticated access", async () => {
+    const url = writeUpload("projects/p1/scheme.jpg", JPEG);
+    seedProject("p1", {
+      items: [clientItem()],
+      manualParams: {
+        projectSchemes: [{ id: "sch1", title: "S", url, clientVisible: true }],
+      },
+    });
+    const app = adminApp();
+    const res = await httpRequest(app, "GET", "/api/projects/p1/media/assets/sch1");
+    expect(res.status).toBe(401);
+  });
+
+  it("serves related asset with admin auth; blocks unrelated and traversal", async () => {
+    const url = writeUpload("projects/p1/scheme.jpg", JPEG);
+    const other = writeUpload("projects/p2/other.jpg", JPEG);
+    seedProject("p1", {
+      items: [clientItem()],
+      manualParams: {
+        projectSchemes: [{ id: "sch1", title: "S", url, clientVisible: true }],
+      },
+      stellageConfigs: [
+        {
+          id: "rack1",
+          name: "R1",
+          extraImages: [{ id: "ex1", title: "E", url: other, clientVisible: true }],
+        },
+      ],
+    });
+    seedProject("p2", {
+      items: [clientItem("it2")],
+      manualParams: {
+        projectSchemes: [{ id: "foreign", title: "F", url: other, clientVisible: true }],
+      },
+    });
+    const app = adminApp();
+    const hdr = { "X-Admin-Key": ADMIN_KEY };
+
+    const ok = await httpRequest(app, "GET", "/api/projects/p1/media/assets/sch1", { headers: hdr });
+    expect(ok.status).toBe(200);
+    expect(ok.buffer[0]).toBe(0xff);
+
+    const unrelated = await httpRequest(app, "GET", "/api/projects/p1/media/assets/foreign", { headers: hdr });
+    expect(unrelated.status).toBe(404);
+
+    const traversal = await httpRequest(
+      app,
+      "GET",
+      "/api/projects/p1/media/assets/..%2F..%2Fetc",
+      { headers: hdr },
+    );
+    expect([400, 404]).toContain(traversal.status);
+
+    const direct = await httpRequest(app, "GET", url);
+    expect(direct.status).toBe(404);
+  });
+
+  it("serves material photo by id for legacy private until migrated", async () => {
+    const url = writeUpload("legacy-mat.jpg", JPEG);
+    db.prepare("UPDATE materials SET photo_url = ? WHERE id = 'mat1'").run(url);
+    const app = adminApp();
+    const hdr = { "X-Admin-Key": ADMIN_KEY };
+    const res = await httpRequest(app, "GET", "/api/materials/mat1/photo", { headers: hdr });
+    expect(res.status).toBe(200);
+    const noAuth = await httpRequest(app, "GET", "/api/materials/mat1/photo");
+    expect(noAuth.status).toBe(401);
+  });
+});
+
+describe("client release-scoped images", () => {
+  it("serves published visible image; hidden not in manifest; wrong token blocked", async () => {
+    const visible = writeUpload("projects/p1/vis.jpg", JPEG);
+    const hidden = writeUpload("projects/p1/hid.jpg", JPEG);
+    seedProject("p1", {
+      items: [clientItem()],
+      token: "token-p1",
+      manualParams: {
+        projectSchemes: [
+          { id: "vis", title: "Visible", url: visible, clientVisible: true, mimeType: "image/jpeg" },
+          { id: "hid", title: "Hidden", url: hidden, clientVisible: false, mimeType: "image/jpeg" },
+        ],
+      },
+    });
+    createVersion("p1", "admin", { force: true });
+
+    const app = clientApp();
+    const dto = await httpRequest(app, "GET", "/api/client/p/token-p1");
+    expect(dto.status).toBe(200);
+    const schemes = dto.body.project.clientImages.projectSchemes;
+    expect(schemes.map((s) => s.id)).toEqual(["vis"]);
+    expect(schemes[0].accessUrl).toContain("/api/client/p/token-p1/images/vis");
+
+    const ok = await httpRequest(app, "GET", "/api/client/p/token-p1/images/vis");
+    expect(ok.status).toBe(200);
+    expect(ok.buffer[0]).toBe(0xff);
+
+    const hid = await httpRequest(app, "GET", "/api/client/p/token-p1/images/hid");
+    expect(hid.status).toBe(404);
+
+    seedProject("p2", { items: [clientItem("it2")], token: "token-p2" });
+    createVersion("p2", "admin", { force: true });
+    const wrong = await httpRequest(app, "GET", "/api/client/p/token-p2/images/vis");
+    expect(wrong.status).toBe(404);
+  });
+
+  it("does not live-fallback to unpublished scheme not in frozen manifest", async () => {
+    const pinned = writeUpload("projects/p1/pinned.jpg", JPEG);
+    seedProject("p1", {
+      items: [clientItem()],
+      token: "token-p1",
+      manualParams: {
+        projectSchemes: [
+          { id: "old", title: "Old", url: pinned, clientVisible: true, mimeType: "image/jpeg" },
+        ],
+      },
+    });
+    createVersion("p1", "admin", { force: true });
+
+    // Live project gains a new scheme after publish — must not be served.
+    const liveNew = writeUpload("projects/p1/new.jpg", JPEG);
+    const p = loadProject("p1");
+    const mp = {
+      ...(p.manualParams || {}),
+      projectSchemes: [
+        ...(p.manualParams?.projectSchemes || []),
+        { id: "newlive", title: "New", url: liveNew, clientVisible: true, mimeType: "image/jpeg" },
+      ],
+    };
+    db.prepare("UPDATE projects SET manual_params = ? WHERE id = 'p1'").run(JSON.stringify(mp));
+
+    const app = clientApp();
+    const res = await httpRequest(app, "GET", "/api/client/p/token-p1/images/newlive");
+    expect(res.status).toBe(404);
+  });
+
+  it("direct private /uploads remains closed", async () => {
+    const url = writeUpload("projects/p1/closed.jpg", JPEG);
+    const app = clientApp();
+    const res = await httpRequest(app, "GET", url);
+    expect(res.status).toBe(404);
   });
 });
 

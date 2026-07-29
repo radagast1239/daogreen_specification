@@ -42,12 +42,11 @@ export function parseProxyImageUrl(raw, opts = {}) {
     if (!allowPrivate && isPrivateUploadRel(rel)) {
       return { error: "URL not allowed" };
     }
-    // Public catalog: only /uploads/public/... (and legacy root files for materials — deny by default
-    // unless under public/ when not allowPrivate). Legacy root material photos: allow if not private prefix.
+    // Public catalog: only /uploads/public/... when not allowPrivate.
+    // Legacy root material photos are no longer allowed via client media proxy.
     if (!allowPrivate) {
       const isPublic = rel === "public" || rel.startsWith("public/");
-      const isLegacyRootFile = !rel.includes("/") && !isPrivateUploadRel(rel);
-      if (!isPublic && !isLegacyRootFile) {
+      if (!isPublic) {
         return { error: "URL not allowed" };
       }
     }

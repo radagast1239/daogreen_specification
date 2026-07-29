@@ -31,6 +31,7 @@ import {
   UploadValidationError,
 } from "../services/uploadValidation.js";
 import { multerFileFilter } from "../services/uploadFilter.js";
+import { sendSafeUploadFile } from "../services/secureFileServe.js";
 import XLSX from "xlsx";
 
 function sendMaterialCatalogError(res, e) {
@@ -86,6 +87,22 @@ router.post("/merge", (req, res) => {
 
 router.get("/:id/price-history", (req, res) => {
   res.json(getPriceHistory(req.params.id));
+});
+
+router.get("/:id/photo", (req, res) => {
+  const m = getMaterial(req.params.id);
+  if (!m) return res.status(404).json({ error: "Not found" });
+  const url = String(m.imageUrl || m.photoUrl || "").trim();
+  if (!url || !url.startsWith("/uploads/")) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  // Legacy private material photos until migrated to /uploads/public/; public URLs also work here.
+  return sendSafeUploadFile(res, {
+    url,
+    filename: path.basename(url),
+    inline: true,
+    cacheControl: "private, max-age=300",
+  });
 });
 
 router.get("/:id", (req, res) => {

@@ -19,7 +19,7 @@ export default function FloorPlanViewer({
     ? Math.min(Math.max(0, Number(activeIndex) || 0), list.length - 1)
     : 0;
   const active = list ? list[idx] : null;
-  const src = photoSrc(active?.url || url);
+  const src = photoSrc(active?.accessUrl || active?.url || url);
   const heading = active
     ? `${active.title || title} · ${idx + 1} из ${list.length}`
     : title;

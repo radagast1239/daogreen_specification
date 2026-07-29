@@ -37,3 +37,35 @@ describe("photoHelpers", () => {
     expect(itemPhotoSrc(null)).toBe("");
   });
 });
+
+describe("photoSrc after upload hardening", () => {
+  it("keeps absolute http(s) unchanged", () => {
+    expect(photoSrc("https://cdn.example/a.jpg")).toBe("https://cdn.example/a.jpg");
+    expect(photoSrc("http://cdn.example/a.jpg")).toBe("http://cdn.example/a.jpg");
+  });
+
+  it("passes through /api accessUrl paths", () => {
+    expect(photoSrc("/api/client/p/tok/images/img1")).toBe("/api/client/p/tok/images/img1");
+    expect(photoSrc("/api/materials/m1/photo")).toBe("/api/materials/m1/photo");
+  });
+
+  it("serves /uploads/public/** directly", () => {
+    expect(photoSrc("/uploads/public/legacy/materials/abc.jpg")).toBe(
+      "/uploads/public/legacy/materials/abc.jpg",
+    );
+  });
+
+  it("routes other /uploads/** through admin media proxy", () => {
+    expect(photoSrc("/uploads/projects/p1/scheme.jpg")).toBe(
+      `/api/media/image?url=${encodeURIComponent("/uploads/projects/p1/scheme.jpg")}`,
+    );
+    expect(photoSrc("/uploads/mat.jpg")).toBe(
+      `/api/media/image?url=${encodeURIComponent("/uploads/mat.jpg")}`,
+    );
+  });
+
+  it("returns empty for falsy", () => {
+    expect(photoSrc("")).toBe("");
+    expect(photoSrc(null)).toBe("");
+  });
+});
