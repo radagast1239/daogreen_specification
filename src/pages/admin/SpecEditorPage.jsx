@@ -2215,6 +2215,29 @@ function SpecTab({
                               onChange={(e) => editItem(it.id, { internalNote: e.target.value })}
                             />
                           </label>
+                          {!it.materialId && (
+                            <div className="spec-comment-field" style={{ display: "grid", gap: 8 }}>
+                              <span>Английская версия (необязательно, для EN-публикации)</span>
+                              <input
+                                className="input"
+                                value={it.nameEn || ""}
+                                placeholder="English name"
+                                onChange={(e) => editItem(it.id, { nameEn: e.target.value })}
+                              />
+                              <textarea
+                                rows={2}
+                                value={it.descriptionEn || ""}
+                                placeholder="English description"
+                                onChange={(e) => editItem(it.id, { descriptionEn: e.target.value })}
+                              />
+                              <input
+                                className="input"
+                                value={it.unitEn || ""}
+                                placeholder="English unit"
+                                onChange={(e) => editItem(it.id, { unitEn: e.target.value })}
+                              />
+                            </div>
+                          )}
                         </div>
                       </td>
                     </tr>
