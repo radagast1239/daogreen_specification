@@ -1054,13 +1054,13 @@
       "sourceUnit": "шт.",
       "sourceCategory": "Дренаж и слив",
       "sourceHash": "c5f98458a7c32be8abb6726311b38b986251970e060b1a0c12dc9a1a134d1d0d",
-      "nameEn": "Sewer reducing elbow 110×50×110",
+      "nameEn": "Sewer branch fitting 110×50×110",
       "descriptionEn": "",
       "unitEn": "pcs",
       "categoryEn": "Drainage and discharge",
-      "status": "needs_review",
-      "confidence": "medium",
-      "note": "RU \"Отвод\" may mean elbow or reducing branch; kept as reducing elbow"
+      "status": "translated",
+      "confidence": "high",
+      "note": "Photo: 90° elbow with smaller side inlet 50; not a plain tee"
     },
     {
       "materialId": "m140",
@@ -1219,13 +1219,13 @@
       "sourceUnit": "шт.",
       "sourceCategory": "Насосы",
       "sourceHash": "5a2926c011ddf2fc438915e6bf5db65db04f9892a04bcb760bf87777f3baea15",
-      "nameEn": "Pump station for flood irrigation",
+      "nameEn": "Ebb-and-flow irrigation pump station",
       "descriptionEn": "Pumps: 1 pc",
       "unitEn": "pcs",
       "categoryEn": "Pumps",
-      "status": "needs_review",
-      "confidence": "medium",
-      "note": "\"подтопление\" = flood/ebb; confirm preferred EN term"
+      "status": "translated",
+      "confidence": "high",
+      "note": "Photo: booster pump station; RU подтопление = ebb-and-flow in farm projects"
     },
     {
       "materialId": "m163",
@@ -1234,13 +1234,13 @@
       "sourceUnit": "шт.",
       "sourceCategory": "Насосы",
       "sourceHash": "688d7c6e90bea697c90c0c5b7fa475e0a669b7392c1dffc9aa5f0f5f68ca3504",
-      "nameEn": "Pump station for flow-through irrigation",
+      "nameEn": "Flow-through irrigation pump station",
       "descriptionEn": "",
       "unitEn": "pcs",
       "categoryEn": "Pumps",
-      "status": "needs_review",
-      "confidence": "medium",
-      "note": "\"проточка\" may mean NFT/flow-through; confirm preferred EN term"
+      "status": "translated",
+      "confidence": "high",
+      "note": "Photo: booster pump station; Ozon Unipump link; RU проточка = flow-through"
     },
     {
       "materialId": "m164",
@@ -1384,13 +1384,13 @@
       "sourceUnit": "шт.",
       "sourceCategory": "Электрика и щит",
       "sourceHash": "78d671cef9c6045c7993b12c5a7a849f999117c7639e59f81ba7674d1e7379db",
-      "nameEn": "DIN-rail enclosure for automation, X modules",
+      "nameEn": "DIN-rail enclosure, X modules",
       "descriptionEn": "",
       "unitEn": "pcs",
       "categoryEn": "Electrical and panel",
-      "status": "needs_review",
-      "confidence": "medium",
-      "note": "\"X модулей\" is a placeholder for module count"
+      "status": "translated",
+      "confidence": "high",
+      "note": "Photo shows several enclosure sizes; X is intentional module-count placeholder in RU name"
     },
     {
       "materialId": "m185",
@@ -2529,8 +2529,8 @@
       "unitEn": "set",
       "categoryEn": "Tools and equipment",
       "status": "needs_review",
-      "confidence": "medium",
-      "note": "Name is \"Аптечка\" but content is plant protection chemicals; EN name clarified"
+      "confidence": "low",
+      "note": "Photo shows medical first-aid kit; client_note/supplier/link describe plant-protection chemicals — unresolved photo vs composition conflict; leave needs_review"
     },
     {
       "materialId": "m_sH8pDGkPlO",
@@ -2554,13 +2554,13 @@
       "sourceUnit": "шт.",
       "sourceCategory": "Общая закупка на ферму",
       "sourceHash": "81cbc97a99a7ad8c2b21f5e0dd86a005bcce3cbf551a0c3f84f4657bb8e116e2",
-      "nameEn": "Lift GROST",
+      "nameEn": "GROST telescopic mast lift",
       "descriptionEn": "",
       "unitEn": "pcs",
       "categoryEn": "General farm procurement",
-      "status": "needs_review",
-      "confidence": "medium",
-      "note": "Brand GROST; type of lift (scissor/platform) unspecified"
+      "status": "translated",
+      "confidence": "high",
+      "note": "Photo + supplier link: GROST Single Mast telescopic (not scissor); model kept out of display name"
     },
     {
       "materialId": "m_up5Q9h3dNq",
