@@ -12,7 +12,8 @@
     "import:materials-map": "node scripts/importMaterialsNamingMap.js",
     "migrate:legacy-public-uploads": "node scripts/migrateLegacyPublicUploads.mjs",
     "apply:materials-modules": "node scripts/applyMaterialsModuleMap.js",
-    "seed": "node src/seed.js"
+    "seed": "node src/seed.js",
+    "materials:translations:import": "node scripts/importMaterialTranslations.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",

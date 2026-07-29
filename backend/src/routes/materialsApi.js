@@ -32,6 +32,11 @@ import {
 } from "../services/uploadValidation.js";
 import { multerFileFilter } from "../services/uploadFilter.js";
 import { sendSafeUploadFile } from "../services/secureFileServe.js";
+import {
+  getMaterialTranslation,
+  materialTranslationCoverage,
+  upsertMaterialTranslation,
+} from "../services/materialTranslationService.js";
 import XLSX from "xlsx";
 
 function sendMaterialCatalogError(res, e) {
@@ -69,8 +74,29 @@ router.get("/", (req, res) => {
       module: req.query.module,
       category: req.query.category,
       q: req.query.q,
+      translationFilter: req.query.translationFilter || req.query.translationStatus,
     })
   );
+});
+
+router.get("/meta/translation-coverage", (_req, res) => {
+  res.json(materialTranslationCoverage());
+});
+
+router.put("/:id/translation", (req, res) => {
+  try {
+    const locale = req.body?.locale || "en";
+    const dto = upsertMaterialTranslation(req.params.id, req.body || {}, locale);
+    res.json(dto);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message, code: e.code });
+  }
+});
+
+router.get("/:id/translation", (req, res) => {
+  const dto = getMaterialTranslation(req.params.id, req.query.locale || "en");
+  if (!dto) return res.status(404).json({ error: "Not found" });
+  res.json(dto);
 });
 
 router.get("/modules", (_req, res) => res.json(listModules()));

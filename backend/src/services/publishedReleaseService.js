@@ -1,4 +1,4 @@
-import { db } from "../db.js";
+import { db, rowToMaterial } from "../db.js";
 import {
   buildPublishedReleaseMeta,
   buildReleaseSnapshotPayload,
@@ -31,6 +31,11 @@ import {
   buildPinnedFrameDrawingsForPublish,
   listLatestClientVisibleFrameDrawings,
 } from "./publishedAssetRetention.js";
+import { freezeItemDisplayFields } from "../../../shared/materialTranslations.js";
+import {
+  getMaterialTranslation,
+  sha256Utf8,
+} from "./materialTranslationService.js";
 
 function parseSummaryColumn(raw) {
   if (raw && typeof raw === "object") return raw;
@@ -92,8 +97,20 @@ export function loadPublishedSnapshotItems(project) {
 export function prepareSnapshotItemForClient(item) {
   const base = stripClientTechnicalFields({ ...item });
   const status = normalizePurchaseStatus(base);
+  // Prefer frozen display* from publish (EN or RU). Never re-resolve live catalog.
+  const name = base.displayName || base.name;
+  const unit = base.displayUnit || base.unit;
+  const category = base.displayCategory || base.category;
+  const clientNote =
+    base.displayDescription != null && String(base.displayDescription).length
+      ? base.displayDescription
+      : base.clientNote;
   return {
     ...base,
+    name,
+    unit,
+    category,
+    clientNote,
     status,
     purchaseStatus: status,
     statusLabel: getPurchaseStatusLabel(status),
@@ -504,7 +521,22 @@ export function shouldPublishOnStatusChange(currentProject, nextStatus) {
 export function prepareReleaseSnapshotPayload(project, extras = {}) {
   const imageManifest = enrichImageManifestForPublish(project);
   const pinnedFrameDrawings = buildPinnedFrameDrawingsForPublish(project.id);
-  return buildReleaseSnapshotPayload(project, project?.items || [], {
+  const language = projectClientLanguage(project);
+  const items = (project?.items || []).map((item) => {
+    const materialId = String(item?.materialId || item?.material_id || "").trim();
+    const translation = materialId ? getMaterialTranslation(materialId, "en") : null;
+    const matRow = materialId
+      ? db.prepare("SELECT * FROM materials WHERE id = ?").get(materialId)
+      : null;
+    const material = matRow ? rowToMaterial(matRow) : null;
+    return freezeItemDisplayFields(item, {
+      language,
+      translation,
+      material,
+      sourceHashFn: sha256Utf8,
+    });
+  });
+  return buildReleaseSnapshotPayload(project, items, {
     schema: RELEASE_SCHEMA_V4,
     assetsPinned: true,
     imageManifest,

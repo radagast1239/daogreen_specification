@@ -14,6 +14,7 @@
     "start": "npm run start --prefix backend",
     "import:materials-map": "npm run import:materials-map --prefix backend",
     "apply:materials-modules": "npm run apply:materials-modules --prefix backend",
+    "materials:translations:import": "npm run materials:translations:import --prefix backend",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -106,6 +106,9 @@ export const api = {
     const q = new URLSearchParams(params).toString();
     return request(`/api/materials${q ? `?${q}` : ""}`);
   },
+  getMaterialTranslationCoverage: () => request("/api/materials/meta/translation-coverage"),
+  upsertMaterialTranslation: (id, body) =>
+    request(`/api/materials/${id}/translation`, { method: "PUT", body }),
   getModules: () => request("/api/materials/modules"),
   createMaterial: (data) => request("/api/materials", { method: "POST", body: data }),
   updateMaterial: (id, patch) => request(`/api/materials/${id}`, { method: "PATCH", body: patch }),
