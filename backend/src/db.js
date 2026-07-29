@@ -240,6 +240,9 @@ function migrateDb() {
   addCol("project_items", "internal_note", "TEXT DEFAULT ''");
   addCol("project_items", "delivery_days", "INTEGER DEFAULT 0");
   addCol("project_items", "item_role", "TEXT DEFAULT 'purchase'");
+  addCol("project_items", "name_en", "TEXT NOT NULL DEFAULT ''");
+  addCol("project_items", "description_en", "TEXT NOT NULL DEFAULT ''");
+  addCol("project_items", "unit_en", "TEXT NOT NULL DEFAULT ''");
   addCol("projects", "client_token_expires_at", "TEXT DEFAULT ''");
   addCol("projects", "purchase_started_at", "TEXT DEFAULT ''");
   addCol("projects", "installation_done_at", "TEXT DEFAULT ''");
@@ -513,6 +516,9 @@ export function rowToItem(row) {
     name: row.name,
     nameOverridden: !!row.name_overridden,
     name_overridden: !!row.name_overridden,
+    nameEn: row.name_en || "",
+    descriptionEn: row.description_en || "",
+    unitEn: row.unit_en || "",
     unit: row.unit,
     category: row.category,
     clientSection: row.client_section || "",

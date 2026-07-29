@@ -212,7 +212,8 @@ const INSERT_ITEM = db.prepare(`
     cooling_kw, cooling_btu, exhaust_m3, room_id, internal_note, delivery_days, item_role, pipe_cuts, breaker_specs, flow_specs, split_specs,     client_section, client_subsection,
     included_in_project, visible_to_client, item_type, subcategory, purchase_key,
     purchase_priority, replacement_link, replacement_photo_url, replacement_price,
-    replacement_comment, replacement_proposed_at, source, source_type, source_key, source_object_ids
+    replacement_comment, replacement_proposed_at, source, source_type, source_key, source_object_ids,
+    name_en, description_en, unit_en
   ) VALUES (
     @id, @project_id, @material_id, @module, @section, @name, @name_overridden, @unit, @category,
     @supplier, @link, @link_alt, @photo_url, @client_note, @tech_note,
@@ -221,7 +222,8 @@ const INSERT_ITEM = db.prepare(`
     @cooling_kw, @cooling_btu, @exhaust_m3, @room_id, @internal_note, @delivery_days, @item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs,     @client_section, @client_subsection,
     @included_in_project, @visible_to_client, @item_type, @subcategory, @purchase_key,
     @purchase_priority, @replacement_link, @replacement_photo_url, @replacement_price,
-    @replacement_comment, @replacement_proposed_at, @source, @source_type, @source_key, @source_object_ids
+    @replacement_comment, @replacement_proposed_at, @source, @source_type, @source_key, @source_object_ids,
+    @name_en, @description_en, @unit_en
   )
 `);
 
@@ -242,7 +244,8 @@ const UPDATE_ITEM = db.prepare(`
     purchase_priority=@purchase_priority, replacement_link=@replacement_link,
     replacement_photo_url=@replacement_photo_url, replacement_price=@replacement_price,
     replacement_comment=@replacement_comment, replacement_proposed_at=@replacement_proposed_at,
-    source=@source, source_type=@source_type, source_key=@source_key, source_object_ids=@source_object_ids
+    source=@source, source_type=@source_type, source_key=@source_key, source_object_ids=@source_object_ids,
+    name_en=@name_en, description_en=@description_en, unit_en=@unit_en
   WHERE id=@id AND project_id=@project_id
 `);
 
@@ -324,6 +327,9 @@ function itemToParams(it, projectId) {
     source_type: normalized.sourceType || "",
     source_key: normalized.sourceKey || "",
     source_object_ids: JSON.stringify(normalized.sourceObjectIds || []),
+    name_en: String(normalized.nameEn || normalized.name_en || "").trim(),
+    description_en: String(normalized.descriptionEn || normalized.description_en || "").trim(),
+    unit_en: String(normalized.unitEn || normalized.unit_en || "").trim(),
   };
 }
 

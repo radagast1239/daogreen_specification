@@ -119,6 +119,16 @@ describe("material translation data file", () => {
       expect(t.sourceHash).toMatch(/^[a-f0-9]{64}$/);
       expect(t.sourceNameRu).toBeTruthy();
     }
-    expect((statuses.translated || 0) + (statuses.needs_review || 0)).toBeGreaterThan(150);
+    expect((statuses.translated || 0) + (statuses.needs_review || 0)).toBe(177);
+    expect(statuses.translated).toBeGreaterThanOrEqual(170);
+    expect(statuses.needs_review).toBeLessThanOrEqual(6);
+  });
+
+  it("keeps only confirmed photo/composition conflict as needs_review", () => {
+    const payload = JSON.parse(
+      fs.readFileSync(path.resolve("backend/data/materialTranslations.en.json"), "utf8"),
+    );
+    const review = payload.translations.filter((t) => t.status === "needs_review");
+    expect(review.map((t) => t.materialId)).toEqual(["m_r1oVb3LqhT"]);
   });
 });
