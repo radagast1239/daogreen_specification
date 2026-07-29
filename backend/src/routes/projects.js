@@ -103,6 +103,11 @@ import {
   findProjectScopedImageAsset,
   findManifestImageById,
 } from "../services/projectScopedMedia.js";
+import {
+  canonicalizeClientMediaUrl,
+  isUrlInFrozenClientMedia,
+  isClientMediaLocalServePath,
+} from "../services/clientMediaAllowlist.js";
 
 const router = Router();
 
@@ -2165,16 +2170,63 @@ clientRouter.use(clientAuthMiddleware);
 clientRouter.get("/p/:token", serveClientProject);
 clientRouter.get("/p/:token/files/:assetId", serveClientReleaseFile);
 clientRouter.get("/p/:token/images/:imageId", serveClientReleaseImage);
+/**
+ * Legacy client media compatibility route.
+ * Not an open URL proxy: token → published release → frozen allowlist → local public/release asset.
+ */
 clientRouter.get("/p/:token/media", async (req, res) => {
+  const notFound = () => {
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    return res.status(404).json({ error: "Not found" });
+  };
+
   try {
+    const p = loadProjectByToken(req.clientToken);
+    if (!p) return notFound();
+    if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
+      return res.status(410).json({ error: "Link expired" });
+    }
+    const release = parsePublishedRelease(p.manualParams);
+    if (!release) return notFound();
+    const parsedSnapshot = loadPublishedReleaseSnapshot(p);
+    if (!parsedSnapshot?.items?.length) return notFound();
+    if (isLegacyReleaseIncomplete(parsedSnapshot)) return notFound();
+
+    let requested = "";
+    const assetId = String(req.query.assetId || "").trim();
+    if (assetId) {
+      if (assetId.includes("..") || assetId.includes("/") || assetId.includes("\\")) {
+        return notFound();
+      }
+      const entry = findManifestImageById(parsedSnapshot.imageManifest, assetId);
+      if (!entry) return notFound();
+      requested = String(entry.url || "").trim();
+    } else {
+      requested = String(req.query.url || "").trim();
+      if (!requested) return notFound();
+      if (!isUrlInFrozenClientMedia(requested, parsedSnapshot)) return notFound();
+    }
+
+    const canonical = canonicalizeClientMediaUrl(requested);
+    if (!canonical || !isClientMediaLocalServePath(canonical, p.id)) {
+      return notFound();
+    }
+
     const { loadProxyImage } = await import("../services/imageProxy.js");
-    // Client media: public catalog only — private prefixes fail closed.
-    const { buffer, contentType } = await loadProxyImage(req.query.url, { allowPrivate: false });
+    const { buffer, contentType } = await loadProxyImage(canonical, {
+      allowPrivate: false,
+      allowRemote: false,
+      allowReleaseProjectId: p.id,
+      // Frozen releases may still point at legacy /uploads/<file> catalog photos.
+      allowLegacyCatalogRoot: true,
+    });
     res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.send(buffer);
-  } catch (e) {
-    res.status(e.status || 500).json({ error: e.message || "Image fetch failed" });
+  } catch {
+    return notFound();
   }
 });
 clientRouter.patch("/p/:token/items/bulk", bulkPatchClientItems);
