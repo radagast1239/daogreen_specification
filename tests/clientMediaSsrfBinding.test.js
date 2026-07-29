@@ -337,6 +337,82 @@ describe("client media authorization / binding", () => {
     expect(viaMedia.status).toBe(404);
   });
 
+  it("scoped image with remote https URL → 404 without Location", async () => {
+    seedProject("p1", {
+      token: "token-p1",
+      items: [clientItem()],
+      manualParams: {
+        projectSchemes: [
+          {
+            id: "remote1",
+            title: "Remote",
+            url: "https://cdn.example/remote.jpg",
+            clientVisible: true,
+            mimeType: "image/jpeg",
+          },
+        ],
+      },
+    });
+    createVersion("p1", "admin", { force: true });
+    const app = clientApp();
+    const res = await httpRequest(app, "GET", "/api/client/p/token-p1/images/remote1");
+    expect(res.status).toBe(404);
+    expect(res.headers.location).toBeUndefined();
+    expect(String(res.text)).not.toMatch(/cdn\.example/i);
+  });
+
+  it("scoped file with remote URL → 404 without Location", async () => {
+    seedProject("p1", {
+      token: "token-p1",
+      items: [clientItem()],
+    });
+    createVersion("p1", "admin", { force: true });
+    const ver = db
+      .prepare("SELECT id, snapshot FROM spec_versions WHERE project_id = ? ORDER BY version_number DESC")
+      .get("p1");
+    const snap = JSON.parse(ver.snapshot);
+    snap.documentManifest = [
+      {
+        id: "doc-remote",
+        sourceFileId: "doc-remote",
+        type: "manual",
+        filename: "remote.pdf",
+        url: "https://cdn.example/remote.pdf",
+        clientVisible: true,
+      },
+    ];
+    db.prepare("UPDATE spec_versions SET snapshot = ? WHERE id = ?").run(JSON.stringify(snap), ver.id);
+
+    const app = clientApp();
+    const res = await httpRequest(app, "GET", "/api/client/p/token-p1/files/doc-remote");
+    expect(res.status).toBe(404);
+    expect(res.headers.location).toBeUndefined();
+    expect(String(res.text)).not.toMatch(/cdn\.example/i);
+  });
+
+  it("legacy local frozen URL via /media still works; arbitrary external → 404", async () => {
+    const legacy = writeUpload("m_legacy.jpg", JPEG);
+    seedProject("p1", {
+      token: "token-p1",
+      items: [clientItem("it1", { imageUrl: legacy, photoUrl: legacy })],
+    });
+    createVersion("p1", "admin", { force: true });
+    const app = clientApp();
+    const ok = await httpRequest(
+      app,
+      "GET",
+      `/api/client/p/token-p1/media?url=${encodeURIComponent(legacy)}`,
+    );
+    expect(ok.status).toBe(200);
+    const ext = await httpRequest(
+      app,
+      "GET",
+      `/api/client/p/token-p1/media?url=${encodeURIComponent("https://evil.example/x.png")}`,
+    );
+    expect(ext.status).toBe(404);
+    expect(ext.headers.location).toBeUndefined();
+  });
+
   it("old release does not get live asset fallback via /media", async () => {
     const pinned = writeUpload("public/pinned.jpg", JPEG);
     seedProject("p1", {

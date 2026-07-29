@@ -2146,10 +2146,8 @@ function serveClientReleaseImage(req, res) {
   }
 
   const url = String(entry.url || "").trim();
-  if (/^https:\/\//i.test(url)) {
-    return res.redirect(302, url);
-  }
-  if (!url.startsWith("/uploads/")) {
+  // Remote media disabled: never 302/fetch external URLs from scoped client images.
+  if (/^https?:\/\//i.test(url) || !url.startsWith("/uploads/")) {
     return res.status(404).json({ error: "Not found" });
   }
 
