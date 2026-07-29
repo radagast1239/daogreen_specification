@@ -17,7 +17,21 @@ function DraftInput({ value, type = "text", placeholder, onCommit }) {
       value={draft}
       placeholder={placeholder}
       onChange={(event) => setDraft(event.target.value)}
-      onBlur={() => onCommit(type === "number" ? Math.max(0, Number(draft) || 0) : draft.trim())}
+      onBlur={() => {
+        if (type === "number") {
+          // Same normalization as pre-wheel behavior (empty/invalid → 0, clamp ≥ 0).
+          const next = Math.max(0, Number(String(draft).trim()) || 0);
+          const prev = Math.max(0, Number(value ?? 0) || 0);
+          if (Object.is(next, prev)) return;
+          onCommit(next);
+          return;
+        }
+
+        const next = draft.trim();
+        const prev = String(value ?? "").trim();
+        if (next === prev) return;
+        onCommit(next);
+      }}
       onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
     />
   );

@@ -591,6 +591,16 @@ const MaterialRow = function MaterialRow({ m, priceDraft, setPriceDraft, patchPr
           onChange={(e) => setPriceDraft((d) => ({ ...d, [m.id]: e.target.value }))}
           onBlur={() => {
             if (priceDraft[m.id] == null) return;
+            const next = Number(priceDraft[m.id]) || 0;
+            const prev = Number(m.basePrice) || 0;
+            if (next === prev) {
+              setPriceDraft((d) => {
+                const copy = { ...d };
+                delete copy[m.id];
+                return copy;
+              });
+              return;
+            }
             patchPrice(m.id, priceDraft[m.id]);
           }}
         />

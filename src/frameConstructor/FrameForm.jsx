@@ -59,13 +59,16 @@ export default function FrameForm({ params, onChange }) {
 
   const handleBlur = (e) => {
     const { name, type } = e.target;
-    if (type === 'number') {
-      let next = { ...params, [name]: params[name] };
-      if (name === 'postCountY') {
-        next = { ...next, ...getPostGridDefaults(params, params.postCountY) };
-      }
-      onChange(normalizeFrameConfig(next));
+    if (type !== 'number') return;
+    // Wheel-induced blur must not rewrite unchanged params.
+    let next = { ...params, [name]: params[name] };
+    if (name === 'postCountY') {
+      next = { ...next, ...getPostGridDefaults(params, params.postCountY) };
     }
+    const normalized = normalizeFrameConfig(next);
+    const current = normalizeFrameConfig(params);
+    if (JSON.stringify(normalized) === JSON.stringify(current)) return;
+    onChange(normalized);
   };
 
   const handlePresetChange = (e) => {
