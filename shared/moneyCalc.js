@@ -44,6 +44,26 @@ function resolveCurrencySymbolArg(currencyOrSymbol) {
   if (currencyOrSymbol && typeof currencyOrSymbol === "object") {
     const fromObj = currencyOrSymbol.currencySymbol;
     if (fromObj != null && fromObj !== "") return String(fromObj);
+    // Prefer code/meta over hard-coded RUB when symbol field is missing.
+    try {
+      // Lazy import avoided: normalize via shared helper when available on object.
+      const code = currencyOrSymbol.currencyCode;
+      if (code != null && String(code).trim()) {
+        const upper = String(code).trim().toUpperCase();
+        if (upper === "USD") return "$";
+        if (upper === "EUR") return "€";
+        if (upper === "RUB") return "₽";
+        if (upper === "AED") return "AED";
+        if (upper === "KZT") return "₸";
+        if (upper === "INR") return "₹";
+        return upper;
+      }
+      if (currencyOrSymbol.currency != null && currencyOrSymbol.currency !== "") {
+        return String(currencyOrSymbol.currency);
+      }
+    } catch {
+      /* ignore */
+    }
     return "₽";
   }
   if (currencyOrSymbol == null || currencyOrSymbol === "") return "₽";

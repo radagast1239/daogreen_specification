@@ -1,6 +1,7 @@
 /** Allowlisted client-facing project metadata for published releases. */
 
 import { projectClientLanguage } from "./projectClientLanguage.js";
+import { normalizeProjectCurrency } from "./projectCurrency.js";
 
 export const CLIENT_PROJECT_META_FIELDS = [
   "name",
@@ -10,6 +11,10 @@ export const CLIENT_PROJECT_META_FIELDS = [
   "description",
   "comment",
   "currency",
+  "currencyCode",
+  "currencySymbol",
+  "currencyName",
+  "currencyCustom",
   "vat",
   "type",
   "area",
@@ -23,6 +28,7 @@ export const CLIENT_PROJECT_META_FIELDS = [
  * Omits auth, tokens, internal-only and server paths.
  */
 export function buildPublishedProjectMeta(project = {}) {
+  const cur = normalizeProjectCurrency(project);
   return {
     id: String(project?.id || ""),
     name: String(project?.name || ""),
@@ -31,7 +37,11 @@ export function buildPublishedProjectMeta(project = {}) {
     address: String(project?.address || ""),
     description: String(project?.description || ""),
     comment: String(project?.comment || ""),
-    currency: String(project?.currency || "₽"),
+    currency: cur.currencySymbol,
+    currencyCode: cur.currencyCode,
+    currencySymbol: cur.currencySymbol,
+    currencyName: cur.currencyName,
+    currencyCustom: !!cur.currencyCustom,
     vat: !!project?.vat,
     type: String(project?.type || ""),
     area: project?.area ?? "",
@@ -48,6 +58,7 @@ function metaIsUsable(projectMeta) {
     projectMeta.name != null ||
     projectMeta.client != null ||
     projectMeta.currency != null ||
+    projectMeta.currencyCode != null ||
     projectMeta.city != null
   );
 }
@@ -66,13 +77,30 @@ export function applyPublishedProjectMeta(projectMeta, liveProject = {}, { allow
       out.vat = !!use[key];
       continue;
     }
+    if (key === "currencyCustom") {
+      continue;
+    }
+    if (
+      key === "currency" ||
+      key === "currencyCode" ||
+      key === "currencySymbol" ||
+      key === "currencyName"
+    ) {
+      continue;
+    }
     if (use[key] !== undefined && use[key] !== null) {
       out[key] = use[key];
       continue;
     }
-    if (key === "currency") out.currency = "₽";
-    else out[key] = "";
+    out[key] = "";
   }
+  // Always normalize from snapshot/live fields — never hardcode ₽ when currencyCode is USD.
+  const cur = normalizeProjectCurrency(use);
+  out.currency = cur.currencySymbol;
+  out.currencyCode = cur.currencyCode;
+  out.currencySymbol = cur.currencySymbol;
+  out.currencyName = cur.currencyName;
+  out.currencyCustom = !!cur.currencyCustom;
   // Language is frozen on the release snapshot; default RU for legacy rows.
   out.clientLanguage = projectClientLanguage(use);
   return out;
@@ -80,6 +108,7 @@ export function applyPublishedProjectMeta(projectMeta, liveProject = {}, { allow
 
 /** Header fields used by PDF/Excel — always from client DTO (already snapshot-backed). */
 export function clientExportHeader(project = {}) {
+  const cur = normalizeProjectCurrency(project);
   return {
     id: project?.id || "",
     name: String(project?.name || ""),
@@ -87,7 +116,9 @@ export function clientExportHeader(project = {}) {
     city: String(project?.city || ""),
     address: String(project?.address || ""),
     comment: String(project?.comment || ""),
-    currency: String(project?.currency || "₽"),
+    currency: cur.currencySymbol,
+    currencyCode: cur.currencyCode,
+    currencySymbol: cur.currencySymbol,
     vat: !!project?.vat,
     status: String(project?.status || ""),
   };

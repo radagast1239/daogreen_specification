@@ -589,8 +589,8 @@ export function rowToProject(row, items = []) {
     height: row.height,
     sowingArea: row.sowing_area,
     type: row.type,
-    // Column remains display-symbol source of truth; extras are derived for UI.
-    currency: row.currency || desc.currencySymbol,
+    // Prefer normalized meta/code over a stale DB currency column (e.g. ₽ + USD meta).
+    currency: desc.currencySymbol,
     currencyCode: desc.currencyCode,
     currencySymbol: desc.currencySymbol,
     currencyName: desc.currencyName,

@@ -7,7 +7,7 @@ export const PROJECT_CURRENCY_PRESETS = [
   { code: "RUB", symbol: "₽", name: "Российский рубль" },
   { code: "USD", symbol: "$", name: "Доллар США" },
   { code: "EUR", symbol: "€", name: "Евро" },
-  { code: "AED", symbol: "د.إ", name: "Дирхам ОАЭ" },
+  { code: "AED", symbol: "AED", name: "Дирхам ОАЭ" },
   { code: "KZT", symbol: "₸", name: "Казахстанский тенге" },
   { code: "INR", symbol: "₹", name: "Индийская рупия" },
 ];

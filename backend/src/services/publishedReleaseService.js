@@ -208,6 +208,15 @@ export function buildClientProjectFromRelease(workingProject, snapshotItemsOrPar
   const hasProjectMeta = !!(parsed.projectMeta && typeof parsed.projectMeta === "object");
   const allowLiveFallback = !historicalMode && !hasProjectMeta && parsed.schema === "legacy_items_array";
   const metaFields = applyPublishedProjectMeta(parsed.projectMeta, workingProject, { allowLiveFallback });
+  // Reinforce currency from snapshot code/symbol (never leave stale ₽ when code is USD).
+  if (hasProjectMeta) {
+    const cur = normalizeProjectCurrency(parsed.projectMeta);
+    metaFields.currency = cur.currencySymbol;
+    metaFields.currencyCode = cur.currencyCode;
+    metaFields.currencySymbol = cur.currencySymbol;
+    metaFields.currencyName = cur.currencyName;
+    metaFields.currencyCustom = !!cur.currencyCustom;
+  }
   const release = parsePublishedRelease(workingProject?.manualParams);
   const assetsPinned = releaseHasPinnedAssets(parsed);
   const schema = parsed.schema || null;
@@ -304,7 +313,13 @@ export function buildHistoricalClientPreview(projectId, versionId, workingProjec
   if (releaseHasPinnedAssets(parsed)) {
     documents = documentsFromPinnedFrameDrawings(parsed.pinnedFrameDrawings || []);
   }
-  const currency = String(parsed.projectMeta?.currency || clientProject?.currency || "₽");
+  const currency = String(
+    clientProject?.currencySymbol
+      || clientProject?.currency
+      || parsed.projectMeta?.currencySymbol
+      || parsed.projectMeta?.currency
+      || "₽",
+  );
   return {
     historical: true,
     versionId: ver.id,
