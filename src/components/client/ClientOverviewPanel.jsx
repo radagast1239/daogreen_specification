@@ -51,7 +51,7 @@ export default function ClientOverviewPanel({
       </div>
 
       <ClientCoolingCalculations rooms={project.rooms || []} />
-      <ClientFarmPowerSummary farmPower={project.farmPower} />
+      <ClientFarmPowerSummary farmPower={project.farmPower} currency={project.currency} />
 
       <div className="card" style={{ padding: 16, marginTop: 16 }}>
         <strong style={{ fontSize: 16, color: "var(--brand)" }}>{t(language, "client.overview.nextStepsTitle")}</strong>

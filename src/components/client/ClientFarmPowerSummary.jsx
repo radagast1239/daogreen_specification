@@ -1,11 +1,14 @@
 import React from "react";
 import { farmPowerTotals, normalizeFarmPower } from "../../../shared/farmPower.js";
+import { resolveMoneyDisplaySymbol } from "../../../shared/projectCurrency.js";
+import { money } from "../../store/helpers.js";
 
-export default function ClientFarmPowerSummary({ farmPower }) {
+export default function ClientFarmPowerSummary({ farmPower, currency }) {
   const normalized = normalizeFarmPower(farmPower);
   const devices = normalized.devices.filter((device) => device.name || device.normalKw > 0 || device.peakKw > 0);
   if (!devices.length) return null;
   const totals = farmPowerTotals({ ...normalized, devices });
+  const currencySymbol = resolveMoneyDisplaySymbol(currency);
   return (
     <section className="card" style={{ padding: 16, marginTop: 20, overflow: "hidden" }}>
       <h3 style={{ margin: "0 0 12px" }}>Электропотребление фермы</h3>
@@ -13,7 +16,7 @@ export default function ClientFarmPowerSummary({ farmPower }) {
         <div className="stat"><div className="k">Установленная мощность</div><div className="v num">{totals.normalKw.toLocaleString("ru-RU")} кВт</div></div>
         <div className="stat"><div className="k">Пиковое потребление</div><div className="v num">{totals.peakKw.toLocaleString("ru-RU")} кВт</div></div>
         <div className="stat"><div className="k">Потребление в месяц</div><div className="v num">{totals.monthlyKwh.toLocaleString("ru-RU")} кВт·ч</div></div>
-        <div className="stat"><div className="k">Затраты в месяц</div><div className="v num">{totals.monthlyCost.toLocaleString("ru-RU")} ₽</div><div className="muted">{normalized.tariffPerKwh.toLocaleString("ru-RU")} ₽/кВт·ч</div></div>
+        <div className="stat"><div className="k">Затраты в месяц</div><div className="v num">{money(totals.monthlyCost, currency)}</div><div className="muted">{normalized.tariffPerKwh.toLocaleString("ru-RU")} {currencySymbol}/кВт·ч</div></div>
       </div>
       <div className="table-scroll-wrap">
         <table className="spec">
