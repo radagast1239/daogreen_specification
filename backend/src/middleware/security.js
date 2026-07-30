@@ -8,6 +8,8 @@ export function applySecurityMiddleware(app, { isProd }) {
         ? {
             directives: {
               ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+              // AuthMediaImg serves private thumbs via blob: object URLs.
+              "img-src": ["'self'", "data:", "blob:"],
               "upgrade-insecure-requests": null,
             },
           }

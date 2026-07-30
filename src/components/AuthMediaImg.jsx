@@ -25,7 +25,7 @@ export default function AuthMediaImg({ src, alt = "", className, style, loading,
         const headers = {};
         const key = getAdminKey();
         if (key) headers["X-Admin-Key"] = key;
-        const res = await fetch(src, { headers, credentials: "include", cache: "force-cache" });
+        const res = await fetch(src, { headers, credentials: "include", cache: "no-store" });
         if (!res.ok || cancelled) return;
         const blob = await res.blob();
         if (!blob || blob.size <= 0 || cancelled) return;
