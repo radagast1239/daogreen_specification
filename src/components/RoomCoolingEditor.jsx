@@ -62,7 +62,7 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
 
   return (
     <div style={{ marginTop: 14 }}>
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="card" style={{ padding: 0, overflow: "hidden", display: "none" }} aria-hidden="true">
         <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)" }}>
           <h4 style={{ margin: 0, fontSize: 14 }}>Расчёт нагрузки по комнатам</h4>
           <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
@@ -201,9 +201,13 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
                 <th>Комната</th>
                 <th className="right">Рек. холод, кВт</th>
                 <th className="right">BTU/ч</th>
-                <th className="right">Потр., кВт</th>
+                <th className="right">Оценка потр., кВт</th>
                 <th className="right">шт</th>
                 <th className="right">Факт. холод, кВт</th>
+                <th className="right">День, кВт</th>
+                <th className="right">День, ч</th>
+                <th className="right">Ночь, кВт</th>
+                <th className="right">Ночь, ч</th>
                 <th>Ссылка</th>
                 <th>Комментарий</th>
                 <th style={{ width: 40 }} />
@@ -259,6 +263,10 @@ export default function RoomCoolingEditor({ rooms, onChange }) {
                       }
                     />
                   </td>
+                  <td className="right num" title="Автоматически: требуемая мощность холода ÷ COP">{recommendedElecKw > 0 ? num(recommendedElecKw) : "—"}</td>
+                  <td className="right num">{list.find((room) => room.id === roomId)?.cooling?.params?.dayHours ?? 16}</td>
+                  <td className="right"><input type="number" min={0} step="any" className="spec-cell-input spec-cell-input--num" style={{ width: 64 }} value={unit.nightElectricKw ?? ""} onChange={(e) => patchUnit(roomId, unit.id, { nightElectricKw: parseNumInput(e.target.value) })} /></td>
+                  <td className="right num">{24 - Math.min(24, Number(list.find((room) => room.id === roomId)?.cooling?.params?.dayHours ?? 16) || 0)}</td>
                   <td>
                     <input
                       type="url"

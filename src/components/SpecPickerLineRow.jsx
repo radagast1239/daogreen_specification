@@ -19,6 +19,9 @@ export default function SpecPickerLineRow({
   categories,
   suppliers,
   unitOptions,
+  showCategory = true,
+  showSupplier = true,
+  showUnit = true,
   showCompositionGroups,
   stellageGroups,
   showFarmLineGroups,
@@ -29,7 +32,15 @@ export default function SpecPickerLineRow({
   onSaveMaterial,
   savingId,
   saveLineToBase,
+  showProjectPrice = false,
 }) {
+  const catalogMaterial = ln.materialId ? materials.find((m) => m.id === ln.materialId) : null;
+  const catalogPrice = catalogMaterial ? Number(catalogMaterial.basePrice) || 0 : null;
+  const catalogLink = catalogMaterial ? String(catalogMaterial.link || "") : null;
+  const catalogLinkAlt = catalogMaterial ? String(catalogMaterial.linkAlt || "") : null;
+  const differsFromCatalog = catalogPrice != null && (Number(ln.price) || 0) !== catalogPrice;
+  const linkDiffersFromCatalog = catalogLink != null && String(ln.link || "") !== catalogLink;
+  const linkAltDiffersFromCatalog = catalogLinkAlt != null && String(ln.linkAlt || "") !== catalogLinkAlt;
   return (
     <tr key={ln.id} className={ln.included ? "" : "spec-row-off"}>
       <td className="center">
@@ -101,6 +112,7 @@ export default function SpecPickerLineRow({
           </span>
         )}
       </td>
+      {showCategory && (
       <td>
         <select
           className="spec-cell-input"
@@ -115,6 +127,8 @@ export default function SpecPickerLineRow({
           ))}
         </select>
       </td>
+      )}
+      {showSupplier && (
       <td>
         <select
           className="spec-cell-input"
@@ -130,10 +144,12 @@ export default function SpecPickerLineRow({
           ))}
         </select>
       </td>
+      )}
+      {showUnit && (
       <td>
         {unitOptions.length > 1 ? (
           <select
-            className="spec-cell-input spec-cell-input--sm"
+            className="spec-cell-input spec-cell-input--unit"
             value={ln.unit}
             disabled={!ln.included || !!ln.materialId}
             onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, { unit: e.target.value }))}
@@ -146,13 +162,14 @@ export default function SpecPickerLineRow({
           </select>
         ) : (
           <input
-            className="spec-cell-input spec-cell-input--sm"
+            className="spec-cell-input spec-cell-input--unit"
             value={ln.unit}
             disabled={!!ln.materialId}
             onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, { unit: e.target.value }))}
           />
         )}
       </td>
+      )}
       {showCompositionGroups && (
         <td>
           <select
@@ -219,7 +236,7 @@ export default function SpecPickerLineRow({
       {showQty && (
         <td>
           <input
-            className="spec-cell-input spec-cell-input--num"
+            className="spec-cell-input spec-cell-input--num spec-cell-input--qty"
             type="number"
             min={0}
             step="any"
@@ -234,23 +251,65 @@ export default function SpecPickerLineRow({
       )}
       <td>
         <input
-          className="spec-cell-input spec-cell-input--num"
+          className="spec-cell-input spec-cell-input--num spec-cell-input--price"
           type="number"
           min={0}
           step="any"
           value={ln.price}
-          disabled={!ln.included || !!ln.materialId}
-          onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, { price: Number(e.target.value) || 0 }))}
+          disabled={!ln.included || (!!ln.materialId && !showProjectPrice)}
+          aria-label={showProjectPrice ? "Цена проекта" : "Цена"}
+          onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, {
+            price: Number(e.target.value) || 0,
+            ...(showProjectPrice ? { priceOverridden: true } : {}),
+          }))}
         />
+        {showProjectPrice && catalogPrice != null && (
+          <div className="project-price-meta">
+            <span className="muted">Цена в базе: {catalogPrice.toLocaleString("ru-RU")} ₽</span>
+            {differsFromCatalog && <span className="project-price-badge">Изменена в проекте</span>}
+            {(ln.priceOverridden || differsFromCatalog) && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => emitLines(patchLine(normalizedLines, ln.id, { price: catalogPrice, priceOverridden: false }))}>
+                Вернуть цену из базы
+              </button>
+            )}
+          </div>
+        )}
       </td>
       <td>
         <input
           className="spec-cell-input"
           value={ln.link || ""}
-          placeholder="ссылка"
-          disabled={!ln.included || !!ln.materialId}
-          onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, { link: e.target.value }))}
+          placeholder="основная ссылка"
+          disabled={!ln.included || (!!ln.materialId && !showProjectPrice)}
+          onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, {
+            link: e.target.value,
+            linkOverridden: true,
+          }))}
         />
+        {showProjectPrice && (
+          <>
+            <input
+              className="spec-cell-input"
+              value={ln.linkAlt || ""}
+              placeholder="альтернативная ссылка"
+              disabled={!ln.included}
+              onChange={(e) => emitLines(patchLine(normalizedLines, ln.id, { linkAlt: e.target.value, linkAltOverridden: true }))}
+            />
+            <div className="project-price-meta">
+              {(linkDiffersFromCatalog || linkAltDiffersFromCatalog) && <span className="project-price-badge">Ссылки изменены в проекте</span>}
+              {(ln.linkOverridden || linkDiffersFromCatalog) && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => emitLines(patchLine(normalizedLines, ln.id, { link: catalogLink || "", linkOverridden: false }))}>
+                  Вернуть основную из базы
+                </button>
+              )}
+              {(ln.linkAltOverridden || linkAltDiffersFromCatalog) && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => emitLines(patchLine(normalizedLines, ln.id, { linkAlt: catalogLinkAlt || "", linkAltOverridden: false }))}>
+                  Вернуть альтернативную из базы
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </td>
       <td className="row" style={{ gap: 2, justifyContent: "flex-end" }}>
         {!ln.materialId && onSaveMaterial && ln.name?.trim() && (

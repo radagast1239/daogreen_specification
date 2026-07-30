@@ -1,4 +1,5 @@
 import { Router } from "express";
+import path from "path";
 import {
   db,
   loadProject,
@@ -7,6 +8,7 @@ import {
   loadSlimItemsForProjects,
   rowToProject,
 } from "../db.js";
+import { shouldPreserveStoredPlan } from "../plannerPlanState.js";
 import {
   uid,
   clientToken,
@@ -21,12 +23,11 @@ import {
   listActivity,
   logItemPatch,
   logProjectEvent,
-  sanitizeItemForClient,
-  sanitizeProjectForClient,
 } from "../services/activityLog.js";
 import { clientPurchaseStatuses } from "../services/referenceData.js";
 import { clientAuthMiddleware } from "../services/clientAuth.js";
 import { loadClientBrand } from "../services/clientBrand.js";
+import { refreshFrameBomProject } from "../services/frameBomRefresh.js";
 import { clientCatalogForProject } from "../services/clientCatalog.js";
 import { normalizePipeCuts, resolvePipeCuts } from "../../../shared/profilePipeCuts.js";
 import { normalizeBreakerSpecs, resolveBreakerSpecs } from "../../../shared/breakerSpecs.js";
@@ -46,11 +47,11 @@ import {
 import { structuredClientNote } from "../../../shared/structuredClientNote.js";
 import { itemFlagsToDb, normalizeItemFlags, resolveItemType, lineVisibleToClient } from "../../../shared/itemTypes.js";
 import {
-  bulkPatchItems as runBulkPatchItems,
-  refreshItemsFromMaterial as runRefreshItemsFromMaterial,
-  parseBulkPatchRequest,
-  parseRefreshRequest,
-} from "../services/projectItems.js";
+  getMaterialById,
+  patchFromMaterial,
+  resolveRefreshFields,
+} from "../services/refreshItemFromMaterial.js";
+import { diffRefreshPatch } from "../../../shared/refreshItemFromMaterial.js";
 import {
   cloneProjectItem,
   cloneProjectItemsWithIdMap,
@@ -60,6 +61,53 @@ import {
 } from "../../../shared/projectItemClone.js";
 import { compareProjectItems } from "../../../shared/projectCompare.js";
 import { buildImportPreview } from "../../../shared/importFromProject.js";
+import {
+  buildPublishedReleaseMeta,
+  isLegacyReleaseIncomplete,
+  isPublishWorkflowStatus,
+  parsePublishedRelease,
+} from "../../../shared/projectPublishedRelease.js";
+import {
+  resolveCurrencyPersistFromBody,
+  defaultCurrencyPersist,
+} from "../../../shared/projectCurrency.js";
+import {
+  normalizeProjectClientLanguage,
+  resolveClientLanguagePatch,
+} from "../../../shared/projectClientLanguage.js";
+import { validateProjectItemsForSave, validateSingleProjectItem } from "../services/projectItemValidation.js";
+import {
+  buildClientProjectFromRelease,
+  buildHistoricalClientPreview,
+  buildReleaseSnapshotJson,
+  getProjectReleaseInfo,
+  listVersionSummaries,
+  loadLatestVersionRow,
+  loadPublishedSnapshotItems,
+  loadPublishedReleaseSnapshot,
+  loadVersionRow,
+  prepareClientMutationItemResponse,
+  prepareReleaseSnapshotPayload,
+  resolveClientDocumentsForRelease,
+  shouldPublishOnStatusChange,
+} from "../services/publishedReleaseService.js";
+import { diffReleaseSnapshots, buildPublishAutoSummaryText } from "../../../shared/releaseHistoryDiff.js";
+import { normalizeReleaseComment } from "../../../shared/releaseComment.js";
+import { clientExportHeader } from "../../../shared/publishedClientMeta.js";
+import * as XLSX from "xlsx";
+import { assertCanDeleteOrOverwriteAsset } from "../services/publishedAssetRetention.js";
+import { publishedPlannedTotal } from "../../../shared/publishedPurchaseTotals.js";
+import { pinClientDocumentsForRelease } from "../services/releaseDocumentPinning.js";
+import { sendSafeUploadFile } from "../services/secureFileServe.js";
+import {
+  findProjectScopedImageAsset,
+  findManifestImageById,
+} from "../services/projectScopedMedia.js";
+import {
+  canonicalizeClientMediaUrl,
+  isUrlInFrozenClientMedia,
+  isClientMediaLocalServePath,
+} from "../services/clientMediaAllowlist.js";
 
 const router = Router();
 
@@ -82,35 +130,111 @@ const UPDATE_PROJECT = db.prepare(`
     status=@status, selected_modules=@selected_modules, zones=@zones,
     stellage_configs=@stellage_configs, manual_params=@manual_params, rooms=@rooms, version=@version,
     planner_plan=@planner_plan, planner_sync_at=@planner_sync_at,
-    last_client_activity_at=@last_client_activity_at, updated_at=datetime('now')
-  WHERE id=@id
+    last_client_activity_at=@last_client_activity_at,
+    revision=revision + 1, updated_at=datetime('now')
+  WHERE id=@id AND revision=@expected_revision
 `);
+
+export const PROJECT_REVISION_CONFLICT = "PROJECT_REVISION_CONFLICT";
+
+function revisionConflict(projectId, expectedRevision, currentRevision) {
+  const error = new Error("Проект был изменён в другой вкладке или другим пользователем.");
+  error.code = PROJECT_REVISION_CONFLICT;
+  error.projectId = projectId;
+  error.expectedRevision = expectedRevision;
+  error.currentRevision = currentRevision;
+  return error;
+}
+
+function parseExpectedRevision(value) {
+  const revision = Number(value);
+  return Number.isInteger(revision) && revision > 0 ? revision : null;
+}
+
+function requireExpectedRevision(projectId, value) {
+  const expected = parseExpectedRevision(value);
+  if (expected == null) {
+    const error = new Error("expectedRevision is required");
+    error.code = "EXPECTED_REVISION_REQUIRED";
+    error.projectId = projectId;
+    throw error;
+  }
+  return expected;
+}
+
+function assertRevision(projectId, expectedRevision) {
+  const current = db.prepare("SELECT revision FROM projects WHERE id = ?").get(projectId);
+  if (!current) return null;
+  if (Number(current.revision) !== expectedRevision) {
+    throw revisionConflict(projectId, expectedRevision, Number(current.revision));
+  }
+  return current;
+}
+
+function bumpRevision(projectId, expectedRevision) {
+  const result = db.prepare(`
+    UPDATE projects SET revision = revision + 1, updated_at = datetime('now')
+    WHERE id = ? AND revision = ?
+  `).run(projectId, expectedRevision);
+  if (result.changes !== 1) {
+    const current = db.prepare("SELECT revision FROM projects WHERE id = ?").get(projectId);
+    if (!current) return false;
+    throw revisionConflict(projectId, expectedRevision, Number(current.revision));
+  }
+  return true;
+}
+
+function mutateWithRevision(projectId, expectedValue, callback) {
+  const expectedRevision = requireExpectedRevision(projectId, expectedValue);
+  const run = db.transaction(() => {
+    const existing = assertRevision(projectId, expectedRevision);
+    if (!existing) return null;
+    const value = callback();
+    bumpRevision(projectId, expectedRevision);
+    return { value, revision: expectedRevision + 1 };
+  });
+  return run();
+}
+
+function revisionErrorResponse(res, error) {
+  if (error?.code !== PROJECT_REVISION_CONFLICT) return false;
+  res.status(409).json({ error: {
+    code: error.code,
+    projectId: error.projectId,
+    expectedRevision: error.expectedRevision,
+    currentRevision: error.currentRevision,
+    message: error.message,
+  } });
+  return true;
+}
 
 const INSERT_ITEM = db.prepare(`
   INSERT INTO project_items (
-    id, project_id, material_id, module, section, name, unit, category,
+    id, project_id, material_id, module, section, name, name_overridden, unit, category,
     supplier, link, link_alt, photo_url, client_note, tech_note,
     qty, price, vat_rate, visible, approved, enabled, needs_approval,
     status, actual_price, client_comment, sort_order, responsible,
     cooling_kw, cooling_btu, exhaust_m3, room_id, internal_note, delivery_days, item_role, pipe_cuts, breaker_specs, flow_specs, split_specs,     client_section, client_subsection,
     included_in_project, visible_to_client, item_type, subcategory, purchase_key,
     purchase_priority, replacement_link, replacement_photo_url, replacement_price,
-    replacement_comment, replacement_proposed_at, source, source_type, source_key, source_object_ids
+    replacement_comment, replacement_proposed_at, source, source_type, source_key, source_object_ids,
+    name_en, description_en, unit_en
   ) VALUES (
-    @id, @project_id, @material_id, @module, @section, @name, @unit, @category,
+    @id, @project_id, @material_id, @module, @section, @name, @name_overridden, @unit, @category,
     @supplier, @link, @link_alt, @photo_url, @client_note, @tech_note,
     @qty, @price, @vat_rate, @visible, @approved, @enabled, @needs_approval,
     @status, @actual_price, @client_comment, @sort_order, @responsible,
     @cooling_kw, @cooling_btu, @exhaust_m3, @room_id, @internal_note, @delivery_days, @item_role, @pipe_cuts, @breaker_specs, @flow_specs, @split_specs,     @client_section, @client_subsection,
     @included_in_project, @visible_to_client, @item_type, @subcategory, @purchase_key,
     @purchase_priority, @replacement_link, @replacement_photo_url, @replacement_price,
-    @replacement_comment, @replacement_proposed_at, @source, @source_type, @source_key, @source_object_ids
+    @replacement_comment, @replacement_proposed_at, @source, @source_type, @source_key, @source_object_ids,
+    @name_en, @description_en, @unit_en
   )
 `);
 
 const UPDATE_ITEM = db.prepare(`
   UPDATE project_items SET
-    module=@module, section=@section, name=@name, unit=@unit, category=@category,
+    module=@module, section=@section, name=@name, name_overridden=@name_overridden, unit=@unit, category=@category,
     supplier=@supplier, link=@link, link_alt=@link_alt, photo_url=@photo_url,
     client_note=@client_note, tech_note=@tech_note,
     qty=@qty, price=@price, vat_rate=@vat_rate,
@@ -125,7 +249,8 @@ const UPDATE_ITEM = db.prepare(`
     purchase_priority=@purchase_priority, replacement_link=@replacement_link,
     replacement_photo_url=@replacement_photo_url, replacement_price=@replacement_price,
     replacement_comment=@replacement_comment, replacement_proposed_at=@replacement_proposed_at,
-    source=@source, source_type=@source_type, source_key=@source_key, source_object_ids=@source_object_ids
+    source=@source, source_type=@source_type, source_key=@source_key, source_object_ids=@source_object_ids,
+    name_en=@name_en, description_en=@description_en, unit_en=@unit_en
   WHERE id=@id AND project_id=@project_id
 `);
 
@@ -155,6 +280,7 @@ function itemToParams(it, projectId) {
     module: normalized.module,
     section: normalized.section || normalized.module,
     name: normalized.name,
+    name_overridden: normalized.nameOverridden ? 1 : 0,
     unit: normalized.unit || "шт.",
     category: normalized.category || "Прочее",
     supplier: normalized.supplier || "",
@@ -206,15 +332,44 @@ function itemToParams(it, projectId) {
     source_type: normalized.sourceType || "",
     source_key: normalized.sourceKey || "",
     source_object_ids: JSON.stringify(normalized.sourceObjectIds || []),
+    name_en: String(normalized.nameEn || normalized.name_en || "").trim(),
+    description_en: String(normalized.descriptionEn || normalized.description_en || "").trim(),
+    unit_en: String(normalized.unitEn || normalized.unit_en || "").trim(),
   };
 }
 
-function saveItems(projectId, items) {
-  const run = db.transaction((pid, list) => {
-    db.prepare("DELETE FROM project_items WHERE project_id = ?").run(pid);
-    for (const it of list) INSERT_ITEM.run(itemToParams(it, pid));
+/**
+ * Внутренняя версия saveItems: выполняет валидацию и SQL, но НЕ открывает
+ * транзакцию — предполагается, что вызывающий код уже находится внутри неё.
+ *
+ * Нужна для атомарного сохранения проекта: db.transaction() (см. db.js) делает
+ * `BEGIN IMMEDIATE`, поэтому вложенный вызов публичного saveItems() внутри
+ * другой транзакции упал бы с "cannot start a transaction within a transaction".
+ */
+export function saveItemsWithin(projectId, items, options = {}) {
+  validateProjectItemsForSave(items, {
+    allowLegacyMissingMaterialId: options.allowLegacyMissingMaterialId !== false,
   });
-  run(projectId, items);
+  const list = Array.isArray(items) ? items : [];
+  db.prepare("DELETE FROM project_items WHERE project_id = ?").run(projectId);
+  let inserted = 0;
+  for (const it of list) {
+    INSERT_ITEM.run(itemToParams(it, projectId));
+    inserted += 1;
+  }
+  if (inserted !== list.length) {
+    throw new Error(`Item insert count mismatch: expected ${list.length}, got ${inserted}`);
+  }
+  touchProject(projectId);
+}
+
+/**
+ * Публичное поведение не изменилось: замена позиций проекта в одной транзакции.
+ * (touchProject теперь коммитится вместе с позициями, а не отдельной записью.)
+ */
+export function saveItems(projectId, items, options = {}) {
+  const run = db.transaction(() => saveItemsWithin(projectId, items, options));
+  run();
 }
 
 export function saveItemsAppend(projectId, items) {
@@ -284,6 +439,20 @@ export function listProjects() {
   });
 }
 
+function stripIncomingCurrencyMeta(manualParams) {
+  if (!manualParams || typeof manualParams !== "object") return {};
+  const { currencyMeta: _ignored, ...rest } = manualParams;
+  return rest;
+}
+
+function mergeCurrencyIntoManualParams(manualParams, currencyPersist) {
+  const mp = { ...(manualParams || {}) };
+  if (currencyPersist?.manualParamsPatch?.currencyMeta) {
+    mp.currencyMeta = currencyPersist.manualParamsPatch.currencyMeta;
+  }
+  return mp;
+}
+
 export function createProject(body) {
   const materials = listMaterials();
   const modules = listModules();
@@ -292,10 +461,20 @@ export function createProject(body) {
     ? body.items
     : buildItemsFromModules(materials, modules, selected);
 
+  const currencyPersist = resolveCurrencyPersistFromBody(body) || defaultCurrencyPersist();
+  const manualParams = mergeCurrencyIntoManualParams(
+    stripIncomingCurrencyMeta(body.manualParams || {}),
+    currencyPersist,
+  );
+  manualParams.clientLanguage = resolveClientLanguagePatch(body)
+    ?? normalizeProjectClientLanguage(manualParams.clientLanguage);
+
   const id = uid("p");
   INSERT_PROJECT.run(projectInsertRow({
     ...body,
     id,
+    currency: currencyPersist.currency,
+    manualParams,
     clientToken: clientToken(),
     selectedModules: selected,
   }));
@@ -303,13 +482,91 @@ export function createProject(body) {
   return loadProject(id);
 }
 
+/**
+ * Полное сохранение проекта — АТОМАРНО: одна SQLite-транзакция на весь запрос.
+ *
+ * Раньше стадии коммитились по отдельности:
+ *   1) saveItems()            → BEGIN/COMMIT (позиции уже сохранены)
+ *   2) publishReleaseIfNeeded → INSERT spec_versions + UPDATE projects.version
+ *   3) UPDATE_PROJECT.run()   → metadata/manualParams/статус
+ * Падение на (2) или (3) оставляло позиции заменёнными, а проект — нет.
+ *
+ * Теперь все стадии выполняются внутри одной транзакции: либо всё COMMIT,
+ * либо всё ROLLBACK и БД остаётся ровно в состоянии до запроса.
+ */
 export function updateProject(id, patch) {
-  const cur = loadProject(id);
-  if (!cur) return null;
-  const merged = { ...cur, ...patch, id };
-  const row = projectUpdateRow(merged);
-  UPDATE_PROJECT.run(row);
-  if (patch.items) saveItems(id, patch.items);
+  const expectedRevision = requireExpectedRevision(id, patch?.expectedRevision);
+
+  const run = db.transaction(() => {
+    const cur = loadProject(id);
+    if (!cur) return null;
+    assertRevision(id, expectedRevision);
+    const { expectedRevision: _expectedRevision, ...safePatch } = patch;
+    if (safePatch.items) {
+      saveItemsWithin(id, safePatch.items);
+    }
+
+    // Внутри транзакции чтение видит собственные незакоммиченные записи,
+    // поэтому publish-валидация по-прежнему проверяет НОВЫЕ позиции.
+    const base = safePatch.items ? loadProject(id) : cur;
+    const currencyPersist = resolveCurrencyPersistFromBody(safePatch);
+    const patchMp = safePatch.manualParams
+      ? stripIncomingCurrencyMeta(safePatch.manualParams)
+      : null;
+    let manualParams = {
+      ...(base.manualParams || {}),
+      ...(patchMp || {}),
+    };
+    const clientLanguage = resolveClientLanguagePatch(patch);
+    if (clientLanguage !== undefined) manualParams.clientLanguage = clientLanguage;
+    // Keep existing currencyMeta unless this patch validates a new currency.
+    if (base.manualParams?.currencyMeta && !currencyPersist) {
+      manualParams.currencyMeta = base.manualParams.currencyMeta;
+    }
+    if (currencyPersist) {
+      manualParams = mergeCurrencyIntoManualParams(manualParams, currencyPersist);
+    }
+    let merged = {
+      ...base,
+      ...safePatch,
+      id,
+      manualParams,
+      ...(currencyPersist ? { currency: currencyPersist.currency } : {}),
+    };
+    delete merged.currencyCode;
+    delete merged.currencySymbol;
+    delete merged.currencyName;
+    delete merged.currencyCustom;
+    delete merged.currencyInfo;
+
+    if (safePatch.status != null && safePatch.status !== base.status && isPublishWorkflowStatus(safePatch.status)) {
+      // Build the release from the complete PATCH candidate. This keeps images and
+      // metadata changed in the same request inside the immutable release_v2 snapshot.
+      const pub = publishReleaseIfNeeded(id, merged, safePatch.status);
+      if (pub.publishedRelease) {
+        manualParams = { ...manualParams, publishedRelease: pub.publishedRelease };
+        merged = { ...merged, manualParams };
+      }
+    }
+
+    const row = projectUpdateRow(merged);
+    // PHASE 0B: не затирать повреждённый planner_plan пустым `{}` при апдейте,
+    // где новый план не передан. Исходные байты остаются нетронутыми в SQLite.
+    const storedRow = db.prepare("SELECT planner_plan FROM projects WHERE id = ?").get(id);
+    if (shouldPreserveStoredPlan(storedRow?.planner_plan, safePatch)) {
+      row.planner_plan = storedRow.planner_plan;
+    }
+    row.expected_revision = expectedRevision;
+    const updated = UPDATE_PROJECT.run(row);
+    if (updated.changes !== 1) {
+      const current = db.prepare("SELECT revision FROM projects WHERE id = ?").get(id);
+      throw revisionConflict(id, expectedRevision, Number(current?.revision || 0));
+    }
+    return true;
+  });
+
+  const found = run();
+  if (!found) return null;
   return loadProject(id);
 }
 
@@ -328,17 +585,44 @@ export function duplicateProject(id, body = {}) {
     mode,
   });
 
+  // Copy currency + currencyMeta; allow body override via validated currency fields.
+  const currencyPersist = resolveCurrencyPersistFromBody({
+    currency: src.currency,
+    currencyCode: src.currencyCode,
+    currencySymbol: src.currencySymbol,
+    currencyName: src.currencyName,
+    currencyCustom: src.currencyCustom,
+    manualParams: { currencyMeta: src.manualParams?.currencyMeta },
+    ...body,
+  }) || defaultCurrencyPersist();
+
+  const clonedMp = stripIncomingCurrencyMeta(src.manualParams || {});
+  // Drop published release pointer from clone.
+  delete clonedMp.publishedRelease;
+
   return createProject({
     ...meta,
     name: (body.name || `${src.name} (копия)`).trim(),
     client: body.client != null ? body.client : "",
     city: body.city != null ? body.city : src.city,
     area: body.area != null ? body.area : src.area,
+    currency: currencyPersist.currency,
+    currencyCode: currencyPersist.manualParamsPatch.currencyMeta.code,
+    currencySymbol: currencyPersist.manualParamsPatch.currencyMeta.symbol,
+    currencyName: currencyPersist.manualParamsPatch.currencyMeta.name,
+    currencyCustom: currencyPersist.manualParamsPatch.currencyMeta.custom,
     items,
     selectedModules: src.selectedModules,
     zones: src.zones,
-    stellageConfigs: src.stellageConfigs,
-    manualParams: src.manualParams,
+    stellageConfigs: (src.stellageConfigs || []).map((rack) => ({
+      ...rack,
+      extraImages: (Array.isArray(rack.extraImages) ? rack.extraImages : []).map((image, sortOrder) => ({
+        ...image,
+        id: uid("rack_img"),
+        sortOrder,
+      })),
+    })),
+    manualParams: mergeCurrencyIntoManualParams(clonedMp, currencyPersist),
     rooms: remapRoomsSelectedItemIds(src.rooms, idMap),
   });
 }
@@ -474,16 +758,21 @@ export function approveAll(id) {
       visibleToClient: it.includedInProject !== false,
     })
   );
-  saveItems(id, items);
-  touchProject(id);
+  saveItemsWithin(id, items);
   return loadProject(id);
 }
 
-export function createVersion(id, createdBy = "admin", { force = false } = {}) {
-  const p = loadProject(id);
-  if (!p) return null;
+function createVersionRecord(projectId, project, {
+  force = false,
+  createdBy = "admin",
+  snapshotPayload = null,
+  releaseComment = null,
+} = {}) {
+  // Validate comment before any DB write so failed publish leaves no row.
+  const comment = normalizeReleaseComment(releaseComment);
+
   if (!force) {
-    const check = validateProjectForPublish(id);
+    const check = validateProjectForPublish(projectId);
     if (check.status === "blocked") {
       const err = new Error("Publish validation failed");
       err.code = "PUBLISH_VALIDATION";
@@ -491,46 +780,176 @@ export function createVersion(id, createdBy = "admin", { force = false } = {}) {
       throw err;
     }
   }
+  const versionId = uid("v");
+  const liveDocuments = getClientProjectDocuments(projectId);
+  const { documentManifest } = pinClientDocumentsForRelease({
+    projectId,
+    versionId,
+    liveDocuments,
+  });
+  // Hash/read assets before the version-row write.
+  const payload = prepareReleaseSnapshotPayload(project, { documentManifest });
+  const snapshotJson = JSON.stringify(payload);
+
   const prev = db
     .prepare("SELECT * FROM spec_versions WHERE project_id = ? ORDER BY version_number DESC LIMIT 1")
-    .get(id);
-  const prevSnapshot = prev ? JSON.parse(prev.snapshot) : [];
-  const summary = compareVersions(prevSnapshot, p.items);
-  const versionNumber = (prev?.version_number || p.version || 0) + 1;
+    .get(projectId);
+  const prevItems = prev ? releaseSnapshotItemsFromRow(prev) : [];
+  const itemSummary = compareVersions(prevItems, project.items || []);
+  let autoSummaryText;
+  let imagesAdded = 0;
+  let imagesRemoved = 0;
+  let imagesChanged = 0;
+  let drawingsAdded = 0;
+  let drawingsRemoved = 0;
+  let drawingsReplaced = 0;
+  let coolingChanged = false;
+  let farmPowerChanged = false;
+  const currency = String(project.currency || "₽");
+  if (prev?.snapshot) {
+    let prevSnap;
+    try {
+      prevSnap = JSON.parse(prev.snapshot);
+    } catch {
+      prevSnap = [];
+    }
+    const diff = diffReleaseSnapshots(prevSnap, payload);
+    autoSummaryText = buildPublishAutoSummaryText(diff, currency);
+    imagesAdded = diff.images?.added?.length || 0;
+    imagesRemoved = diff.images?.removed?.length || 0;
+    imagesChanged = diff.images?.changed?.length || 0;
+    drawingsAdded = diff.drawings?.added?.length || 0;
+    drawingsRemoved = diff.drawings?.removed?.length || 0;
+    drawingsReplaced = diff.drawings?.replaced?.length || 0;
+    coolingChanged = !!(
+      diff.cooling?.powerChanged ||
+      (diff.cooling?.roomsAdded?.length || 0) ||
+      (diff.cooling?.roomsRemoved?.length || 0)
+    );
+    farmPowerChanged = !!(
+      diff.farmPower?.tariffChanged ||
+      diff.farmPower?.devicesChanged ||
+      diff.farmPower?.costChanged
+    );
+    // Prefer snapshot totals (client-planned) when available
+    if (diff.totals && Number.isFinite(diff.totals.delta)) {
+      itemSummary.sumBefore = diff.totals.from;
+      itemSummary.sumAfter = diff.totals.to;
+      itemSummary.delta = diff.totals.delta;
+    }
+  } else {
+    const total = publishedPlannedTotal(payload.items || project.items || []);
+    itemSummary.sumBefore = 0;
+    itemSummary.sumAfter = total;
+    itemSummary.delta = total;
+    autoSummaryText = "Первая публикация проекта.";
+  }
 
-  const versionId = uid("v");
+  const summary = {
+    ...itemSummary,
+    autoSummaryText,
+    imagesAdded,
+    imagesRemoved,
+    imagesChanged,
+    drawingsAdded,
+    drawingsRemoved,
+    drawingsReplaced,
+    coolingChanged,
+    farmPowerChanged,
+  };
+  const versionNumber = prev ? Number(prev.version_number) + 1 : 1;
+
   db.prepare(`
-    INSERT INTO spec_versions (id, project_id, version_number, created_by, summary, snapshot)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(versionId, id, versionNumber, createdBy, JSON.stringify(summary), JSON.stringify(p.items));
+    INSERT INTO spec_versions (id, project_id, version_number, created_by, summary, snapshot, release_comment)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    versionId,
+    projectId,
+    versionNumber,
+    createdBy,
+    JSON.stringify(summary),
+    snapshotJson,
+    comment,
+  );
 
   db.prepare("UPDATE projects SET version = ?, updated_at = datetime('now') WHERE id = ?").run(
     versionNumber,
-    id
+    projectId,
   );
 
   return {
     id: versionId,
-    projectId: id,
+    projectId,
     versionNumber,
     summary,
+    summaryText: autoSummaryText,
+    releaseComment: comment,
     createdAt: new Date().toISOString(),
     createdBy,
+    schema: payload.schema,
+    assetsPinned: !!payload.assetsPinned,
   };
 }
 
+function releaseSnapshotItemsFromRow(row) {
+  try {
+    const raw = JSON.parse(row?.snapshot || "[]");
+    if (Array.isArray(raw)) return raw;
+    if (raw && Array.isArray(raw.items)) return raw.items;
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function publishReleaseIfNeeded(projectId, project, targetStatus) {
+  const existing = parsePublishedRelease(project?.manualParams);
+  if (existing && !shouldPublishOnStatusChange(project, targetStatus)) {
+    return { publishedRelease: existing, version: null, skipped: true };
+  }
+  const version = createVersionRecord(projectId, project, { force: false });
+  return {
+    publishedRelease: buildPublishedReleaseMeta(version, targetStatus),
+    version,
+    skipped: false,
+  };
+}
+
+function persistPublishedRelease(projectId, publishedRelease) {
+  const row = db.prepare("SELECT manual_params FROM projects WHERE id = ?").get(projectId);
+  if (!row) return;
+  let mp = {};
+  try {
+    mp = JSON.parse(row.manual_params || "{}");
+  } catch {
+    mp = {};
+  }
+  mp.publishedRelease = publishedRelease;
+  db.prepare("UPDATE projects SET manual_params = ?, updated_at = datetime('now') WHERE id = ?").run(
+    JSON.stringify(mp),
+    projectId,
+  );
+}
+
+export function createVersion(id, createdBy = "admin", { force = false, releaseComment = null } = {}) {
+  const p = loadProject(id);
+  if (!p) return null;
+  // Prepare snapshot (may throw PUBLISH_ASSET_MISSING) before mutating DB / revision.
+  // Do not open a nested transaction here — callers (mutateWithRevision, updateProject,
+  // backfill) already wrap writes. Opening BEGIN inside an active txn fails on node:sqlite.
+  // Normalize comment early so validation errors happen before snapshot work when possible.
+  normalizeReleaseComment(releaseComment);
+  const snapshotPayload = prepareReleaseSnapshotPayload(p);
+  const version = createVersionRecord(id, p, { force, createdBy, snapshotPayload, releaseComment });
+  const publishedRelease = buildPublishedReleaseMeta(version, p.status);
+  persistPublishedRelease(id, publishedRelease);
+  return version;
+}
+
 export function listVersions(id) {
-  return db
-    .prepare("SELECT * FROM spec_versions WHERE project_id = ? ORDER BY version_number DESC")
-    .all(id)
-    .map((r) => ({
-      id: r.id,
-      projectId: r.project_id,
-      versionNumber: r.version_number,
-      createdAt: r.created_at,
-      createdBy: r.created_by,
-      summary: JSON.parse(r.summary || "{}"),
-    }));
+  const summaries = listVersionSummaries(id);
+  if (!summaries) return [];
+  return summaries;
 }
 
 function touchProject(projectId) {
@@ -542,32 +961,103 @@ export function patchItem(projectId, itemId, patch) {
   if (!p) return null;
   let item = p.items.find((i) => i.id === itemId);
   if (!item) return null;
-  item = normalizeItemFlags({ ...item, ...patch });
+  const effectivePatch = { ...patch };
+  if (patch.name_overridden !== undefined && patch.nameOverridden === undefined) effectivePatch.nameOverridden = !!patch.name_overridden;
+  if (item.materialId && patch.name !== undefined && effectivePatch.nameOverridden === undefined) effectivePatch.nameOverridden = true;
+  item = normalizeItemFlags({ ...item, ...effectivePatch });
+  item.name_overridden = !!item.nameOverridden;
   if (patch.qty !== undefined && patch.qty === 0) item.includedInProject = false;
   UPDATE_ITEM.run(updateItemParams(item, projectId));
   touchProject(projectId);
   return item;
 }
 
-export function bulkPatchItems(projectId, options = {}) {
-  return runBulkPatchItems(projectId, options, {
-    loadProject,
-    patchItem,
-    touchProject,
-  });
+export function bulkPatchItems(projectId, { itemIds = [], patch = {} } = {}) {
+  const p = loadProject(projectId);
+  if (!p) return { updated: [], skipped: [], before: [] };
+  const ids = new Set(itemIds);
+  const updated = [];
+  const skipped = [];
+  const before = [];
+  const found = new Set();
+  for (const it of p.items) {
+    if (!ids.has(it.id)) continue;
+    found.add(it.id);
+    before.push({ ...it });
+    updated.push(patchItem(projectId, it.id, patch));
+  }
+  for (const id of ids) {
+    if (!found.has(id)) skipped.push({ itemId: id, reason: "not_found" });
+  }
+  if (updated.length) touchProject(projectId);
+  return { updated: updated.filter(Boolean), skipped, before, patch };
 }
 
-export function refreshItemsFromMaterial(projectId, options = {}) {
-  return runRefreshItemsFromMaterial(projectId, options, {
-    loadProject,
-    patchItem,
-    touchProject,
-  });
+export function planRefreshItemsFromMaterial(project, { itemIds = [], fields = [] } = {}) {
+  if (!project) return { plans: [], skipped: [], results: [] };
+  const refreshFields = resolveRefreshFields(fields);
+  const ids = itemIds.length ? itemIds : (project.items || []).map((i) => i.id);
+  const plans = [];
+  const skipped = [];
+  const results = [];
+
+  for (const itemId of ids) {
+    const item = (project.items || []).find((i) => i.id === itemId);
+    if (!item?.materialId) {
+      skipped.push({ itemId, reason: "no_material" });
+      results.push({ itemId, changed: false, changedFields: [], item: item || null, reason: "no_material" });
+      continue;
+    }
+    const mat = getMaterialById(item.materialId);
+    if (!mat) {
+      skipped.push({ itemId, reason: "material_missing" });
+      results.push({ itemId, changed: false, changedFields: [], item, reason: "material_missing" });
+      continue;
+    }
+    const matPatch = patchFromMaterial(mat, refreshFields);
+    if (!Object.keys(matPatch).length) {
+      skipped.push({ itemId, reason: "no_fields" });
+      results.push({ itemId, changed: false, changedFields: [], item, reason: "no_fields" });
+      continue;
+    }
+    const changedFields = diffRefreshPatch(item, matPatch);
+    if (!changedFields.length) {
+      results.push({ itemId, changed: false, changedFields: [], item });
+      continue;
+    }
+    plans.push({ itemId, patch: matPatch, changedFields, before: item });
+    results.push({ itemId, changed: true, changedFields, item });
+  }
+
+  return { plans, skipped, results };
+}
+
+export function refreshItemsFromMaterial(projectId, { itemIds = [], fields = [] } = {}) {
+  const p = loadProject(projectId);
+  if (!p) return { updated: [], skipped: [], results: [] };
+  const { plans, skipped, results: plannedResults } = planRefreshItemsFromMaterial(p, { itemIds, fields });
+  const updated = [];
+  const results = [];
+
+  for (const row of plannedResults) {
+    if (!row.changed) {
+      results.push(row);
+      continue;
+    }
+    const plan = plans.find((entry) => entry.itemId === row.itemId);
+    const next = patchItem(projectId, row.itemId, plan.patch);
+    updated.push(next);
+    results.push({ itemId: row.itemId, changed: true, changedFields: row.changedFields, item: next });
+  }
+
+  return { updated, skipped, results };
 }
 
 export function addItem(projectId, item) {
   const it = { ...item, id: item.id || uid("it") };
+  validateSingleProjectItem(it, { allowLegacyMissingMaterialId: false });
   INSERT_ITEM.run(itemToParams(it, projectId));
+  touchProject(projectId);
   return it;
 }
 
@@ -699,21 +1189,43 @@ api.get("/section-templates/list", (_req, res) => {
 api.get("/:id", (req, res) => {
   const p = loadProject(req.params.id);
   if (!p) return res.status(404).json({ error: "Not found" });
-  res.json(p);
+  const releaseInfo = getProjectReleaseInfo(p);
+  res.json({
+    ...p,
+    ...releaseInfo,
+  });
 });
 
 api.post("/", (req, res) => {
   try {
     res.status(201).json(createProject(req.body));
   } catch (e) {
+    if (revisionErrorResponse(res, e)) return;
+    if (e.code === "PROJECT_CURRENCY_INVALID" || e.code === "PROJECT_CLIENT_LANGUAGE_INVALID") {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
     res.status(400).json({ error: e.message });
   }
 });
 
 api.patch("/:id", (req, res) => {
-  const p = updateProject(req.params.id, req.body);
-  if (!p) return res.status(404).json({ error: "Not found" });
-  res.json(p);
+  try {
+    const p = updateProject(req.params.id, req.body);
+    if (!p) return res.status(404).json({ error: "Not found" });
+    res.json({ ...p, ...getProjectReleaseInfo(p) });
+  } catch (e) {
+    if (revisionErrorResponse(res, e)) return;
+    if (e.code === "PUBLISH_VALIDATION") {
+      return res.status(422).json({ error: e.message, problems: e.problems, code: e.code });
+    }
+    if (e.code === "ITEM_VALIDATION") {
+      return res.status(400).json({ error: e.message, details: e.details, code: e.code });
+    }
+    if (e.code === "PROJECT_CURRENCY_INVALID" || e.code === "PROJECT_CLIENT_LANGUAGE_INVALID") {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    return res.status(400).json({ error: e.message, code: e.code });
+  }
 });
 
 api.delete("/:id", (req, res) => {
@@ -740,9 +1252,11 @@ api.post("/:id/import-preview", (req, res) => {
 });
 
 api.post("/:id/import-from-project", (req, res) => {
-  const result = importToProject(req.params.id, req.body || {});
-  if (!result) return res.status(404).json({ error: "Not found" });
-  res.json(result);
+  try {
+    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => importToProject(req.params.id, req.body || {}));
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.get("/:id/compare/:otherId", (req, res) => {
@@ -758,28 +1272,34 @@ api.post("/:id/sections/:module/save-template", (req, res) => {
 });
 
 api.post("/:id/apply-section-template", (req, res) => {
-  const result = applySectionTemplate(req.params.id, req.body?.templateId, {
-    targetModule: req.body?.targetModule,
-  });
-  if (!result) return res.status(404).json({ error: "Not found" });
-  res.json(result);
+  try {
+    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => applySectionTemplate(req.params.id, req.body?.templateId, { targetModule: req.body?.targetModule }));
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.post("/:id/approve-all", (req, res) => {
-  const p = approveAll(req.params.id);
-  if (!p) return res.status(404).json({ error: "Not found" });
-  logProjectEvent({
-    projectId: req.params.id,
-    actor: "admin",
-    summary: "Daogreen: утверждены все позиции для клиента",
-    clientVisible: false,
-  });
-  res.json(p);
+  try {
+    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
+      const p = approveAll(req.params.id);
+      if (p) logProjectEvent({ projectId: req.params.id, actor: "admin", summary: "Daogreen: утверждены все позиции для клиента", clientVisible: false });
+      return p;
+    });
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.json({ ...loadProject(req.params.id), revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.post("/:id/versions", (req, res) => {
   try {
-    const v = createVersion(req.params.id, req.body?.createdBy, { force: !!req.body?.force });
+    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () =>
+      createVersion(req.params.id, req.body?.createdBy, {
+        force: !!req.body?.force,
+        releaseComment: req.body?.releaseComment,
+      })
+    );
+    const v = changed?.value;
     if (!v) return res.status(404).json({ error: "Not found" });
     logProjectEvent({
       projectId: req.params.id,
@@ -787,10 +1307,17 @@ api.post("/:id/versions", (req, res) => {
       summary: `Daogreen: опубликована версия ${v.versionNumber}`,
       clientVisible: false,
     });
-    res.status(201).json(v);
+    res.status(201).json({ ...v, revision: changed.revision });
   } catch (e) {
+    if (revisionErrorResponse(res, e)) return;
+    if (e.code === "RELEASE_COMMENT_TOO_LONG") {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
     if (e.code === "PUBLISH_VALIDATION") {
       return res.status(422).json({ error: e.message, problems: e.problems });
+    }
+    if (e.code === "PUBLISH_ASSET_MISSING") {
+      return res.status(422).json({ error: e.message, code: e.code, details: e.details });
     }
     throw e;
   }
@@ -801,14 +1328,174 @@ api.get("/:id/publish-check", (req, res) => {
 });
 
 api.get("/:id/versions", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
   res.json(listVersions(req.params.id));
 });
 
-api.post("/:id/items/bulk-patch", (req, res) => {
+api.get("/:id/versions/:versionId", (req, res) => {
+  const ver = loadVersionRow(req.params.id, req.params.versionId);
+  if (!ver) return res.status(404).json({ error: "Not found" });
+  const snapshotItems = releaseSnapshotItemsFromRow({ snapshot: ver.snapshot });
+  res.json({
+    ...ver,
+    snapshotItems,
+    itemCount: snapshotItems.length,
+  });
+});
+
+/** Historical client DTO — admin only (router already behind adminAuth). Read-only. */
+api.get("/:id/versions/:versionId/client-preview", (req, res) => {
   const p = loadProject(req.params.id);
   if (!p) return res.status(404).json({ error: "Not found" });
-  const body = parseBulkPatchRequest(req.body);
-  const result = bulkPatchItems(req.params.id, body);
+  const preview = buildHistoricalClientPreview(req.params.id, req.params.versionId, p);
+  if (!preview) return res.status(404).json({ error: "Not found", code: "VERSION_NOT_FOUND" });
+  const branding = loadBrandingSettings();
+  res.json({
+    ...preview,
+    branding,
+    brandingNote: "live_global_branding",
+  });
+});
+
+api.get("/:id/versions/:versionId/diff", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const versionId = req.params.versionId;
+  const otherId = String(req.query.compareTo || req.query.other || "").trim();
+  const verB = loadVersionRow(req.params.id, versionId);
+  if (!verB) return res.status(404).json({ error: "Not found", code: "VERSION_NOT_FOUND" });
+
+  let verA = null;
+  if (otherId) {
+    verA = loadVersionRow(req.params.id, otherId);
+    if (!verA) return res.status(404).json({ error: "Compare version not found", code: "VERSION_NOT_FOUND" });
+  } else {
+    // Default: previous version by number
+    const prev = db
+      .prepare(
+        `SELECT id FROM spec_versions
+         WHERE project_id = ? AND version_number < ?
+         ORDER BY version_number DESC, created_at DESC, id DESC LIMIT 1`
+      )
+      .get(req.params.id, verB.versionNumber);
+    if (prev) verA = loadVersionRow(req.params.id, prev.id);
+  }
+
+  if (!verA) {
+    return res.json({
+      versionA: null,
+      versionB: { id: verB.id, versionNumber: verB.versionNumber, createdAt: verB.createdAt },
+      diff: { hasChanges: false, empty: true, message: "Нет предыдущей версии для сравнения" },
+    });
+  }
+
+  let snapA;
+  let snapB;
+  try {
+    snapA = JSON.parse(verA.snapshot || "[]");
+    snapB = JSON.parse(verB.snapshot || "[]");
+  } catch {
+    return res.status(500).json({ error: "Invalid snapshot" });
+  }
+  const diff = diffReleaseSnapshots(snapA, snapB);
+  res.json({
+    versionA: {
+      id: verA.id,
+      versionNumber: verA.versionNumber,
+      createdAt: verA.createdAt,
+      releaseComment: verA.releaseComment || null,
+      summaryText: verA.summary?.autoSummaryText || null,
+    },
+    versionB: {
+      id: verB.id,
+      versionNumber: verB.versionNumber,
+      createdAt: verB.createdAt,
+      releaseComment: verB.releaseComment || null,
+      summaryText: verB.summary?.autoSummaryText || null,
+    },
+    diff,
+  });
+});
+
+/** Historical Excel — built from immutable snapshot DTO (not live draft). */
+api.get("/:id/versions/:versionId/excel", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const preview = buildHistoricalClientPreview(req.params.id, req.params.versionId, p);
+  if (!preview) return res.status(404).json({ error: "Not found", code: "VERSION_NOT_FOUND" });
+  const project = preview.project;
+  const header = clientExportHeader(project);
+  const items = project.items || [];
+  const rows = [
+    ["Версия", preview.versionNumber, "от", preview.publishedAt],
+    ["Проект", header.name],
+    ["Клиент", header.client],
+    ["Город", header.city],
+    ["Адрес", header.address || ""],
+    ["Валюта", header.currency],
+    ["НДС", header.vat ? "да" : "нет"],
+    [],
+    ["Название", "Кол-во", "Цена", "Сумма", "Раздел", "Ссылка"],
+    ...items.map((it) => [
+      it.name || "",
+      Number(it.qty) || 0,
+      Number(it.price) || 0,
+      Math.round((Number(it.qty) || 0) * (Number(it.price) || 0)),
+      [it.clientSection, it.clientSubsection].filter(Boolean).join(" / "),
+      it.link || "",
+    ]),
+  ];
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, "История");
+  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  const safe = String(header.name || "project").replace(/[^\w\-]+/g, "_").slice(0, 40);
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="Daogreen_v${preview.versionNumber}_${safe}.xlsx"`
+  );
+  res.send(buf);
+});
+
+/**
+ * Historical PDF export data — same immutable DTO used by client PDF builder.
+ * Returns JSON for admin UI to generate PDF without duplicating layout logic.
+ * Query ?format=json (default). Binary PDF generation stays in the frontend builder.
+ */
+api.get("/:id/versions/:versionId/pdf", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const preview = buildHistoricalClientPreview(req.params.id, req.params.versionId, p);
+  if (!preview) return res.status(404).json({ error: "Not found", code: "VERSION_NOT_FOUND" });
+  const branding = loadBrandingSettings();
+  const header = clientExportHeader(preview.project);
+  res.json({
+    historical: true,
+    versionId: preview.versionId,
+    versionNumber: preview.versionNumber,
+    publishedAt: preview.publishedAt,
+    schema: preview.schema,
+    assetsPinned: preview.assetsPinned,
+    header,
+    project: preview.project,
+    items: preview.project.items || [],
+    documents: preview.documents || [],
+    branding,
+    exportHint: "Use frontend generateClientPurchasePdf with this project DTO",
+  });
+});
+
+api.post("/:id/items/bulk-patch", (req, res) => {
+  try {
+  const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
+  const p = loadProject(req.params.id);
+  if (!p) return null;
+  const result = bulkPatchItems(req.params.id, {
+    itemIds: req.body?.itemIds || [],
+    patch: req.body?.patch || {},
+  });
   for (const prev of result.before || []) {
     logItemPatch({
       projectId: req.params.id,
@@ -819,15 +1506,33 @@ api.post("/:id/items/bulk-patch", (req, res) => {
       patch: result.patch,
     });
   }
-  res.json(result);
+  return result;
+  });
+  if (!changed?.value) return res.status(404).json({ error: "Not found" });
+  res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.post("/:id/items/refresh-from-material", (req, res) => {
+  try {
   const p = loadProject(req.params.id);
   if (!p) return res.status(404).json({ error: "Not found" });
+  const expectedRevision = requireExpectedRevision(req.params.id, req.body?.expectedRevision);
+  assertRevision(req.params.id, expectedRevision);
+  const itemIds = req.body?.itemIds || (req.body?.itemId ? [req.body.itemId] : []);
+  const fields = req.body?.fields || [];
+  const planned = planRefreshItemsFromMaterial(p, { itemIds, fields });
+  if (!planned.plans.length) {
+    return res.json({
+      updated: [],
+      skipped: planned.skipped,
+      results: planned.results,
+      revision: expectedRevision,
+    });
+  }
+  const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
   const beforeMap = new Map((p.items || []).map((it) => [it.id, it]));
-  const body = parseRefreshRequest(req.body);
-  const result = refreshItemsFromMaterial(req.params.id, body);
+  const result = refreshItemsFromMaterial(req.params.id, { itemIds, fields });
   for (const it of result.updated || []) {
     const before = beforeMap.get(it.id);
     if (!before) continue;
@@ -846,25 +1551,35 @@ api.post("/:id/items/refresh-from-material", (req, res) => {
       });
     }
   }
-  res.json(result);
+  return result;
+  });
+  if (!changed?.value) return res.status(404).json({ error: "Not found" });
+  res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.patch("/:id/items/:itemId", (req, res) => {
-  const itemId = decodeURIComponent(req.params.itemId);
+  try {
+  const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
   const p = loadProject(req.params.id);
-  if (!p) return res.status(404).json({ error: "Not found" });
-  const before = p.items.find((i) => i.id === itemId);
-  const it = patchItem(req.params.id, itemId, req.body);
-  if (!it) return res.status(404).json({ error: "Not found" });
+  if (!p) return null;
+  const before = p.items.find((i) => i.id === req.params.itemId);
+  const { expectedRevision: _expectedRevision, ...itemPatch } = req.body || {};
+  const it = patchItem(req.params.id, req.params.itemId, itemPatch);
+  if (!it) return null;
   logItemPatch({
     projectId: req.params.id,
     itemId: it.id,
     itemName: it.name,
     actor: "admin",
     before,
-    patch: req.body,
+    patch: itemPatch,
   });
-  res.json(it);
+  return it;
+  });
+  if (!changed?.value) return res.status(404).json({ error: "Not found" });
+  res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.post("/:id/items/:itemId/replacement-review", reviewItemReplacement);
@@ -876,13 +1591,56 @@ api.get("/:id/activity", (req, res) => {
 });
 
 api.post("/:id/items", (req, res) => {
-  const it = addItem(req.params.id, req.body);
-  res.status(201).json(it);
+  try {
+    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
+      const { expectedRevision: _expectedRevision, ...item } = req.body || {};
+      return addItem(req.params.id, item);
+    });
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.status(201).json({ ...changed.value, revision: changed.revision });
+  } catch (e) {
+    if (revisionErrorResponse(res, e)) return;
+    if (e.code === "ITEM_VALIDATION") {
+      return res.status(400).json({ error: e.message, details: e.details, code: e.code });
+    }
+    return res.status(400).json({ error: e.message });
+  }
 });
 
 api.delete("/:id/items/:itemId", (req, res) => {
-  removeItem(req.params.id, req.params.itemId);
-  res.status(204).end();
+  try {
+    const changed = mutateWithRevision(req.params.id, req.query?.expectedRevision, () => removeItem(req.params.id, req.params.itemId));
+    if (!changed) return res.status(404).json({ error: "Not found" });
+    res.json({ ok: true, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
+});
+
+api.post("/:id/frame-bom/refresh", (req, res) => {
+  try {
+    const result = refreshFrameBomProject(req.params.id, req.body || {}, { saveItemsWithin });
+    res.json({
+      ...result.project,
+      revision: result.revision,
+      summary: result.summary,
+      plan: result.plan,
+    });
+  } catch (e) {
+    const known = [
+      "FRAME_BOM_REFRESH_CONFLICT",
+      "FRAME_BOM_REFRESH_UNSAFE_DELETE",
+      "FRAME_BOM_REFRESH_INVALID",
+      "PROJECT_REVISION_CONFLICT",
+    ];
+    if (known.includes(e?.code)) {
+      const status = e.status || (e.code === "FRAME_BOM_REFRESH_INVALID" ? 400 : 409);
+      return res.status(status).json({
+        error: e.code,
+        code: e.code,
+        message: e.message,
+      });
+    }
+    return res.status(400).json({ error: e.message });
+  }
 });
 
 function linkExpiresAt() {
@@ -893,22 +1651,51 @@ function linkExpiresAt() {
 }
 
 api.post("/:id/regenerate-token", (req, res) => {
+  try {
+  const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
   const token = clientToken();
   const expires = linkExpiresAt();
   db.prepare(
     "UPDATE projects SET client_token = ?, client_token_expires_at = ?, updated_at = datetime('now') WHERE id = ?"
   ).run(token, expires, req.params.id);
-  res.json({ clientToken: token, clientTokenExpiresAt: expires });
+  return { clientToken: token, clientTokenExpiresAt: expires };
+  });
+  if (!changed) return res.status(404).json({ error: "Not found" });
+  res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.post("/:id/archive", (req, res) => {
-  db.prepare("UPDATE projects SET status = 'archived', updated_at = datetime('now') WHERE id = ?").run(req.params.id);
-  res.json({ ok: true });
+  try { const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => db.prepare("UPDATE projects SET status = 'archived', updated_at = datetime('now') WHERE id = ?").run(req.params.id));
+  if (!changed) return res.status(404).json({ error: "Not found" }); res.json({ ok: true, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
 });
 
 api.post("/:id/restore", (req, res) => {
-  db.prepare("UPDATE projects SET status = 'active', updated_at = datetime('now') WHERE id = ?").run(req.params.id);
-  res.json({ ok: true });
+  try { const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => db.prepare("UPDATE projects SET status = 'active', updated_at = datetime('now') WHERE id = ?").run(req.params.id));
+  if (!changed) return res.status(404).json({ error: "Not found" }); res.json({ ok: true, revision: changed.revision });
+  } catch (e) { if (!revisionErrorResponse(res, e)) res.status(400).json({ error: e.message, code: e.code }); }
+});
+
+/** Admin ID-scoped project image (schemes / rack extras) — no raw /uploads reopen. */
+api.get("/:id/media/assets/:assetId", (req, res) => {
+  const p = loadProject(req.params.id);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  const found = findProjectScopedImageAsset(p, req.params.assetId);
+  if (!found.ok) {
+    const status = found.code === "INVALID_ASSET_ID" ? 400 : 404;
+    return res.status(status).json({ error: found.code === "INVALID_ASSET_ID" ? "Invalid asset id" : "Not found", code: found.code });
+  }
+  const url = String(found.url || "");
+  if (!url.startsWith("/uploads/")) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  return sendSafeUploadFile(res, {
+    url,
+    filename: path.basename(url),
+    inline: true,
+    cacheControl: "private, max-age=300",
+  });
 });
 
 export default api;
@@ -919,7 +1706,7 @@ function loadBrandingSettings() {
 
 /** Client-visible project files: excludes hidden frame_drawings (is_client_visible=0). */
 export function getClientProjectDocuments(projectId) {
-  return db.prepare(`
+  const documents = db.prepare(`
     SELECT
       f.id,
       f.type,
@@ -943,6 +1730,43 @@ export function getClientProjectDocuments(projectId) {
       )
     ORDER BY f.uploaded_at DESC
   `).all(projectId);
+
+  const latestFrameDrawingByTarget = new Map();
+  return documents.filter((document) => {
+    if (document.type !== "frame_drawing") return true;
+    const targetKey =
+      document.moduleRackKey ||
+      document.stellageId ||
+      document.presetId ||
+      document.id;
+    const current = latestFrameDrawingByTarget.get(targetKey);
+    if (!current) {
+      latestFrameDrawingByTarget.set(targetKey, document);
+      return true;
+    }
+    const currentVersion = Number(current.drawingVersion || 0);
+    const candidateVersion = Number(document.drawingVersion || 0);
+    if (candidateVersion <= currentVersion) return false;
+    const currentIndex = documents.indexOf(current);
+    if (currentIndex >= 0) documents[currentIndex].__supersededFrameDrawing = true;
+    latestFrameDrawingByTarget.set(targetKey, document);
+    return true;
+  }).filter((document) => !document.__supersededFrameDrawing);
+}
+
+function attachClientImageAccessUrls(manifest, token) {
+  const mapEntry = (img) => {
+    const id = String(img?.id || "").trim();
+    if (!id) return { ...img };
+    return {
+      ...img,
+      accessUrl: `/api/client/p/${encodeURIComponent(token)}/images/${encodeURIComponent(id)}`,
+    };
+  };
+  return {
+    projectSchemes: (manifest?.projectSchemes || []).map(mapEntry),
+    rackImages: (manifest?.rackImages || []).map(mapEntry),
+  };
 }
 
 function serveClientProject(req, res) {
@@ -951,18 +1775,83 @@ function serveClientProject(req, res) {
   if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
     return res.status(410).json({ error: "Link expired" });
   }
+
+  const release = parsePublishedRelease(p.manualParams);
+  if (!release) {
+    return res.status(403).json({
+      error: "Project not published for client",
+      code: "NOT_PUBLISHED",
+    });
+  }
+
+  const parsedSnapshot = loadPublishedReleaseSnapshot(p);
+  const snapshotItems = parsedSnapshot?.items || [];
+  if (!snapshotItems.length) {
+    return res.status(403).json({
+      error: "Published release snapshot missing",
+      code: "PUBLISHED_SNAPSHOT_MISSING",
+    });
+  }
+
+  const clientProject = buildClientProjectFromRelease(p, parsedSnapshot, { overlayLive: true });
+  if (clientProject?.clientImages) {
+    clientProject.clientImages = attachClientImageAccessUrls(
+      clientProject.clientImages,
+      req.clientToken,
+    );
+  }
   const versions = listVersions(p.id);
-  const documents = getClientProjectDocuments(p.id);
+  const versionInfoRaw = versions.find((v) => v.id === release.versionId) || versions[0] || null;
+  // Admin-only fields must never reach the client DTO.
+  const versionInfo = versionInfoRaw
+    ? (({ releaseComment: _rc, ...safe }) => safe)(versionInfoRaw)
+    : null;
+  const documents = resolveClientDocumentsForRelease(parsedSnapshot).map((d) => {
+    const { url: _internalUrl, ...safe } = d;
+    return {
+      ...safe,
+      // Keep filename/type for UI; open via token-scoped route only.
+      accessUrl: `/api/client/p/${encodeURIComponent(req.clientToken)}/files/${encodeURIComponent(d.id)}`,
+    };
+  });
   const activity = listActivity(p.id, { clientOnly: true });
+
+  res.setHeader("Cache-Control", "private, no-store");
   res.json({
-    project: sanitizeProjectForClient(p),
-    versionInfo: versions[0] || null,
+    project: clientProject,
+    projectId: p.id,
+    revision: Number(p.revision) || 1,
+    versionInfo,
+    publishedRelease: release,
+    // Intentional live global branding (non-commercial overlay) — see publishedLiveOverlays.js
     branding: loadBrandingSettings(),
+    brandingSource: "live_global_settings",
     purchaseStatuses: clientPurchaseStatuses(),
     documents,
     activity,
-    catalog: clientCatalogForProject(p),
   });
+}
+
+function loadClientProjectOrRespond(req, res) {
+  const p = loadProjectByToken(req.clientToken);
+  if (!p) {
+    res.status(404).json({ error: "Not found" });
+    return null;
+  }
+  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
+    res.status(410).json({ error: "Link expired" });
+    return null;
+  }
+  return p;
+}
+
+function clientWriteError(res, error) {
+  if (revisionErrorResponse(res, error)) return true;
+  if (error?.code === "EXPECTED_REVISION_REQUIRED") {
+    res.status(400).json({ error: error.message, code: error.code, projectId: error.projectId });
+    return true;
+  }
+  return false;
 }
 
 function clientPatchAllowed(body = {}) {
@@ -978,62 +1867,27 @@ function validateClientStatus(status) {
   return valid.has(status);
 }
 
-function patchClientItem(req, res) {
-  const p = loadProjectByToken(req.clientToken);
-  if (!p) return res.status(404).json({ error: "Not found" });
-  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
-    return res.status(410).json({ error: "Link expired" });
-  }
-  const before = p.items.find((i) => i.id === req.params.itemId);
-  if (!before || !lineVisibleToClient(before)) {
-    return res.status(403).json({ error: "Item not available" });
-  }
-  const patch = clientPatchAllowed(req.body);
-  if (patch.status !== undefined && !validateClientStatus(patch.status)) {
-    return res.status(400).json({ error: "Invalid status" });
-  }
-  const it = patchItem(p.id, req.params.itemId, patch);
-  logItemPatch({
-    projectId: p.id,
-    itemId: it.id,
-    itemName: it.name,
-    actor: "client",
-    before,
-    patch,
-  });
-  const bought = ["bought", "delivered", "have"].includes(patch.status);
-  if (bought && !p.purchaseStartedAt) {
-    db.prepare("UPDATE projects SET purchase_started_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(
-      p.id
-    );
-  }
-  db.prepare(
-    "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-  ).run(p.id);
-  res.json(sanitizeItemForClient(it));
+function clientSnapshotItem(project, itemId) {
+  const items = loadPublishedSnapshotItems(project);
+  return items.find((i) => i.id === itemId) || null;
 }
 
-function bulkPatchClientItems(req, res) {
-  const p = loadProjectByToken(req.clientToken);
-  if (!p) return res.status(404).json({ error: "Not found" });
-  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
-    return res.status(410).json({ error: "Link expired" });
-  }
-  const patch = clientPatchAllowed(req.body?.patch || req.body);
-  const itemIds = Array.isArray(req.body?.itemIds) ? req.body.itemIds : [];
-  if (!itemIds.length) return res.status(400).json({ error: "itemIds required" });
-  if (patch.status !== undefined && !validateClientStatus(patch.status)) {
-    return res.status(400).json({ error: "Invalid status" });
-  }
-  const visibleIds = itemIds.filter((id) => {
-    const it = p.items.find((i) => i.id === id);
-    return it && lineVisibleToClient(it);
-  });
-  if (!visibleIds.length) return res.status(403).json({ error: "No items available" });
-  const result = bulkPatchItems(p.id, { itemIds: visibleIds, patch });
-  for (const it of result.updated) {
-    const before = result.before.find((b) => b.id === it.id);
-    if (before) {
+function patchClientItem(req, res) {
+  try {
+    const p = loadClientProjectOrRespond(req, res);
+    if (!p) return;
+    const snapBefore = clientSnapshotItem(p, req.params.itemId);
+    if (!snapBefore || !lineVisibleToClient(snapBefore)) {
+      return res.status(403).json({ error: "Item not available" });
+    }
+    const before = p.items.find((i) => i.id === req.params.itemId) || snapBefore;
+    const { expectedRevision: _expectedRevision, ...rawBody } = req.body || {};
+    const patch = clientPatchAllowed(rawBody);
+    if (patch.status !== undefined && !validateClientStatus(patch.status)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+    const changed = mutateWithRevision(p.id, req.body?.expectedRevision, () => {
+      const it = patchItem(p.id, req.params.itemId, patch);
       logItemPatch({
         projectId: p.id,
         itemId: it.id,
@@ -1042,61 +1896,136 @@ function bulkPatchClientItems(req, res) {
         before,
         patch,
       });
+      const bought = ["bought", "delivered", "have"].includes(patch.status);
+      if (bought && !p.purchaseStartedAt) {
+        db.prepare("UPDATE projects SET purchase_started_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(
+          p.id
+        );
+      }
+      db.prepare(
+        "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+      ).run(p.id);
+      return it;
+    });
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.json({
+      ...prepareClientMutationItemResponse(snapBefore, changed.value),
+      revision: changed.revision,
+      projectId: p.id,
+    });
+  } catch (e) {
+    if (!clientWriteError(res, e)) res.status(400).json({ error: e.message, code: e.code });
+  }
+}
+
+function bulkPatchClientItems(req, res) {
+  try {
+    const p = loadClientProjectOrRespond(req, res);
+    if (!p) return;
+    const patch = clientPatchAllowed(req.body?.patch || req.body);
+    const itemIds = Array.isArray(req.body?.itemIds) ? req.body.itemIds : [];
+    if (!itemIds.length) return res.status(400).json({ error: "itemIds required" });
+    if (patch.status !== undefined && !validateClientStatus(patch.status)) {
+      return res.status(400).json({ error: "Invalid status" });
     }
+    const visibleIds = itemIds.filter((id) => {
+      const snap = clientSnapshotItem(p, id);
+      return snap && lineVisibleToClient(snap);
+    });
+    if (!visibleIds.length) return res.status(403).json({ error: "No items available" });
+    const changed = mutateWithRevision(p.id, req.body?.expectedRevision, () => {
+      const result = bulkPatchItems(p.id, { itemIds: visibleIds, patch });
+      for (const it of result.updated) {
+        const before = result.before.find((b) => b.id === it.id);
+        if (before) {
+          logItemPatch({
+            projectId: p.id,
+            itemId: it.id,
+            itemName: it.name,
+            actor: "client",
+            before,
+            patch,
+          });
+        }
+      }
+      if (patch.status && ["bought", "delivered", "have"].includes(patch.status) && !p.purchaseStartedAt) {
+        db.prepare("UPDATE projects SET purchase_started_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(
+          p.id
+        );
+      }
+      db.prepare(
+        "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+      ).run(p.id);
+      return result;
+    });
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.json({
+      updated: changed.value.updated.map((it) =>
+        prepareClientMutationItemResponse(clientSnapshotItem(p, it.id) || it, it)),
+      skipped: changed.value.skipped,
+      revision: changed.revision,
+      projectId: p.id,
+    });
+  } catch (e) {
+    if (!clientWriteError(res, e)) res.status(400).json({ error: e.message, code: e.code });
   }
-  if (patch.status && ["bought", "delivered", "have"].includes(patch.status) && !p.purchaseStartedAt) {
-    db.prepare("UPDATE projects SET purchase_started_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(
-      p.id
-    );
-  }
-  db.prepare(
-    "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-  ).run(p.id);
-  res.json({ updated: result.updated.map(sanitizeItemForClient), skipped: result.skipped });
 }
 
 function proposeClientReplacement(req, res) {
-  const p = loadProjectByToken(req.clientToken);
-  if (!p) return res.status(404).json({ error: "Not found" });
-  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
-    return res.status(410).json({ error: "Link expired" });
+  try {
+    const p = loadClientProjectOrRespond(req, res);
+    if (!p) return;
+    const before = p.items.find((i) => i.id === req.params.itemId) || clientSnapshotItem(p, req.params.itemId);
+    if (!before || !lineVisibleToClient(before)) {
+      return res.status(403).json({ error: "Item not available" });
+    }
+    const patch = {
+      status: "replacement_check",
+      replacementLink: String(req.body?.link || "").trim(),
+      replacementPhotoUrl: String(req.body?.photoUrl || "").trim(),
+      replacementPrice:
+        req.body?.price != null && req.body.price !== "" ? Number(req.body.price) : null,
+      replacementComment: String(req.body?.comment || "").trim(),
+      replacementProposedAt: new Date().toISOString(),
+    };
+    const changed = mutateWithRevision(p.id, req.body?.expectedRevision, () => {
+      const it = patchItem(p.id, req.params.itemId, patch);
+      logItemPatch({
+        projectId: p.id,
+        itemId: it.id,
+        itemName: it.name,
+        actor: "client",
+        before,
+        patch: { status: "replacement_check", replacementProposed: true },
+      });
+      db.prepare(
+        "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+      ).run(p.id);
+      return it;
+    });
+    if (!changed?.value) return res.status(404).json({ error: "Not found" });
+    res.json({
+      ...prepareClientMutationItemResponse(clientSnapshotItem(p, changed.value.id) || before, changed.value),
+      revision: changed.revision,
+      projectId: p.id,
+    });
+  } catch (e) {
+    if (!clientWriteError(res, e)) res.status(400).json({ error: e.message, code: e.code });
   }
-  const before = p.items.find((i) => i.id === req.params.itemId);
-  if (!before || !lineVisibleToClient(before)) {
-    return res.status(403).json({ error: "Item not available" });
-  }
-  const patch = {
-    status: "replacement_check",
-    replacementLink: String(req.body?.link || "").trim(),
-    replacementPhotoUrl: String(req.body?.photoUrl || "").trim(),
-    replacementPrice:
-      req.body?.price != null && req.body.price !== "" ? Number(req.body.price) : null,
-    replacementComment: String(req.body?.comment || "").trim(),
-    replacementProposedAt: new Date().toISOString(),
-  };
-  const it = patchItem(p.id, req.params.itemId, patch);
-  logItemPatch({
-    projectId: p.id,
-    itemId: it.id,
-    itemName: it.name,
-    actor: "client",
-    before,
-    patch: { status: "replacement_check", replacementProposed: true },
-  });
-  db.prepare(
-    "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-  ).run(p.id);
-  res.json(sanitizeItemForClient(it));
 }
 
 function reviewItemReplacement(req, res) {
+  try {
+  const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () => {
   const p = loadProject(req.params.id);
-  if (!p) return res.status(404).json({ error: "Not found" });
+  if (!p) return null;
   const before = p.items.find((i) => i.id === req.params.itemId);
-  if (!before) return res.status(404).json({ error: "Item not found" });
+  if (!before) return null;
   const action = req.body?.action;
   if (!["accept", "reject"].includes(action)) {
-    return res.status(400).json({ error: "action must be accept or reject" });
+    const error = new Error("action must be accept or reject");
+    error.code = "INVALID_REPLACEMENT_ACTION";
+    throw error;
   }
   const patch = {
     status: "not_bought",
@@ -1121,41 +2050,115 @@ function reviewItemReplacement(req, res) {
     itemName: it.name,
     actor: "admin",
     before,
-    patch: { replacementReview: action, ...req.body },
+    patch: { replacementReview: action, ...req.body, expectedRevision: undefined },
   });
-  res.json(it);
+  return it;
+  });
+  if (!changed?.value) return res.status(404).json({ error: "Not found" });
+  res.json({ ...changed.value, revision: changed.revision });
+  } catch (e) {
+    if (!revisionErrorResponse(res, e)) res.status(e.code === "INVALID_REPLACEMENT_ACTION" ? 400 : 400).json({ error: e.message, code: e.code });
+  }
 }
 
 function patchClientCooling(req, res) {
+  const p = loadClientProjectOrRespond(req, res);
+  if (!p) return;
+  return res.status(403).json({
+    error: "CLIENT_ENGINEERING_MUTATION_FORBIDDEN",
+    code: "CLIENT_ENGINEERING_MUTATION_FORBIDDEN",
+  });
+}
+
+function serveClientReleaseFile(req, res) {
   const p = loadProjectByToken(req.clientToken);
   if (!p) return res.status(404).json({ error: "Not found" });
   if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
     return res.status(410).json({ error: "Link expired" });
   }
-  const sf = Number(req.body?.safetyFactor);
-  if (!Number.isFinite(sf) || sf < 1 || sf > 2.5) {
-    return res.status(400).json({ error: "Invalid safetyFactor" });
+  const release = parsePublishedRelease(p.manualParams);
+  if (!release) {
+    return res.status(403).json({ error: "Project not published for client", code: "NOT_PUBLISHED" });
   }
-  const mp = typeof p.manualParams === "object" && p.manualParams ? { ...p.manualParams } : {};
-  const cf = mp.coolingFarm && typeof mp.coolingFarm === "object" ? { ...mp.coolingFarm } : {};
-  const oldSf = cf.safetyFactor;
-  cf.safetyFactor = sf;
-  mp.coolingFarm = cf;
-  db.prepare("UPDATE projects SET manual_params = ?, updated_at = datetime('now') WHERE id = ?").run(
-    JSON.stringify(mp),
-    p.id
-  );
-  if (oldSf !== sf) {
-    logProjectEvent({
-      projectId: p.id,
-      actor: "client",
-      summary: `Клиент: запасной коэфф. ${oldSf ?? "—"} → ${sf}`,
-    });
+  const parsedSnapshot = loadPublishedReleaseSnapshot(p);
+  if (!parsedSnapshot?.items?.length) {
+    return res.status(403).json({ error: "Published release snapshot missing", code: "PUBLISHED_SNAPSHOT_MISSING" });
   }
-  db.prepare(
-    "UPDATE projects SET last_client_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-  ).run(p.id);
-  res.json({ manualParams: mp });
+  if (isLegacyReleaseIncomplete(parsedSnapshot)) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  const assetId = String(req.params.assetId || "").trim();
+  if (!assetId || assetId.includes("..") || assetId.includes("/") || assetId.includes("\\")) {
+    return res.status(400).json({ error: "Invalid asset id" });
+  }
+
+  const docs = resolveClientDocumentsForRelease(parsedSnapshot);
+  const entry = docs.find((d) => d.id === assetId || d.sourceFileId === assetId);
+  if (!entry) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  // Pinned release files only — reject non-release paths (no live fallback).
+  const url = String(entry.url || "");
+  if (!url.startsWith(`/uploads/releases/${p.id}/`)) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  return sendSafeUploadFile(res, {
+    url,
+    filename: entry.filename,
+    inline: true,
+    cacheControl: "private, max-age=300",
+  });
+}
+
+/**
+ * Client release-scoped image by frozen imageManifest id.
+ * Resolves URL from the snapshot entry only (no live project scheme lookup).
+ */
+function serveClientReleaseImage(req, res) {
+  const p = loadProjectByToken(req.clientToken);
+  if (!p) return res.status(404).json({ error: "Not found" });
+  if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
+    return res.status(410).json({ error: "Link expired" });
+  }
+  const release = parsePublishedRelease(p.manualParams);
+  if (!release) {
+    return res.status(403).json({ error: "Project not published for client", code: "NOT_PUBLISHED" });
+  }
+  const parsedSnapshot = loadPublishedReleaseSnapshot(p);
+  if (!parsedSnapshot?.items?.length) {
+    return res.status(403).json({ error: "Published release snapshot missing", code: "PUBLISHED_SNAPSHOT_MISSING" });
+  }
+  if (isLegacyReleaseIncomplete(parsedSnapshot)) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  const imageId = String(req.params.imageId || "").trim();
+  if (!imageId || imageId.includes("..") || imageId.includes("/") || imageId.includes("\\")) {
+    return res.status(400).json({ error: "Invalid image id" });
+  }
+
+  const entry = findManifestImageById(parsedSnapshot.imageManifest, imageId);
+  if (!entry) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  const url = String(entry.url || "").trim();
+  // Remote media disabled: never 302/fetch external URLs from scoped client images.
+  if (/^https?:\/\//i.test(url) || !url.startsWith("/uploads/")) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  // Prefer release-pinned paths; for older snapshots that froze live upload URLs,
+  // still serve ONLY the frozen manifest URL (membership = release scope), never live project lookup.
+  return sendSafeUploadFile(res, {
+    url,
+    filename: path.basename(url) || "image",
+    inline: true,
+    cacheControl: "private, max-age=300",
+  });
 }
 
 // Client router — основной путь /api/client/p/:token
@@ -1163,15 +2166,68 @@ export const clientRouter = Router();
 clientRouter.use(clientAuthMiddleware);
 
 clientRouter.get("/p/:token", serveClientProject);
+clientRouter.get("/p/:token/files/:assetId", serveClientReleaseFile);
+clientRouter.get("/p/:token/images/:imageId", serveClientReleaseImage);
+/**
+ * Legacy client media compatibility route.
+ * Not an open URL proxy: token → published release → frozen allowlist → local public/release asset.
+ */
 clientRouter.get("/p/:token/media", async (req, res) => {
+  const notFound = () => {
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    return res.status(404).json({ error: "Not found" });
+  };
+
   try {
+    const p = loadProjectByToken(req.clientToken);
+    if (!p) return notFound();
+    if (p.clientTokenExpiresAt && new Date(p.clientTokenExpiresAt) < new Date()) {
+      return res.status(410).json({ error: "Link expired" });
+    }
+    const release = parsePublishedRelease(p.manualParams);
+    if (!release) return notFound();
+    const parsedSnapshot = loadPublishedReleaseSnapshot(p);
+    // Require frozen items; do NOT hard-deny incomplete legacy release_v1 —
+    // allowlist is built only from URLs stored in this snapshot (no live fallback).
+    if (!parsedSnapshot?.items?.length) return notFound();
+
+    let requested = "";
+    const assetId = String(req.query.assetId || "").trim();
+    if (assetId) {
+      if (assetId.includes("..") || assetId.includes("/") || assetId.includes("\\")) {
+        return notFound();
+      }
+      const entry = findManifestImageById(parsedSnapshot.imageManifest, assetId);
+      if (!entry) return notFound();
+      requested = String(entry.url || "").trim();
+    } else {
+      requested = String(req.query.url || "").trim();
+      if (!requested) return notFound();
+      if (!isUrlInFrozenClientMedia(requested, parsedSnapshot)) return notFound();
+    }
+
+    const canonical = canonicalizeClientMediaUrl(requested);
+    if (!canonical || !isClientMediaLocalServePath(canonical, p.id)) {
+      return notFound();
+    }
+    // Remote schemes never served via /media (defense in depth after allowlist).
+    if (/^https?:\/\//i.test(canonical)) return notFound();
+
     const { loadProxyImage } = await import("../services/imageProxy.js");
-    const { buffer, contentType } = await loadProxyImage(req.query.url);
+    const { buffer, contentType } = await loadProxyImage(canonical, {
+      allowPrivate: false,
+      allowRemote: false,
+      allowReleaseProjectId: p.id,
+      // Frozen releases may still point at legacy /uploads/<file> catalog photos.
+      allowLegacyCatalogRoot: true,
+    });
     res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.send(buffer);
-  } catch (e) {
-    res.status(e.status || 500).json({ error: e.message || "Image fetch failed" });
+  } catch {
+    return notFound();
   }
 });
 clientRouter.patch("/p/:token/items/bulk", bulkPatchClientItems);

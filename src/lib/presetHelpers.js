@@ -4,6 +4,7 @@ import { stripCatalogLines } from "../../shared/catalogLine.js";
 import { emptyFarmSectionsState as buildFarmSectionsState } from "./farmSectionsConfig.js";
 import { normalizeStellageParams } from "./stellagePresetParams.js";
 import { resolveStellagePhoto } from "./stellageCatalogConfig.js";
+import { cloneRackImages } from "./rackImages.js";
 
 export { cloneBuilderLines };
 
@@ -14,6 +15,7 @@ export function duplicateStellageInstance(st) {
     name: `${st.name} (копия)`,
     params: st.params ? { ...st.params } : {},
     items: cloneBuilderLines(st.items, { freshIds: true }),
+    extraImages: cloneRackImages(st.extraImages),
   };
 }
 

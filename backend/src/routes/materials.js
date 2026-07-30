@@ -35,6 +35,11 @@ import {
   syncMaterialFarmSectionCatalog,
   removeMaterialFromFarmSectionCatalogs,
 } from "../services/syncMaterialFarmSectionCatalog.js";
+import {
+  assertReplaceAllowed,
+  assertMaterialNotInUse,
+} from "../services/materialReferenceGuard.js";
+import { attachTranslationToMaterial } from "../services/materialTranslationService.js";
 
 const INSERT_MAT = db.prepare(`
   INSERT INTO materials (
@@ -140,7 +145,7 @@ function matToParams(m, id) {
   };
 }
 
-export function listMaterials({ module, category, q } = {}) {
+export function listMaterials({ module, category, q, translationStatus, translationFilter } = {}) {
   let sql = "SELECT * FROM materials WHERE 1=1";
   const params = {};
   if (category) {
@@ -148,17 +153,35 @@ export function listMaterials({ module, category, q } = {}) {
     params.category = category;
   }
   if (q) {
-    sql += " AND name LIKE @q";
+    sql += ` AND (
+      name LIKE @q
+      OR EXISTS (
+        SELECT 1 FROM material_translations t
+        WHERE t.material_id = materials.id AND t.locale = 'en' AND t.name LIKE @q
+      )
+    )`;
     params.q = `%${q}%`;
   }
   sql += " ORDER BY module, name";
-  let list = db.prepare(sql).all(params).map(rowToMaterial);
+  let list = db.prepare(sql).all(params).map(rowToMaterial).map(attachTranslationToMaterial);
   if (module) list = list.filter((m) => materialInModule(m, module));
+  const filter = String(translationFilter || translationStatus || "").trim();
+  if (filter === "missing") {
+    list = list.filter((m) => !m.translation);
+  } else if (filter === "needs_review" || filter === "stale") {
+    list = list.filter((m) =>
+      filter === "stale" ? m.translationStale : m.translationStatus === "needs_review",
+    );
+  } else if (filter && filter !== "all") {
+    list = list.filter((m) => m.translationStatus === filter);
+  }
   return list;
 }
 
 export function getMaterial(id) {
-  return rowToMaterial(db.prepare("SELECT * FROM materials WHERE id = ?").get(id));
+  return attachTranslationToMaterial(
+    rowToMaterial(db.prepare("SELECT * FROM materials WHERE id = ?").get(id)),
+  );
 }
 
 export function createMaterial(data) {
@@ -200,12 +223,19 @@ export function updateMaterial(id, patch, { changedBy = "admin" } = {}) {
 }
 
 export function deleteMaterial(id) {
-  removeMaterialFromFarmSectionCatalogs(id);
-  db.prepare("DELETE FROM materials WHERE id = ?").run(id);
+  const materialId = String(id || "").trim();
+  if (!materialId) return;
+
+  const runDelete = db.transaction(() => {
+    assertMaterialNotInUse(db, materialId);
+    removeMaterialFromFarmSectionCatalogs(materialId);
+    db.prepare("DELETE FROM materials WHERE id = ?").run(materialId);
+  });
+  runDelete();
 }
 
 export function bulkUpsertMaterials(materials, mode = "merge") {
-  if (mode === "replace") db.prepare("DELETE FROM materials").run();
+  assertReplaceAllowed(mode);
   for (const m of materials) {
     const existing = m.id ? getMaterial(m.id) : null;
     if (existing) updateMaterial(existing.id, m);

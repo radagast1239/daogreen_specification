@@ -22,6 +22,7 @@ import {
 import { buildClientBrand } from '../lib/clientBrandConfig.js';
 import { api, photoSrc } from '../lib/api.js';
 import { useToast } from '../components/Toast.jsx';
+import { useStore } from '../store/StoreContext.jsx';
 
 function saveButtonLabel(ctx, pdfOnlyMode = false) {
   if (pdfOnlyMode) return FRAME_SAVE_PDF_ONLY_BUTTON_LABEL;
@@ -44,6 +45,7 @@ export default function FramePdfButton({
   onProjectUpdated = null,
 }) {
   const { confirm } = useToast();
+  const { actions } = useStore();
   const [busy, setBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [comboBusy, setComboBusy] = useState(false);
@@ -170,14 +172,21 @@ export default function FramePdfButton({
     setError('');
     setCombinedResult(null);
     try {
+      let catalog = materials;
+      if (!catalog?.length) {
+        catalog = await api.getMaterials();
+      }
+      if (!catalog?.length) {
+        throw new Error('Не удалось загрузить базу материалов для BOM.');
+      }
       const outcome = await executeFrameSavePdfAndBom({
         confirm,
         savePdf: () => performSavePdf(isReplaceMode),
         project,
         purchaseDraft,
         drawingContext: { ...drawingContext, projectId: drawingContext.projectId },
-        updateProject: api.updateProject,
-        materials,
+        updateProject: (id, patch) => actions.projectUpdate(id, patch),
+        materials: catalog,
       });
       if (outcome.cancelled) return;
       if (outcome.skipped) return;
@@ -197,6 +206,8 @@ export default function FramePdfButton({
     performSavePdf,
     isReplaceMode,
     onProjectUpdated,
+    actions,
+    materials,
   ]);
 
   const returnLabel = buildStellagesReturnLabel(drawingContext?.returnTo);

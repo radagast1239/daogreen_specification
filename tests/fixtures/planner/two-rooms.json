@@ -1,0 +1,26 @@
+{
+  "_fixture": "two-rooms",
+  "_note": "Два прямоугольника с общей перегородкой w7 (n2-n5). Внешний контур 8000x4000, разделён посередине. Проверка детекции нескольких помещений.",
+  "unit": "mm",
+  "room": { "w": 12000, "h": 8000, "wallThk": 120, "height": 3000, "defaultRoomHeightMm": 3000 },
+  "nodes": {
+    "n1": { "x": 0, "y": 0 },
+    "n2": { "x": 4000, "y": 0 },
+    "n3": { "x": 8000, "y": 0 },
+    "n4": { "x": 8000, "y": 4000 },
+    "n5": { "x": 4000, "y": 4000 },
+    "n6": { "x": 0, "y": 4000 }
+  },
+  "walls": [
+    { "id": "w1", "a": "n1", "b": "n2", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w1" },
+    { "id": "w2", "a": "n2", "b": "n3", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w2" },
+    { "id": "w3", "a": "n3", "b": "n4", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w3" },
+    { "id": "w4", "a": "n4", "b": "n5", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w4" },
+    { "id": "w5", "a": "n5", "b": "n6", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w5" },
+    { "id": "w6", "a": "n6", "b": "n1", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w6" },
+    { "id": "w7", "a": "n2", "b": "n5", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w7" }
+  ],
+  "items": [],
+  "lines": [],
+  "dimensions": []
+}

@@ -1,12 +1,14 @@
 import { lineVisibleToClient, isPurchasableLineType, resolveItemType, isCoolingSpecItem } from "./itemTypes.js";
-import { enrichProjectItemFromMaterial } from "./frameBomProjectItems.js";
+import { enrichProjectItemFromMaterial, isFrameBomLine } from "./frameBomProjectItems.js";
 import { structuredClientNote } from "./structuredClientNote.js";
-import { pipeCutsClientNote, normalizePipeCuts } from "./profilePipeCuts.js";
+import { isProfilePipeName, resolvePipeCuts, pipeCutsClientNote, normalizePipeCuts, resolveStellageCountForProjectItem, scalePipeCuts } from "./profilePipeCuts.js";
 import {
   formatClientPurchaseStatusLine,
   getPurchaseStatusLabel,
   normalizePurchaseStatus,
 } from "./purchaseStatusRules.js";
+import { purchaseMergeKey as computePurchaseMergeKey } from "./purchaseMerge.js";
+import { computeLineMoney, roundMoney } from "./moneyCalc.js";
 
 export const NFT_CHANNEL_CLIENT_NOTE = "Используется как NFT-канал в схеме стеллажа.";
 export const CLIENT_PRICE_TBD = "цена уточняется";
@@ -24,6 +26,7 @@ export const CLIENT_ITEM_TECH_FIELDS = [
   "internalNote",
   "techNote",
   "materialId",
+  "purchaseMergeKey",
   "drawingId",
   "moduleRackKey",
   "sourceRackKey",
@@ -71,10 +74,15 @@ export function stripClientTechnicalFields(item) {
 }
 
 export function prepareClientPurchaseItem(item, materials = []) {
-  const base = stripClientTechnicalFields(enrichClientPurchaseItem(item, materials));
+  const frameBom = isFrameBomLine(item);
+  const enriched = enrichClientPurchaseItem(item, materials);
+  const mergeKey = computePurchaseMergeKey(enriched);
+  const base = stripClientTechnicalFields(enriched);
   const status = normalizePurchaseStatus(base);
   return {
     ...base,
+    purchaseMergeKey: mergeKey,
+    frameBom,
     status,
     purchaseStatus: status,
     statusLabel: getPurchaseStatusLabel(status),
@@ -124,16 +132,24 @@ export function clientRowHasTechnicalFields(row) {
   return clientPdfRowHasTechnicalFields(row);
 }
 
-/** Сплит-система без заполненной цены. */
+/** Explicit unit price present (including finite 0). null/undefined/'' = missing. */
+export function hasExplicitClientUnitPrice(row) {
+  const raw = row?.price;
+  if (raw == null || raw === "") return false;
+  return Number.isFinite(Number(raw));
+}
+
+/** Сплит-система без заполненной цены. Explicit price 0 is not TBD. */
 export function isClientCoolingPriceUnset(row) {
   const rep = row?.sourceItems?.[0] || row;
   if (!isCoolingSpecItem(rep)) return false;
-  return !(Number(row?.price) > 0) && !(Number(row?.sumVat) > 0);
+  if (hasExplicitClientUnitPrice(row)) return false;
+  return !(Number(row?.sumVat) > 0);
 }
 
-/** Есть ли у строки цена за единицу (не путать с бесплатным price=0 в базе без snapshot). */
+/** Есть ли у строки цена за единицу (включая явную цену 0). */
 export function hasClientUnitPrice(row) {
-  return Number(row?.price) > 0;
+  return hasExplicitClientUnitPrice(row);
 }
 
 /**
@@ -154,16 +170,34 @@ export function formatClientLineTotal(row) {
   if (isClientCoolingPriceUnset(row)) return CLIENT_PRICE_TBD;
   if (!hasClientUnitPrice(row)) return "";
   const sumVat = Number(row.sumVat);
-  if (Number.isFinite(sumVat) && sumVat > 0) return Math.round(sumVat);
-  const qty = Number(row.qty) || 0;
-  const price = Number(row.price) || 0;
-  const vat = Number(row.vatRate) || 0;
-  const net = qty * price;
-  return Math.round(net + net * (vat / 100));
+  if (Number.isFinite(sumVat) && sumVat > 0) return roundMoney(sumVat);
+  const money = computeLineMoney(row, { priceMode: "planned", contributeCheck: false });
+  return roundMoney(money.gross);
 }
 
 export function formatPipeCutsNote(pipeCuts) {
   return pipeCutsClientNote(normalizePipeCuts(pipeCuts));
+}
+
+/**
+ * Для карточек без склейки: умножить сегменты профильной трубы на count стеллажа.
+ * Frame BOM не трогаем — сегменты уже с учётом count.
+ */
+export function scaleClientItemPipeCutsForDisplay(item, stellageConfigs = []) {
+  if (!item || !isProfilePipeName(item.name) || isFrameBomLine(item)) return item;
+  const configs = Array.isArray(stellageConfigs) ? stellageConfigs : [];
+  if (!configs.length) return item;
+  const count = resolveStellageCountForProjectItem(item, configs);
+  if (count <= 1) return item;
+  const cuts = scalePipeCuts(resolvePipeCuts(item), count);
+  if (!cuts.length) return item;
+  const note = pipeCutsClientNote(cuts);
+  return {
+    ...item,
+    pipeCuts: cuts,
+    clientNote: note || item.clientNote,
+    comment: note || item.comment,
+  };
 }
 
 /** Объединить уникальные клиентские примечания из нескольких sourceItems. */

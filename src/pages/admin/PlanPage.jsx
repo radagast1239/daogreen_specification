@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { uid } from "../../store/helpers.js";
@@ -25,7 +25,6 @@ import {
   createWallDraftState, wallDraftStart, wallDraftContinueFrom,
   wallDraftAddSegment, wallDraftBackspace, wallDraftFinishPts, wallDraftFinishMeta,
 } from "../../planner/core/walls/wallDraft.js";
-import { commitWallChain } from "../../planner/core/walls/wallCommit.js";
 import { computeItemPlacement, placementZoneLabel } from "../../planner/placementPreview.js";
 import { PlacementGhost } from "../../planner/objectOverlays.jsx";
 import { itemOverlapsAnyWall } from "../../planner/wallCollision.js";
@@ -45,19 +44,31 @@ import {
   applyWallNodeMove, refreshWallMountedItems,
   tryMergeWall, straightenWall, setWallSegmentLength, setWallSegmentLengthAt,
   wallSegmentLengthAt, wallSegmentIndexForNode, alignWallToNeighbor, weldWallNodes,
-  refineWallDraftSnap, ensureWallNodesAtPoints, snapPointsToWallNodes, wallInteractionAt,
+  refineWallDraftSnap, ensureWallNodesAtPoints, snapPointsToWallNodes,
   hitTestWallBody, pickWallBodyHit,
   planWorkingBounds, planHasDrawnWalls,
   alignmentGuides, angleAt, draftChainArea,
 } from "../../planner/core/walls/index.js";
-import { syncRooms } from "../../planner/core/rooms/index.js";
+import { syncRoomsSafe } from "../../planner/core/rooms/index.js";
 import { validateRooms } from "../../planner/core/rooms/validateRooms.js";
 import {
-  resolvePlanWalls, commitWallEdge, deleteWallEdge, movePlanNode,
-  wallNodeIdAt, isNetworkPlan, ensureWallNetwork,
-  applyNetworkNodeAtWall, applyNetworkWallSegMove, nudgeWallInPlan,
-  tryMergeWallEdge, breakWallEdgeAt, straightenWallEdge, alignWallEdgeToNeighbor,
+  resolvePlanWalls, commitWallEdge, movePlanNode,
+  wallNodeIdAt, ensureWallNetwork,
+  applyNetworkNodeAtWall, applyNetworkWallSegMove,
 } from "../../planner/wallNetwork.js";
+import { createGeometryCommandDispatcher } from "../../planner/ui/geometryCommandDispatcher.js";
+import {
+  classifyWallLengthDimension, resolveFixedEndpointForPoint,
+  WALL_PARTIAL_DIMENSION_MESSAGE, ITEM_DIMENSION_MESSAGE,
+} from "../../planner/ui/wallLengthDimensionMapping.js";
+import { applyWallDelete } from "../../planner/ui/applyWallDelete.js";
+import { applyWallBulkDelete } from "../../planner/ui/applyWallBulkDelete.js";
+import { applyItemBulkDelete } from "../../planner/ui/applyItemBulkDelete.js";
+import { applyLineBulkDelete } from "../../planner/ui/applyLineBulkDelete.js";
+import { applyCombinedLayerClear } from "../../planner/ui/applyCombinedLayerClear.js";
+import { summarizeRoomClearItems, buildRoomClearConfirmMessage } from "../../planner/ui/roomClearSummary.js";
+import { applyWallLengthEdit, createWallLengthEditSession } from "../../planner/ui/applyWallLengthEdit.js";
+import { formatWallLengthMm } from "../../planner/ui/parseWallLengthInput.js";
 import { validateOpeningPlacement, nextDoorNumber, nextOpeningNumber } from "../../planner/doorGeometry.js";
 import { attachItemZoneFields } from "../../planner/roomZones.js";
 import {
@@ -88,7 +99,13 @@ import { isDoorItem } from "../../planner/doorTypes.js";
 import { defaultWallFields, WALL_KINDS, THICKNESS_SIDES } from "../../planner/wallTypes.js";
 import { wallFieldsFromTool, defaultWallThkForTool, wallMaterialForTool } from "../../planner/wallToolPresets.js";
 import { usePlanHistory } from "../../planner/usePlanHistory.js";
-import { normalizePlan } from "../../planner/planNormalize.js";
+import { normalizePlan, normalizePlanResult } from "../../planner/planNormalize.js";
+import { isPlannerPlanCorrupt } from "../../planner/plannerPersistenceState.js";
+import { hitTestWallInteraction } from "../../planner/ui/hitTesting/planHitTest.js";
+import { validatePlanIntegrity } from "../../planner/core/validation/validatePlanIntegrity.js";
+import { PlanDiagnosticsPanel } from "../../planner/ui/diagnostics/PlanDiagnosticsPanel.jsx";
+import { getDiagnosticFocusTarget } from "../../planner/ui/diagnostics/diagnosticFocus.js";
+import { isDiagnosticsStale, mergeDiagnosticsResult } from "../../planner/ui/diagnostics/diagnosticPresentation.js";
 import { DEFAULT_DUCT_SIZE_H_MM, DEFAULT_DUCT_SIZE_W_MM } from "../../planner/ventDuctRender.jsx";
 import {
   PlanGridScreen, PlanAxesScreen, SheetBackdrop, RoomDims, WallEl, WallsTopOverlay, PlannerWallDefs, PlannerLayerDefs, LayerMutedWrap, ItemEl, ZoneEl, LabelEl, LineEl,
@@ -139,6 +156,44 @@ const LINE_LAYER_IDS = ["drain", "irrigation", "supply", "power", "vent", "clima
 const ITEM_LAYER_IDS = LAYERS.map((l) => l.id).filter(
   (id) => !["room", "zones", "partitions", "client", "install", "spec"].includes(id)
 );
+// PHASE 1A-2C2D3B — только эти item-слои уже сегодня реально очищают
+// items через clearSheet (не перехватываются LINE_LAYER_IDS раньше по
+// цепочке if/else-if, см. RESULT — AUDIT PHASE 1A-2C2D3A). Намеренно не
+// весь ITEM_LAYER_IDS — irrigation/power/light/vent/staff (реальные item+line
+// слои) очищаются через MIGRATED_COMBINED_CLEAR_LAYER_IDS ниже, а не через
+// этот item-only набор.
+// PHASE 1A-2C2D3E3 — climate добавлен: LAYERS.mode для climate уже "items"
+// (17 реальных catalog kinds, ни одного line tool в LAYER_TOOLS.climate), но
+// climate ошибочно состоит в LINE_LAYER_IDS, из-за чего legacy fallback
+// перехватывал его как line-layer и чистил (почти всегда 0) lines, оставляя
+// все climate items нетронутыми (см. AUDIT PHASE 1A-2C2D3E1, Risk R1). Здесь
+// исправляется только routing — climate остаётся в LINE_LAYER_IDS
+// (не тронут в этой фазе), но clearSheet теперь достигает item-путь раньше
+// по цепочке if/else, так что legacy line-fallback для climate больше не
+// достижим.
+const MIGRATED_ITEM_CLEAR_LAYER_IDS = ["racks", "water", "sockets", "sanitary", "furn", "climate"];
+// PHASE 1A-2C2D3E2 — только эти два фактически line-only слоя мигрируют на
+// line.bulkDelete в clearSheet (см. AUDIT PHASE 1A-2C2D3E1: drain и
+// irrigation — единственные LINE_LAYER_IDS-слои с нулём catalog item kinds
+// сегодня, так что line-only clear здесь ничего не оставляет позади).
+// Намеренно НЕ весь LINE_LAYER_IDS — power/light/vent/staff (реальные item+
+// line слои) очищаются через MIGRATED_COMBINED_CLEAR_LAYER_IDS ниже; climate
+// уже item-only (PHASE 1A-2C2D3E3).
+const MIGRATED_LINE_CLEAR_LAYER_IDS = ["drain", "irrigation"];
+// PHASE 1A-2C2D3E4D — power/light/vent (mode:"both") мигрируют на
+// itemLine.bulkDelete (см. AUDIT PHASE 1A-2C2D3E4A: единственные на тот
+// момент LINE_LAYER_IDS-слои с реальными catalog item kinds, у которых
+// «Очистить лист» удалял только lines, оставляя все items нетронутыми).
+// PHASE 1A-2C2D3E5B — staff добавлен: AUDIT PHASE 1A-2C2D3E5A (verdict C)
+// подтвердил, что staff (LAYERS.mode ошибочно "lines") реально хранит и
+// items (kind:"person"), и lines (любой lineTag: staff/raw/product/waste/
+// отсутствует) — тот же item+line профиль, что и power/light/vent, так что
+// staff переиспользует тот же канонический combined-путь без изменений в
+// applyCombinedLayerClear/applyItemLineBulkDelete/geometryCommands. Намеренно
+// НЕ строится динамически из LINE_LAYER_IDS/ITEM_LAYER_IDS — climate
+// (уже item-only с PHASE 1A-2C2D3E3) остаётся исключён; drain/irrigation
+// остаются line-only (PHASE 1A-2C2D3E2).
+const MIGRATED_COMBINED_CLEAR_LAYER_IDS = ["power", "light", "vent", "staff"];
 
 function draftPt(from, to, opts) {
   const { point, angleSnap } = resolveDraftPoint(from, to, opts);
@@ -160,14 +215,22 @@ export default function PlanPage() {
   const { state, actions } = useStore();
   const project = standalone ? null : state.projects.find((p) => p.id === id);
   const [draftMeta, setDraftMeta] = useState(() => (standalone ? getStandalonePlan(draftId) : null));
+  // PHASE 0B: повреждённый сохранённый план — запрет любой автозаписи/синка,
+  // чтобы не затереть исходные данные пустым планом.
+  const plannerPlanCorrupt = !standalone && isPlannerPlanCorrupt(project);
 
+  // PHASE 0G corrective: lazy-seed для usePlanHistory — выполняется синхронно
+  // до первого effect, где нельзя безопасно вызвать setRoomDetectionDiagnostic.
+  // Diagnostic от этого начального normalize не теряется: effect ниже (загрузка
+  // standalone/project) выполняет normalizePlanResult ЗАНОВО сразу после mount
+  // и surfacing diagnostic через resetHistory + setRoomDetectionDiagnostic.
   const initialPlan = () => {
     if (standalone) return normalizePlan(draftMeta?.plan || getStandalonePlan(draftId)?.plan);
     return normalizePlan(project?.plan);
   };
 
   const {
-    plan, setPlan, replacePlan, commitPlan, commitFrom, undo, redo, resetHistory,
+    plan, getCurrentPlan, setPlan, replacePlan, commitPlan, undo, redo, resetHistory,
   } = usePlanHistory(initialPlan);
   const [active, setActive] = useState("room");
   const [tool, setTool] = useState("select");
@@ -232,6 +295,9 @@ export default function PlanPage() {
   const structuralDrawRef = useRef(null);
   const measureDrawRef = useRef(null);
   const [dimensionEdit, setDimensionEdit] = useState(null);
+  // PHASE 1B-1B — synchronous submit guard against duplicate Enter/blur
+  // dispatch for the wall-length editor (see applyWallLengthEdit.js).
+  const dimensionEditSessionRef = useRef(createWallLengthEditSession());
   const [ctrlSnapFine, setCtrlSnapFine] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [activeSheetId, setActiveSheetId] = useState("base_plan");
@@ -243,6 +309,14 @@ export default function PlanPage() {
   const [propsTab, setPropsTab] = useState("props");
   const [warningsPanelOpen, setWarningsPanelOpen] = useState(false);
   const [viewMode, setViewMode] = useState("2d");
+  // PHASE 0D — read-only проверка целостности плана (session-only, не persisted).
+  const [planDiagnostics, setPlanDiagnostics] = useState(null); // { result, planRef }
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [diagnosticsChecking, setDiagnosticsChecking] = useState(false);
+  // PHASE 0G — последний сбой room detection (session-only, не persisted в plan).
+  // Очищается следующим успешным syncAutoZones; сливается в runPlanCheck.
+  const [roomDetectionDiagnostic, setRoomDetectionDiagnostic] = useState(null);
+  const [diagnosticFilters, setDiagnosticFilters] = useState({ error: true, warning: true, info: true });
 
   const structuralKind = tool === "structural" ? pending : null;
 
@@ -282,25 +356,37 @@ export default function PlanPage() {
     return () => ro.disconnect();
   }, []);
 
+  // PHASE 0G corrective: реальный production load path — result-aware API,
+  // room detection failure на загрузке всплывает в session-only state, а не
+  // теряется молча внутри normalizePlan().
   useEffect(() => {
     if (standalone) {
       const d = getStandalonePlan(draftId);
       if (d) {
         setDraftMeta(d);
-        resetHistory(normalizePlan(d.plan));
+        const { plan: normalized, diagnostics } = normalizePlanResult(d.plan);
+        resetHistory(normalized);
+        setRoomDetectionDiagnostic(diagnostics[0] || null);
       }
       return;
     }
     let cancelled = false;
     actions.loadProject(id).then((p) => {
-      if (!cancelled && p?.plan && Object.keys(p.plan).length) resetHistory(normalizePlan(p.plan));
+      if (!cancelled && p?.plan && Object.keys(p.plan).length) {
+        const { plan: normalized, diagnostics } = normalizePlanResult(p.plan);
+        resetHistory(normalized);
+        setRoomDetectionDiagnostic(diagnostics[0] || null);
+      }
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [id, draftId, standalone, actions, resetHistory]);
 
+  // PHASE 0G corrective: чистый room-only sync — runAutoZonesSync сам решает,
+  // вызывать ли setPlan (см. определение ниже). Rejected/no-op sync не создаёт
+  // history checkpoint.
   useEffect(() => {
     if (!planHasDrawnWalls(plan.walls)) return;
-    setPlan((p) => syncAutoZones(p));
+    runAutoZonesSync();
   }, [standalone ? draftId : id, plan.walls, plan.zones?.length, plan.rooms?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -315,6 +401,8 @@ export default function PlanPage() {
       return () => window.clearTimeout(t);
     }
     if (!project?.id) return;
+    // PHASE 0B: не автосохранять поверх повреждённого сохранённого плана.
+    if (plannerPlanCorrupt) return;
     setSaved(false);
     const t = window.setTimeout(() => {
       actions.projectUpdate(project.id, { plan })
@@ -322,7 +410,7 @@ export default function PlanPage() {
         .catch((e) => console.error("Planner autosave failed", e));
     }, 700);
     return () => window.clearTimeout(t);
-  }, [plan, standalone, draftMeta?.id, draftMeta?.name, project?.id, actions]);
+  }, [plan, standalone, draftMeta?.id, draftMeta?.name, project?.id, actions, plannerPlanCorrupt]);
 
   const snapOn = display.snapOn && !altSnapOff;
   const snapStep = (ctrlSnapFine || view.zoom >= 1.2) ? 10 : 50;
@@ -556,21 +644,73 @@ export default function PlanPage() {
     return { pt, snap, guides: s?.guides || [] };
   }, [snapOn, snapStep, display.snapGrid, display.snapWalls, display.snapObjects, display.snapGuides, plan, view, measure]);
 
-  const syncAutoZones = (p) => {
-    try {
-      const synced = syncRooms({ ...p, walls: resolvePlanWalls(p) });
-      const dimWarnings = (p.validationWarnings || []).filter((w) => w.source === "dimensions");
-      return {
+  // PHASE 0G corrective: чистое вычисление room sync БЕЗ setState/setPlan —
+  // { ok, plan, diagnostics }. Единственная точка, откуда caller решает, что
+  // делать с результатом: setPlan только при ok:true и реальном изменении.
+  const computeAutoZonesSync = (p) => {
+    const synced = syncRoomsSafe({ ...p, walls: resolvePlanWalls(p) });
+    if (!synced.ok) return { ok: false, plan: p, diagnostics: synced.diagnostics };
+    const dimWarnings = (p.validationWarnings || []).filter((w) => w.source === "dimensions");
+    return {
+      ok: true,
+      diagnostics: [],
+      plan: {
         ...p,
         rooms: synced.rooms,
         zones: synced.zones,
         validationWarnings: [...dimWarnings, ...(synced.validationWarnings || [])],
-      };
-    } catch (e) {
-      console.error("syncAutoZones failed", e);
+      },
+    };
+  };
+
+  // PHASE 0G: используется callers, которые УЖЕ выполняют реальную правку
+  // геометрии (split/drag/delete/straighten) внутри того же setPlan updater —
+  // checkpoint там принадлежит этой правке независимо от исхода room sync.
+  // ok:false не трогает план — existing rooms/zones/metadata сохраняются как
+  // есть; сбой всплывает как session-only diagnostic в панели «Проверить план».
+  const syncAutoZones = (p) => {
+    const result = computeAutoZonesSync(p);
+    if (!result.ok) {
+      setRoomDetectionDiagnostic(result.diagnostics[0]);
       return p;
     }
+    if (roomDetectionDiagnostic) setRoomDetectionDiagnostic(null);
+    return result.plan;
   };
+
+  // PHASE 0G corrective: для «чистых» room-only sync (авто-эффект после
+  // загрузки/правки, кнопка «Синхронизировать зоны») — вычисляем результат ДО
+  // setPlan. Rejected sync НЕ вызывает setPlan вовсе (нет history checkpoint,
+  // canUndo не меняется, autosave не запускается). Успешный sync без
+  // фактических изменений rooms/zones тоже не создаёт пустой checkpoint.
+  const runAutoZonesSync = () => {
+    const result = computeAutoZonesSync(plan);
+    if (!result.ok) {
+      setRoomDetectionDiagnostic(result.diagnostics[0]);
+      return;
+    }
+    if (roomDetectionDiagnostic) setRoomDetectionDiagnostic(null);
+    const changed = JSON.stringify(result.plan.rooms) !== JSON.stringify(plan.rooms)
+      || JSON.stringify(result.plan.zones) !== JSON.stringify(plan.zones);
+    if (!changed) return;
+    setPlan(() => result.plan);
+  };
+
+  // PHASE 1A-2A — единая UI orchestration граница для geometry commands
+  // (executeGeometryCommand). getPlan берёт живой HistoryModel.current через
+  // usePlanHistory.getCurrentPlan, а не замыкание `plan` этого рендера.
+  // Это гарантирует, что две быстрые команды в одном JS tick читают актуальный
+  // committed plan. commitPlan вызывается ДИСПЕТЧЕРОМ ровно один раз при
+  // changed:true — room sync уже выполнен внутри executeGeometryCommand и
+  // здесь повторно не запускается (см. src/planner/ui/geometryCommandDispatcher.js).
+  const runGeometryCommand = createGeometryCommandDispatcher({
+    getPlan: getCurrentPlan,
+    commitPlan: (nextPlan) => setPlan(() => nextPlan),
+    setSelection: setSel,
+    setRuntimeDiagnostic: setRoomDetectionDiagnostic,
+    showMessage: (text) => window.alert(text),
+    makeId: uid,
+  });
 
   const applyTypedLength = () => {
     const len = parseInt(typedLengthRef.current, 10);
@@ -657,22 +797,50 @@ export default function PlanPage() {
       clearSelection();
       return true;
     }
+    if (coll === "walls") {
+      // PHASE 1A-2C2B: canonical command boundary — wall.delete already
+      // handles orphan-node pruning, dangling-opening removal (400mm
+      // re-place or delete), and wall-attached manual-dimension detach (see
+      // geometryCommands.js handleWallDelete) — not duplicated here.
+      const { status } = applyWallDelete({ wallId: ids[0], runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        clearSelection();
+      }
+      // geometry-rejected / commit-failed: selection preserved for
+      // analysis/retry, geometry unchanged — no false-success cleanup.
+      return status === "success";
+    }
+    if (coll === "items") {
+      // PHASE 1A-2C2D3B (deleteHits): canonical command boundary —
+      // item.bulkDelete already handles links cleanup and item-attached
+      // dimension detach/delete atomically for the whole delete set (see
+      // geometryCommands.js deleteItemsFromPlan) — not duplicated here.
+      const { status } = applyItemBulkDelete({ itemIds: ids, runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        clearSelection();
+      }
+      // geometry-rejected / commit-failed: selection preserved for
+      // analysis/retry, geometry unchanged — no false-success cleanup.
+      return status === "success";
+    }
+    if (coll === "lines") {
+      // PHASE 1A-2C2D3E2 (deleteHits): canonical command boundary —
+      // line.bulkDelete already runs the shared engineering-derived sync
+      // exactly once for the whole delete set (see geometryCommands.js
+      // deleteLinesFromPlan) — not duplicated here. Full ids array is
+      // forwarded (not just ids[0]) so a future multi-line selection is
+      // already handled atomically.
+      const { status } = applyLineBulkDelete({ lineIds: ids, runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        clearSelection();
+      }
+      // geometry-rejected / commit-failed: selection preserved for
+      // analysis/retry, geometry unchanged — no false-success cleanup.
+      return status === "success";
+    }
     setPlan((p) => {
       let next = { ...p };
-      if (coll === "items") {
-        const idSet = new Set(ids);
-        next.items = p.items.filter((o) => !idSet.has(o.id));
-        next.links = (p.links || []).filter((l) => !idSet.has(l.fromId) && !idSet.has(l.toId));
-      } else if (coll === "walls") {
-        const id = ids[0];
-        if (isNetworkPlan(p)) {
-          next = deleteWallEdge(p, id);
-        } else {
-          next.walls = p.walls.filter((o) => o.id !== id);
-        }
-        next.items = refreshWallMountedItems(next.items, resolvePlanWalls(next), next.room, id);
-        next = syncAutoZones(next);
-      } else if (coll === "rulers") {
+      if (coll === "rulers") {
         const idSet = new Set(ids);
         next.rulers = (p.rulers || []).filter((r) => !idSet.has(r.id));
       } else if (coll === "measurements") {
@@ -693,14 +861,11 @@ export default function PlanPage() {
           next[coll] = p[coll].filter((o) => o.id !== id);
         }
       }
-      if (coll === "items" || coll === "lines") {
-        next = syncEngineeringPlan(next);
-      }
       return next;
     });
     clearSelection();
     return true;
-  }, [plan.zones]);
+  }, [plan.zones, runGeometryCommand]);
 
   const delSel = () => {
     if (!selection?.ids?.length) return;
@@ -935,27 +1100,46 @@ export default function PlanPage() {
   }, [labelDraft, plan.items, plan.room, sn]);
 
   const finishWallChain = () => {
-    const meta = wallDraftFinishMeta(wallDraftStateRef.current) || (
-      draft.length >= 2 ? { pts: draft, closed: false } : null
-    );
+    // PHASE 1A-2B2 corrective: wallDraftStateRef.current — единственный
+    // источник истины. Раньше здесь был fallback на render-closure `draft`
+    // (React state) — ref обновляется синхронно (clearWallChain присваивает
+    // wallDraftStateRef.current = createWallDraftState() немедленно), а
+    // `draft` обновляется только на следующем render. Если бы finish
+    // вызывался дважды подряд без промежуточного render (напр. два быстрых
+    // Enter), второй вызов через fallback мог прочитать СТАРЫЕ точки из ещё
+    // не перерендеренного `draft`, хотя ref уже пуст — риск дублирующей
+    // цепочки. Без fallback второй вызов видит уже очищенный ref и корректно
+    // не создаёт команду.
+    const meta = wallDraftFinishMeta(wallDraftStateRef.current);
     const pts = meta?.pts;
     const closed = meta?.closed === true;
     if (!pts || pts.length < 2) {
+      // Меньше 2 точек — как и раньше, тихий cancel: ни plan, ни history не
+      // трогаются, draft просто очищается (см. RESULT — PHASE 1A-2B2,
+      // "Draft state policy").
       clearWallChain();
       return;
     }
+    // PHASE 1A-2B2: через command boundary — вся цепочка одной командой
+    // (wall.create), а не commitPlan(updater) с безусловным checkpoint, как
+    // раньше. wallProps считается от живого plan.room (getCurrentPlan, не
+    // render-closure `plan`) — тот же снимок, что раньше читался как `p.room`
+    // внутри commitPlan(updater), просто взятый непосредственно перед
+    // вызовом, а не изнутри updater'а.
     const role = active === "room" ? "outer" : "partition";
-    commitPlan((p) => {
-      const toolFields = wallFieldsFromTool(activeToolId, role, p.room, wallThk);
-      const props = {
-        ...defaultWallFields(toolFields.role || role, p.room),
-        ...toolFields,
-        thk: toolFields.thk ?? (role === "outer" ? (p.room.wallThk || wallThk) : wallThk),
-      };
-      let next = commitWallChain(p, pts, props, uid, { closed });
-      return syncAutoZones(next);
-    });
-    clearWallChain();
+    const liveRoom = getCurrentPlan().room;
+    const toolFields = wallFieldsFromTool(activeToolId, role, liveRoom, wallThk);
+    const wallProps = {
+      ...defaultWallFields(toolFields.role || role, liveRoom),
+      ...toolFields,
+      thk: toolFields.thk ?? (role === "outer" ? (liveRoom.wallThk || wallThk) : wallThk),
+    };
+    const result = runGeometryCommand({ type: "wall.create", points: pts, wallProps, closed });
+    // success (changed:true) ИЛИ no-op (changed:false, напр. цепочка схлопнулась
+    // в <2 точек после dedup) — цепочку рисовать больше нечего, draft чистим.
+    // rejected (ok:false) — draft НЕ трогаем, чтобы пользователь мог
+    // исправить точки и повторить (см. секция 6 задания "Rejected/invalid").
+    if (result?.ok) clearWallChain();
   };
 
   const addWallDraftSegment = (from, to, fromOverride = null) => {
@@ -1005,18 +1189,38 @@ export default function PlanPage() {
     }));
   };
 
+  /** Manual/free dimension only — wall-attached full-wall edits go through submitWallLengthEdit below. */
   const applyDimensionEdit = (dimId, value) => {
-    const dim = (plan.dimensions || []).find((d) => d.id === dimId);
-    if (!dim) return;
-    if (dim.attachedTo?.type === "wall" || dim.attachedTo?.type === "item") {
-      // TODO: change attached geometry/object by typed dimension value.
-      window.alert("Изменение геометрии по связанному размеру будет добавлено следующим шагом.");
-      return;
-    }
     setPlan((p) => ({
       ...p,
       dimensions: (p.dimensions || []).map((d) => (d.id === dimId ? { ...d, labelOverride: value } : d)),
     }));
+  };
+
+  // PHASE 1B-1B — canonical apply path for the full-wall-length editor. The
+  // session guard makes a trailing native blur (fired when the input unmounts
+  // after a successful Enter) a safe no-op, regardless of React render timing.
+  const submitWallLengthEdit = (entry) => {
+    if (!entry || !dimensionEditSessionRef.current.tryConsume(entry.token)) return;
+    const result = applyWallLengthEdit({
+      rawValue: entry.value,
+      wallId: entry.wallId,
+      fixedEndpoint: entry.fixedEndpoint,
+      runGeometryCommand,
+    });
+    if (result.status === "parse-rejected") {
+      dimensionEditSessionRef.current.reopen(entry.token);
+      setDimensionEdit((d) => (d && d.id === entry.id ? { ...d, error: result.message } : d));
+      return;
+    }
+    if (result.status === "geometry-rejected" || result.status === "commit-failed") {
+      // result.result?.error?.message (if any) is already surfaced via
+      // showMessage by the dispatcher itself — nothing further to show here.
+      dimensionEditSessionRef.current.reopen(entry.token);
+      setDimensionEdit((d) => (d && d.id === entry.id ? { ...d, error: null } : d));
+      return;
+    }
+    setDimensionEdit(null); // success or no-op
   };
 
   /** @deprecated старый инструмент линейки. */
@@ -1076,14 +1280,11 @@ export default function PlanPage() {
     if (selection?.coll !== "walls" || selection.ids?.length !== 1) return;
     const wid = selection.ids[0];
     const nidx = selection.nodeIdx;
-    setPlan((p) => {
-      const plan = nudgeWallInPlan(p, wid, nidx, dx, dy, fineMm);
-      const resolved = resolvePlanWalls(plan);
-      return syncAutoZones({
-        ...plan,
-        items: refreshWallMountedItems(p.items, resolved, p.room, wid),
-      });
-    });
+    // PHASE 1A-2B1: через command boundary — node.nudge уже воспроизводит
+    // nudgeWallInPlan (включая whole-wall translate при nodeIdx == null) и
+    // сам гарантирует ноль checkpoint на zero-delta/no-op (см.
+    // geometryCommands.js handleNodeNudge).
+    runGeometryCommand({ type: "node.nudge", wallId: wid, nodeIdx: nidx, dx, dy, round: fineMm });
   };
 
   const finishDraft = (ptsOverride = null) => {
@@ -1509,13 +1710,121 @@ export default function PlanPage() {
   };
 
   const clearSheet = () => {
+    if (active === "room") {
+      // PHASE 1A-2C2D3D2: canonical command boundary — item.bulkDelete
+      // already handles links cleanup and item-attached dimension detach/
+      // delete atomically for the whole delete set (see geometryCommands.js
+      // deleteItemsFromPlan) — not duplicated here. This clear is
+      // intentionally project-wide: layer:"room" items (doors/windows/
+      // openings/legacy-import) exist independently of which room the user
+      // is currently viewing, so a generic per-sheet confirm text would be
+      // misleading — see RESULT — PHASE 1A-2C2D3D2, "Product policy".
+      const roomItemsBeforeConfirm = getCurrentPlan().items.filter((it) => it.layer === "room");
+      if (roomItemsBeforeConfirm.length === 0) {
+        setSel(null);
+        return;
+      }
+      const counts = summarizeRoomClearItems(roomItemsBeforeConfirm);
+      if (!window.confirm(buildRoomClearConfirmMessage(counts))) return;
+      // Live-plan race: itemIds are recomputed from a fresh getCurrentPlan()
+      // read taken AFTER the confirm dialog closes, never from the
+      // pre-confirm snapshot used only for the displayed counts.
+      const itemIds = getCurrentPlan().items.filter((it) => it.layer === "room").map((it) => it.id);
+      const { status } = applyItemBulkDelete({ itemIds, runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        setSel(null);
+      }
+      // geometry-rejected / commit-failed: selection preserved, no
+      // false-success cleanup.
+      return;
+    }
+    if (MIGRATED_COMBINED_CLEAR_LAYER_IDS.includes(active)) {
+      // PHASE 1A-2C2D3E4D (clearSheet): canonical command boundary —
+      // itemLine.bulkDelete already runs one merged item+line structural
+      // cleanup and one engineering sync for the whole delete set (see
+      // geometryCommands.js deleteItemsAndLinesFromPlan) — not duplicated
+      // here. power/light/vent/staff (real item+line layers) get their own
+      // honest equipment+lines count confirm instead of the generic
+      // per-sheet text below, since a bare "Очистить объекты листа X?"
+      // historically only cleared lines while implying everything (see
+      // AUDIT PHASE 1A-2C2D3E4A, Risk R2). Orchestration (pre-confirm
+      // summary/empty check/confirm/live-plan-race re-read/dispatch) is
+      // factored out into applyCombinedLayerClear so it's directly
+      // unit-testable without rendering this component.
+      // PHASE 1A-2C2D3E5B — staff gets its own confirm terminology
+      // ("Персонал"/"Маршруты" instead of "Оборудование"/"Линии и трассы")
+      // since calling a person "equipment" is misleading (see AUDIT PHASE
+      // 1A-2C2D3E5A, "Confirmation terminology"). Computed here in PlanPage,
+      // not inside applyCombinedLayerClear/combinedLayerClearSummary, which
+      // stay layer-agnostic — power/light/vent pass no override and keep
+      // the existing default text byte-for-byte.
+      const status = applyCombinedLayerClear({
+        getCurrentPlan,
+        layerId: active,
+        layerLabel: layerById(active).name,
+        ...(active === "staff" ? { itemLabel: "Персонал", lineLabel: "Маршруты" } : {}),
+        confirmFn: (message) => window.confirm(message),
+        runGeometryCommand,
+      });
+      if (status === "success" || status === "noop" || status === "no-target" || status === "empty") {
+        setSel(null);
+      }
+      // "cancelled" / geometry-rejected / commit-failed: selection
+      // preserved, no false-success cleanup.
+      return;
+    }
     const name = layerById(active).name;
     if (!window.confirm(`Очистить объекты листа «${name}»?`)) return;
+    if (active === "partitions") {
+      // PHASE 1A-2C2D2: canonical command boundary — wall.bulkDelete already
+      // handles orphan-node pruning, dangling-opening removal, link cleanup,
+      // and wall-attached dimension detach/delete atomically for the whole
+      // delete set (see geometryCommands.js deleteWallsFromPlan) — not
+      // duplicated here. Outer walls are excluded from the delete set below
+      // and never sent to the command at all, so they and their nodes/
+      // openings are untouched.
+      const wallIds = getCurrentPlan().walls.filter((w) => w.role !== "outer").map((w) => w.id);
+      const { status } = applyWallBulkDelete({ wallIds, runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        setSel(null);
+      }
+      // geometry-rejected / commit-failed: selection preserved, no
+      // false-success cleanup.
+      return;
+    }
+    if (MIGRATED_ITEM_CLEAR_LAYER_IDS.includes(active)) {
+      // PHASE 1A-2C2D3B (clearSheet): canonical command boundary —
+      // item.bulkDelete already handles links cleanup and item-attached
+      // dimension detach/delete atomically for the whole delete set (see
+      // geometryCommands.js deleteItemsFromPlan) — not duplicated here.
+      const itemIds = getCurrentPlan().items.filter((it) => it.layer === active).map((it) => it.id);
+      const { status } = applyItemBulkDelete({ itemIds, runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        setSel(null);
+      }
+      // geometry-rejected / commit-failed: selection preserved, no
+      // false-success cleanup.
+      return;
+    }
+    if (MIGRATED_LINE_CLEAR_LAYER_IDS.includes(active)) {
+      // PHASE 1A-2C2D3E2 (clearSheet): canonical command boundary —
+      // line.bulkDelete already runs the shared engineering-derived sync
+      // exactly once for the whole delete set (see geometryCommands.js
+      // deleteLinesFromPlan) — not duplicated here.
+      const lineIds = getCurrentPlan().lines
+        .filter((line) => line.layer === active || migrateLayerId(line.layer) === active)
+        .map((line) => line.id);
+      const { status } = applyLineBulkDelete({ lineIds, runGeometryCommand });
+      if (status === "success" || status === "noop" || status === "no-target") {
+        setSel(null);
+      }
+      // geometry-rejected / commit-failed: selection preserved, no
+      // false-success cleanup.
+      return;
+    }
     setPlan((p) => {
       const next = { ...p };
-      if (active === "partitions") next.walls = p.walls.filter((w) => w.role === "outer");
-      else if (active === "room") next.items = p.items.filter((i) => i.layer !== "room");
-      else if (LINE_LAYER_IDS.includes(active)) next.lines = p.lines.filter((l) => l.layer !== active && migrateLayerId(l.layer) !== active);
+      if (LINE_LAYER_IDS.includes(active)) next.lines = p.lines.filter((l) => l.layer !== active && migrateLayerId(l.layer) !== active);
       else if (ITEM_LAYER_IDS.includes(active)) next.items = p.items.filter((i) => i.layer !== active);
       return next;
     });
@@ -1957,66 +2266,41 @@ export default function PlanPage() {
       updateObj("walls", obj.id, { role: "partition", kind: obj.kind || "new" });
     }
     else if (actionId === "wall-straight-h" && sel.coll === "walls") {
-      setPlan((p) => {
-        const next = straightenWallEdge(p, obj.id, "h");
-        const resolved = resolvePlanWalls(next);
-        return syncAutoZones({
-          ...next,
-          items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
-        });
-      });
+      // PHASE 1A-2A: через command boundary — selection исходной стены
+      // сохраняется (selectAfter не передан), как и в старом коде.
+      runGeometryCommand({ type: "wall.straightenHorizontal", wallId: obj.id });
     }
     else if (actionId === "wall-straight-v" && sel.coll === "walls") {
-      setPlan((p) => {
-        const next = straightenWallEdge(p, obj.id, "v");
-        const resolved = resolvePlanWalls(next);
-        return syncAutoZones({
-          ...next,
-          items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
-        });
-      });
+      runGeometryCommand({ type: "wall.straightenVertical", wallId: obj.id });
     }
     else if (actionId === "wall-align" && sel.coll === "walls") {
-      setPlan((p) => {
-        const next = alignWallEdgeToNeighbor(p, obj.id);
-        if (!next) {
-          window.alert("Нет соседней стены с общим узлом для выравнивания.");
-          return p;
-        }
-        const resolved = resolvePlanWalls(next);
-        return syncAutoZones({
-          ...next,
-          items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
-        });
-      });
+      runGeometryCommand({ type: "wall.alignToNeighbor", wallId: obj.id });
     }
     else if (actionId === "wall-merge" && sel.coll === "walls") {
-      setPlan((p) => {
-        const res = tryMergeWallEdge(p, obj.id);
-        if (!res) {
-          window.alert("Не найдена соседняя стена с общим узлом для объединения.");
-          return p;
-        }
-        const resolved = resolvePlanWalls(res.plan);
-        return syncAutoZones({
-          ...res.plan,
-          items: refreshWallMountedItems(p.items, resolved, p.room),
-        });
-      });
-      setSel({ coll: "walls", id: obj.id });
+      // Surviving wall id берётся из typed entityRemap, а не угадывается —
+      // для этого способа вызова (merge всегда стартует от obj.id) он и так
+      // всегда совпадает с obj.id, но контракт остаётся явным и корректным
+      // на случай будущих caller'ов с другой семантикой выбора.
+      runGeometryCommand(
+        { type: "wall.merge", wallId: obj.id },
+        { selectAfter: (result) => ({ coll: "walls", id: result.entityRemap.walls.survivingWallId }) },
+      );
     }
     else if (actionId === "wall-break" && sel.coll === "walls") {
       const mm = ctxMenuRef.current?.mm;
       if (!mm) return;
-      setPlan((p) => {
-        const res = breakWallEdgeAt(p, obj.id, mm, uid);
-        if (!res) {
-          window.alert("Не удалось разорвать стену — кликните ближе к сегменту.");
-          return p;
-        }
-        setSel({ coll: "walls", id: res.newWallId });
-        return syncAutoZones(res.plan);
-      });
+      // PHASE 1A-2A: через command boundary — dispatcher сам гарантирует, что
+      // rejected/no-op split не вызывает commitPlan (см. PHASE 0F/1A-1: ранее
+      // это обеспечивалось вручную здесь же, теперь — структурно в
+      // geometryCommandDispatcher.js). newWallId выбирается через typed
+      // operationResult.childWallIds[1] (тот же PHASE 0F newWallId).
+      runGeometryCommand(
+        { type: "wall.split", wallId: obj.id, point: mm },
+        {
+          selectAfter: (result) => ({ coll: "walls", id: result.operationResult.childWallIds[1] }),
+          warningMessage: () => "Стена разделена. Часть размеров пересекала линию разрыва и была откреплена.",
+        },
+      );
     }
     else if (actionId === "rename" && sel.coll === "zones") {
       const name = prompt("Название помещения:", obj.name || "Помещение");
@@ -2303,6 +2587,25 @@ export default function PlanPage() {
     );
   }
 
+  // PHASE 0B: повреждённый сохранённый план — безопасный экран без canvas.
+  // Редактор не открывается, автозапись и создание нового пустого плана
+  // поверх повреждённых данных исключены; исходный payload не перезаписан.
+  if (!standalone && plannerPlanCorrupt) {
+    return (
+      <div className="content">
+        <Empty title="Не удалось загрузить сохранённую планировку">
+          <p style={{ maxWidth: 520, margin: "0 auto 16px", lineHeight: 1.5 }}>
+            Проект «{project.name}». Данные планировки повреждены или имеют
+            неподдерживаемый формат. Исходные данные не перезаписаны. Для
+            восстановления используйте резервную копию или обратитесь к
+            администратору.
+          </p>
+          <Link className="btn btn-primary" to={`/project/${project.id}`}>Назад к проекту</Link>
+        </Empty>
+      </div>
+    );
+  }
+
   const planTitle = standalone ? draftMeta.name : project.name;
   const planMetaId = standalone ? draftMeta.id : project.id.replace(/\D/g, "").slice(0, 7);
 
@@ -2318,7 +2621,10 @@ export default function PlanPage() {
   const handleImportJson = async (file) => {
     try {
       const { plan: imported } = await readPlanFile(file);
-      resetHistory(normalizePlan(imported));
+      // PHASE 0G corrective: импорт — production load path, доступен UI.
+      const { plan: normalized, diagnostics } = normalizePlanResult(imported);
+      resetHistory(normalized);
+      setRoomDetectionDiagnostic(diagnostics[0] || null);
       setSaved(false);
     } catch (e) {
       alert("Не удалось импортировать: " + (e?.message || e));
@@ -2773,6 +3079,11 @@ export default function PlanPage() {
       const move = dx * nx + dy * ny;
       const newA = { x: fineMm(a0.x + nx * move), y: fineMm(a0.y + ny * move) };
       const newB = { x: fineMm(b0.x + nx * move), y: fineMm(b0.y + ny * move) };
+      // PHASE 1A-2B1: финальный target (для commit на pointer up) считается
+      // от origPts + delta каждый кадр, а не накапливается — тот же newA/newB,
+      // что уже применяется в preview ниже, просто сохраняем последнее
+      // значение в dragRef для onUp.
+      dragRef.current = { ...d, finalA: newA, finalB: newB };
       replacePlan((p) => {
         const next = applyNetworkWallSegMove(p, d.id, newA, newB);
         const resolved = resolvePlanWalls(next);
@@ -2792,6 +3103,9 @@ export default function PlanPage() {
         }
         const resolved = resolvePlanWalls(plan);
         const snapped = snapWallPoint(pt, resolved, plan.room, view.zoom, snapOn && display.snapWalls !== false && !altSnapRef.current, snapStep);
+        // PHASE 1A-2B1: последняя абсолютная target-точка — для commit на
+        // pointer up (см. onUp), preview ниже не меняется.
+        dragRef.current = { ...d, finalPoint: { x: snapped.x, y: snapped.y } };
         replacePlan((p) => {
           const next = applyNetworkNodeAtWall(p, d.id, d.idx, { x: snapped.x, y: snapped.y });
           const rw = resolvePlanWalls(next);
@@ -2874,10 +3188,30 @@ export default function PlanPage() {
     } else if (d?.mode === "move" && d.coll === "labels") {
       const obj = plan.labels.find((o) => o.id === d.id);
       if (obj && !obj.pinned) updateObj("labels", obj.id, { pinned: true });
-    } else if (d?.mode === "move-wall-seg" && d.basePlan && d.basePlan !== plan) {
-      commitFrom(d.basePlan, plan);
-    } else if (d?.mode === "node" && d.coll === "walls" && d.basePlan && d.basePlan !== plan) {
-      commitFrom(d.basePlan, plan);
+    } else if (d?.mode === "move-wall-seg" && d.basePlan && d.finalA && d.finalB) {
+      // PHASE 1A-2B1: финальный commit — не commitFrom(preview-plan), а
+      // geometry command, пересчитанный от committed d.basePlan + final
+      // target. Preview мог накопить промежуточные side-effects
+      // (refreshWallMountedItems/syncAutoZones на каждый кадр) — commit
+      // должен считать заново, а не наследовать их. Restore синхронный:
+      // getCurrentPlan() внутри dispatcher сразу увидит basePlan.
+      //
+      // ВАЖНО: restore здесь делается через setPlan, а не replacePlan.
+      // HistoryModel.replace() выставляет skipNext=true и не сбрасывает его;
+      // preview (см. onMove) уже вызвал replace() как минимум один раз, так
+      // что skipNext уже true к этому моменту. Если восстановить basePlan
+      // ЕЩЁ одним replace(), skipNext останется true, и следующий
+      // commitPlan()->HistoryModel.mutate() решит, что чекпоинт уже сделан,
+      // и молча пропустит его — ноль checkpoint вместо одного (проверено
+      // тестом, см. tests/plannerGeometryDragDispatcher.test.js). setPlan
+      // (mutate) для restore, наоборот, УЖЕ checkpoint-free при skipNext=true
+      // (унаследованном от preview) и корректно сбрасывает флаг, так что
+      // последующий commitPlan честно создаёт один checkpoint.
+      if (getCurrentPlan() !== d.basePlan) setPlan(() => d.basePlan);
+      runGeometryCommand({ type: "wall.moveSegment", wallId: d.id, a: d.finalA, b: d.finalB });
+    } else if (d?.mode === "node" && d.coll === "walls" && d.basePlan && d.finalPoint) {
+      if (getCurrentPlan() !== d.basePlan) setPlan(() => d.basePlan);
+      runGeometryCommand({ type: "node.move", wallId: d.id, nodeIdx: d.idx, point: d.finalPoint });
     }
     dragRef.current = null;
     rackSnapStickyRef.current = { x: null, y: null, atX: null, atY: null };
@@ -3097,7 +3431,9 @@ export default function PlanPage() {
     e.stopPropagation();
     const mm = toMM(e.clientX, e.clientY);
     const walls = resolvePlanWalls(plan);
-    const hit = wallInteractionAt(wall, mm, view.zoom, { allWalls: walls, room: plan.room });
+    // PHASE 0E: screen-space резолвер (узел ≈10px, тело стены +8px), вместо
+    // прежних 320px/zoom с безусловным приоритетом узла.
+    const hit = hitTestWallInteraction({ wall, worldPoint: mm, zoom: view.zoom, allWalls: walls, room: plan.room });
     if (e.detail >= 2) {
       setSelection({ coll: "walls", ids: wallContourIdsFor(wall, walls) });
       return;
@@ -3218,6 +3554,9 @@ export default function PlanPage() {
   };
 
   const syncSpec = async () => {
+    // PHASE 0B: не запускать planner → specification sync при повреждённом плане
+    // (иначе projectUpdate({ plan }) затрёт исходные данные).
+    if (plannerPlanCorrupt) return;
     setBusy(true);
     try {
       const materials = state.materialsLoaded ? state.materials : await actions.ensureMaterials();
@@ -3499,6 +3838,40 @@ export default function PlanPage() {
     }
   };
 
+  // PHASE 0D — ручной запуск проверки целостности (без autosave/backend/mutation).
+  // PHASE 0G: сливает session-only room detection diagnostic в тот же result.
+  const runPlanCheck = () => {
+    setDiagnosticsChecking(true);
+    const result = validatePlanIntegrity(plan);
+    const merged = mergeDiagnosticsResult(result, roomDetectionDiagnostic ? [roomDetectionDiagnostic] : []);
+    setPlanDiagnostics({ result: merged, planRef: plan });
+    setDiagnosticFilters({ error: true, warning: true, info: true });
+    setDiagnosticsChecking(false);
+    setDiagnosticsOpen(true);
+  };
+  const toggleDiagnosticFilter = (sev) => {
+    if (sev === "all") {
+      setDiagnosticFilters({ error: true, warning: true, info: true });
+      return;
+    }
+    setDiagnosticFilters((f) => ({ ...f, [sev]: !f[sev] }));
+  };
+  const focusDiagnostic = (diag) => {
+    const target = getDiagnosticFocusTarget(plan, diag);
+    if (target.selection) setSel(target.selection);
+    if (target.canFocus && target.point) {
+      centerOnMm(target.point.x, target.point.y, 0.12);
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      message: target.selection
+        ? "Объект нельзя показать на схеме: его геометрия повреждена"
+        : "Объект не найден на плане",
+    };
+  };
+  const diagnosticsStale = isDiagnosticsStale(planDiagnostics?.planRef, plan);
+
   const cursorStyle = spacePan || tool === "pan" ? "grab" : tool === "wall" || tool === "structural" ? "crosshair" : tool === "add" || tool === "label" ? "copy" : tool === "link" ? "crosshair" : tool === "erase" ? "not-allowed" : "default";
   const drawerTitle = activeCategoryId
     ? (categoryById(activeCategoryId)?.label || layerById(active).name)
@@ -3625,6 +3998,7 @@ export default function PlanPage() {
           onImportJson: handleImportJson,
           onRename: handleRenameDraft,
           onAttach: standalone ? () => setAttachOpen(true) : undefined,
+          onCheckPlan: runPlanCheck,
           projectId: project?.id,
         }}
         activeSheetId={activeSheetId}
@@ -3659,7 +4033,7 @@ export default function PlanPage() {
               onRoomPatch={(patch) => setPlan((p) => ({ ...p, room: { ...p.room, ...patch } }))}
               specSummary={specSummary}
               onSync={syncSpec}
-              onSyncZones={() => setPlan((p) => syncAutoZones(p))}
+              onSyncZones={runAutoZonesSync}
               onSelectPlanItem={handlePickPlanItem}
               projectId={project?.id}
             />
@@ -3679,7 +4053,7 @@ export default function PlanPage() {
                 onWallThk={setWallThk}
                 onRoomPatch={(patch) => setPlan((p) => ({ ...p, room: { ...p.room, ...patch } }))}
                 onSync={syncSpec}
-                onSyncZones={() => setPlan((p) => syncAutoZones(p))}
+                onSyncZones={runAutoZonesSync}
                 onSelectPlanItem={handlePickPlanItem}
                 projectId={project?.id}
               />
@@ -4048,7 +4422,41 @@ export default function PlanPage() {
                   onDoubleClick={(e, dim, pos) => {
                     if (dim.auto || dim.locked) return;
                     setSelection({ coll: "dimensions", ids: [dim.id] });
+                    // PHASE 1B-1B — classify BEFORE opening any editor: only a
+                    // dimension that provably spans one whole network-wall
+                    // gets the geometry-editing UI; partial/item dimensions
+                    // never open an editor at all (see RESULT — PHASE 1B-1B).
+                    const classification = classifyWallLengthDimension(dim, getCurrentPlan());
+                    if (classification.kind === "item") {
+                      window.alert(ITEM_DIMENSION_MESSAGE);
+                      return;
+                    }
+                    if (classification.kind === "wall-partial") {
+                      window.alert(WALL_PARTIAL_DIMENSION_MESSAGE);
+                      return;
+                    }
+                    if (classification.kind === "wall-full") {
+                      const token = dimensionEditSessionRef.current.open();
+                      setDimensionEdit({
+                        kind: "wall-full",
+                        id: dim.id,
+                        wallId: classification.wallId,
+                        value: formatWallLengthMm(classification.currentLengthMm),
+                        error: null,
+                        point1: dim.p1,
+                        point2: dim.p2,
+                        point1Endpoint: classification.point1Endpoint,
+                        point2Endpoint: classification.point2Endpoint,
+                        fixedEndpoint: classification.defaultFixedEndpoint,
+                        token,
+                        x: pos.x,
+                        y: pos.y,
+                      });
+                      return;
+                    }
+                    // classification.kind === "manual" — unchanged existing UX.
                     setDimensionEdit({
+                      kind: "manual",
                       id: dim.id,
                       value: dim.labelOverride || "",
                       x: pos.x,
@@ -4205,7 +4613,7 @@ export default function PlanPage() {
                     snapPt={rulerSnap}
                   />
                 )}
-                {dimensionEdit && (
+                {dimensionEdit && (!dimensionEdit.kind || dimensionEdit.kind === "manual") && (
                   <foreignObject
                     x={dimensionEdit.x - 80 * k}
                     y={dimensionEdit.y - 16 * k}
@@ -4241,6 +4649,108 @@ export default function PlanPage() {
                       }}
                     />
                   </foreignObject>
+                )}
+                {dimensionEdit && dimensionEdit.kind === "wall-full" && (
+                  <React.Fragment>
+                    <g data-ui="wall-length-badges" pointerEvents="none">
+                      {[
+                        { n: 1, pt: dimensionEdit.point1, endpoint: dimensionEdit.point1Endpoint },
+                        { n: 2, pt: dimensionEdit.point2, endpoint: dimensionEdit.point2Endpoint },
+                      ].map(({ n, pt, endpoint }) => {
+                        if (!pt) return null;
+                        const isFixed = endpoint === dimensionEdit.fixedEndpoint;
+                        return (
+                          <g key={n}>
+                            <circle cx={pt.x} cy={pt.y} r={9 * k} fill={isFixed ? "#116355" : "#ffffff"} stroke="#116355" strokeWidth={1.5 * k} />
+                            <text x={pt.x} y={pt.y} textAnchor="middle" dominantBaseline="central" fontSize={10 * k} fontFamily="var(--mono)" fill={isFixed ? "#ffffff" : "#116355"}>
+                              {n}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </g>
+                    <foreignObject
+                      x={dimensionEdit.x - 95 * k}
+                      y={dimensionEdit.y - 40 * k}
+                      width={190 * k}
+                      height={(dimensionEdit.error ? 92 : 74) * k}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: `${4 * k}px`,
+                          background: "#fff",
+                          border: "1px solid #d9e0dc",
+                          borderRadius: "6px",
+                          padding: `${5 * k}px ${7 * k}px`,
+                          fontFamily: "var(--mono)",
+                          boxSizing: "border-box",
+                        }}
+                      >
+                        <input
+                          autoFocus
+                          value={dimensionEdit.value}
+                          onChange={(e) => setDimensionEdit((d) => (d ? { ...d, value: e.target.value, error: null } : d))}
+                          onBlur={() => submitWallLengthEdit(dimensionEdit)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              submitWallLengthEdit(dimensionEdit);
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              dimensionEditSessionRef.current.close();
+                              setDimensionEdit(null);
+                            }
+                          }}
+                          style={{
+                            width: "100%",
+                            border: "1px solid #d9e0dc",
+                            borderRadius: "5px",
+                            padding: "2px 6px",
+                            fontSize: `${11 * k}px`,
+                            fontFamily: "var(--mono)",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                        <div style={{ display: "flex", gap: `${4 * k}px` }}>
+                          {[1, 2].map((pointNumber) => {
+                            const endpoint = pointNumber === 1 ? dimensionEdit.point1Endpoint : dimensionEdit.point2Endpoint;
+                            const isActive = dimensionEdit.fixedEndpoint === endpoint;
+                            return (
+                              <button
+                                key={pointNumber}
+                                type="button"
+                                // Keep DOM focus on the input — the toggle must
+                                // never trigger a "leaving the editor" blur
+                                // (PHASE 1B-1B §10, anchor toggle policy).
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => setDimensionEdit((d) => (d ? { ...d, fixedEndpoint: resolveFixedEndpointForPoint(pointNumber, d) } : d))}
+                                style={{
+                                  flex: 1,
+                                  fontSize: `${9 * k}px`,
+                                  fontFamily: "var(--mono)",
+                                  border: "1px solid #d9e0dc",
+                                  borderRadius: "4px",
+                                  padding: "2px 4px",
+                                  background: isActive ? "#116355" : "#fff",
+                                  color: isActive ? "#fff" : "#111",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                {`Закрепить точку ${pointNumber}`}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {dimensionEdit.error && (
+                          <div style={{ fontSize: `${9 * k}px`, color: "#c0392b", fontFamily: "var(--mono)" }}>
+                            {dimensionEdit.error}
+                          </div>
+                        )}
+                      </div>
+                    </foreignObject>
+                  </React.Fragment>
                 )}
                 {tool === "structural" && draft.length >= 1 && (
                   <StructuralDraft
@@ -4318,6 +4828,19 @@ export default function PlanPage() {
         onConfirm={confirmLabelDraft}
         onCancel={cancelLabelDraft}
       />
+      {diagnosticsOpen && (
+        <PlanDiagnosticsPanel
+          result={planDiagnostics?.result || null}
+          stale={diagnosticsStale}
+          checking={diagnosticsChecking}
+          filters={diagnosticFilters}
+          onFilterToggle={toggleDiagnosticFilter}
+          onRerun={runPlanCheck}
+          onClose={() => setDiagnosticsOpen(false)}
+          onFocus={focusDiagnostic}
+          propertiesOpen={showProperties}
+        />
+      )}
     </>
   );
 }

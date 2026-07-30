@@ -150,11 +150,17 @@ export function buildBuilderFrameDrawingContext({ projectId, projectName, stella
 }
 
 export function buildSavedProjectFrameDrawingContext(project, stellage) {
+  const moduleRackKey = buildModuleRackKey({
+    moduleId: stellage?.moduleId,
+    rackId: stellage?.id,
+  });
   return buildBuilderFrameDrawingContext({
     projectId: project.id,
     projectName: project.name,
     stellage,
-    returnTo: buildProjectStellagesReturnPath(project.id),
+    // Return into builder with the same rack — SpecEditor "Схемы каркасов"
+    // must not drop the user into a blank new-stellage draft.
+    returnTo: buildBuilderEditStellagesPath(project.id, { editRack: moduleRackKey }),
   });
 }
 

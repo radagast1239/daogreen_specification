@@ -2,17 +2,42 @@
 
 import { isCoolingSpecItem } from "./itemTypes.js";
 
+function normName(name) {
+  return String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function normUnit(unit) {
+  return String(unit || "").trim().toLowerCase().replace(/\.+$/, "");
+}
+
 export function purchaseMergeKey(it) {
+  const preset = String(it?.purchaseMergeKey || "").trim();
+  if (preset) return preset;
   const purchaseKey = (it?.purchaseKey || it?.purchase_key || "").trim();
   if (purchaseKey) return purchaseKey;
-  const normName = (it?.name || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const materialId = String(it?.materialId || it?.material_id || "").trim();
   // Спецификации сплит-систем не склеиваем между разными комнатами/типоразмерами.
   if (isCoolingSpecItem(it)) {
     const room = String(it?.roomId ?? it?.room_id ?? "").trim();
     const kw = Math.round((Number(it?.coolingKw) || 0) * 100);
-    return ["cooling-spec", normName, room, kw].join("|");
+    return ["cooling-spec", normName(it?.name), room, kw].join("|");
   }
-  return [normName, (it?.unit || "").toLowerCase(), (it?.supplier || "").trim(), (it?.link || "").trim()].join("|");
+  if (materialId) {
+    return [
+      "mat",
+      materialId,
+      normUnit(it?.unit),
+      String(it?.supplier || "").trim(),
+      String(it?.link || "").trim(),
+      String(it?.linkAlt || it?.link_alt || "").trim(),
+    ].join("|");
+  }
+  return [
+    normName(it?.name),
+    normUnit(it?.unit),
+    String(it?.supplier || "").trim(),
+    String(it?.link || "").trim(),
+  ].join("|");
 }
 
 /** Группы дублей среди переданных позиций (ключ → массив позиций) */

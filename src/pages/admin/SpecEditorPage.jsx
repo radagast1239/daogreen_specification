@@ -1,34 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, Link, useSearchParams, useNavigate } from "react-router-dom";
-import { useStore } from "../../store/StoreContext.jsx";
-import {
-  projectTotals,
-  projectStats,
-  groupBy,
-  mergedPurchaseList,
-  money,
-  num,
-} from "../../store/helpers.js";
-import { SPECIALIST_MAP, PURCHASE_STATUSES } from "../../data/modules.js";
-import { VAT_RATES, lineGross, lineContributesToSum, RESPONSIBLE_OPTIONS } from "../../lib/itemHelpers.js";
-import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient } from "../../../shared/itemTypes.js";
-import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
-import { PROJECT_DASHBOARD_FILTERS, resolveDashboardFilterLabel } from "../../../shared/projectDashboardSummary.js";
-import { FARM_LINE_GROUPS, farmLineGroupLabel } from "../../../shared/farmLineGroups.js";
-import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
-import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
-import { clientLink, photoSrc } from "../../lib/api.js";
-import { PageHeader } from "../../components/Layout.jsx";
-import { Progress, Stat, Empty, ClientLinkModal, StatusChip } from "../../components/ui.jsx";
-import Breadcrumbs from "../../components/Breadcrumbs.jsx";
-import Collapsible from "../../components/Collapsible.jsx";
-import PageSkeleton from "../../components/PageSkeleton.jsx";
-import { useToast } from "../../components/Toast.jsx";
-import StellageFrameDrawingsPanel from "../../components/StellageFrameDrawingsPanel.jsx";
-import { buildProjectStellagesReturnPath } from "../../../shared/frameDrawingContext.js";
 import { resolveAdminItemSourceLabel } from "../../../shared/frameBomProjectItems.js";
+import { applyResidualFrameBomTwinRepair } from "../../frameConstructor/frameBomAddToProject.js";
 import { buildBuilderDraftPath, isDraftProject, resolveBuilderWizardStep } from "../../../shared/projectLifecycle.js";
 import SaveSectionTemplateModal from "../../components/SaveSectionTemplateModal.jsx";
+import AddMaterialToSpecModal from "../../components/AddMaterialToSpecModal.jsx";
+import { buildProjectItemFromMaterial, findDuplicateMaterialInModule } from "../../lib/addProjectItemFromMaterial.js";
 import { api } from "../../lib/api.js";
 import CoolingFarmTab from "../../components/CoolingFarmTab.jsx";
 import RoomsEditor from "../../components/RoomsEditor.jsx";
@@ -42,28 +17,92 @@ import {
   applyCoolingCalcToRoom,
   clearRoomCooling,
 } from "../../../shared/roomCoolingWorkflow.js";
-import RoomCoolingSummary from "../../components/RoomCoolingSummary.jsx";
+import { SPECIALIST_MAP, PURCHASE_STATUSES } from "../../data/modules.js";
+import { VAT_RATES, lineGross, lineContributesToSum, RESPONSIBLE_OPTIONS } from "../../lib/itemHelpers.js";
+import {
+  projectTotals,
+  projectStats,
+  groupBy,
+  mergedPurchaseList,
+  money,
+  num,
+} from "../../store/helpers.js";
+import { useStore } from "../../store/StoreContext.jsx";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, Link, useSearchParams, useNavigate, useLocation } from "react-router-dom";
+import ProjectWorkspaceHeader from "../../components/ProjectWorkspaceHeader.jsx";
+import SpecificationItemInspector from "../../components/SpecificationItemInspector.jsx";
+import SpecificationRowMenu from "../../components/SpecificationRowMenu.jsx";
+import { DEFAULT_SPECIFICATION_COLUMN_PRESET, SPECIFICATION_COLUMN_PRESETS, specificationPresetHasColumn } from "../../lib/specificationColumnPresets.js";
+import {
+  parseProjectWorkspaceView,
+  buildProjectWorkspaceSearch,
+  normalizeProjectWorkspaceView,
+} from "../../lib/projectWorkspaceView.js";
+import "../../styles/project-workspace.css";
+import "../../styles/specification-table.css";
+import { matchSpecLineFilter } from "../../../shared/specLineFilters.js";
+import { PROJECT_LINE_TYPES, PROJECT_LINE_TYPE_LABELS, lineVisibleToClient, buildClientVisibilityPatch } from "../../../shared/itemTypes.js";
+import { formatCatalogRefreshToast } from "../../../shared/refreshItemFromMaterial.js";
+import { buildModuleSelectionFromIds } from "../../../shared/specLineSelection.js";
+import { FARM_LINE_GROUPS, farmLineGroupLabel } from "../../../shared/farmLineGroups.js";
+import SpecSectionToolbar from "../../components/SpecSectionToolbar.jsx";
+import { absolutePhotoUrl } from "../../lib/photoHelpers.js";
+import { clientLink, photoSrc } from "../../lib/api.js";
+import AuthMediaImg from "../../components/AuthMediaImg.jsx";
+import { PageHeader } from "../../components/Layout.jsx";
+import ProjectCurrencyFields, { currencyFieldsForApi } from "../../components/ProjectCurrencyFields.jsx";
+import { normalizeProjectCurrency } from "../../../shared/projectCurrency.js";
+import { Progress, Stat, Empty, ClientLinkModal, StatusChip } from "../../components/ui.jsx";
+import Breadcrumbs from "../../components/Breadcrumbs.jsx";
+import Collapsible from "../../components/Collapsible.jsx";
+import PageSkeleton from "../../components/PageSkeleton.jsx";
+import { useToast } from "../../components/Toast.jsx";
+import StellageFrameDrawingsPanel from "../../components/StellageFrameDrawingsPanel.jsx";
+import ProjectReleaseHistory from "../../components/ProjectReleaseHistory.jsx";
 import RoomCoolingEditor from "../../components/RoomCoolingEditor.jsx";
 import { syncRoomAcSpecItems } from "../../../shared/roomAcSync.js";
 import ReplacementReviewModal from "../../components/ReplacementReviewModal.jsx";
-import { findStaleProjectPrices } from "../../../shared/staleProjectPrices.js";
+import MaterialChangesReviewPanel from "../../components/MaterialChangesReviewPanel.jsx";
+import { buildMaterialChangesReview } from "../../../shared/materialChangesReview.js";
 import ActivityFeed from "../../components/ActivityFeed.jsx";
 import PublishChecklist, { PublishGateModal } from "../../components/PublishChecklist.jsx";
 import ProjectHqBar from "../../components/ProjectHqBar.jsx";
+import ProjectClientReadinessPanel from "../../components/ProjectClientReadinessPanel.jsx";
+import CreateProjectOnboarding from "../../components/CreateProjectOnboarding.jsx";
+import {
+  buildProjectSendReadiness,
+  buildReadyToSendConfirmText,
+  projectStatusNeedsConfirm,
+  resolveProjectStatusForSave,
+  shouldConfirmReadyToSend,
+  getProjectStatusLabel,
+} from "../../../shared/projectStatus.js";
+import { buildProjectPreSendChecklist } from "../../../shared/projectPreSendChecklist.js";
+import { shouldShowCreateOnboarding } from "../../../shared/projectCreation.js";
+import ProjectCoolingSummary from "../../components/ProjectCoolingSummary.jsx";
+import SpecQuickFilters from "../../components/SpecQuickFilters.jsx";
 import PrePublishCheckModal from "../../components/PrePublishCheckModal.jsx";
+import PublishVersionModal from "../../components/PublishVersionModal.jsx";
 import ImportFromProjectModal from "../../components/ImportFromProjectModal.jsx";
 import CompareProjectsModal from "../../components/CompareProjectsModal.jsx";
 import DuplicateProjectModal from "../../components/DuplicateProjectModal.jsx";
 import ClientSchemesEditor from "../../components/ClientSchemesEditor.jsx";
+import FarmPowerEditor from "../../components/FarmPowerEditor.jsx";
 import { filterItemsForViewMode } from "../../../shared/projectReadiness.js";
 import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
+import { clientLinkActiveState } from "../../../shared/clientProjectLoadState.js";
 import { copyToClipboard } from "../../lib/copyText.js";
+import { createDebouncedTask } from "../../lib/debouncedTask.js";
+import { getFloorPlanUrl, listUploadedSchemes, setFloorPlanUrl } from "../../lib/clientSchemes.js";
+import { itemHasAdminComments, itemHasClientNote, itemHasInternalNote } from "../../lib/specItemComments.js";
 import {
   compositionGroupLabel,
   groupItemsByComposition,
   isStellageModuleTitle,
   STELLAGE_GROUPS,
 } from "../../../shared/stellageComposition.js";
+
 const TAB_LABELS = {
   spec: "Спецификация",
   merged: "Общий список",
@@ -74,10 +113,24 @@ const TAB_LABELS = {
 export default function SpecEditorPage() {
   const { id } = useParams();
   const nav = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const highlightItemId = searchParams.get("item");
   const sectionParam = searchParams.get("section");
+  const focusParam = searchParams.get("focus");
+  const workspaceView = parseProjectWorkspaceView(searchParams);
   const stellagesPanelRef = useRef(null);
+
+  const setWorkspaceView = useCallback(
+    (next, { replace = false } = {}) => {
+      const view = normalizeProjectWorkspaceView(next);
+      if (view === workspaceView && searchParams.get("view") === view) return;
+      if (view === workspaceView && view === "spec" && !searchParams.get("view") && next == null) return;
+      const search = buildProjectWorkspaceSearch(searchParams, view);
+      nav({ pathname: location.pathname, search: search ? `?${search}` : "" }, { replace });
+    },
+    [nav, location.pathname, searchParams, workspaceView]
+  );
   const { state, actions } = useStore();
   const { confirm, success, error } = useToast();
   const project = state.projects.find((p) => p.id === id);
@@ -92,6 +145,7 @@ export default function SpecEditorPage() {
   const [publishCheckLoading, setPublishCheckLoading] = useState(false);
   const [gateModal, setGateModal] = useState(null);
   const [prePublishOpen, setPrePublishOpen] = useState(false);
+  const [publishConfirm, setPublishConfirm] = useState(null); // { force: boolean } | null
   const [viewMode, setViewMode] = useState("designer");
   const [importOpen, setImportOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -100,11 +154,27 @@ export default function SpecEditorPage() {
   const [applyTplId, setApplyTplId] = useState("");
   const [replacementReviewItem, setReplacementReviewItem] = useState(null);
   const [activeCoolingRoomId, setActiveCoolingRoomId] = useState(null);
-  const [specQuickFilter, setSpecQuickFilter] = useState("");
+  const [specQuickFilters, setSpecQuickFilters] = useState([]);
+  const specQuickFilter = specQuickFilters.at(-1) || "";
+  const [specSelectedIds, setSpecSelectedIds] = useState([]);
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [specModalOpen, setSpecModalOpen] = useState(false);
+  const [createOnboardingDismissed, setCreateOnboardingDismissed] = useState(false);
+  const [currencyDraft, setCurrencyDraft] = useState(null);
+  const [currencySaving, setCurrencySaving] = useState(false);
+  const clearSpecSelectionRef = useRef(null);
+  const applySpecSelectionRef = useRef(null);
+  const itemRefreshRef = useRef(null);
 
-  const stalePrices = useMemo(
-    () => findStaleProjectPrices(project?.items || [], state.materials),
-    [project?.items, state.materials]
+  const [materialReviewOpen, setMaterialReviewOpen] = useState(false);
+  const [inspectItemRequest, setInspectItemRequest] = useState(null);
+  const retainedCatalogFields = project?.manualParams?.retainedCatalogFields || {};
+  const materialChangesReview = useMemo(
+    () =>
+      buildMaterialChangesReview(project?.items || [], state.materials, {
+        retainedByItem: retainedCatalogFields,
+      }),
+    [project?.items, state.materials, retainedCatalogFields]
   );
   const replacementPending = useMemo(
     () => (project?.items || []).filter((i) => i.status === "replacement_check"),
@@ -114,6 +184,35 @@ export default function SpecEditorPage() {
     const by = publishCheck?.counts?.byIssue || {};
     return (by.no_client_section || 0) + (by.no_client_subsection || 0);
   }, [publishCheck]);
+  const headerReadiness = useMemo(() => {
+    if (!project) return null;
+    const checklist = buildProjectPreSendChecklist(project.items || [], state.materials, {
+      publishCheck,
+    });
+    return buildProjectSendReadiness(checklist);
+  }, [project, state.materials, publishCheck]);
+
+  const currencyValue = currencyDraft || normalizeProjectCurrency(project || {});
+
+  const saveProjectCurrency = async () => {
+    if (!project?.id || currencySaving) return;
+    setCurrencySaving(true);
+    try {
+      const fields = currencyFieldsForApi(currencyValue);
+      await actions.projectUpdate(project.id, fields);
+      setCurrencyDraft(null);
+      success("Валюта проекта сохранена");
+    } catch (e) {
+      error(e.message || "Не удалось сохранить валюту");
+    } finally {
+      setCurrencySaving(false);
+    }
+  };
+
+  const applyAllCatalogUpdates = async () => {
+    /* kept for workspace parity tests — panel owns bulk update UX */
+    setMaterialReviewOpen(true);
+  };
 
   const syncAllClientSections = async () => {
     const ids = (project?.items || []).filter((it) => it.materialId).map((it) => it.id);
@@ -128,7 +227,7 @@ export default function SpecEditorPage() {
     });
     if (!ok) return;
     try {
-      const res = await api.refreshItemsFromMaterial(
+      const res = await actions.refreshItemsFromMaterial(
         project.id,
         { itemIds: ids, fields: ["clientSection"] },
         { items: project.items, materials: state.materials }
@@ -148,7 +247,7 @@ export default function SpecEditorPage() {
     }).catch(() => {});
   }, []);
 
-  const refreshPublishCheck = () => {
+  const refreshPublishCheck = useCallback(() => {
     if (!id) return Promise.resolve();
     setPublishCheckLoading(true);
     return api
@@ -156,7 +255,23 @@ export default function SpecEditorPage() {
       .then(setPublishCheck)
       .catch(() => setPublishCheck(null))
       .finally(() => setPublishCheckLoading(false));
-  };
+  }, [id]);
+
+  const refreshActivity = useCallback(() => {
+    if (!id) return Promise.resolve();
+    return api.getProjectActivity(id).then(setActivity).catch(() => setActivity([]));
+  }, [id]);
+
+  useEffect(() => {
+    itemRefreshRef.current?.cancel();
+    itemRefreshRef.current = createDebouncedTask(() => {
+      refreshActivity();
+      refreshPublishCheck();
+    });
+    return () => itemRefreshRef.current?.cancel();
+  }, [refreshActivity, refreshPublishCheck]);
+
+  const scheduleItemRefresh = useCallback(() => itemRefreshRef.current?.schedule(), []);
 
   useEffect(() => {
     refreshPublishCheck();
@@ -164,21 +279,30 @@ export default function SpecEditorPage() {
 
   useEffect(() => {
     if (!id) return;
-    api.getProjectActivity(id).then(setActivity).catch(() => setActivity([]));
-  }, [id, project?.updatedAt]);
+    refreshActivity();
+  }, [refreshActivity, project?.updatedAt]);
 
   useEffect(() => {
-    if (highlightItemId) setTab("spec");
-  }, [highlightItemId]);
+    if (!highlightItemId) return;
+    setTab("spec");
+    if (workspaceView !== "spec") setWorkspaceView("spec", { replace: true });
+  }, [highlightItemId, workspaceView, setWorkspaceView]);
 
   useEffect(() => {
     if (sectionParam !== "stellages" || !project?.id) return;
     setTab("spec");
+    if (workspaceView !== "design") setWorkspaceView("design", { replace: true });
     const timer = window.setTimeout(() => {
       stellagesPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 120);
     return () => window.clearTimeout(timer);
-  }, [sectionParam, project?.id]);
+  }, [sectionParam, project?.id, workspaceView, setWorkspaceView]);
+
+  useEffect(() => {
+    if (focusParam !== "general") return;
+    setTab("merged");
+    if (workspaceView !== "spec") setWorkspaceView("spec", { replace: true });
+  }, [focusParam, workspaceView, setWorkspaceView]);
 
   useEffect(() => {
     api.listSectionTemplates().then(setSectionTemplates).catch(() => setSectionTemplates([]));
@@ -224,8 +348,7 @@ export default function SpecEditorPage() {
     actions
       .itemUpdate(project.id, itemId, patch)
       .then(() => {
-        api.getProjectActivity(project.id).then(setActivity).catch(() => {});
-        refreshPublishCheck();
+        scheduleItemRefresh();
       })
       .catch((e) => error(e.message || "Не удалось сохранить позицию"));
 
@@ -274,15 +397,33 @@ export default function SpecEditorPage() {
     return actions.projectUpdate(project.id, { manualParams: { ...mp, [key]: value } });
   };
 
-  const floorPlanUrl = project.manualParams?.floorPlanUrl || "";
-  const showFloorPlanPin = !!floorPlanUrl && (tab === "spec" || tab === "calc");
+  const floorPlanUrl = getFloorPlanUrl(project.manualParams);
+  const uploadedSchemes = useMemo(
+    () => listUploadedSchemes(project.manualParams),
+    [project.manualParams]
+  );
+  const showFloorPlanPin = uploadedSchemes.length > 0 && workspaceView === "design";
 
-  const doPublishVersion = async (force = false) => {
+  const saveFloorPlanUrl = (url) => {
+    const mp = project.manualParams && typeof project.manualParams === "object" ? project.manualParams : {};
+    return actions.projectUpdate(project.id, { manualParams: setFloorPlanUrl(mp, url) });
+  };
+  const doPublishVersion = async (force = false, releaseComment = "") => {
     try {
-      const v = await actions.createVersion(project.id, force ? { force: true } : {});
-      setVersionMsg(`Опубликована версия ${v.versionNumber}: Δ ${v.summary.delta} ₽`);
+      const body = force ? { force: true } : {};
+      if (releaseComment != null && String(releaseComment).length) {
+        body.releaseComment = releaseComment;
+      }
+      const v = await actions.createVersion(project.id, body);
+      setVersionMsg(
+        `Опубликована версия ${v.versionNumber}${
+          v.summary?.delta != null ? `: Δ ${v.summary.delta} ₽` : ""
+        }`
+      );
       success(force ? "Версия опубликована (принудительно)" : "Версия опубликована");
+      setPublishConfirm(null);
       await refreshPublishCheck();
+      await actions.loadProject(project.id);
     } catch (e) {
       if (e.problems?.length) {
         error(`Не хватает данных: ${e.problems.length} замечаний`);
@@ -290,12 +431,13 @@ export default function SpecEditorPage() {
       } else {
         error(e.message);
       }
+      throw e;
     }
   };
 
   const requestPublishVersion = () => {
     if (publishCheck?.status === "blocked") setGateModal({ action: "version" });
-    else doPublishVersion(false);
+    else setPublishConfirm({ force: false });
   };
 
   const requestClientLink = () => {
@@ -315,21 +457,30 @@ export default function SpecEditorPage() {
 
   const exportSpec = async () => {
     const { downloadXlsx } = await import("../../lib/exportXlsx.js");
-    const rows = project.items.map((it) => ({
-      Фото: absolutePhotoUrl(it.imageUrl || it.photoUrl),
-      Модуль: it.module,
-      Категория: it.category,
-      Наименование: it.name,
-      Ед: it.unit,
-      Кол: it.qty,
-      Цена: it.price,
-      Сумма: Math.round((it.qty || 0) * (it.price || 0)),
-      Ссылка: it.link,
-      Видно: it.visible ? "да" : "нет",
-      Утверждено: it.approved ? "да" : "нет",
-      Источник: it.source === "planner" ? `план: ${it.sourceType || ""}` : "ручная/модуль",
-    }));
-    downloadXlsx(`${project.name}_спецификация`, rows);
+    const { computeLineMoney, roundMoney } = await import("../../../shared/moneyCalc.js");
+    const draft = { ...project, exportKind: "draft" };
+    const currency = draft.currency || "₽";
+    const rows = (draft.items || []).map((it) => {
+      const money = computeLineMoney(it, { priceMode: "planned" });
+      return {
+        Фото: absolutePhotoUrl(it.imageUrl || it.photoUrl),
+        Модуль: it.module,
+        Категория: it.category,
+        Наименование: it.name,
+        Ед: it.unit,
+        Кол: it.qty,
+        Цена: it.price,
+        "НДС %": it.vatRate ?? 0,
+        Сумма: roundMoney(money.gross),
+        Ссылка: it.link,
+        _link: it.link || "",
+        _photo: absolutePhotoUrl(it.imageUrl || it.photoUrl) || "",
+        Видно: it.visible ? "да" : "нет",
+        Утверждено: it.approved ? "да" : "нет",
+        Источник: it.source === "planner" ? `план: ${it.sourceType || ""}` : "ручная/модуль",
+      };
+    });
+    downloadXlsx(`${draft.name || "project"}_спецификация_рабочая_${currency}`, rows);
   };
 
   const url = project.clientToken ? clientLink(project.clientToken) : "";
@@ -357,14 +508,17 @@ export default function SpecEditorPage() {
 
   const exportClientPdf = async () => {
     try {
-      const visibleItems = filterItemsForViewMode(project.items, "client");
+      const { projectForAdminClientPdfExport, resolveAdminClientExportProject } = await import("../../lib/exportProjectContext.js");
+      const exportProject = resolveAdminClientExportProject(project);
+      const visibleItems = filterItemsForViewMode(exportProject.items || [], "client");
       if (!visibleItems.length) {
         error("Нет позиций для клиента");
         return;
       }
       const { generateClientPurchasePdf } = await import("../../lib/clientPdfExport.js");
+      const pdfProject = projectForAdminClientPdfExport(project);
       await generateClientPurchasePdf({
-        project,
+        project: pdfProject,
         items: visibleItems,
         branding: { companyName },
         purchaseStatuses: PURCHASE_STATUSES,
@@ -379,19 +533,104 @@ export default function SpecEditorPage() {
 
   const exportClientExcel = async () => {
     try {
-      const visibleItems = filterItemsForViewMode(project.items, "client");
+      const { projectForAdminClientExcelExport, resolveAdminClientExportProject } = await import("../../lib/exportProjectContext.js");
+      const exportProject = resolveAdminClientExportProject(project);
+      const visibleItems = filterItemsForViewMode(exportProject.items || [], "client");
       if (!visibleItems.length) {
         error("Нет позиций для клиента");
         return;
       }
       const { downloadClientWorkbook } = await import("../../lib/clientExcelExport.js");
-      downloadClientWorkbook(project, visibleItems, {
+      const excelProject = projectForAdminClientExcelExport(project);
+      await new Promise((r) => setTimeout(r, 0));
+      downloadClientWorkbook(excelProject, visibleItems, {
         purchaseStatuses: PURCHASE_STATUSES,
         branding: { companyName },
-        versionInfo: project.version > 0 ? { versionNumber: project.version } : null,
+        versionInfo: excelProject.version > 0 ? { versionNumber: excelProject.version } : null,
       });
     } catch (e) {
       error(e.message || "Ошибка Excel");
+    }
+  };
+
+  const showCreateOnboarding =
+    !createOnboardingDismissed &&
+    shouldShowCreateOnboarding(project, searchParams) &&
+    !(project?.items || []).length;
+
+  const dismissCreateOnboarding = async () => {
+    setCreateOnboardingDismissed(true);
+    if (!project?.id) return;
+    try {
+      await actions.projectUpdate(project.id, {
+        manualParams: { ...(project.manualParams || {}), showCreateOnboarding: false },
+      });
+    } catch {
+      /* banner already closed locally */
+    }
+  };
+
+  const handleProjectStatusChange = async (nextRaw) => {
+    if (!project?.id) return;
+    const next = resolveProjectStatusForSave(nextRaw);
+    if (next === project.status) return;
+
+    const checklist = buildProjectPreSendChecklist(project.items || [], state.materials, {
+      publishCheck,
+    });
+    const readiness = buildProjectSendReadiness(checklist);
+
+    if (shouldConfirmReadyToSend(next, readiness)) {
+      const ok = await confirm({
+        title: "Готов к отправке",
+        message: buildReadyToSendConfirmText(readiness),
+        confirmLabel: "Всё равно отметить готовым",
+        cancelLabel: "Вернуться к исправлению",
+      });
+      if (!ok) return;
+    } else if (projectStatusNeedsConfirm(next)) {
+      const ok = await confirm({
+        title: getProjectStatusLabel(next),
+        message: `Отметить проект как «${getProjectStatusLabel(next)}»?`,
+        confirmLabel: "Да",
+      });
+      if (!ok) return;
+    }
+
+    setStatusSaving(true);
+    try {
+      await actions.projectUpdate(project.id, { status: next });
+      success(`Статус: ${getProjectStatusLabel(next)}`);
+    } catch (e) {
+      error(e.message || "Не удалось сохранить статус");
+    } finally {
+      setStatusSaving(false);
+    }
+  };
+
+  const [bomTwinRepairBusy, setBomTwinRepairBusy] = useState(false);
+  const handleRepairBomTwins = async () => {
+    if (!project?.id || bomTwinRepairBusy) return;
+    const ok = await confirm({
+      title: "Убрать дубли BOM?",
+      message:
+        "Будут удалены только безопасные дубли каркаса (builder twin при наличии канонического BOM). Позиции полива и ручные строки не трогаются.",
+      confirmLabel: "Убрать дубли",
+    });
+    if (!ok) return;
+    setBomTwinRepairBusy(true);
+    try {
+      const outcome = await applyResidualFrameBomTwinRepair({
+        project,
+        deleteItem: (projectId, itemId) => actions.itemDelete(projectId, itemId),
+        updateProject: (projectId, patch) => actions.projectUpdate(projectId, patch),
+        loadProject: (projectId) => actions.loadProject(projectId),
+      });
+      success(`Удалено дублей: ${outcome.summary?.removedCount || 0}`);
+    } catch (e) {
+      error(e.message || "Не удалось убрать дубли BOM");
+    } finally {
+      setBomTwinRepairBusy(false);
     }
   };
 
@@ -402,7 +641,39 @@ export default function SpecEditorPage() {
 
   const handleDashboardFilter = (filterId) => {
     setTab("spec");
-    setSpecQuickFilter(filterId || "");
+    setSpecQuickFilters(filterId ? [filterId] : []);
+  };
+
+  const bulkDeliveryPatch = async (patch) => {
+    if (!specSelectedIds.length || !project) return;
+    const ids = [...specSelectedIds];
+    const normalizedPatch =
+      patch.visibleToClient != null ? buildClientVisibilityPatch(patch.visibleToClient) : patch;
+    try {
+      await actions.bulkPatchItems(project.id, { itemIds: ids, patch: normalizedPatch });
+      await actions.loadProject(project.id);
+      if (patch.visibleToClient != null) {
+        actions.applyItemsVisibilityPatch(project.id, ids, normalizedPatch);
+      }
+      success(`Обновлено позиций: ${ids.length}`);
+    } catch (e) {
+      error(e.message);
+    }
+  };
+
+  const bulkDeliveryRefreshPrice = async () => {
+    if (!specSelectedIds.length || !project) return;
+    try {
+      const res = await actions.refreshItemsFromMaterial(
+        project.id,
+        { itemIds: specSelectedIds, fields: ["price"] },
+        { items: project.items, materials: state.materials }
+      );
+      await actions.loadProject(project.id);
+      success(`Обновлено позиций: ${res.updated?.length || 0}`);
+    } catch (e) {
+      error(e.message);
+    }
   };
 
   const breadcrumbs = (
@@ -415,6 +686,18 @@ export default function SpecEditorPage() {
       ]}
     />
   );
+
+  const handleWorkspaceViewChange = (next) => {
+    if (specModalOpen && next !== workspaceView) {
+      error("Сначала завершите или закройте открытое окно");
+      return;
+    }
+    setWorkspaceView(next);
+  };
+
+  const headerReadinessLabel = publishCheckLoading
+    ? "обновляется…"
+    : headerReadiness?.shortTitle || null;
 
   return (
     <>
@@ -447,7 +730,17 @@ export default function SpecEditorPage() {
           onProceed={async () => {
             setGateModal(null);
             if (gateModal.action === "link") setLinkOpen(true);
-            else await doPublishVersion(true);
+            else setPublishConfirm({ force: true });
+          }}
+        />
+      )}
+      {publishConfirm && (
+        <PublishVersionModal
+          project={project}
+          force={!!publishConfirm.force}
+          onClose={() => setPublishConfirm(null)}
+          onPublish={async (comment, force) => {
+            await doPublishVersion(!!force, comment);
           }}
         />
       )}
@@ -492,288 +785,441 @@ export default function SpecEditorPage() {
             publishCheck?.status !== "blocked"
               ? async () => {
                   setPrePublishOpen(false);
-                  await doPublishVersion(false);
+                  setPublishConfirm({ force: false });
                 }
               : publishCheck?.allowForcePublish
                 ? async () => {
                     setPrePublishOpen(false);
-                    await doPublishVersion(true);
+                    setPublishConfirm({ force: true });
                   }
                 : undefined
           }
           proceedLabel="Утвердить версию"
         />
       )}
-      <PageHeader
-        title={project.name}
+      <ProjectWorkspaceHeader
+        project={project}
         breadcrumbs={breadcrumbs}
-        back={{ to: "/", label: "Проекты" }}
-        sub={`${project.client || "—"}${project.city ? " · " + project.city : ""}${
-          project.area ? " · " + project.area + " м²" : ""
-        } · ${project.type}`}
-        actions={
-          <>
-            <Link className="btn" to={`/project/${project.id}/plan`}>▦ План</Link>
-            <button className="btn" onClick={exportSpec} title="Внутренний Excel (все поля)">Excel ↓</button>
-            <button className="btn" onClick={() => setImportOpen(true)}>Из прошлого</button>
-            <button className="btn" onClick={() => setCompareOpen(true)}>Сравнить</button>
-            <details style={{ position: "relative" }}>
-              <summary className="btn btn-ghost" style={{ cursor: "pointer" }}>Ещё ▾</summary>
-              <div
-                className="card"
-                style={{
-                  position: "absolute",
-                  right: 0,
-                  top: "100%",
-                  marginTop: 4,
-                  padding: 8,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                  zIndex: 100,
-                  minWidth: 200,
-                }}
-              >
-                <button className="btn btn-sm" onClick={() => setDupOpen(true)}>На основе прошлого</button>
-                <button className="btn btn-sm" onClick={approveAll}>Показать всё клиенту</button>
-                <button className="btn btn-sm" disabled={!url} onClick={requestClientLink}>QR / Шаблон ссылки</button>
-                <button className="btn btn-sm btn-ghost" onClick={regenerateLink}>↻ Сбросить ссылку</button>
-              </div>
-            </details>
-          </>
-        }
+        workspaceView={workspaceView}
+        onWorkspaceViewChange={handleWorkspaceViewChange}
+        statusLabel={getProjectStatusLabel(project.status)}
+        workingTotal={totals.budget}
+        publishedTotal={project.publishedRelease?.plannedTotal}
+        readinessLabel={headerReadinessLabel}
+        formatMoney={(value) => money(value, project.currency)}
+        publishActions={{
+          clientUrl: url,
+          onOpenClientLink: requestClientLink,
+          onCopyClientLink: copyClientLink,
+          onExportPdf: exportClientPdf,
+          onExportExcel: exportClientExcel,
+          onPublish: () => setPrePublishOpen(true),
+        }}
       />
 
       <div className="content">
-        <ProjectHqBar
-          project={project}
-          items={project.items || []}
-          publishCheck={publishCheck}
-          publishCheckLoading={publishCheckLoading}
-          clientUrl={url}
-          onRefreshPublishCheck={refreshPublishCheck}
-          onOpenPrePublish={() => setPrePublishOpen(true)}
-          onOpenClientLink={requestClientLink}
-          onOpenClientPreview={() => url && window.open(url, "_blank", "noopener,noreferrer")}
-          onCopyClientLink={copyClientLink}
-          onExportPdf={exportClientPdf}
-          onExportExcel={exportClientExcel}
-          onPrepareClient={prepareClientNotice}
-          onFilterSelect={handleDashboardFilter}
-          activeFilter={specQuickFilter}
+        <CreateProjectOnboarding
+          visible={showCreateOnboarding}
+          onDismiss={dismissCreateOnboarding}
         />
 
-        <div className="print-header">
-          <h1>{project.name}</h1>
-          <p>
-            {project.client || "—"}
-            {project.city ? ` · ${project.city}` : ""} · спецификация · {new Date().toLocaleDateString("ru-RU")}
-          </p>
-        </div>
-
-        {clientSectionIssueCount > 0 && (
-          <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--danger)" }}>
-            <strong>Нет клиентского раздела/подраздела: {clientSectionIssueCount} поз.</strong>
-            <p className="muted" style={{ fontSize: 13, margin: "6px 0 10px" }}>
-              В материалах разделы заполнены, но в проекте — старый снимок. Подтяните из базы одной кнопкой.
-            </p>
-            <button type="button" className="btn btn-sm btn-primary" onClick={syncAllClientSections}>
-              Клиент. разделы из базы
-            </button>
-          </div>
-        )}
-
-        {stalePrices.length > 0 && (
-          <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--warn)" }}>
-            <strong>Цена в базе изменилась у {stalePrices.length} поз.</strong>
-            <p className="muted" style={{ fontSize: 13, margin: "6px 0 10px" }}>
-              Старые проекты не обновляются автоматически. Обновить цену в проекте из базы?
-            </p>
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              onClick={async () => {
-                await api.refreshItemsFromMaterial(
-                  project.id,
-                  {
-                    itemIds: stalePrices.map((s) => s.itemId),
-                    fields: ["price"],
-                  },
-                  { items: project.items, materials: state.materials }
-                );
-                await actions.loadProject(project.id);
-                success("Цены обновлены из базы");
-              }}
-            >
-              Обновить {stalePrices.length} поз.
-            </button>
-          </div>
-        )}
-
-        {replacementPending.length > 0 && (
-          <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--accent)" }}>
-            <strong>Замены на проверке: {replacementPending.length}</strong>
-            <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
-              {replacementPending.slice(0, 6).map((it) => (
-                <button
-                  key={it.id}
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() => setReplacementReviewItem(it)}
-                >
-                  {it.name.slice(0, 40)}
-                  {it.name.length > 40 ? "…" : ""}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {project.version > 0 && (
-          <p className="muted no-print" style={{ fontSize: 12, margin: "0 0 12px" }}>
-            Версия {project.version} опубликована. Правки сохраняются без новой версии — для снимка нажмите «Утвердить версию».
-          </p>
-        )}
-
-        <div className="row wrap no-print view-mode-toggle" style={{ gap: 8, marginBottom: 14 }}>
-          <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>Режим:</span>
-          {[
-            ["designer", "Проектировщик"],
-            ["client", "Предпросмотр клиента"],
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`btn btn-sm${viewMode === id ? " btn-primary" : ""}`}
-              onClick={() => setViewMode(id)}
-            >
-              {label}
-            </button>
-          ))}
-          {viewMode === "client" && (
-            <span className="chip chip--amber" style={{ fontSize: 11 }}>
-              Только то, что увидит клиент
-            </span>
-          )}
-        </div>
-
-        {sectionTemplates.length > 0 && (
-          <div className="row wrap no-print" style={{ gap: 8, marginBottom: 14, alignItems: "center" }}>
-            <span className="muted" style={{ fontSize: 12 }}>Шаблон раздела:</span>
-            <select
-              value={applyTplId}
-              onChange={(e) => setApplyTplId(e.target.value)}
-              style={{ width: "auto", minWidth: 220 }}
-            >
-              <option value="">— выберите —</option>
-              {sectionTemplates.map((t) => (
-                <option key={t.id} value={t.id}>{t.name} ({t.moduleName})</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn btn-sm"
-              disabled={!applyTplId}
-              onClick={async () => {
-                const tpl = sectionTemplates.find((t) => t.id === applyTplId);
-                await api.applySectionTemplate(project.id, {
-                  templateId: applyTplId,
-                  targetModule: tpl?.moduleName,
-                });
-                await actions.loadProject(project.id);
-                success(`Шаблон «${tpl?.name}» добавлен`);
-              }}
-            >
-              Вставить шаблон
-            </button>
-          </div>
-        )}
-
-        <div ref={stellagesPanelRef}>
-          <StellageFrameDrawingsPanel
+        {/* —— Клиентская выдача (keep mounted) —— */}
+        <div
+          className={workspaceView === "publish" ? undefined : "pw-pane--inactive"}
+          data-workspace-pane="publish"
+          aria-hidden={workspaceView !== "publish"}
+          hidden={workspaceView !== "publish"}
+        >
+          <ProjectHqBar
             project={project}
-            returnPath={buildProjectStellagesReturnPath(project.id)}
+            items={project.items || []}
+            materials={state.materials}
+            publishCheck={publishCheck}
+            publishCheckLoading={publishCheckLoading}
+            clientUrl={url}
+            onRefreshPublishCheck={refreshPublishCheck}
+            onOpenPrePublish={() => setPrePublishOpen(true)}
+            onOpenClientLink={requestClientLink}
+            onOpenClientPreview={() => url && window.open(url, "_blank", "noopener,noreferrer")}
+            onCopyClientLink={copyClientLink}
+            onExportPdf={exportClientPdf}
+            onExportExcel={exportClientExcel}
+            onFilterSelect={handleDashboardFilter}
+            onProjectStatusChange={handleProjectStatusChange}
+            statusSaving={statusSaving}
+            onOpenPlan={() => nav(`/project/${project.id}/plan`)}
+            onImportFromPast={() => setImportOpen(true)}
+            onCompare={() => setCompareOpen(true)}
+            onDuplicate={() => setDupOpen(true)}
+            onApproveAll={approveAll}
+            onResetLink={regenerateLink}
+            onInternalExcel={exportSpec}
+            hidePrimaryActions
+          />
+
+          <div className="card" style={{ marginBottom: 16, maxWidth: 420 }} data-testid="client-language-card">
+            <label className="field" style={{ marginBottom: 0 }}>
+              Язык клиентской версии
+              <select
+                value={project.manualParams?.clientLanguage || "ru"}
+                onChange={(event) => saveManualParam("clientLanguage", event.target.value)}
+              >
+                <option value="ru">Русский</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <p className="muted" style={{ fontSize: 12, margin: "8px 0 0" }}>
+              Язык новой клиентской ссылки и документов
+            </p>
+          </div>
+
+          {(() => {
+            const linkState = clientLinkActiveState(project);
+            if (!linkState.needsPublishBeforeClientLink) return null;
+            return (
+              <div className="card" style={{ marginBottom: 16, borderColor: "var(--warn)" }}>
+                <strong>Клиентская ссылка пока неактивна</strong>
+                <p className="muted" style={{ margin: "8px 0 12px" }}>
+                  Токен клиента создан, но опубликованная версия отсутствует. Клиент увидит сообщение
+                  «Проект пока не опубликован», пока вы не опубликуете версию.
+                </p>
+                <button type="button" className="btn primary" onClick={() => setPrePublishOpen(true)}>
+                  Опубликовать версию
+                </button>
+              </div>
+            );
+          })()}
+
+          {project.publishedRelease && project.hasUnpublishedChanges && (
+            <div className="card" style={{ marginBottom: 16, borderColor: "var(--warn)", background: "var(--warn-bg, rgba(255, 193, 7, 0.08))" }}>
+              <strong>Есть неопубликованные изменения</strong>
+              <p className="muted" style={{ margin: "8px 0 12px" }}>
+                Клиент видит опубликованную версию {project.publishedRelease.versionNumber}.
+                Рабочая спецификация изменилась — опубликуйте новую версию перед отправкой.
+              </p>
+              <button type="button" className="btn primary" onClick={() => setPrePublishOpen(true)}>
+                Опубликовать новую версию
+              </button>
+            </div>
+          )}
+
+          <ProjectClientReadinessPanel
+            items={project.items || []}
+            materials={state.materials}
+            currency={project.currency}
+            stellageConfigs={project.stellageConfigs || []}
+            publishCheck={publishCheck}
+            activeFilter={specQuickFilter}
+            onFilterSelect={handleDashboardFilter}
+            selectedItemIds={specSelectedIds}
+            onSelectItems={(ids) => applySpecSelectionRef.current?.(ids)}
+            onBulkShowClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(true))}
+            onBulkHideClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(false))}
+            onBulkRefreshPrice={bulkDeliveryRefreshPrice}
+            onClearSelection={() => clearSpecSelectionRef.current?.()}
+            onRepairBomTwins={handleRepairBomTwins}
+            bomTwinRepairBusy={bomTwinRepairBusy}
+          />
+
+          {clientSectionIssueCount > 0 && (
+            <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--danger)" }}>
+              <strong>Нет клиентского раздела/подраздела: {clientSectionIssueCount} поз.</strong>
+              <p className="muted" style={{ fontSize: 13, margin: "6px 0 10px" }}>
+                В материалах разделы заполнены, но в проекте — старый снимок. Подтяните из базы одной кнопкой.
+              </p>
+              <button type="button" className="btn btn-sm btn-primary" onClick={syncAllClientSections}>
+                Клиент. разделы из базы
+              </button>
+            </div>
+          )}
+
+          {materialChangesReview.count > 0 && (
+            <div className="card mcr-card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--accent)" }}>
+              <strong>Изменения в базе материалов: {materialChangesReview.count} позиций</strong>
+              <p className="muted" style={{ fontSize: 13, margin: "6px 0 10px" }}>
+                {[
+                  materialChangesReview.summary.prices ? `цены: ${materialChangesReview.summary.prices}` : null,
+                  materialChangesReview.summary.names ? `названия: ${materialChangesReview.summary.names}` : null,
+                  materialChangesReview.summary.links ? `ссылки: ${materialChangesReview.summary.links}` : null,
+                  materialChangesReview.summary.suppliers ? `поставщики: ${materialChangesReview.summary.suppliers}` : null,
+                  materialChangesReview.summary.other ? `характеристики/другие: ${materialChangesReview.summary.other}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "есть отличия от каталога"}
+              </p>
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => setMaterialReviewOpen(true)}>
+                Проверить изменения
+              </button>
+            </div>
+          )}
+
+          <MaterialChangesReviewPanel
+            open={materialReviewOpen}
+            onClose={() => setMaterialReviewOpen(false)}
+            review={materialChangesReview}
+            project={project}
+            materials={state.materials}
+            actions={actions}
+            onPatchItem={(itemId, patch) => actions.itemUpdate(project.id, itemId, patch)}
+            onOpenItem={(itemId) => {
+              setTab("spec");
+              setInspectItemRequest(itemId);
+            }}
+            success={success}
+            error={error}
+            confirm={confirm}
+            retainedByItem={retainedCatalogFields}
+            onRetainedChange={() => {}}
+            onAfterChange={async () => {
+              await actions.loadProject(project.id);
+              refreshPublishCheck();
+            }}
+          />
+
+          {replacementPending.length > 0 && (
+            <div className="card" style={{ padding: "12px 16px", marginBottom: 14, borderColor: "var(--accent)" }}>
+              <strong>Замены на проверке: {replacementPending.length}</strong>
+              <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
+                {replacementPending.slice(0, 6).map((it) => (
+                  <button
+                    key={it.id}
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => setReplacementReviewItem(it)}
+                  >
+                    {it.name.slice(0, 40)}
+                    {it.name.length > 40 ? "…" : ""}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Collapsible
+            title="История публикаций"
+            subtitle={project.version ? `v${project.version}` : "нет версий"}
+            defaultOpen={false}
+          >
+            <ProjectReleaseHistory projectId={project.id} currency={project.currency} />
+          </Collapsible>
+
+          <Collapsible title="История: клиент и Daogreen" subtitle={`${activity.length} записей`} defaultOpen={false}>
+            <ActivityFeed activity={activity} title="" />
+          </Collapsible>
+
+          <Collapsible title="Сводка и прогресс" subtitle={`${stats.total} позиций`} defaultOpen={false}>
+            <div className="stat-grid" style={{ marginBottom: 0 }}>
+              <Stat k="Без НДС" v={money(totals.budgetNet, project.currency)} />
+              <Stat k="НДС" v={money(totals.vatAmount, project.currency)} />
+              <Stat k="Итого" v={money(totals.budget, project.currency)} />
+              <Stat k="Потрачено" v={money(totals.spent, project.currency)} />
+              <div className="card stat">
+                <div className="k">Прогресс</div>
+                <div className="v num">{totals.progress}%</div>
+                <div style={{ marginTop: 8 }}><Progress value={totals.progress} /></div>
+              </div>
+            </div>
+
+            <div className="row wrap" style={{ gap: 14, marginBottom: 14, fontSize: 12.5 }}>
+              <span className="muted">Позиций: <b className="num">{stats.total}</b></span>
+              <span className="muted">Для клиента: <b className="num">{stats.approved}</b></span>
+              <span className="muted">Скрыто: <b className="num">{stats.hidden}</b></span>
+              {stats.noPrice > 0 && <span className="chip chip--amber chip-dot">без цены: {stats.noPrice}</span>}
+              {stats.noLink > 0 && <span className="chip chip--neutral chip-dot">без ссылки: {stats.noLink}</span>}
+            </div>
+          </Collapsible>
+        </div>
+
+        {/* —— Проектирование (stellages + documents; SpecTab design section below) —— */}
+        <div
+          className={workspaceView === "design" ? undefined : "pw-pane--inactive"}
+          data-workspace-pane="design"
+          aria-hidden={workspaceView !== "design"}
+          hidden={workspaceView !== "design"}
+          ref={stellagesPanelRef}
+        >
+          <StellageFrameDrawingsPanel project={project} />
+          <ProjectDocuments projectId={project.id} />
+        </div>
+
+        {/* —— Спецификация chrome —— */}
+        <div
+          className={workspaceView === "spec" ? undefined : "pw-pane--inactive"}
+          data-workspace-pane="spec-chrome"
+          aria-hidden={workspaceView !== "spec"}
+          hidden={workspaceView !== "spec"}
+        >
+          <div className="print-header">
+            <h1>{project.name}</h1>
+            <p>
+              {project.client || "—"}
+              {project.city ? ` · ${project.city}` : ""} · спецификация · {new Date().toLocaleDateString("ru-RU")}
+            </p>
+          </div>
+
+          {project.version > 0 && (
+            <p className="muted no-print" style={{ fontSize: 12, margin: "0 0 12px" }}>
+              Версия {project.version} опубликована. Правки сохраняются без новой версии — для снимка нажмите «Утвердить версию».
+            </p>
+          )}
+
+          <div className="row wrap no-print view-mode-toggle" style={{ gap: 8, marginBottom: 14 }}>
+            <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>Режим:</span>
+            {[
+              ["designer", "Проектировщик"],
+              ["client", "Предпросмотр клиента"],
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={`btn btn-sm${viewMode === id ? " btn-primary" : ""}`}
+                onClick={() => setViewMode(id)}
+              >
+                {label}
+              </button>
+            ))}
+            {viewMode === "client" && (
+              <span className="chip chip--amber" style={{ fontSize: 11 }}>
+                Только то, что увидит клиент
+              </span>
+            )}
+          </div>
+
+          {sectionTemplates.length > 0 && (
+            <div className="row wrap no-print" style={{ gap: 8, marginBottom: 14, alignItems: "center" }}>
+              <span className="muted" style={{ fontSize: 12 }}>Шаблон раздела:</span>
+              <select
+                value={applyTplId}
+                onChange={(e) => setApplyTplId(e.target.value)}
+                style={{ width: "auto", minWidth: 220 }}
+              >
+                <option value="">— выберите —</option>
+                {sectionTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name} ({t.moduleName})</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={!applyTplId}
+                onClick={async () => {
+                  const tpl = sectionTemplates.find((t) => t.id === applyTplId);
+                  await actions.applySectionTemplate(project.id, {
+                    templateId: applyTplId,
+                    targetModule: tpl?.moduleName,
+                  });
+                  await actions.loadProject(project.id);
+                  success(`Шаблон «${tpl?.name}» добавлен`);
+                }}
+              >
+                Вставить шаблон
+              </button>
+            </div>
+          )}
+
+          {/* Tabs */}
+          <div className="toolbar toolbar--tabs" style={{ borderBottom: "1px solid var(--line)", paddingBottom: 0, gap: 0 }}>
+            {[
+              ["spec", "Спецификация"],
+              ["merged", "Общий список"],
+              ["spec_lists", "Специалисты"],
+              ["calc", "Расчёт охлаждения фермы"],
+            ].map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setTab(k)}
+                className="btn btn-ghost"
+                style={{
+                  borderRadius: "6px 6px 0 0",
+                  borderBottom: tab === k ? "3px solid var(--brand)" : "3px solid transparent",
+                  color: tab === k ? "var(--brand)" : "var(--muted)",
+                  background: tab === k ? "var(--bg-light)" : "transparent",
+                  fontWeight: tab === k ? 700 : 500,
+                  padding: "10px 16px",
+                  marginRight: 4,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {versionMsg && <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>{versionMsg}</p>}
+        </div>
+
+        {/* SpecTab keep-mounted for design + spec table state */}
+        <div
+          className={
+            workspaceView === "design" || (workspaceView === "spec" && tab === "spec")
+              ? undefined
+              : "pw-pane--inactive"
+          }
+          data-workspace-pane="spec-tab"
+          aria-hidden={!(workspaceView === "design" || (workspaceView === "spec" && tab === "spec"))}
+          hidden={!(workspaceView === "design" || (workspaceView === "spec" && tab === "spec"))}
+        >
+          <div className={workspaceView === "spec" && tab === "spec" ? undefined : "pw-pane--inactive"}>
+            <ProjectCoolingSummary
+              project={project}
+              onOpenCalc={() => {
+                setTab("calc");
+                setWorkspaceView("spec");
+              }}
+            />
+          </div>
+          <SpecTab
+            project={project}
+            patchItem={patchItem}
+            actions={actions}
+            saveRooms={saveRooms}
+            floorPlanUrl={floorPlanUrl}
+            onFloorPlanChange={saveFloorPlanUrl}
+            manualParams={project.manualParams}
+            onManualParamsChange={(mp) => actions.projectUpdate(project.id, { manualParams: mp })}
+            highlightItemId={highlightItemId}
+            inspectItemRequest={inspectItemRequest}
+            onInspectItemRequestHandled={() => setInspectItemRequest(null)}
+            viewMode={viewMode}
+            quickFilters={specQuickFilters}
+            onQuickFilterChange={setSpecQuickFilters}
+            onSelectionChange={setSpecSelectedIds}
+            publishCheck={publishCheck}
+            onBulkShowClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(true))}
+            onBulkHideClient={() => bulkDeliveryPatch(buildClientVisibilityPatch(false))}
+            onBulkRefreshPrice={bulkDeliveryRefreshPrice}
+            registerClearSelection={(fn) => {
+              clearSpecSelectionRef.current = fn;
+            }}
+            registerApplySelection={(fn) => {
+              applySpecSelectionRef.current = fn;
+            }}
+            workspaceView={workspaceView}
+            onModalOpenChange={setSpecModalOpen}
           />
         </div>
-        <ProjectDocuments projectId={project.id} />
 
-        <Collapsible title="История: клиент и Daogreen" subtitle={`${activity.length} записей`} defaultOpen={activity.length > 0}>
-          <ActivityFeed activity={activity} title="" />
-        </Collapsible>
-
-        <Collapsible title="Сводка и прогресс" subtitle={`${stats.total} позиций`} defaultOpen>
-        <div className="stat-grid" style={{ marginBottom: 0 }}>
-          <Stat k="Без НДС" v={money(totals.budgetNet, project.currency)} />
-          <Stat k="НДС" v={money(totals.vatAmount, project.currency)} />
-          <Stat k="Итого" v={money(totals.budget, project.currency)} />
-          <Stat k="Потрачено" v={money(totals.spent, project.currency)} />
-          <div className="card stat">
-            <div className="k">Прогресс</div>
-            <div className="v num">{totals.progress}%</div>
-            <div style={{ marginTop: 8 }}><Progress value={totals.progress} /></div>
-          </div>
+        <div
+          className={workspaceView === "spec" && tab === "merged" ? undefined : "pw-pane--inactive"}
+          data-workspace-pane="merged"
+          aria-hidden={!(workspaceView === "spec" && tab === "merged")}
+          hidden={!(workspaceView === "spec" && tab === "merged")}
+        >
+          <MergedTab project={project} />
         </div>
-
-        <div className="row wrap" style={{ gap: 14, marginBottom: 14, fontSize: 12.5 }}>
-          <span className="muted">Позиций: <b className="num">{stats.total}</b></span>
-          <span className="muted">Для клиента: <b className="num">{stats.approved}</b></span>
-          <span className="muted">Скрыто: <b className="num">{stats.hidden}</b></span>
-          {stats.noPrice > 0 && <span className="chip chip--amber chip-dot">без цены: {stats.noPrice}</span>}
-          {stats.noLink > 0 && <span className="chip chip--neutral chip-dot">без ссылки: {stats.noLink}</span>}
+        <div
+          className={workspaceView === "spec" && tab === "spec_lists" ? undefined : "pw-pane--inactive"}
+          data-workspace-pane="spec-lists"
+          aria-hidden={!(workspaceView === "spec" && tab === "spec_lists")}
+          hidden={!(workspaceView === "spec" && tab === "spec_lists")}
+        >
+          <SpecialistTab project={project} />
         </div>
-        </Collapsible>
-
-        {/* Tabs */}
-        <div className="toolbar toolbar--tabs" style={{ borderBottom: "1px solid var(--line)", paddingBottom: 0, gap: 0 }}>
-          {[
-            ["spec", "Спецификация"],
-            ["merged", "Общий список"],
-            ["spec_lists", "Специалисты"],
-            ["calc", "Расчёт охлаждения фермы"],
-          ].map(([k, label]) => (
-            <button
-              key={k}
-              onClick={() => setTab(k)}
-              className="btn btn-ghost"
-              style={{
-                borderRadius: "6px 6px 0 0",
-                borderBottom: tab === k ? "3px solid var(--brand)" : "3px solid transparent",
-                color: tab === k ? "var(--brand)" : "var(--muted)",
-                background: tab === k ? "var(--bg-light)" : "transparent",
-                fontWeight: tab === k ? 700 : 500,
-                padding: "10px 16px",
-                marginRight: 4,
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {versionMsg && <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>{versionMsg}</p>}
-
-        {tab === "spec" && (
-          <>
-            <RoomCoolingSummary project={project} />
-            <SpecTab
-              project={project}
-              patchItem={patchItem}
-              actions={actions}
-              saveRooms={saveRooms}
-              floorPlanUrl={floorPlanUrl}
-              onFloorPlanChange={(url) => saveManualParam("floorPlanUrl", url)}
-              manualParams={project.manualParams}
-              onManualParamsChange={(mp) => actions.projectUpdate(project.id, { manualParams: mp })}
-              highlightItemId={highlightItemId}
-              viewMode={viewMode}
-              quickFilter={specQuickFilter}
-              onQuickFilterChange={setSpecQuickFilter}
-            />
-          </>
-        )}
-        {tab === "merged" && <MergedTab project={project} />}
-        {tab === "spec_lists" && <SpecialistTab project={project} />}
-        {tab === "calc" && (
+        <div
+          className={workspaceView === "spec" && tab === "calc" ? undefined : "pw-pane--inactive"}
+          data-workspace-pane="calc"
+          aria-hidden={!(workspaceView === "spec" && tab === "calc")}
+          hidden={!(workspaceView === "spec" && tab === "calc")}
+        >
           <CoolingFarmTab
             project={project}
             actions={actions}
@@ -798,10 +1244,10 @@ export default function SpecEditorPage() {
             onDuplicateToNewRoom={duplicateCoolingToNewRoom}
             onClearRoomCooling={clearCoolingRoom}
           />
-        )}
+        </div>
       </div>
 
-      {showFloorPlanPin && <FloorPlanPin url={floorPlanUrl} title="Схема помещения" />}
+      {showFloorPlanPin && <FloorPlanPin schemes={uploadedSchemes} title="Схема помещения" />}
     </>
   );
 }
@@ -870,7 +1316,14 @@ function ProjectDocuments({ projectId }) {
           {docs.map((d) => (
             <li key={d.id} style={{ marginBottom: 6 }}>
               <span className="chip chip--neutral" style={{ marginRight: 6 }}>{typeLabel(d.type)}</span>
-              <a href={photoSrc(d.url)} target="_blank" rel="noreferrer">{d.filename}</a>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ padding: 0, fontWeight: 600, textDecoration: "underline" }}
+                onClick={() => api.openAdminFile(d.id, d.filename).catch((e) => error(e.message))}
+              >
+                {d.filename}
+              </button>
               <button className="btn btn-ghost btn-sm" style={{ marginLeft: 6 }} onClick={() => remove(d)}>✕</button>
             </li>
           ))}
@@ -891,9 +1344,20 @@ function SpecTab({
   manualParams,
   onManualParamsChange,
   highlightItemId,
+  inspectItemRequest,
+  onInspectItemRequestHandled,
   viewMode = "designer",
-  quickFilter = "",
+  quickFilters = [],
   onQuickFilterChange,
+  onSelectionChange,
+  publishCheck,
+  onBulkShowClient,
+  onBulkHideClient,
+  onBulkRefreshPrice,
+  registerClearSelection,
+  registerApplySelection,
+  workspaceView = "spec",
+  onModalOpenChange,
 }) {
   const { confirm, success, error } = useToast();
   const { state } = useStore();
@@ -915,7 +1379,38 @@ function SpecTab({
   const [moduleSelected, setModuleSelected] = useState({});
   const [suppliers, setSuppliers] = useState([]);
   const [saveTplModule, setSaveTplModule] = useState(null);
+  const [commentExpandId, setCommentExpandId] = useState(null);
+  const [addMaterialModule, setAddMaterialModule] = useState(null);
+  const [columnPreset, setColumnPreset] = useState(DEFAULT_SPECIFICATION_COLUMN_PRESET);
+  const [inspectedItemId, setInspectedItemId] = useState(null);
+  const inspectorTriggerRefs = useRef(new Map());
   const moduleScrollRefs = useRef({});
+
+  const inspectedItem = useMemo(
+    () => project.items.find((item) => item.id === inspectedItemId) || null,
+    [project.items, inspectedItemId]
+  );
+
+  useEffect(() => {
+    if (inspectedItemId && !inspectedItem) setInspectedItemId(null);
+  }, [inspectedItemId, inspectedItem]);
+
+  useEffect(() => {
+    if (!inspectItemRequest) return;
+    setInspectedItemId(inspectItemRequest);
+    onInspectItemRequestHandled?.();
+  }, [inspectItemRequest, onInspectItemRequestHandled]);
+
+  const closeInspector = useCallback(() => {
+    const trigger = inspectorTriggerRefs.current.get(inspectedItemId);
+    setInspectedItemId(null);
+    window.setTimeout(() => trigger?.focus(), 0);
+  }, [inspectedItemId]);
+
+  useEffect(() => {
+    onModalOpenChange?.(Boolean(saveTplModule || addMaterialModule));
+    return () => onModalOpenChange?.(false);
+  }, [saveTplModule, addMaterialModule, onModalOpenChange]);
 
   useEffect(() => {
     api.getSuppliers().then(setSuppliers).catch(() => setSuppliers([]));
@@ -929,22 +1424,73 @@ function SpecTab({
     return ids;
   }, [moduleSelected]);
 
+  useEffect(() => {
+    onSelectionChange?.(selectedItemIds);
+  }, [selectedItemIds, onSelectionChange]);
+
+  useEffect(() => {
+    registerClearSelection?.(() => setModuleSelected({}));
+  }, [registerClearSelection]);
+
+  useEffect(() => {
+    registerApplySelection?.((ids) => {
+      setModuleSelected(buildModuleSelectionFromIds(project.items, ids));
+    });
+  }, [registerApplySelection, project.items]);
+
   const refreshFromBase = async (itemIds, fields) => {
     if (!itemIds.length) {
       error("Выберите позиции с materialId");
       return;
     }
+    const linkedIds = itemIds.filter((id) => project.items.find((it) => it.id === id)?.materialId);
+    if (!linkedIds.length) {
+      error("Нет позиций с привязкой к материалу в базе");
+      return;
+    }
+    const touchesNameOrPrice = !fields?.length || fields.includes("all") || fields.includes("name") || fields.includes("price");
+    if (touchesNameOrPrice) {
+      const needsConfirm = linkedIds.some((id) => {
+        const it = project.items.find((row) => row.id === id);
+        const mat = materials.find((row) => row.id === it?.materialId);
+        if (!it?.materialId || !mat) return false;
+        const nameDiff = !!it.nameOverridden || String(it.name || "") !== String(mat.name || "");
+        const priceDiff = (Number(it.price) || 0) !== (Number(mat.basePrice) || 0);
+        return nameDiff || priceDiff;
+      });
+      if (needsConfirm) {
+        const ok = await confirm({
+          title: "Обновить из базы",
+          message: "Вернуть название и цену из базы материалов? Ручные изменения этой позиции будут сброшены",
+          confirmLabel: "Обновить",
+        });
+        if (!ok) return;
+      }
+    }
     try {
-      const res = await api.refreshItemsFromMaterial(
+      const res = await actions.refreshItemsFromMaterial(
         project.id,
-        { itemIds, fields },
+        { itemIds: linkedIds, fields },
         { items: project.items, materials }
       );
-      await actions.loadProject(project.id);
-      success(`Обновлено позиций: ${res.updated?.length || 0}`);
+      const changedFields = [...new Set((res.results || []).flatMap((row) => row.changedFields || []))];
+      const anyChanged = (res.results || []).some((row) => row.changed) || (res.updated || []).length > 0;
+      success(anyChanged ? formatCatalogRefreshToast(changedFields) : "Позиция уже соответствует базе");
     } catch (e) {
       error(e.message);
     }
+  };
+
+  const resetItemNameFromBase = async (item) => {
+    const mat = materials.find((row) => row.id === item.materialId);
+    if (!item.materialId || !mat) return;
+    const ok = await confirm({
+      title: "Вернуть название из базы",
+      message: "Текущее название позиции будет заменено названием из базы материалов.",
+      confirmLabel: "Вернуть",
+    });
+    if (!ok) return;
+    await patchItem(item.id, { name: mat.name || "", nameOverridden: false });
   };
 
   const syncClientSections = async (itemIds) => {
@@ -970,7 +1516,6 @@ function SpecTab({
   const REFRESH_ACTIONS = [
     ["price", "Обновить цену из базы"],
     ["link", "Обновить ссылку из базы"],
-    ["supplier", "Обновить поставщика из базы"],
     ["photo", "Обновить фото из базы"],
     ["clientSection", "Обновить клиентский раздел из базы"],
     ["all", "Обновить выбранные из базы"],
@@ -1005,8 +1550,7 @@ function SpecTab({
 
   const passesFilter = (it, moduleFilter = "") => {
     if (!matchSpecLineFilter(it, moduleFilter, "project")) return false;
-    if (!quickFilter) return true;
-    return matchSpecLineFilter(it, quickFilter, "project");
+    return quickFilters.every((filterId) => matchSpecLineFilter(it, filterId, "project"));
   };
 
   const sectionNames = useMemo(() => groups.map(([m]) => m), [groups]);
@@ -1027,7 +1571,7 @@ function SpecTab({
           });
         }
       } else {
-        await api.bulkPatchItems(project.id, { itemIds: ids, patch });
+        await actions.bulkPatchItems(project.id, { itemIds: ids, patch });
         await actions.loadProject(project.id);
       }
       setModuleSelected((s) => ({ ...s, [module]: new Set() }));
@@ -1037,18 +1581,19 @@ function SpecTab({
     }
   };
 
-  const addItem = (module) => {
+  const addCustomItem = (module) => {
     actions.itemAdd(project.id, {
       module,
       section: module,
-      name: "Новая позиция",
+      name: "Произвольная позиция",
       unit: "шт.",
       category: "Прочее",
       link: "",
       clientNote: "",
       qty: 1,
       price: 0,
-      itemType: "material",
+      itemType: "note",
+      materialId: null,
       includedInProject: true,
       visibleToClient: true,
       visible: true,
@@ -1059,6 +1604,26 @@ function SpecTab({
       clientComment: "",
     });
   };
+
+  const addItemFromMaterial = async (module, mat) => {
+    try {
+      const sortOrder = (project.items || []).length;
+      const asManualDuplicate = Boolean(
+        findDuplicateMaterialInModule(project.items || [], mat.id, module),
+      );
+      const item = buildProjectItemFromMaterial(mat, module, {
+        sortOrder,
+        qty: 1,
+        asManualDuplicate,
+      });
+      await actions.itemAdd(project.id, item);
+      success(`Добавлено: ${mat.name}`);
+    } catch (e) {
+      error(e.message || "Не удалось добавить позицию");
+    }
+  };
+
+  const openAddItem = (module) => setAddMaterialModule(module);
 
   if (!project.items.length)
     return <Empty title="В проекте нет позиций" hint="Добавь модули при создании проекта или вручную ниже." />;
@@ -1085,17 +1650,45 @@ function SpecTab({
           }}
         />
       )}
+      {addMaterialModule && (
+        <AddMaterialToSpecModal
+          module={addMaterialModule}
+          materials={materials}
+          existingItems={project.items}
+          onClose={() => setAddMaterialModule(null)}
+          onSelect={async (mat) => {
+            const mod = addMaterialModule;
+            setAddMaterialModule(null);
+            await addItemFromMaterial(mod, mat);
+          }}
+          onCustom={() => {
+            const mod = addMaterialModule;
+            setAddMaterialModule(null);
+            addCustomItem(mod);
+          }}
+        />
+      )}
       {!clientPreview && (
       <>
-      <Collapsible title="Схема и комнаты" defaultOpen={hasFarmItems || !!floorPlanUrl}>
+      <div
+        className={workspaceView === "design" ? undefined : "pw-pane--inactive"}
+        data-workspace-pane="spec-design"
+        aria-hidden={workspaceView !== "design"}
+        hidden={workspaceView !== "design"}
+      >
+      <Collapsible title="Схема, комнаты и электропотребление" defaultOpen={hasFarmItems || rooms.length > 0 || !!floorPlanUrl}>
         <FloorPlanField value={floorPlanUrl || ""} onChange={onFloorPlanChange} />
-        {hasFarmItems && (
+        {(hasFarmItems || rooms.length > 0) && (
           <div style={{ marginTop: 12 }}>
             <RoomsEditor rooms={rooms} onChange={(next) => saveRooms(next)} compact />
             <RoomCoolingEditor
               rooms={rooms}
               onChange={(next) => saveRooms(next)}
             />
+            <div className="card" style={{ padding: 14, marginTop: 14 }}>
+              <h4 style={{ margin: "0 0 8px" }}>Электропотребление фермы</h4>
+              <FarmPowerEditor manualParams={manualParams} onChange={onManualParamsChange} rooms={rooms} />
+            </div>
           </div>
         )}
       </Collapsible>
@@ -1121,65 +1714,59 @@ function SpecTab({
           }
         />
       </Collapsible>
+      </div>
 
-      <div className="spec-quick-filters no-print">
-        {quickFilter ? (
-          <div className="spec-active-filter">
-            <span className="chip chip--brand spec-active-filter__chip">
-              Показаны: <strong>{resolveDashboardFilterLabel(quickFilter)}</strong>
-            </span>
+      <div
+        className={workspaceView === "spec" ? undefined : "pw-pane--inactive"}
+        data-workspace-pane="spec-table"
+        aria-hidden={workspaceView !== "spec"}
+        hidden={workspaceView !== "spec"}
+      >
+      <div className="spec-table-controls">
+      <SpecQuickFilters
+        items={project.items || []}
+        materials={materials}
+        publishCheck={publishCheck}
+        quickFilters={quickFilters}
+        onQuickFilterChange={onQuickFilterChange}
+        selectedItemIds={selectedItemIds}
+        onSelectItems={(ids) => {
+          const next = buildModuleSelectionFromIds(project.items || [], ids);
+          setModuleSelected(next);
+        }}
+        onBulkShowClient={onBulkShowClient}
+        onBulkHideClient={onBulkHideClient}
+        onBulkRefreshPrice={onBulkRefreshPrice}
+        onClearSelection={() => setModuleSelected({})}
+        syncClientSections={syncClientSections}
+      />
+      {!clientPreview && (
+        <div className="spec-columns" role="group" aria-label="Набор колонок спецификации">
+          <span className="spec-columns__label muted">Колонки</span>
+          {Object.entries(SPECIFICATION_COLUMN_PRESETS).map(([id, preset]) => (
             <button
+              key={id}
               type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={() => onQuickFilterChange?.("")}
+              className={`btn btn-sm${columnPreset === id ? " btn-primary" : ""}`}
+              aria-pressed={columnPreset === id}
+              onClick={() => setColumnPreset(id)}
             >
-              Сбросить фильтр
+              {preset.label}
             </button>
-          </div>
-        ) : null}
-        <span className="muted" style={{ fontSize: 12 }}>Быстрый фильтр:</span>
-        {PROJECT_DASHBOARD_FILTERS.map(({ id, label }) => (
-          <button
-            key={id || "all"}
-            type="button"
-            className={`btn btn-sm${quickFilter === id ? " btn-primary" : ""}`}
-            onClick={() => onQuickFilterChange?.(id)}
-          >
-            {label}
-          </button>
-        ))}
-        <button
-          type="button"
-          className="btn btn-sm btn-primary"
-          onClick={() => syncClientSections(selectedItemIds)}
-          title="Раздел и подраздел для клиентской закупки из справочника материалов"
-        >
-          Клиент. разделы из базы
-          {selectedItemIds.length > 0 ? ` (${selectedItemIds.length})` : ""}
-        </button>
-        {selectedItemIds.length > 0 && (
-          <span className="spec-refresh-toolbar">
-            <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
-              Выбрано: {selectedItemIds.length}
-            </span>
-            {REFRESH_ACTIONS.map(([field, label]) => (
-              <button
-                key={field}
-                type="button"
-                className="btn btn-sm"
-                onClick={() =>
-                  refreshFromBase(selectedItemIds, field === "all" ? ["all"] : [field])
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </span>
-        )}
+          ))}
+        </div>
+      )}
+      </div>
       </div>
       </>
       )}
 
+      <div
+        className={workspaceView === "spec" ? undefined : "pw-pane--inactive"}
+        data-workspace-pane="spec-sections"
+        aria-hidden={workspaceView !== "spec"}
+        hidden={workspaceView !== "spec"}
+      >
       {groups.map(([module, items]) => {
         const moduleFilter = moduleFilters[module] || "";
         const modSelected = moduleSelected[module] || new Set();
@@ -1194,20 +1781,29 @@ function SpecTab({
         const modSum = visibleItems.filter(lineContributesToSum).reduce((s, i) => s + lineGross(i), 0);
         const specColSpan = clientPreview
           ? (hasFarmItems ? 11 : 10)
-          : (hasFarmItems ? 21 : 20);
+          : (hasFarmItems ? 22 : 21);
         const isStellage = isStellageModuleTitle(module, modules);
         const lineGroups = isStellage ? stellageGroups : FARM_LINE_GROUPS;
         const editItem = readOnly ? () => Promise.resolve() : patchItem;
         const renderItemRow = (it) => {
+          const catalogMaterial = materials.find((material) => material.id === it.materialId);
+          const catalogPrice = Number(catalogMaterial?.basePrice) || 0;
+          const catalogLink = catalogMaterial?.link || "";
+          const catalogLinkAlt = catalogMaterial?.linkAlt || "";
+          const priceChanged = Boolean(catalogMaterial) && Number(it.price || 0) !== catalogPrice;
+          const linkChanged = Boolean(catalogMaterial) && (it.link || "") !== catalogLink;
+          const linkAltChanged = Boolean(catalogMaterial) && (it.linkAlt || "") !== catalogLinkAlt;
           const frameBomSourceLabel = clientPreview ? "" : resolveAdminItemSourceLabel(it);
+          const commentsOpen = commentExpandId === it.id;
+          const hasComments = itemHasAdminComments(it);
           return (
+            <React.Fragment key={it.id}>
                   <tr
-                    key={it.id}
                     id={`spec-item-${it.id}`}
-                    className={((it.includedInProject === false ? "row-hidden " : "") + (highlightItemId === it.id ? "spec-row--highlight" : ""))}
+                    className={((it.includedInProject === false ? "row-hidden " : "") + (highlightItemId === it.id ? "spec-row--highlight " : "") + (inspectedItemId === it.id ? "spec-row--inspected" : ""))}
                   >
                     {!clientPreview && (
-                    <td style={{ width: 36, textAlign: "center" }}>
+                    <td data-spec-column="select" hidden={!specificationPresetHasColumn(columnPreset, "select")} className="spec-select-cell" style={{ width: 36 }}>
                       <input
                         type="checkbox"
                         checked={modSelected.has(it.id)}
@@ -1222,9 +1818,9 @@ function SpecTab({
                       />
                     </td>
                     )}
-                    <td className="spec-photo">
+                    <td data-spec-column="photo" hidden={!specificationPresetHasColumn(columnPreset, "photo")} className="spec-photo">
                       {photoSrc(it.imageUrl || it.photoUrl) ? (
-                        <img
+                        <AuthMediaImg
                           src={photoSrc(it.imageUrl || it.photoUrl)}
                           alt=""
                           className="thumb-img"
@@ -1235,23 +1831,24 @@ function SpecTab({
                         </div>
                       )}
                     </td>
-                    <td style={{ minWidth: 240 }}>
+                    <td data-spec-column="name" hidden={!specificationPresetHasColumn(columnPreset, "name")} className="spec-name-cell" style={{ minWidth: 200 }}>
                       {readOnly ? (
                         <div>
-                          <strong style={{ fontSize: 13 }}>{it.name}</strong>
+                          <strong className="spec-name-text" title={it.name || ""}>{it.name}</strong>
                           {it.clientNote && (
-                            <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{it.clientNote}</div>
+                            <div className="spec-name-meta muted">{it.clientNote}</div>
                           )}
                         </div>
                       ) : (
                         <>
                       <input
-                        className="input-inline"
+                        className="input-inline spec-name-input"
                         value={it.name}
-                        onChange={(e) => editItem(it.id, { name: e.target.value })}
+                        title={it.name || ""}
+                        onChange={(e) => editItem(it.id, { name: e.target.value, ...(it.materialId ? { nameOverridden: true } : {}) })}
                       />
                       {it.comment && !hasStructuredSpecEditor(it.name) && (
-                        <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{it.comment}</div>
+                        <div className="spec-name-meta muted">{it.comment}</div>
                       )}
                       {it.source === "planner" && (
                         <div className="chip" style={{ fontSize: 10, marginTop: 4 }}>
@@ -1263,59 +1860,62 @@ function SpecTab({
                           {frameBomSourceLabel}
                         </div>
                       )}
-                      {hasStructuredSpecEditor(it.name) ? (
+                      {hasStructuredSpecEditor(it.name) && (
                         <StructuredSpecEditor
                           compact
                           name={it.name}
                           values={it}
                           onChange={(patch) => editItem(it.id, patch)}
                         />
-                      ) : (
-                        <input
-                          className="input-inline"
-                          placeholder="сообщение клиенту"
-                          style={{ marginTop: 4, fontSize: 11 }}
-                          value={it.clientNote || ""}
-                          onChange={(e) => editItem(it.id, { clientNote: e.target.value })}
-                        />
                       )}
                         </>
                       )}
                     </td>
-                    <td style={{ width: 70 }}>
+                    <td data-spec-column="unit" hidden={!specificationPresetHasColumn(columnPreset, "unit")} style={{ width: 70 }}>
                       {readOnly ? (
                         <span>{it.unit}</span>
                       ) : (
                       <input className="input-inline" value={it.unit} onChange={(e) => editItem(it.id, { unit: e.target.value })} />
                       )}
                     </td>
-                    <td className="right" style={{ width: 90 }}>
+                    <td data-spec-column="qty" hidden={!specificationPresetHasColumn(columnPreset, "qty")} className="right spec-qty-cell">
                       {readOnly ? (
                         <span className="num">{it.qty}</span>
                       ) : (
                       <input
-                        className="input-inline num"
-                        style={{ textAlign: "right" }}
+                        className="input-inline num spec-qty-input"
                         type="number"
                         value={it.qty}
                         onChange={(e) => editItem(it.id, { qty: Number(e.target.value) || 0 })}
                       />
                       )}
                     </td>
-                    <td className="right" style={{ width: 100 }}>
+                    <td data-spec-column="price" hidden={!specificationPresetHasColumn(columnPreset, "price")} className="right" style={{ width: 100 }}>
                       {readOnly ? (
                         <span className="num">{it.price}</span>
                       ) : (
-                      <input
-                        className="input-inline num"
-                        style={{ textAlign: "right" }}
-                        type="number"
-                        value={it.price}
-                        onChange={(e) => editItem(it.id, { price: Number(e.target.value) || 0 })}
-                      />
+                        <div style={{ display: "grid", gap: 3 }}>
+                          <input
+                            className="input-inline num"
+                            style={{ textAlign: "right" }}
+                            type="number"
+                            value={it.price}
+                            onChange={(e) => editItem(it.id, { price: Number(e.target.value) || 0, ...(it.materialId ? { priceOverridden: true } : {}) })}
+                          />
+                          {priceChanged && (
+                            <button
+                              type="button"
+                              className="btn btn-xs btn-ghost"
+                              title={`Вернуть цену из базы: ${catalogPrice}`}
+                              onClick={() => editItem(it.id, { price: catalogPrice, priceOverridden: false })}
+                            >
+                              ↺ база
+                            </button>
+                          )}
+                        </div>
                       )}
                     </td>
-                    <td style={{ width: 56 }}>
+                    <td data-spec-column="vat" hidden={!specificationPresetHasColumn(columnPreset, "vat")} style={{ width: 56 }}>
                       {readOnly ? (
                         <span className="num">{it.vatRate || 0}%</span>
                       ) : (
@@ -1332,20 +1932,26 @@ function SpecTab({
                       </select>
                       )}
                     </td>
-                    <td style={{ width: 100 }}>
-                      {readOnly ? (
-                        <span>{it.supplier || "—"}</span>
+                    <td data-spec-column="supplier" hidden={!specificationPresetHasColumn(columnPreset, "supplier")} style={{ width: 100 }}>
+                      {readOnly || it.materialId ? (
+                        <span
+                          className={`spec-supplier${it.materialId ? " spec-supplier--catalog" : ""}`}
+                          title={it.supplier ? `${it.supplier}${it.materialId ? " · поставщик из базы материалов" : ""}` : (it.materialId ? "Поставщик закреплён в базе материалов" : undefined)}
+                        >
+                          {it.supplier || "—"}
+                        </span>
                       ) : (
                       <input
-                        className="input-inline"
+                        className="input-inline spec-supplier-input"
                         value={it.supplier || ""}
                         placeholder="поставщик"
+                        title={it.supplier || ""}
                         onChange={(e) => editItem(it.id, { supplier: e.target.value })}
                       />
                       )}
                     </td>
                     {hasFarmItems && (
-                      <td style={{ width: 130 }}>
+                      <td data-spec-column="room" hidden={!specificationPresetHasColumn(columnPreset, "room")} style={{ width: 130 }}>
                         {isFarmGeneralItem(project, it) ? (
                           <select
                             className="input-inline"
@@ -1362,21 +1968,46 @@ function SpecTab({
                         )}
                       </td>
                     )}
-                    <td className="right num" style={{ width: 100, fontWeight: 600 }}>
+                    <td data-spec-column="sum" hidden={!specificationPresetHasColumn(columnPreset, "sum")} className="right num" style={{ width: 100, fontWeight: 600 }}>
                       {lineContributesToSum(it) ? money(lineGross(it), project.currency) : "—"}
                     </td>
-                    <td style={{ minWidth: 120, maxWidth: 180 }}>
-                      {it.link ? (
-                        <a href={it.link} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
-                          ссылка ↗
-                        </a>
-                      ) : readOnly ? (
-                        <span className="muted">—</span>
+                    <td data-spec-column="links" hidden={!specificationPresetHasColumn(columnPreset, "links")} style={{ minWidth: 170, maxWidth: 240 }}>
+                      {readOnly ? (
+                        <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                          {it.link && <a href={it.link} target="_blank" rel="noreferrer">основная ↗</a>}
+                          {it.linkAlt && <a href={it.linkAlt} target="_blank" rel="noreferrer">доп. ↗</a>}
+                          {!it.link && !it.linkAlt && <span className="muted">—</span>}
+                        </span>
                       ) : (
-                        <input className="input-inline" placeholder="url" onBlur={(e) => editItem(it.id, { link: e.target.value })} />
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <div className="row" style={{ gap: 4 }}>
+                            <input
+                              className="input-inline"
+                              value={it.link || ""}
+                              placeholder="Основная ссылка"
+                              onChange={(e) => editItem(it.id, { link: e.target.value })}
+                            />
+                            {it.link && <a href={it.link} target="_blank" rel="noreferrer" title="Открыть">↗</a>}
+                            {linkChanged && (
+                              <button type="button" className="btn btn-xs btn-ghost" title="Вернуть основную ссылку из базы" onClick={() => editItem(it.id, { link: catalogLink })}>↺</button>
+                            )}
+                          </div>
+                          <div className="row" style={{ gap: 4 }}>
+                            <input
+                              className="input-inline"
+                              value={it.linkAlt || ""}
+                              placeholder="Дополнительная ссылка"
+                              onChange={(e) => editItem(it.id, { linkAlt: e.target.value })}
+                            />
+                            {it.linkAlt && <a href={it.linkAlt} target="_blank" rel="noreferrer" title="Открыть">↗</a>}
+                            {linkAltChanged && (
+                              <button type="button" className="btn btn-xs btn-ghost" title="Вернуть дополнительную ссылку из базы" onClick={() => editItem(it.id, { linkAlt: catalogLinkAlt })}>↺</button>
+                            )}
+                          </div>
+                        </div>
                       )}
                     </td>
-                    <td style={{ minWidth: 120, maxWidth: 150 }}>
+                    <td data-spec-column="purchaseStatus" hidden={!specificationPresetHasColumn(columnPreset, "purchaseStatus")} style={{ minWidth: 120, maxWidth: 150 }}>
                       {readOnly || clientPreview ? (
                         <StatusChip status={it.status || "not_bought"} statuses={PURCHASE_STATUSES} />
                       ) : (
@@ -1403,17 +2034,26 @@ function SpecTab({
                       )}
                     </td>
                     {!clientPreview && (
-                    <td style={{ minWidth: 100, maxWidth: 140 }}>
-                      <input
-                        className="input-inline"
-                        placeholder="внутр."
-                        title="Не видно клиенту"
-                        value={it.internalNote || ""}
-                        onChange={(e) => editItem(it.id, { internalNote: e.target.value })}
-                      />
+                    <td data-spec-column="comments" hidden={!specificationPresetHasColumn(columnPreset, "comments")} className="spec-comment-cell">
+                      <button
+                        type="button"
+                        className={`spec-comment-toggle${hasComments ? " has-notes" : ""}${commentsOpen ? " is-open" : ""}`}
+                        title={hasComments ? "Комментарии (есть текст)" : "Комментарии"}
+                        aria-expanded={commentsOpen}
+                        aria-label="Комментарии к позиции"
+                        onClick={() => setCommentExpandId(commentsOpen ? null : it.id)}
+                      >
+                        💬
+                        {hasComments && (
+                          <span className="spec-comment-toggle__dots" aria-hidden>
+                            {itemHasClientNote(it) ? <span className="dot dot--client" /> : null}
+                            {itemHasInternalNote(it) ? <span className="dot dot--internal" /> : null}
+                          </span>
+                        )}
+                      </button>
                     </td>
                     )}
-                    <td style={{ minWidth: 100, maxWidth: 160, fontSize: 12 }}>
+                    <td data-spec-column="clientComment" hidden={!specificationPresetHasColumn(columnPreset, "clientComment")} style={{ minWidth: 100, maxWidth: 160, fontSize: 12 }}>
                       {it.clientComment ? (
                         <span className="chip chip--amber" style={{ whiteSpace: "normal", textAlign: "left" }}>
                           {it.clientComment}
@@ -1424,7 +2064,7 @@ function SpecTab({
                     </td>
                     {!clientPreview && (
                     <>
-                    <td style={{ width: 56 }}>
+                    <td data-spec-column="deliveryDays" hidden={!specificationPresetHasColumn(columnPreset, "deliveryDays")} style={{ width: 56 }}>
                       <input
                         className="input-inline num"
                         type="number"
@@ -1434,7 +2074,7 @@ function SpecTab({
                         onChange={(e) => editItem(it.id, { deliveryDays: Number(e.target.value) || 0 })}
                       />
                     </td>
-                    <td style={{ width: 100 }}>
+                    <td data-spec-column="group" hidden={!specificationPresetHasColumn(columnPreset, "group")} style={{ width: 100 }}>
                       <select
                         className="input-inline"
                         value={it.subcategory || ""}
@@ -1448,7 +2088,7 @@ function SpecTab({
                         ))}
                       </select>
                     </td>
-                    <td style={{ width: 100 }}>
+                    <td data-spec-column="type" hidden={!specificationPresetHasColumn(columnPreset, "type")} style={{ width: 100 }}>
                       <select
                         className="input-inline"
                         value={it.itemType || "material"}
@@ -1461,7 +2101,7 @@ function SpecTab({
                         ))}
                       </select>
                     </td>
-                    <td style={{ width: 60, textAlign: "center" }} title="Включена в проект и сумму">
+                    <td data-spec-column="included" hidden={!specificationPresetHasColumn(columnPreset, "included")} style={{ width: 60, textAlign: "center" }} title="Включена в проект и сумму">
                       <input
                         type="checkbox"
                         checked={it.includedInProject !== false}
@@ -1476,7 +2116,7 @@ function SpecTab({
                         }
                       />
                     </td>
-                    <td style={{ width: 60, textAlign: "center" }} title="Скрыто от клиента">
+                    <td data-spec-column="clientVisibility" hidden={!specificationPresetHasColumn(columnPreset, "clientVisibility") && !specificationPresetHasColumn(columnPreset, "hidden")} style={{ width: 60, textAlign: "center" }} title="Скрыто от клиента">
                       <input
                         type="checkbox"
                         checked={it.includedInProject !== false && !lineVisibleToClient(it, materials.find((m) => m.id === it.materialId))}
@@ -1490,7 +2130,7 @@ function SpecTab({
                         }
                       />
                     </td>
-                    <td style={{ width: 44 }}>
+                    <td data-spec-column="catalog" hidden={!specificationPresetHasColumn(columnPreset, "catalog")} style={{ width: 44 }}>
                       {it.materialId ? (
                         <details className="refresh-from-base">
                           <summary className="btn btn-ghost btn-sm" title="Обновить из базы материалов">
@@ -1515,7 +2155,7 @@ function SpecTab({
                         <span className="muted" style={{ fontSize: 11 }}>—</span>
                       )}
                     </td>
-                    <td style={{ width: 36 }}>
+                    <td data-spec-column="delete" hidden={!specificationPresetHasColumn(columnPreset, "delete")} style={{ width: 36 }}>
                       <button
                         className="btn btn-ghost btn-sm"
                         title="Удалить"
@@ -1533,9 +2173,77 @@ function SpecTab({
                         ✕
                       </button>
                     </td>
+                    <td data-spec-column="details" className="spec-details-cell">
+                      <span tabIndex={-1} aria-expanded={inspectedItemId === it.id} ref={(node) => node ? inspectorTriggerRefs.current.set(it.id, node) : inspectorTriggerRefs.current.delete(it.id)}>
+                      <SpecificationRowMenu
+                        item={it}
+                        material={materials.find((row) => row.id === it.materialId) || null}
+                        sectionOptions={sectionNames}
+                        onDetails={() => setInspectedItemId(it.id)}
+                        onRefresh={() => refreshFromBase([it.id], ["all"])}
+                        onResetName={() => resetItemNameFromBase(it)}
+                        onDuplicate={() => actions.itemAdd(project.id, { ...it })}
+                        onMove={(target) => patchItem(it.id, { module: target, section: target })}
+                        onDelete={async () => {
+                          if (await confirm({ title: "Удалить позицию?", message: it.name, confirmLabel: "Удалить" })) actions.itemDelete(project.id, it.id);
+                        }}
+                      />
+                      {it.nameOverridden && <div className="chip chip--neutral spec-name-override" title="Название изменено вручную в этом проекте">Изменено в проекте</div>}
+                      </span>
+                    </td>
                     </>
                     )}
                   </tr>
+                  {!clientPreview && commentsOpen && (
+                    <tr className="spec-comment-expand-row">
+                      <td colSpan={specColSpan}>
+                        <div className="spec-comment-expand">
+                          <label className="spec-comment-field">
+                            <span>Комментарий клиенту</span>
+                            <textarea
+                              rows={2}
+                              value={it.clientNote || ""}
+                              placeholder="Видно клиенту и в клиентских PDF/Excel"
+                              onChange={(e) => editItem(it.id, { clientNote: e.target.value })}
+                            />
+                          </label>
+                          <label className="spec-comment-field">
+                            <span>Внутренний комментарий</span>
+                            <textarea
+                              rows={2}
+                              value={it.internalNote || ""}
+                              placeholder="Только в админке"
+                              onChange={(e) => editItem(it.id, { internalNote: e.target.value })}
+                            />
+                          </label>
+                          {!it.materialId && (
+                            <div className="spec-comment-field" style={{ display: "grid", gap: 8 }}>
+                              <span>Английская версия (необязательно, для EN-публикации)</span>
+                              <input
+                                className="input"
+                                value={it.nameEn || ""}
+                                placeholder="English name"
+                                onChange={(e) => editItem(it.id, { nameEn: e.target.value })}
+                              />
+                              <textarea
+                                rows={2}
+                                value={it.descriptionEn || ""}
+                                placeholder="English description"
+                                onChange={(e) => editItem(it.id, { descriptionEn: e.target.value })}
+                              />
+                              <input
+                                className="input"
+                                value={it.unitEn || ""}
+                                placeholder="English unit"
+                                onChange={(e) => editItem(it.id, { unitEn: e.target.value })}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+            </React.Fragment>
           );
         };
         const bodyRows = isStellageModuleTitle(module, modules)
@@ -1563,7 +2271,7 @@ function SpecTab({
             <button className="btn btn-sm btn-ghost" onClick={() => setSaveTplModule(module)}>
               Сохранить как шаблон
             </button>
-            <button className="btn btn-sm btn-ghost" onClick={() => addItem(module)}>
+            <button className="btn btn-sm btn-ghost" onClick={() => openAddItem(module)}>
               ＋ позиция
             </button>
             </span>
@@ -1601,34 +2309,35 @@ function SpecTab({
                 : {}),
             }}
           >
-            <table className="spec">
+            <table className="spec" data-preset={columnPreset}>
               <thead className="virtual-table-head">
                 <tr>
-                  {!clientPreview && <th style={{ width: 36 }} aria-label="Выбор" />}
-                  <th style={{ width: 48 }}>Фото</th>
-                  <th>Наименование</th>
-                  <th>Ед</th>
-                  <th className="right">Кол-во</th>
-                  <th className="right">Цена</th>
-                  <th>НДС</th>
-                  <th>Поставщик</th>
-                  {hasFarmItems && <th style={{ width: 130 }}>Комната</th>}
-                  <th className="right">Сумма</th>
-                  <th>Ссылка</th>
-                  <th style={{ width: 130 }}>Статус закупки</th>
-                  {!clientPreview && <th title="Внутренний комментарий">Заметка</th>}
-                  <th title="Комментарий клиента">Клиент</th>
+                  {!clientPreview && <th data-spec-column="select" hidden={!specificationPresetHasColumn(columnPreset, "select")} style={{ width: 36 }} aria-label="Выбор" />}
+                  <th data-spec-column="photo" hidden={!specificationPresetHasColumn(columnPreset, "photo")} style={{ width: 48 }}>Фото</th>
+                  <th data-spec-column="name" hidden={!specificationPresetHasColumn(columnPreset, "name")}>Наименование</th>
+                  <th data-spec-column="unit" hidden={!specificationPresetHasColumn(columnPreset, "unit")}>Ед</th>
+                  <th data-spec-column="qty" hidden={!specificationPresetHasColumn(columnPreset, "qty")} className="right spec-qty-cell">Кол-во</th>
+                  <th data-spec-column="price" hidden={!specificationPresetHasColumn(columnPreset, "price")} className="right">Цена</th>
+                  <th data-spec-column="vat" hidden={!specificationPresetHasColumn(columnPreset, "vat")}>НДС</th>
+                  <th data-spec-column="supplier" hidden={!specificationPresetHasColumn(columnPreset, "supplier")}>Поставщик</th>
+                  {hasFarmItems && <th data-spec-column="room" hidden={!specificationPresetHasColumn(columnPreset, "room")} style={{ width: 130 }}>Комната</th>}
+                  <th data-spec-column="sum" hidden={!specificationPresetHasColumn(columnPreset, "sum")} className="right">Сумма</th>
+                  <th data-spec-column="links" hidden={!specificationPresetHasColumn(columnPreset, "links")}>Ссылка</th>
+                  <th data-spec-column="purchaseStatus" hidden={!specificationPresetHasColumn(columnPreset, "purchaseStatus")} style={{ width: 130 }}>Статус закупки</th>
+                  {!clientPreview && <th data-spec-column="comments" hidden={!specificationPresetHasColumn(columnPreset, "comments")} className="spec-comment-cell" title="Комментарии к позиции">💬</th>}
+                  <th data-spec-column="clientComment" hidden={!specificationPresetHasColumn(columnPreset, "clientComment")} title="Комментарий клиента">Клиент</th>
                   {!clientPreview && (
                     <>
-                  <th title="Срок поставки, дней">Дней</th>
-                  <th>Группа</th>
-                  <th>Тип</th>
-                  <th title="В проекте">В проекте</th>
-                  <th title="Скрыто от клиента">Скрыто</th>
-                  <th title="Обновить снимок из базы">База</th>
-                  <th></th>
+                  <th data-spec-column="deliveryDays" hidden={!specificationPresetHasColumn(columnPreset, "deliveryDays")} title="Срок поставки, дней">Дней</th>
+                  <th data-spec-column="group" hidden={!specificationPresetHasColumn(columnPreset, "group")}>Группа</th>
+                  <th data-spec-column="type" hidden={!specificationPresetHasColumn(columnPreset, "type")}>Тип</th>
+                  <th data-spec-column="included" hidden={!specificationPresetHasColumn(columnPreset, "included")} title="В проекте">В проекте</th>
+                  <th data-spec-column="clientVisibility" hidden={!specificationPresetHasColumn(columnPreset, "clientVisibility") && !specificationPresetHasColumn(columnPreset, "hidden")} title="Скрыто от клиента">Скрыто</th>
+                  <th data-spec-column="catalog" hidden={!specificationPresetHasColumn(columnPreset, "catalog")} title="Обновить снимок из базы">База</th>
+                  <th data-spec-column="delete" hidden={!specificationPresetHasColumn(columnPreset, "delete")}></th>
                     </>
                   )}
+                  {!clientPreview && <th data-spec-column="details" className="spec-details-cell">Подробнее</th>}
                 </tr>
               </thead>
               <tbody>{bodyRows}</tbody>
@@ -1637,6 +2346,26 @@ function SpecTab({
         </Collapsible>
       );
       })}
+      {!clientPreview && inspectedItem && (
+        <SpecificationItemInspector
+          item={inspectedItem}
+          project={project}
+          materials={materials}
+          rooms={rooms}
+          lineGroups={isStellageModuleTitle(inspectedItem.module, modules) ? stellageGroups : FARM_LINE_GROUPS}
+          sectionOptions={sectionNames}
+          onPatch={patchItem}
+          onClose={closeInspector}
+          onRefreshFromBase={(itemId) => refreshFromBase([itemId], ["all"])}
+          onDuplicate={(item) => actions.itemAdd(project.id, { ...item })}
+          onMove={(item, target) => patchItem(item.id, { module: target, section: target })}
+          onDelete={async (item) => {
+            const ok = await confirm({ title: "Удалить позицию?", message: item.name, confirmLabel: "Удалить" });
+            if (ok) actions.itemDelete(project.id, item.id);
+          }}
+        />
+      )}
+      </div>
     </div>
   );
 }
@@ -1647,6 +2376,7 @@ function MergedTab({ project }) {
   const mergedScrollRef = useRef(null);
   const exportMerged = async () => {
     const { downloadXlsx } = await import("../../lib/exportXlsx.js");
+    const { roundMoney } = await import("../../../shared/moneyCalc.js");
     downloadXlsx(
       `${project.name}_общий_список`,
       rows.map((r) => ({
@@ -1654,8 +2384,9 @@ function MergedTab({ project }) {
         Ед: r.unit,
         Кол: r.qty,
         Цена: r.price,
-        Сумма: Math.round(r.sum),
+        Сумма: roundMoney(r.sumVat ?? r.sum),
         Источники: r.sources.map((s) => `${s.module}: ${num(s.qty)}`).join("; "),
+        _link: r.link || "",
       }))
     );
   };

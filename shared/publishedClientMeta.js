@@ -1,0 +1,125 @@
+/** Allowlisted client-facing project metadata for published releases. */
+
+import { projectClientLanguage } from "./projectClientLanguage.js";
+import { normalizeProjectCurrency } from "./projectCurrency.js";
+
+export const CLIENT_PROJECT_META_FIELDS = [
+  "name",
+  "client",
+  "city",
+  "address",
+  "description",
+  "comment",
+  "currency",
+  "currencyCode",
+  "currencySymbol",
+  "currencyName",
+  "currencyCustom",
+  "vat",
+  "type",
+  "area",
+  "height",
+  "sowingArea",
+  "status",
+];
+
+/**
+ * Build immutable projectMeta stored in release snapshot.
+ * Omits auth, tokens, internal-only and server paths.
+ */
+export function buildPublishedProjectMeta(project = {}) {
+  const cur = normalizeProjectCurrency(project);
+  return {
+    id: String(project?.id || ""),
+    name: String(project?.name || ""),
+    client: String(project?.client || ""),
+    city: String(project?.city || ""),
+    address: String(project?.address || ""),
+    description: String(project?.description || ""),
+    comment: String(project?.comment || ""),
+    currency: cur.currencySymbol,
+    currencyCode: cur.currencyCode,
+    currencySymbol: cur.currencySymbol,
+    currencyName: cur.currencyName,
+    currencyCustom: !!cur.currencyCustom,
+    vat: !!project?.vat,
+    type: String(project?.type || ""),
+    area: project?.area ?? "",
+    height: project?.height ?? "",
+    sowingArea: project?.sowingArea ?? "",
+    status: String(project?.status || ""),
+    versionNumber: Number(project?.version) || 0,
+  };
+}
+
+function metaIsUsable(projectMeta) {
+  if (!projectMeta || typeof projectMeta !== "object") return false;
+  return (
+    projectMeta.name != null ||
+    projectMeta.client != null ||
+    projectMeta.currency != null ||
+    projectMeta.currencyCode != null ||
+    projectMeta.city != null
+  );
+}
+
+/**
+ * Apply published meta onto a client DTO shell.
+ * Legacy compatibility: only when projectMeta is truly absent, fall back to live allowlist fields.
+ */
+export function applyPublishedProjectMeta(projectMeta, liveProject = {}, { allowLiveFallback = false } = {}) {
+  const useSnapshot = metaIsUsable(projectMeta);
+  const use = useSnapshot ? projectMeta : allowLiveFallback ? liveProject : {};
+
+  const out = {};
+  for (const key of CLIENT_PROJECT_META_FIELDS) {
+    if (key === "vat") {
+      out.vat = !!use[key];
+      continue;
+    }
+    if (key === "currencyCustom") {
+      continue;
+    }
+    if (
+      key === "currency" ||
+      key === "currencyCode" ||
+      key === "currencySymbol" ||
+      key === "currencyName"
+    ) {
+      continue;
+    }
+    if (use[key] !== undefined && use[key] !== null) {
+      out[key] = use[key];
+      continue;
+    }
+    out[key] = "";
+  }
+  // Always normalize from snapshot/live fields — never hardcode ₽ when currencyCode is USD.
+  const cur = normalizeProjectCurrency(use);
+  out.currency = cur.currencySymbol;
+  out.currencyCode = cur.currencyCode;
+  out.currencySymbol = cur.currencySymbol;
+  out.currencyName = cur.currencyName;
+  out.currencyCustom = !!cur.currencyCustom;
+  // Language is frozen on the release snapshot; default RU for legacy rows.
+  out.clientLanguage = projectClientLanguage(use);
+  return out;
+}
+
+/** Header fields used by PDF/Excel — always from client DTO (already snapshot-backed). */
+export function clientExportHeader(project = {}) {
+  const cur = normalizeProjectCurrency(project);
+  return {
+    id: project?.id || "",
+    name: String(project?.name || ""),
+    client: String(project?.client || ""),
+    city: String(project?.city || ""),
+    address: String(project?.address || ""),
+    comment: String(project?.comment || ""),
+    currency: cur.currencySymbol,
+    currencyCode: cur.currencyCode,
+    currencySymbol: cur.currencySymbol,
+    vat: !!project?.vat,
+    status: String(project?.status || ""),
+  };
+}

@@ -5,6 +5,8 @@ import {
   isDraftProject,
   isActiveProject,
   buildBuilderDraftPath,
+  buildBuilderEditPath,
+  buildBuilderContinuePath,
   projectOpenPath,
   projectOpenLabel,
   mergeBuilderWizardParams,
@@ -19,6 +21,8 @@ describe('projectLifecycle', () => {
     expect(isActiveProject({ status: PROJECT_STATUS_ACTIVE })).toBe(true);
     expect(isActiveProject({ status: PROJECT_STATUS_DRAFT })).toBe(false);
     expect(isActiveProject({ status: 'archived' })).toBe(false);
+    expect(isActiveProject({ status: 'in_progress' })).toBe(true);
+    expect(isActiveProject({ status: 'ready_to_send' })).toBe(true);
   });
 
   it('builds draft wizard URLs', () => {
@@ -26,6 +30,18 @@ describe('projectLifecycle', () => {
       .toBe('/new?projectId=p1&mode=draft&step=stellages&editRack=mod1%3Ast1');
     expect(buildBuilderEditStellagesPath('p1', { editRack: 'mod1:st1' }))
       .toBe('/new?projectId=p1&mode=draft&step=stellages&editRack=mod1%3Ast1');
+  });
+
+  it('builds edit URL for finished project without creating a new id', () => {
+    expect(buildBuilderEditPath('p2', { step: 'general' }))
+      .toBe('/new?projectId=p2&mode=edit&step=general');
+    const active = {
+      id: 'p2',
+      status: PROJECT_STATUS_ACTIVE,
+      manualParams: { builderWizard: { lastStep: 'cooling' } },
+    };
+    expect(buildBuilderContinuePath(active)).toBe('/new?projectId=p2&mode=edit&step=cooling');
+    expect(buildBuilderContinuePath(active)).toContain('projectId=p2');
   });
 
   it('routes open actions by lifecycle', () => {
@@ -46,8 +62,10 @@ describe('projectLifecycle', () => {
     const parsed = parseBuilderSearchParams('projectId=p1&mode=draft&step=stellages&editRack=mod1:st1');
     expect(parsed.projectId).toBe('p1');
     expect(parsed.mode).toBe('draft');
-    expect(parsed.step).toBe('stellages');
-    expect(parsed.editRack).toBe('mod1:st1');
     expect(parsed.isDraftUrl).toBe(true);
+    expect(parsed.isEditUrl).toBe(false);
+    const edit = parseBuilderSearchParams('projectId=p2&mode=edit&step=review');
+    expect(edit.isEditUrl).toBe(true);
+    expect(edit.isDraftUrl).toBe(false);
   });
 });

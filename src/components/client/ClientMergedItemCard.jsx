@@ -3,7 +3,7 @@ import PhotoGallery from "../PhotoGallery.jsx";
 import { Chip } from "../ui.jsx";
 import { PURCHASE_STATUSES } from "../../data/modules.js";
 import { materialSpecLabel } from "../../lib/materialSpecs.js";
-import { itemImageUrl, isPurchaseClosed } from "../../lib/itemHelpers.js";
+import { isPurchaseClosed } from "../../lib/itemHelpers.js";
 import { money, num } from "../../store/helpers.js";
 import { isCoolingSpecItem } from "../../../shared/itemTypes.js";
 import {
@@ -12,9 +12,11 @@ import {
   resolveClientPurchaseStatusLabel,
 } from "../../../shared/clientPurchaseRows.js";
 import { getPurchaseStatusTone, isPurchaseStatusNeedsAttention } from "../../../shared/purchaseStatusRules.js";
+import { clientMergedPhotoSrc } from "../../lib/photoHelpers.js";
 import ClientStatusActions from "./ClientStatusActions.jsx";
 import { patchMergedRow } from "../../lib/clientMergedPatch.js";
 import { DebouncedInput } from "./ClientDebouncedField.jsx";
+import { t, tStatus, tUnit } from "../../../shared/clientI18n.js";
 
 function mergedRowStatus(row) {
   if (row.statusSummary?.status) return row.statusSummary.status;
@@ -40,10 +42,12 @@ export default function ClientMergedItemCard({
   purchaseStatuses = PURCHASE_STATUSES,
   onProposeReplacement,
   compact = false,
+  language = "ru",
+  clientToken = "",
 }) {
   const [showPhoto, setShowPhoto] = useState(false);
   const rep = row.sourceItems?.[0];
-  const photoUrl = rep ? itemImageUrl(rep) : row.imageUrl;
+  const photoUrl = clientMergedPhotoSrc(row, clientToken);
   const hasPhoto = !!photoUrl;
   const showImage = !compact || showPhoto;
   const img = showImage ? photoUrl : "";
@@ -59,13 +63,16 @@ export default function ClientMergedItemCard({
   const coolingSpec = isCoolingSpecItem(rep || row);
   const unitPrice = formatClientUnitPrice(row);
   const lineTotal = formatClientLineTotal(row);
-  const unitPriceLabel = typeof unitPrice === "number" ? money(unitPrice, currency) : unitPrice;
+  const localizedPrice = (value) => value === "цена уточняется"
+    ? t(language, "client.price.tbd")
+    : value === "Без цены" ? t(language, "client.price.missing") : value;
+  const unitPriceLabel = typeof unitPrice === "number" ? money(unitPrice, currency) : localizedPrice(unitPrice);
   const lineTotalLabel =
     lineTotal === ""
       ? ""
       : typeof lineTotal === "number"
         ? money(lineTotal, currency)
-        : lineTotal;
+        : localizedPrice(lineTotal);
 
   return (
     <div className={"card card-item" + (bought ? " card-item--bought" : "") + (compact ? " card-item--compact" : "")}>
@@ -82,31 +89,31 @@ export default function ClientMergedItemCard({
           <div className="row" style={{ gap: 6, alignItems: "center" }}>
             {compact && hasPhoto && !showPhoto && (
               <button type="button" className="btn btn-sm btn-ghost" onClick={() => setShowPhoto(true)}>
-                Фото
+                {t(language, "client.purchaseTable.showPhoto")}
               </button>
             )}
             {compact && showPhoto && (
               <button type="button" className="btn btn-sm btn-ghost" onClick={() => setShowPhoto(false)}>
-                Скрыть
+                {t(language, "client.purchaseTable.hidePhoto")}
               </button>
             )}
           {bought ? (
             <span className="chip chip--ok chip-dot" style={{ fontSize: 11 }}>
-              Готово
+              {t(language, "client.itemCard.done")}
             </span>
           ) : (
             <Chip
               kind={getPurchaseStatusTone(status)}
               dot={isPurchaseStatusNeedsAttention(status)}
             >
-              {resolveClientPurchaseStatusLabel(row)}
+              {tStatus(language, status) === status ? resolveClientPurchaseStatusLabel(row) : tStatus(language, status)}
             </Chip>
           )}
           {multi && !bought && (
             <span
               className="chip chip--brand chip-dot"
               style={{ fontSize: 11, marginLeft: 6 }}
-              title="Одинаковые позиции с разных стеллажей сложены в одну строку"
+              title={t(language, "client.itemCard.mergeChipTitle")}
             >
               ×{row.sourceCount || row.sources?.length}
             </span>
@@ -116,39 +123,45 @@ export default function ClientMergedItemCard({
         {!compact && rep && materialSpecLabel(rep) && (
           <div style={{ fontSize: 12, marginTop: 2, color: "var(--brand)" }}>{materialSpecLabel(rep)}</div>
         )}
-        <div className="muted" style={{ fontSize: compact ? 12 : 12.5, marginTop: 2 }}>
-          <span className="num">{num(row.qty)}</span> {row.unit}
-          {!compact && (row.vatRate || 0) > 0 && <span> · НДС {row.vatRate}%</span>}
+        <div className="client-qty-row">
+          <span className="client-qty-badge" title={t(language, "client.purchaseTable.qtyTitle")}>
+            <span className="num">{num(row.qty)}</span>
+            <span className="client-qty-badge__unit">{tUnit(language, row.unit || "шт.")}</span>
+          </span>
+          {!compact && (row.vatRate || 0) > 0 && (
+            <span className="muted" style={{ fontSize: 12 }}>
+              {t(language, "client.itemCard.vat", { rate: row.vatRate })}
+            </span>
+          )}
           {compact && lineTotalLabel && (
-            <span>
-              {" "}
+            <span className="muted" style={{ fontSize: 12 }}>
               · <span className="num">{lineTotalLabel}</span>
             </span>
           )}
         </div>
         {!compact && (
             <div style={{ fontSize: 12.5, marginTop: 4 }}>
-              Цена: <span className="num">{unitPriceLabel}</span>
+              {t(language, "client.itemCard.priceLabel", { price: unitPriceLabel })}
               {lineTotalLabel ? (
                 <>
-                  /ед · Сумма: <b className="num">{lineTotalLabel}</b>
+                  {" "}{t(language, "client.itemCard.sumLabel", { sum: lineTotalLabel })}
                 </>
               ) : null}
             </div>
           )}
         {!compact && row.supplier && (
           <div style={{ fontSize: 12.5, marginTop: 4 }}>
-            <b>Поставщик:</b> {row.supplier}
+            <b>{t(language, "client.itemCard.supplierLabel")}</b> {row.supplier}
           </div>
         )}
         {sourcesLine && (
           <div className="muted client-merged-sources" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.45 }}>
-            <b>Из:</b> {sourcesLine}
+            {t(language, "client.purchaseTable.fromSource", { sourceText: sourcesLine })}
           </div>
         )}
         {!compact && row.clientNote && (
           <div className="client-admin-note" style={{ fontSize: 12.5, marginTop: 6 }}>
-            <b>{coolingSpec ? "Спецификация:" : "Комментарий Daogreen:"}</b> {row.clientNote}
+            <b>{t(language, coolingSpec ? "client.itemCard.specLabel" : "client.itemCard.commentLabel")}</b> {row.clientNote}
           </div>
         )}
         {row.link && (
@@ -159,12 +172,13 @@ export default function ClientMergedItemCard({
             className="btn btn-sm"
             style={{ marginTop: compact ? 6 : 8, display: "inline-block" }}
           >
-            {compact ? "Ссылка ↗" : "Открыть ссылку ↗"}
+            {t(language, compact ? "client.itemCard.linkShort" : "client.itemCard.linkLong")}
           </a>
         )}
 
         {!bought ? (
           <ClientStatusActions
+            language={language}
             status={status}
             onStatusChange={onStatus}
             onNeedReplacement={onReplacement}
@@ -176,14 +190,14 @@ export default function ClientMergedItemCard({
             style={{ marginTop: 10 }}
             onClick={() => onStatus("not_bought")}
           >
-            Вернуть в список
+            {t(language, "client.itemCard.revert")}
           </button>
         )}
 
         {!compact && !bought && (
           <div className="row no-print" style={{ marginTop: 10, gap: 8, flexWrap: "wrap" }}>
             <div className="field" style={{ flex: "0 0 150px" }}>
-              <label>Факт. цена</label>
+              <label>{t(language, "client.itemCard.actualPriceLabel")}</label>
               <DebouncedInput
                 type="number"
                 value={rep?.actualPrice ?? ""}
@@ -192,7 +206,7 @@ export default function ClientMergedItemCard({
               />
             </div>
             <div className="field" style={{ flex: 1, minWidth: 160 }}>
-              <label>Комментарий</label>
+              <label>{t(language, "client.itemCard.clientCommentLabel")}</label>
               <DebouncedInput
                 value={rep?.clientComment || ""}
                 onCommit={(val) => patchRowField({ clientComment: val })}

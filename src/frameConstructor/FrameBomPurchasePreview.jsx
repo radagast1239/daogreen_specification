@@ -23,6 +23,23 @@ function PreviewLine({ label, qty, unit }) {
   );
 }
 
+/** Stable React key — never materialId alone when duplicates are possible. */
+export function frameBomPreviewItemKey(item, index = 0) {
+  if (item?.key) return String(item.key);
+  if (item?.id) return String(item.id);
+  const composite = [
+    item?.bomKey || "",
+    item?.moduleRackKey || item?.drawingId || "",
+    item?.sourceKey || "",
+    item?.materialId || "",
+    item?.name || "",
+    String(index),
+  ]
+    .filter(Boolean)
+    .join("::");
+  return composite || `bom-preview-${index}`;
+}
+
 function PipeCutsList({ pipeCuts }) {
   if (!pipeCuts?.length) return null;
   return (
@@ -165,9 +182,9 @@ export default function FrameBomPurchasePreview({
           {groups.other.length > 0 && (
             <div className="fc-bom-preview__block">
               <ul className="fc-bom-preview__list">
-                {groups.other.map((item) => (
+                {groups.other.map((item, index) => (
                   <PreviewLine
-                    key={item.key || item.materialId}
+                    key={frameBomPreviewItemKey(item, index)}
                     label={item.name}
                     qty={item.qty}
                     unit={item.unit}

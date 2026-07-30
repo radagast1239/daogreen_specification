@@ -1,5 +1,9 @@
 import { uid } from "./ids.js";
-import { FRAME_BOM_SOURCE, isFrameBomLine } from "../../shared/frameBomProjectItems.js";
+import { FRAME_BOM_SOURCE } from "../../shared/frameBomProjectItems.js";
+import {
+  copyCatalogSnapshotFromMaterial,
+  fillEmptyCatalogFieldsFromMaterial,
+} from "../../shared/materialCatalogSnapshot.js";
 import { normalizeStoredCatalogLine } from "../../shared/catalogLine.js";
 import { mergeLineSpecOverrides } from "../../shared/lineSpecOverrides.js";
 import { materialCompositionGroup } from "../../shared/stellageComposition.js";
@@ -9,8 +13,8 @@ import { resolveFlowSpecs, normalizeFlowSpecs } from "../../shared/flowSpecs.js"
 import { resolveSplitSpecs, normalizeSplitSpecs } from "../../shared/splitSpecs.js";
 import { resolveItemType } from "../../shared/itemTypes.js";
 
-/** Поля, которые при привязке к materialId берутся из базы, если в шаблоне пусто */
-const MATERIAL_SYNC_KEYS = [
+/** Поля материала, которые всегда берутся из базы при materialId */
+export const MATERIAL_CATALOG_FIELD_KEYS = [
   "name",
   "unit",
   "category",
@@ -31,6 +35,9 @@ const MATERIAL_SYNC_KEYS = [
   "coolingBtu",
   "exhaustM3",
 ];
+
+/** @deprecated use MATERIAL_CATALOG_FIELD_KEYS — kept for fill-if-empty merge in lineFromMaterial */
+const MATERIAL_SYNC_KEYS = MATERIAL_CATALOG_FIELD_KEYS;
 
 function isEmptyCatalogOverride(v) {
   if (v === null || v === undefined) return true;
@@ -121,13 +128,48 @@ export function lineFromMaterial(mat, overrides = {}) {
   return blankLine(mergeMaterialWithCatalogOverrides(fromMat, overrides));
 }
 
+/**
+ * Подтянуть каталожные поля без перезаписи существующего snapshot.
+ * Для явного обновления из базы используйте refreshItemFromMaterial / applyCatalogDiffToItem.
+ * @param {object} [options]
+ * @param {boolean} [options.force] — перезаписать все catalog-owned поля (legacy / explicit refresh)
+ * @param {boolean} [options.isNewLine] — новая строка: полный snapshot из каталога
+ */
+export function applyMaterialCatalogFields(line, materials = [], options = {}) {
+  if (!line) return line;
+  const { force = false, isNewLine = false } = options;
+  if (force || isNewLine) {
+    const snapshotted = copyCatalogSnapshotFromMaterial(line, materials);
+    if (!String(snapshotted.subcategory || snapshotted.farmGroup || "").trim()) {
+      const mat = materials.find((m) => (m.id || m.materialId) === line.materialId);
+      if (mat) snapshotted.subcategory = mat.subcategory || materialCompositionGroup(mat) || "";
+    }
+    if (!Array.isArray(snapshotted.pipeCuts) || !snapshotted.pipeCuts.length) {
+      const mat = materials.find((m) => (m.id || m.materialId) === line.materialId);
+      if (mat) snapshotted.pipeCuts = resolvePipeCuts(mat);
+    }
+    if (!Array.isArray(snapshotted.breakerSpecs) || !snapshotted.breakerSpecs.length) {
+      const mat = materials.find((m) => (m.id || m.materialId) === line.materialId);
+      if (mat) snapshotted.breakerSpecs = resolveBreakerSpecs(mat);
+    }
+    if (!Array.isArray(snapshotted.flowSpecs) || !snapshotted.flowSpecs.length) {
+      const mat = materials.find((m) => (m.id || m.materialId) === line.materialId);
+      if (mat) snapshotted.flowSpecs = resolveFlowSpecs(mat);
+    }
+    if (!Array.isArray(snapshotted.splitSpecs) || !snapshotted.splitSpecs.length) {
+      const mat = materials.find((m) => (m.id || m.materialId) === line.materialId);
+      if (mat) snapshotted.splitSpecs = resolveSplitSpecs(mat);
+    }
+    return snapshotted;
+  }
+  return fillEmptyCatalogFieldsFromMaterial(line, materials);
+}
+
 /** Строка каталога/пресета → полная строка редактора (данные только из базы материалов) */
 export function hydrateCatalogEditorLine(ln, materials) {
   if (!ln) return blankLine();
   const stored = normalizeStoredCatalogLine(ln);
-  const qty = isFrameBomLine(ln)
-    ? Number(ln.qty ?? stored.qty ?? stored.defaultQty) || 0
-    : Number(stored.defaultQty ?? ln.qty) || 0;
+  const qty = Number(ln.qty ?? stored.qty ?? stored.defaultQty) || 0;
   const sub = stored.subcategory || ln.farmGroup || ln.subcategory || "";
   const included = ln.included !== false;
 
@@ -144,7 +186,7 @@ export function hydrateCatalogEditorLine(ln, materials) {
         included,
       });
     }
-    return mergeLineSpecOverrides(
+    const hydrated = mergeLineSpecOverrides(
       {
         ...lineFromMaterial(mat, {
           included,
@@ -157,6 +199,12 @@ export function hydrateCatalogEditorLine(ln, materials) {
       },
       ln
     );
+    return {
+      ...hydrated,
+      ...(ln.priceOverridden ? { price: Number(ln.price) || 0, priceOverridden: true } : {}),
+      ...(ln.linkOverridden ? { link: ln.link || "", linkOverridden: true } : {}),
+      ...(ln.linkAltOverridden ? { linkAlt: ln.linkAlt || "", linkAltOverridden: true } : {}),
+    };
   }
 
   return blankLine({

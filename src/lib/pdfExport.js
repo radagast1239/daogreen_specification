@@ -1,7 +1,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import QRCode from "qrcode";
-import { money, num } from "../store/helpers.js";
+import { num } from "../store/helpers.js";
 import { lineGross } from "./itemHelpers.js";
 import { absolutePhotoUrl } from "./photoHelpers.js";
 import { loadPdfImage, buildPdfPhotoMap, pdfPhotoTableHooks, itemRowPhotoUrl } from "./pdfImageHelpers.js";
@@ -9,8 +9,13 @@ import { PDF_COLUMN_OPTIONS } from "./clientBrandConfig.js";
 import { PURCHASE_STATUSES } from "../data/modules.js";
 import { setupPdfFonts, pdfTableFontStyles, pdfTableHeadFontStyles } from "./pdfFontSetup.js";
 import { safePdfText, safePdfPhotoCell } from "./pdfSafeValue.js";
+import { formatMoneyForPdf, normalizeProjectCurrency } from "../../shared/projectCurrency.js";
 
 const COLUMN_LABELS = Object.fromEntries(PDF_COLUMN_OPTIONS.map((c) => [c.id, c.label]));
+
+function pdfMoney(amount, project) {
+  return formatMoneyForPdf(amount, normalizeProjectCurrency(project));
+}
 
 function hexToRgb(hex) {
   const h = (hex || "#116355").replace("#", "");
@@ -32,9 +37,9 @@ function cellValue(col, it, project, purchaseStatuses) {
     case "unit":
       return it.unit || "шт.";
     case "price":
-      return money(it.price, project.currency);
+      return pdfMoney(it.price, project);
     case "sum":
-      return money(lineGross(it), project.currency);
+      return pdfMoney(lineGross(it), project);
     case "supplier":
       return it.supplier || "—";
     case "category":

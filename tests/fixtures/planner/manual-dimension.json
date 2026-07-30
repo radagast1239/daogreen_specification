@@ -1,0 +1,30 @@
+{
+  "_fixture": "manual-dimension",
+  "_note": "Одна стена и ручной размер (kind=manual), привязанный к геометрии стены через attachedTo{type:wall, wallId, segIndex, t0, t1}. Проверка резолва якоря размера.",
+  "unit": "mm",
+  "room": { "w": 12000, "h": 8000, "wallThk": 120, "height": 3000 },
+  "nodes": {
+    "n1": { "x": 0, "y": 0 },
+    "n2": { "x": 4000, "y": 0 }
+  },
+  "walls": [
+    { "id": "w1", "a": "n1", "b": "n2", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w1" }
+  ],
+  "items": [],
+  "lines": [],
+  "dimensions": [
+    {
+      "id": "dim1",
+      "type": "dimension",
+      "mode": "linear",
+      "kind": "manual",
+      "p1": { "x": 0, "y": 0 },
+      "p2": { "x": 4000, "y": 0 },
+      "offset": 300,
+      "orientation": "horizontal",
+      "attachedTo": { "type": "wall", "wallId": "w1", "segIndex": 0, "t0": 0, "t1": 1 },
+      "labelOverride": null,
+      "locked": false
+    }
+  ]
+}

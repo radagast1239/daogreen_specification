@@ -1,5 +1,7 @@
 /** Project lifecycle: draft wizard vs active HQ project */
 
+import { isProjectStatusActiveLifecycle } from "./projectStatus.js";
+
 export const PROJECT_STATUS_DRAFT = 'draft';
 export const PROJECT_STATUS_ACTIVE = 'active';
 export const PROJECT_STATUS_ARCHIVED = 'archived';
@@ -9,8 +11,7 @@ export function isDraftProject(project) {
 }
 
 export function isActiveProject(project) {
-  const status = String(project?.status || PROJECT_STATUS_ACTIVE);
-  return status !== PROJECT_STATUS_DRAFT && status !== PROJECT_STATUS_ARCHIVED;
+  return isProjectStatusActiveLifecycle(project?.status);
 }
 
 export function builderWizardFromManualParams(manualParams = {}) {
@@ -45,16 +46,34 @@ export function buildBuilderDraftPath(projectId, { step = 'stellages', editRack,
   return `/new?${params.toString()}`;
 }
 
+/** Open finished (non-draft) project in the wizard without demoting to draft URL. */
+export function buildBuilderEditPath(projectId, { step = 'review', editRack } = {}) {
+  return buildBuilderDraftPath(projectId, { step, editRack, mode: 'edit' });
+}
+
+/** Continue draft or re-open finished project in builder. */
+export function buildBuilderContinuePath(project, { step } = {}) {
+  const id = project?.id;
+  if (!id) return '/new';
+  const resolved = step || resolveBuilderWizardStep(project, isDraftProject(project) ? 'stellages' : 'review');
+  if (isDraftProject(project)) {
+    return buildBuilderDraftPath(id, { step: resolved, mode: 'draft' });
+  }
+  return buildBuilderEditPath(id, { step: resolved });
+}
+
 export function parseBuilderSearchParams(searchParams) {
   const sp = searchParams instanceof URLSearchParams
     ? searchParams
     : new URLSearchParams(searchParams || '');
+  const mode = String(sp.get('mode') || '').trim();
   return {
     projectId: String(sp.get('projectId') || '').trim(),
-    mode: String(sp.get('mode') || '').trim(),
+    mode,
     step: String(sp.get('step') || '').trim(),
     editRack: String(sp.get('editRack') || '').trim(),
-    isDraftUrl: sp.get('mode') === 'draft' || Boolean(sp.get('projectId')),
+    isDraftUrl: mode === 'draft' || (Boolean(sp.get('projectId')) && mode !== 'edit'),
+    isEditUrl: mode === 'edit',
   };
 }
 

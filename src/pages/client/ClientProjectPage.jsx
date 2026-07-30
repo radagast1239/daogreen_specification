@@ -4,13 +4,13 @@ import { useStore } from "../../store/StoreContext.jsx";
 import { projectTotals, money } from "../../store/helpers.js";
 import { PURCHASE_STATUSES } from "../../data/modules.js";
 import { clientVisibleItems, clientPurchaseItems } from "../../lib/itemHelpers.js";
-import { Progress, Empty } from "../../components/ui.jsx";
+import { Progress, Empty, Modal } from "../../components/ui.jsx";
 import PageSkeleton from "../../components/PageSkeleton.jsx";
 import { setClientScope } from "../../components/ClientGuard.jsx";
 import { photoSrc } from "../../lib/api.js";
 import { clientTabDefs, heroEyebrow, legacyTabToPurchaseMode } from "../../lib/clientBrandConfig.js";
 import { printPDF } from "../../lib/exportDownload.js";
-import { ClientSchemesViewer } from "../../components/ClientSchemesEditor.jsx";
+import { ClientSchemesViewer, ClientRackImagesViewer } from "../../components/ClientSchemesEditor.jsx";
 import ClientOverviewPanel from "../../components/client/ClientOverviewPanel.jsx";
 import ClientPurchasePanel from "../../components/client/ClientPurchasePanel.jsx";
 import { isClosedPurchaseStatus } from "../../lib/itemHelpers.js";
@@ -30,6 +30,15 @@ import { STELLAGE_GROUPS } from "../../../shared/stellageComposition.js";
 import { clientPurchaseDashboard } from "../../../shared/clientPurchaseStats.js";
 import { groupClientFrameDocuments } from "../../../shared/frameDrawingTargets.js";
 import { api } from "../../lib/api.js";
+import {
+  classifyClientProjectLoadError,
+  CLIENT_LOAD_ERROR,
+} from "../../../shared/clientProjectLoadState.js";
+import {
+  clientProjectLoadMessageI18n,
+  normalizeClientLanguage,
+  t,
+} from "../../../shared/clientI18n.js";
 
 function clientPageStyle(branding) {
   const brand = branding.brandColor || "#116355";
@@ -65,6 +74,17 @@ export default function ClientProjectPage() {
   const [topbarExpanded, setTopbarExpanded] = useState(() =>
     typeof window !== "undefined" ? !window.matchMedia("(max-width: 860px)").matches : true
   );
+  const [revisionConflict, setRevisionConflict] = useState(null);
+  const clientLanguage = normalizeClientLanguage(data?.project?.clientLanguage);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const previous = document.documentElement.lang;
+    document.documentElement.lang = clientLanguage;
+    return () => {
+      document.documentElement.lang = previous;
+    };
+  }, [clientLanguage]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -98,8 +118,11 @@ export default function ClientProjectPage() {
         setData(fresh);
       })
       .catch((e) => {
-        if (e.status === 410) setErr("expired");
-        else setErr(e.message || "notfound");
+        const kind = classifyClientProjectLoadError(e);
+        if (kind === CLIENT_LOAD_ERROR.EXPIRED) setErr("expired");
+        else if (kind === CLIENT_LOAD_ERROR.NOT_PUBLISHED) setErr("not_published");
+        else if (kind === CLIENT_LOAD_ERROR.NOT_FOUND) setErr("notfound");
+        else setErr("network");
       })
       .finally(() => setLoading(false));
   }, [token, actions]);
@@ -112,24 +135,48 @@ export default function ClientProjectPage() {
     );
   }
 
-  if (err === "expired")
+  if (err === "expired") {
+    const msg = clientProjectLoadMessageI18n(clientLanguage, "EXPIRED");
     return (
       <div className="client-wrap" style={{ paddingTop: 60 }}>
-        <Empty title="Ссылка устарела" hint="Попросите Daogreen прислать новую ссылку на проект." />
+        <Empty title={msg.title} hint={msg.hint} />
       </div>
     );
+  }
+
+  if (err === "not_published") {
+    const msg = clientProjectLoadMessageI18n(clientLanguage, "NOT_PUBLISHED");
+    return (
+      <div className="client-wrap" style={{ paddingTop: 60 }}>
+        <Empty title={msg.title} hint={msg.hint} />
+      </div>
+    );
+  }
+
+  if (err === "notfound" || err === "network") {
+    const kind = err === "notfound" ? CLIENT_LOAD_ERROR.NOT_FOUND : CLIENT_LOAD_ERROR.NETWORK;
+    const msg = clientProjectLoadMessageI18n(
+      clientLanguage,
+      kind === CLIENT_LOAD_ERROR.NOT_FOUND ? "NOT_FOUND" : "NETWORK",
+    );
+    return (
+      <div className="client-wrap" style={{ paddingTop: 60 }}>
+        <Empty title={msg.title} hint={msg.hint} />
+      </div>
+    );
+  }
 
   if (err)
     return (
       <div className="client-wrap" style={{ paddingTop: 60 }}>
-        <Empty title="Проект не найден" hint="Проверьте ссылку — она должна начинаться с /spec/client/p/… (например http://62.233.35.206/spec/client/p/…)." />
+        <Empty title={t(clientLanguage, "client.error.loadFailed.title")} hint={t(clientLanguage, "client.error.loadFailed.hint")} />
       </div>
     );
 
   if (!data)
     return (
       <div className="client-wrap" style={{ paddingTop: 60 }}>
-        <div className="muted">Загрузка…</div>
+        <div className="muted">{t(clientLanguage, "client.common.loading")}</div>
       </div>
     );
 
@@ -154,7 +201,7 @@ export default function ClientProjectPage() {
   const purchaseItems = clientPurchaseItems({ items: visibleItems });
   const purchaseDash = clientPurchaseDashboard(purchaseItems);
   const hasPurchase = visibleItems.length > 0;
-  const clientTabs = clientTabDefs(branding);
+  const clientTabs = clientTabDefs(branding, clientLanguage);
   const activeTab = clientTabs.some(([k]) => k === tab) ? tab : clientTabs[0]?.[0] || "overview";
   const stellageGroups = data.catalog?.stellageGroups?.length
     ? data.catalog.stellageGroups
@@ -199,6 +246,26 @@ export default function ClientProjectPage() {
     setTab(nextTab);
   };
 
+  const reloadClientProject = async () => {
+    const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
+    applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
+    setData(fresh);
+    setRevisionConflict(null);
+    return fresh;
+  };
+
+  const handleClientWriteError = (error) => {
+    if (error?.code === "PROJECT_REVISION_CONFLICT") {
+      setRevisionConflict({
+        expectedRevision: error.expectedRevision,
+        currentRevision: error.currentRevision,
+        projectId: error.projectId,
+      });
+      return true;
+    }
+    return false;
+  };
+
   const patch = async (itemId, p) => {
     setData((prev) => {
       if (!prev?.project?.items) return prev;
@@ -206,18 +273,19 @@ export default function ClientProjectPage() {
       return { ...prev, project: { ...prev.project, items } };
     });
     try {
-      const updated = await actions.clientPatchItem(token, itemId, p);
+      const updated = await actions.clientPatchItem(decodeURIComponent(token || ""), itemId, p);
       if (updated?.id) {
         setData((prev) => {
           if (!prev?.project?.items) return prev;
           const items = prev.project.items.map((it) => (it.id === itemId ? { ...it, ...updated } : it));
-          return { ...prev, project: { ...prev.project, items } };
+          const next = { ...prev, project: { ...prev.project, items } };
+          if (updated.revision != null) next.revision = updated.revision;
+          return next;
         });
       }
-    } catch {
-      const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
-      applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
-      setData(fresh);
+    } catch (error) {
+      if (handleClientWriteError(error)) return;
+      await reloadClientProject();
     }
   };
 
@@ -231,31 +299,38 @@ export default function ClientProjectPage() {
     try {
       const result = await api.bulkPatchClientItems(decodeURIComponent(token || ""), { itemIds, patch: p });
       const byId = new Map((result?.updated || []).map((it) => [it.id, it]));
-      if (byId.size) {
+      if (byId.size || result?.revision != null) {
         setData((prev) => {
           if (!prev?.project?.items) return prev;
-          const items = prev.project.items.map((it) => (byId.has(it.id) ? { ...it, ...byId.get(it.id) } : it));
-          return { ...prev, project: { ...prev.project, items } };
+          const items = byId.size
+            ? prev.project.items.map((it) => (byId.has(it.id) ? { ...it, ...byId.get(it.id) } : it))
+            : prev.project.items;
+          const next = { ...prev, project: { ...prev.project, items } };
+          if (result.revision != null) next.revision = result.revision;
+          return next;
         });
       }
-    } catch {
-      const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
-      applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
-      setData(fresh);
+    } catch (error) {
+      if (handleClientWriteError(error)) return;
+      await reloadClientProject();
     }
   };
 
   const proposeReplacement = async (body) => {
-    await api.proposeClientReplacement(decodeURIComponent(token || ""), replacementItem.id, body);
-    const fresh = await actions.loadClientProject(decodeURIComponent(token || ""));
-    applyClientSectionsFromSettings({ clientSectionsJson: fresh.branding?.clientSectionsJson });
-    setData(fresh);
+    try {
+      await api.proposeClientReplacement(decodeURIComponent(token || ""), replacementItem.id, body);
+      await reloadClientProject();
+    } catch (error) {
+      if (handleClientWriteError(error)) return;
+      throw error;
+    }
   };
 
   const exportPdf = async (mode = "client_full") => {
     const { generateClientPurchasePdf } = await import("../../lib/clientPdfExport.js");
-    generateClientPurchasePdf({
-      project,
+    const { projectForClientPdfExport } = await import("../../lib/clientExportProject.js");
+    await generateClientPurchasePdf({
+      project: projectForClientPdfExport(project),
       items: visibleItems,
       branding,
       purchaseStatuses,
@@ -267,7 +342,10 @@ export default function ClientProjectPage() {
 
   const exportExcel = async () => {
     const { downloadClientWorkbook } = await import("../../lib/clientExcelExport.js");
-    downloadClientWorkbook(project, visibleItems, {
+    const { projectForClientExcelExport } = await import("../../lib/clientExportProject.js");
+    // Yield so the UI can paint a busy state before the sync workbook build.
+    await new Promise((r) => setTimeout(r, 0));
+    downloadClientWorkbook(projectForClientExcelExport(project), visibleItems, {
       purchaseStatuses,
       branding,
       versionInfo,
@@ -283,7 +361,7 @@ export default function ClientProjectPage() {
         <h1>{project.name}</h1>
         <p>
           {branding.companyName || "Daogreen"} · {project.client}
-          {project.city ? ` · ${project.city}` : ""} · спецификация закупки
+          {project.city ? ` · ${project.city}` : ""} · {t(clientLanguage, "client.printHeader.specificationSuffix")}
         </p>
       </div>
 
@@ -303,7 +381,7 @@ export default function ClientProjectPage() {
               <div className="client-topbar__mark">{(branding.companyName || "D").charAt(0)}</div>
             )}
             <div className="client-topbar__titles">
-              <div className="client-topbar__eyebrow">{branding.companyName || heroEyebrow(branding)}</div>
+              <div className="client-topbar__eyebrow">{branding.companyName || heroEyebrow(branding, clientLanguage)}</div>
               <h1 className="client-topbar__title">{project.name}</h1>
               <p className="client-topbar__sub">
                 {project.client}
@@ -316,7 +394,7 @@ export default function ClientProjectPage() {
             type="button"
             className="client-topbar__toggle btn btn-ghost btn-sm"
             aria-expanded={topbarExpanded}
-            aria-label={topbarExpanded ? "Свернуть шапку" : "Развернуть шапку"}
+            aria-label={t(clientLanguage, topbarExpanded ? "client.topbar.collapseAria" : "client.topbar.expandAria")}
             onClick={() => setTopbarExpanded((v) => !v)}
           >
             {topbarExpanded ? "▲" : "▼"}
@@ -329,7 +407,7 @@ export default function ClientProjectPage() {
               PDF
             </button>
             <button type="button" className="btn btn-sm btn-primary" onClick={() => openPurchase("categories")}>
-              К списку
+              {t(clientLanguage, "client.topbar.goToList")}
             </button>
           </div>
         </div>
@@ -340,9 +418,9 @@ export default function ClientProjectPage() {
           <div className="client-topbar__meta">
             <span className="num">{totals.progress}%</span>
             <span className="muted">
-              · куплено {purchaseDash.boughtCount} из {purchaseDash.totalCount}
+              · {t(clientLanguage, "client.topbar.boughtCount", { bought: purchaseDash.boughtCount, total: purchaseDash.totalCount })}
             </span>
-            <span className="muted">· {money(totals.remaining, project.currency)} осталось</span>
+            <span className="muted">· {t(clientLanguage, "client.topbar.remainingAmount", { amount: money(totals.remaining, project.currency) })}</span>
             {versionInfo && delta != null && delta !== 0 && (
               <span className="client-topbar__delta">
                 v{versionInfo.versionNumber}: {delta > 0 ? "+" : ""}
@@ -353,12 +431,13 @@ export default function ClientProjectPage() {
         </div>
       </header>
 
-      <ClientSchemesViewer manualParams={project.manualParams} />
+      <ClientSchemesViewer images={project.clientImages?.projectSchemes || []} language={clientLanguage} />
+      <ClientRackImagesViewer images={project.clientImages?.rackImages || []} />
       {!hasPurchase && (
         <div className="card" style={{ padding: 16, marginBottom: 16, borderColor: "var(--accent)" }}>
-          <strong>Список закупки пока пуст</strong>
+          <strong>{t(clientLanguage, "client.empty.purchaseListEmpty.title")}</strong>
           <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
-            Ссылка работает — администратор ещё не опубликовал позиции (нужны галочка, количество и утверждение в спецификации).
+            {t(clientLanguage, "client.empty.purchaseListEmpty.hint")}
           </p>
         </div>
       )}
@@ -373,18 +452,20 @@ export default function ClientProjectPage() {
       {(activeTab === "purchase") && hasPurchase && (
         <>
           <ClientPurchaseGuide
+            language={clientLanguage}
             projectId={project.id}
             itemCount={purchaseItems.length}
-            uniqueCount={mergedPurchaseRows(purchaseItems).length}
+            uniqueCount={mergedPurchaseRows(purchaseItems, { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] }).length}
           />
           <div className="client-purchase-toolbar no-print">
             <input
               className="client-purchase-toolbar__search"
-              placeholder="Поиск: название или поставщик…"
+              placeholder={t(clientLanguage, "client.purchase.searchPlaceholder")}
               value={purchaseQuery}
               onChange={(e) => setPurchaseQuery(e.target.value)}
             />
             <ClientPurchaseViewToggles
+              language={clientLanguage}
               layout={purchaseLayout}
               compact={clientCompact}
               onLayoutChange={(next) => {
@@ -398,9 +479,9 @@ export default function ClientProjectPage() {
             />
           </div>
           <div className="client-supplier-bar no-print">
-            <strong style={{ fontSize: 13 }}>Поставщик:</strong>
+            <strong style={{ fontSize: 13 }}>{t(clientLanguage, "client.purchase.supplierFilter")}</strong>
             <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} style={{ width: "auto" }}>
-              <option value="">Все поставщики ({visibleItems.length})</option>
+              <option value="">{t(clientLanguage, "client.purchase.allSuppliers", { count: visibleItems.length })}</option>
               {suppliers.map((s) => {
                 const cnt = visibleItems.filter((i) => i.supplier === s).length;
                 return (
@@ -412,11 +493,14 @@ export default function ClientProjectPage() {
             </select>
             {supplierFilter && (
               <span className="muted" style={{ fontSize: 13 }}>
-                Показано {filteredCount} позиций от «{supplierFilter}»
+                {t(clientLanguage, "client.purchase.filteredSupplier", { count: filteredCount, supplier: supplierFilter })}
               </span>
             )}
             <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>
-              Куплено / заказано {purchaseItems.filter((i) => isClosedPurchaseStatus(i.status)).length} из {purchaseItems.length}
+              {t(clientLanguage, "client.purchase.closedCount", {
+                count: purchaseItems.filter((i) => isClosedPurchaseStatus(i.status)).length,
+                total: purchaseItems.length,
+              })}
             </span>
           </div>
         </>
@@ -429,16 +513,18 @@ export default function ClientProjectPage() {
           qrUrl={qrUrl}
           onExportExcel={exportExcel}
           onOpenPdf={() => setPdfExportOpen(true)}
+          language={clientLanguage}
         />
       )}
 
       {!hasPurchase && activeTab !== "docs" ? (
-        <Empty title="Спецификация готовится" hint="Позиции появятся после утверждения администратором." />
+        <Empty title={t(clientLanguage, "client.empty.specNotReady.title")} hint={t(clientLanguage, "client.empty.specNotReady.hint")} />
       ) : activeTab !== "docs" ? (
         <>
           {activeTab === "overview" && (
             <ClientOverviewPanel
               project={project}
+              language={clientLanguage}
               totals={totals}
               items={purchaseItems}
               branding={branding}
@@ -450,6 +536,7 @@ export default function ClientProjectPage() {
           {activeTab === "purchase" && (
             <ClientPurchasePanel
               project={project}
+              language={clientLanguage}
               items={purchaseItems}
               mode={purchaseMode}
               onModeChange={handlePurchaseModeChange}
@@ -471,6 +558,7 @@ export default function ClientProjectPage() {
               simple
               layout={purchaseLayout}
               compact={clientCompact}
+              clientToken={decodeURIComponent(token || "")}
             />
           )}
         </>
@@ -483,13 +571,28 @@ export default function ClientProjectPage() {
         itemName={replacementItem?.name}
         onClose={() => setReplacementItem(null)}
         onSubmit={proposeReplacement}
+        language={clientLanguage}
       />
       <ClientPdfExportModal
         open={pdfExportOpen}
         items={visibleItems}
         onClose={() => setPdfExportOpen(false)}
         onExport={exportPdf}
+        language={clientLanguage}
       />
+      {revisionConflict && (
+        <Modal
+          title="Конфликт изменений проекта"
+          onClose={() => setRevisionConflict(null)}
+          footer={<>
+            <button type="button" className="btn" onClick={() => setRevisionConflict(null)}>Остаться и скопировать свои изменения</button>
+            <button type="button" className="btn btn-primary" onClick={reloadClientProject}>Загрузить актуальную версию</button>
+          </>}
+        >
+          <p>Проект изменён в другой вкладке. Ваши изменения не сохранены поверх новой версии.</p>
+          <p className="muted">Серверная версия: {revisionConflict.currentRevision}; версия этой вкладки: {revisionConflict.expectedRevision}.</p>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -511,45 +614,54 @@ function ClientBrandFooter({ branding }) {
   );
 }
 
-function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
+function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf, language }) {
+  const [excelBusy, setExcelBusy] = useState(false);
   const frameGroups = groupClientFrameDocuments(documents || []);
   const otherDocs = (documents || []).filter((d) => d.type !== "frame_drawing");
+  const runExcel = async () => {
+    if (excelBusy) return;
+    setExcelBusy(true);
+    try {
+      await onExportExcel?.();
+    } finally {
+      setExcelBusy(false);
+    }
+  };
   return (
     <div className="card" style={{ padding: 22, marginTop: 16 }}>
-      <h3>Документы</h3>
+      <h3>{t(language, "client.docs.title")}</h3>
       <p className="muted" style={{ fontSize: 13 }}>
-        Excel — полная книга закупки (11 листов). PDF — выберите формат: компактный список или полный
-        комплект с разделами и специалистами.
+        {t(language, "client.docs.description")}
       </p>
       <div style={{ marginTop: 14 }}>
         <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>Excel</div>
         <div className="row wrap" style={{ gap: 8 }}>
-          <button type="button" className="btn" onClick={onExportExcel}>
-            Скачать книгу закупки
+          <button type="button" className="btn" onClick={runExcel} disabled={excelBusy}>
+            {excelBusy ? t(language, "client.docs.buildingExcel") : t(language, "client.docs.downloadExcel")}
           </button>
         </div>
       </div>
       <div style={{ marginTop: 16 }}>
         <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>PDF</div>
         <div className="row wrap" style={{ gap: 8 }}>
-          <button type="button" className="btn btn-primary" onClick={onOpenPdf}>
-            Скачать PDF…
+          <button type="button" className="btn btn-primary" onClick={onOpenPdf} disabled={excelBusy}>
+            {t(language, "client.docs.downloadPdf")}
           </button>
-          <button type="button" className="btn" onClick={printPDF}>
-            Печать страницы
+          <button type="button" className="btn" onClick={printPDF} disabled={excelBusy}>
+            {t(language, "client.docs.printPage")}
           </button>
         </div>
       </div>
       {frameGroups.length > 0 && (
         <div style={{ marginTop: 16 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>Чертежи и схемы</div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6, fontWeight: 600 }}>{t(language, "client.docs.drawingsTitle")}</div>
           {frameGroups.map((group) => (
             <div key={group.label} style={{ marginBottom: 12 }}>
               <div className="muted" style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{group.label}</div>
               <ul style={{ margin: 0, paddingLeft: 18 }}>
                 {group.items.map((d) => (
                   <li key={d.id} style={{ marginBottom: 8 }}>
-                    <a href={photoSrc(d.url)} target="_blank" rel="noreferrer">
+                    <a href={photoSrc(d.accessUrl || d.url)} target="_blank" rel="noreferrer">
                       {d.drawingTitle || d.filename}
                     </a>
                     {d.drawingVersion ? (
@@ -557,7 +669,7 @@ function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
                     ) : null}
                     {d.uploadedAt ? (
                       <span className="muted" style={{ fontSize: 12 }}>
-                        {" "}· {new Date(d.uploadedAt).toLocaleDateString("ru-RU")}
+                        {" "}· {new Date(d.uploadedAt).toLocaleDateString(t(language, "client.pdf.dateLocale"))}
                       </span>
                     ) : null}
                   </li>
@@ -571,7 +683,7 @@ function DocsTab({ documents, qrUrl, onExportExcel, onOpenPdf }) {
         <ul style={{ marginTop: 16, paddingLeft: 18 }}>
           {otherDocs.map((d) => (
             <li key={d.id} style={{ marginBottom: 8 }}>
-              <a href={photoSrc(d.url)} target="_blank" rel="noreferrer">
+              <a href={photoSrc(d.accessUrl || d.url)} target="_blank" rel="noreferrer">
                 {d.filename}
               </a>
               <span className="muted" style={{ fontSize: 12 }}> · {d.type}</span>

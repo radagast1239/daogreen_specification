@@ -5,6 +5,7 @@ import { StoreProvider } from "./store/StoreContext.jsx";
 import { ToastProvider } from "./components/Toast.jsx";
 import App from "./App.jsx";
 import { initCompactMode } from "./lib/compactMode.js";
+import { bootstrapAdminAccess } from "./lib/adminAuthBootstrap.js";
 import "./styles/theme.css";
 
 initCompactMode();
@@ -16,14 +17,18 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
 
 const routerBase = import.meta.env.BASE_URL.replace(/\/$/, "") || undefined;
 
-createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <BrowserRouter basename={routerBase}>
-      <ToastProvider>
-        <StoreProvider>
-          <App />
-        </StoreProvider>
-      </ToastProvider>
-    </BrowserRouter>
-  </React.StrictMode>
-);
+function renderApp() {
+  createRoot(document.getElementById("root")).render(
+    <React.StrictMode>
+      <BrowserRouter basename={routerBase}>
+        <ToastProvider>
+          <StoreProvider>
+            <App />
+          </StoreProvider>
+        </ToastProvider>
+      </BrowserRouter>
+    </React.StrictMode>
+  );
+}
+
+bootstrapAdminAccess().finally(renderApp);

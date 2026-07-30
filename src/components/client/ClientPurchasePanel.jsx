@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { t, tSection } from "../../../shared/clientI18n.js";
 import { groupBy, mergedPurchaseRows, money } from "../../store/helpers.js";
 import {
   lineGross,
@@ -38,6 +39,7 @@ import {
   isSpecialistPurchaseMode,
   isSimplePurchaseMode,
 } from "../../lib/clientBrandConfig.js";
+import { scaleClientItemPipeCutsForDisplay } from "../../../shared/clientPurchaseRows.js";
 import { isTodayPriority } from "../../../shared/purchasePriority.js";
 import ClientPurchaseDashboard from "./ClientPurchaseDashboard.jsx";
 import ClientPurchaseTable from "./ClientPurchaseTable.jsx";
@@ -104,7 +106,7 @@ function sortMergedRows(rows, currency) {
   return flattenMergedBySectionOrder(rows, currency);
 }
 
-function MergedRowsList({ rows, layout, currency, patch, patchBulk, bought, purchaseStatuses, onProposeReplacement, compact }) {
+function MergedRowsList({ rows, layout, currency, patch, patchBulk, bought, purchaseStatuses, onProposeReplacement, compact, language, clientToken = "" }) {
   if (layout === "table") {
     return (
       <ClientPurchaseTable
@@ -116,6 +118,8 @@ function MergedRowsList({ rows, layout, currency, patch, patchBulk, bought, purc
         purchaseStatuses={purchaseStatuses}
         onProposeReplacement={onProposeReplacement}
         compact={compact}
+        language={language}
+        clientToken={clientToken}
       />
     );
   }
@@ -130,11 +134,13 @@ function MergedRowsList({ rows, layout, currency, patch, patchBulk, bought, purc
       purchaseStatuses={purchaseStatuses}
       onProposeReplacement={onProposeReplacement}
       compact={compact}
+      language={language}
+      clientToken={clientToken}
     />
   ));
 }
 
-function BuyNowInstructions() {
+function BuyNowInstructions({ language }) {
   return (
     <div
       className="client-buy-now-hint no-print"
@@ -148,29 +154,28 @@ function BuyNowInstructions() {
         lineHeight: 1.45,
       }}
     >
-      Откройте раздел, перейдите по ссылкам товаров и отметьте статус: <b>Заказано</b>, <b>Куплено</b> или{" "}
-      <b>Нужна помощь</b>.
+      {t(language, "client.buyNow.instructions")}
     </div>
   );
 }
 
-function SectionCardActions({ section }) {
+function SectionCardActions({ section, language }) {
   const done = section.totalCount > 0 && section.boughtCount >= section.totalCount;
   return (
     <span className="client-section-card__meta" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, fontSize: 12 }}>
       {done ? (
-        <span style={{ color: "var(--ok, #2e7d32)", fontWeight: 600 }}>Готово</span>
+        <span style={{ color: "var(--ok, #2e7d32)", fontWeight: 600 }}>{t(language, "client.sectionCard.done")}</span>
       ) : (
-        <span className="muted">Куплено {section.boughtCount}/{section.totalCount}</span>
+        <span className="muted">{t(language, "client.sectionCard.boughtCount", { bought: section.boughtCount, total: section.totalCount })}</span>
       )}
     </span>
   );
 }
 
-function SectionBodySummary({ section }) {
-  const parts = [`Сумма: ${section.sumLabel}`];
-  if (section.supplierCount) parts.push(`Поставщиков: ${section.supplierCount}`);
-  parts.push(`Куплено: ${section.boughtCount}/${section.totalCount}`);
+function SectionBodySummary({ section, language }) {
+  const parts = [t(language, "client.sectionCard.summarySum", { amount: section.sumLabel })];
+  if (section.supplierCount) parts.push(t(language, "client.sectionCard.summarySuppliers", { n: section.supplierCount }));
+  parts.push(t(language, "client.sectionCard.summaryBought", { bought: section.boughtCount, total: section.totalCount }));
   return (
     <div className="client-section-card__summary muted no-print" style={{ fontSize: 12, padding: "0 0 8px", borderBottom: "1px solid var(--border-light, #eee)", marginBottom: 8 }}>
       {parts.join(" · ")}
@@ -192,13 +197,18 @@ function MergedSectionGroups({
   compact = false,
   richSections = false,
   openSectionId = null,
+  language = "ru",
+  clientToken = "",
 }) {
   return groups.map((section, sectionIndex) => {
     const rich = richSections && section.totalCount > 0;
-    const title = rich ? <span style={{ fontWeight: 700 }}>{section.title}</span> : section.title;
+    const localizedSectionTitle = section.sectionId === "__misc__"
+      ? t(language, "client.sections.needsReview")
+      : tSection(language, section.sectionId, section.title);
+    const title = rich ? <span style={{ fontWeight: 700 }}>{localizedSectionTitle}</span> : localizedSectionTitle;
     const subtitle = rich
-      ? `${section.count} позиций · ${section.sumLabel}${section.supplierCount ? ` · ${section.supplierCount} поставщиков` : ""}`
-      : `${section.count} поз. · ${section.sumLabel}${section.hint ? ` · ${section.hint}` : ""}`;
+      ? `${t(language, "client.sectionCard.itemCount", { n: section.count })} · ${section.sumLabel}${section.supplierCount ? ` · ${t(language, "client.sectionCard.supplierCount", { n: section.supplierCount })}` : ""}`
+      : `${t(language, "client.sectionCard.itemCountShort", { n: section.count })} · ${section.sumLabel}${section.hint ? ` · ${section.hint}` : ""}`;
     const openThis = openSectionId
       ? section.sectionId === openSectionId
       : defaultOpenFirst && sectionIndex === 0;
@@ -209,10 +219,10 @@ function MergedSectionGroups({
       className="client-purchase-section"
       title={title}
       subtitle={subtitle}
-      actions={rich ? <SectionCardActions section={section} /> : undefined}
+      actions={rich ? <SectionCardActions section={section} language={language} /> : undefined}
       defaultOpen={openThis}
     >
-      {rich && <SectionBodySummary section={section} />}
+      {rich && <SectionBodySummary section={section} language={language} />}
       {withSubsections
         ? section.subsections.map((sub) =>
             sub.title ? (
@@ -220,24 +230,24 @@ function MergedSectionGroups({
                 key={`${section.title}-${sub.title}`}
                 className="client-purchase-subsection"
                 title={sub.title}
-                subtitle={`${sub.count} поз. · ${sub.sumLabel}`}
+                subtitle={`${t(language, "client.sectionCard.itemCountShort", { n: sub.count })} · ${sub.sumLabel}`}
                 defaultOpen={false}
               >
-                <MergedRowsList rows={sub.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} />
+                <MergedRowsList rows={sub.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} language={language} clientToken={clientToken} />
               </Collapsible>
             ) : (
-              <MergedRowsList key={`${section.title}-default`} rows={sub.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} />
+              <MergedRowsList key={`${section.title}-default`} rows={sub.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} language={language} clientToken={clientToken} />
             )
           )
         : section.rows && (
-            <MergedRowsList rows={section.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} />
+            <MergedRowsList rows={section.rows} layout={layout} currency={currency} patch={patch} patchBulk={patchBulk} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} language={language} clientToken={clientToken} />
           )}
     </Collapsible>
     );
   });
 }
 
-function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, materials, modules, stellageGroups, onProposeReplacement, compact = false }) {
+function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, materials, modules, stellageGroups, onProposeReplacement, compact = false, language = "ru", clientToken = "" }) {
   return groups.map(([title, list]) => {
     const sum = list.reduce((s, i) => s + lineGross(i), 0);
     const stellageModule = isStellageModuleTitle(title, modules);
@@ -247,7 +257,7 @@ function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, mater
         key={title}
         className="client-purchase-section"
         title={title}
-        subtitle={`${list.length} поз. · ${money(sum, currency)}`}
+        subtitle={`${t(language, "client.sectionCard.itemCountShort", { n: list.length })} · ${money(sum, currency)}`}
         defaultOpen={false}
       >
         {compositionGroups
@@ -259,25 +269,25 @@ function ItemsByGroup({ groups, currency, patch, bought, purchaseStatuses, mater
                   </div>
                 )}
                 {gItems.map((it) => (
-                  <ClientItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} />
+                  <ClientItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} compact={compact} language={language} clientToken={clientToken} />
                 ))}
               </React.Fragment>
             ))
           : list.map((it) => (
-              <ClientItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} />
+              <ClientItemCard key={it.id} it={it} currency={currency} patch={patch} bought={bought} purchaseStatuses={purchaseStatuses} onProposeReplacement={onProposeReplacement} language={language} clientToken={clientToken} />
             ))}
       </Collapsible>
     );
   });
 }
 
-export function ClientMergedList({ project, items, patch, purchaseStatuses, groupBySection = false, layout = "cards" }) {
-  const rows = mergedPurchaseRows(items);
+export function ClientMergedList({ project, items, patch, purchaseStatuses, groupBySection = false, layout = "cards", language = "ru", clientToken = "" }) {
+  const rows = mergedPurchaseRows(items, { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] });
   if (groupBySection) {
     const groups = groupMergedBySectionHierarchy(rows, project.currency);
     return (
       <div style={{ marginTop: 8 }}>
-        <p className="muted" style={{ fontSize: 13 }}>{rows.length} уникальных позиций</p>
+        <p className="muted" style={{ fontSize: 13 }}>{t(language, "client.purchasePanel.uniqueCount", { n: rows.length })}</p>
         <MergedSectionGroups
           groups={groups}
           currency={project.currency}
@@ -286,14 +296,16 @@ export function ClientMergedList({ project, items, patch, purchaseStatuses, grou
           purchaseStatuses={purchaseStatuses}
           withSubsections
           layout={layout}
+          language={language}
+          clientToken={clientToken}
         />
       </div>
     );
   }
   return (
     <div style={{ marginTop: 8 }}>
-      <p className="muted" style={{ fontSize: 13 }}>{rows.length} уникальных позиций</p>
-      <MergedRowsList rows={rows} layout={layout} currency={project.currency} patch={patch} bought={false} purchaseStatuses={purchaseStatuses} />
+      <p className="muted" style={{ fontSize: 13 }}>{t(language, "client.purchasePanel.uniqueCount", { n: rows.length })}</p>
+      <MergedRowsList rows={rows} layout={layout} currency={project.currency} patch={patch} bought={false} purchaseStatuses={purchaseStatuses} language={language} clientToken={clientToken} />
     </div>
   );
 }
@@ -321,6 +333,8 @@ export default function ClientPurchasePanel({
   compact = false,
   targetSection = null,
   onTargetConsumed,
+  language = "ru",
+  clientToken = "",
 }) {
   const [readyOnly, setReadyOnly] = useState(false);
 
@@ -341,19 +355,24 @@ export default function ClientPurchasePanel({
 
   const mergeFilter = isClosedMode || isStatusMode ? "all" : effectiveFilter;
 
+  const mergeOpts = useMemo(
+    () => ({ stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] }),
+    [project?.stellageConfigs, project?.stellageCounts],
+  );
+
   const mergedRows = useMemo(() => {
     if (isStatusMode || !isMergedPurchaseMode(effectiveMode)) return null;
     const pool = filterItemPool(scoped, { supplierFilter, purchaseQuery });
-    let rows = mergedPurchaseRows(pool);
+    let rows = mergedPurchaseRows(pool, mergeOpts);
     if (!isClosedMode) rows = applyMergedPurchaseFilter(rows, mergeFilter);
     return sortMergedRows(rows, project.currency);
-  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, mergeFilter, project.currency, isStatusMode, isClosedMode]);
+  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, mergeFilter, project.currency, isStatusMode, isClosedMode, mergeOpts]);
 
   const allMergedForStats = useMemo(() => {
     if (!simple || effectiveMode !== "categories") return null;
     const pool = filterItemPool(scoped, { supplierFilter, purchaseQuery });
-    return mergedPurchaseRows(pool);
-  }, [simple, effectiveMode, scoped, supplierFilter, purchaseQuery]);
+    return mergedPurchaseRows(pool, mergeOpts);
+  }, [simple, effectiveMode, scoped, supplierFilter, purchaseQuery, mergeOpts]);
 
   const sectionStats = useMemo(() => {
     if (!allMergedForStats) return null;
@@ -364,19 +383,25 @@ export default function ClientPurchasePanel({
     if (!isStatusMode && isMergedPurchaseMode(effectiveMode)) return [];
     let out = filterItemPool(scoped, { supplierFilter, purchaseQuery });
     out = applyPurchaseFilter(out, effectiveFilter);
-    return [...out].sort((a, b) => {
-      const ao = a.sortOrder ?? 99999;
-      const bo = b.sortOrder ?? 99999;
-      if (ao !== bo) return ao - bo;
-      return (a.name || "").localeCompare(b.name || "", "ru");
-    });
-  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, effectiveFilter, isStatusMode]);
+    const configs = project?.stellageConfigs || project?.stellageCounts || [];
+    return [...out]
+      .map((it) => scaleClientItemPipeCutsForDisplay(it, configs))
+      .sort((a, b) => {
+        const ao = a.sortOrder ?? 99999;
+        const bo = b.sortOrder ?? 99999;
+        if (ao !== bo) return ao - bo;
+        return (a.name || "").localeCompare(b.name || "", "ru");
+      });
+  }, [effectiveMode, scoped, supplierFilter, purchaseQuery, effectiveFilter, isStatusMode, project?.stellageConfigs, project?.stellageCounts]);
 
   const statusFlatList = useMemo(() => {
     if (!isStatusMode) return [];
     let out = filterItemPool(scoped, { supplierFilter, purchaseQuery });
-    return [...out].sort((a, b) => (a.name || "").localeCompare(b.name || "", "ru"));
-  }, [isStatusMode, scoped, supplierFilter, purchaseQuery]);
+    const configs = project?.stellageConfigs || project?.stellageCounts || [];
+    return [...out]
+      .map((it) => scaleClientItemPipeCutsForDisplay(it, configs))
+      .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ru"));
+  }, [isStatusMode, scoped, supplierFilter, purchaseQuery, project?.stellageConfigs, project?.stellageCounts]);
 
   const { todo, bought } = isClosedMode || (isStatusMode && effectiveMode !== "bought")
     ? { todo: mergedRows ?? filtered, bought: [] }
@@ -398,7 +423,7 @@ export default function ClientPurchasePanel({
   }, [targetSection, simple, effectiveMode, onTargetConsumed]);
 
   const renderMergedList = (list, isBought) => {
-    const pass = { onProposeReplacement, layout, compact, patchBulk };
+    const pass = { onProposeReplacement, layout, compact, patchBulk, language, clientToken };
     const openFirst = simple && !isBought && effectiveMode === "categories";
     if (effectiveMode === "categories" || effectiveMode === "plumber" || effectiveMode === "with_link" || effectiveMode === "without_link") {
       const isClientCategories = simple && effectiveMode === "categories";
@@ -446,6 +471,8 @@ export default function ClientPurchasePanel({
           onProposeReplacement={onProposeReplacement}
           compact={compact}
           layout={layout}
+          language={language}
+          clientToken={clientToken}
         />
       );
     }
@@ -490,6 +517,7 @@ export default function ClientPurchasePanel({
           stellageGroups={stellageGroups}
           onProposeReplacement={onProposeReplacement}
           compact={compact}
+          clientToken={clientToken}
         />
       );
     }
@@ -504,6 +532,8 @@ export default function ClientPurchasePanel({
             purchaseStatuses={purchaseStatuses}
             onProposeReplacement={onProposeReplacement}
             compact={compact}
+            language={language}
+            clientToken={clientToken}
           />
         );
       }
@@ -517,6 +547,8 @@ export default function ClientPurchasePanel({
           purchaseStatuses={purchaseStatuses}
           onProposeReplacement={onProposeReplacement}
           compact={compact}
+          language={language}
+          clientToken={clientToken}
         />
       ));
     }
@@ -540,7 +572,7 @@ export default function ClientPurchasePanel({
   const isSpecialistOrEmptySafeMode = isClosedMode || isSpecialistPurchaseMode(effectiveMode);
 
   if (!todo.length && !bought.length && !isSpecialistOrEmptySafeMode) {
-    return <Empty title="Нет позиций по фильтру" />;
+    return <Empty title={t(language, "client.purchasePanel.noFilterItems")} />;
   }
 
   return (
@@ -549,6 +581,7 @@ export default function ClientPurchasePanel({
         <ClientPurchaseDashboard
           items={items}
           currency={project.currency}
+          language={language}
           onModeSelect={(key) => {
             const map = {
               ordered: () => onModeChange("closed"),
@@ -569,7 +602,7 @@ export default function ClientPurchasePanel({
             className={"btn btn-sm" + (effectiveMode === m.id ? " btn-primary" : "")}
             onClick={() => onModeChange(m.id)}
           >
-            {m.label}
+            {t(language, `client.purchaseMode.${m.id === "with_link" ? "withLink" : m.id === "without_link" ? "withoutLink" : m.id}`)}
           </button>
         ))}
       </div>
@@ -583,13 +616,13 @@ export default function ClientPurchasePanel({
                 className={"btn btn-sm" + (effectiveMode === m.id ? " btn-primary" : "")}
                 onClick={() => onModeChange(m.id)}
               >
-                {m.label}
+                {t(language, `client.purchaseMode.${m.id === "need_help" ? "needHelp" : m.id === "replacement_check" ? "replacementCheck" : m.id}`)}
               </button>
             ))}
           </div>
           <div className="client-purchase-modes client-purchase-modes--sub no-print">
             <span className="muted" style={{ fontSize: 12, alignSelf: "center", marginRight: 4 }}>
-              Специалисты:
+              {t(language, "client.purchasePanel.specialists")}
             </span>
             {SPECIALIST_PURCHASE_MODES.map((m) => (
               <button
@@ -598,7 +631,7 @@ export default function ClientPurchasePanel({
                 className={"btn btn-sm" + (effectiveMode === m.id ? " btn-primary" : "")}
                 onClick={() => onModeChange(m.id)}
               >
-                {m.label}
+                {t(language, `client.purchaseMode.${m.id}`)}
               </button>
             ))}
           </div>
@@ -613,107 +646,113 @@ export default function ClientPurchasePanel({
               className={"btn btn-sm" + (filter === f.id ? " btn-primary" : "")}
               onClick={() => onFilterChange(f.id)}
             >
-              {f.label}
+              {f.id === "need_help"
+                ? t(language, "client.status.need_help")
+                : t(language, `client.purchaseFilter.${f.id === "not_bought" ? "notBought" : f.id}`)}
             </button>
           ))}
         {simple && !isClosedMode && (
           <span className="client-purchase-filters__count muted">
-            {todo.length} к покупке
-            {boughtCount > 0 ? ` · ${boughtCount} заказано/куплено` : ""}
+            {t(language, "client.purchasePanel.todoCount", { n: todo.length })}
+            {boughtCount > 0 ? ` · ${t(language, "client.purchasePanel.closedCount", { n: boughtCount })}` : ""}
           </span>
         )}
         {simple && isClosedMode && (
           <span className="client-purchase-filters__count muted">
-            {todo.length} заказано/куплено
+            {t(language, "client.purchasePanel.closedCountStandalone", { n: todo.length })}
           </span>
         )}
         {simple && effectiveMode === "categories" && !isClosedMode && (
           <label className="client-purchase-show-bought">
             <input type="checkbox" checked={readyOnly} onChange={(e) => setReadyOnly(e.target.checked)} />
-            <span>Только готовые к покупке</span>
+            <span>{t(language, "client.purchasePanel.readyOnly")}</span>
           </label>
         )}
         {!isClosedMode && (
           <label className="client-purchase-show-bought">
             <input type="checkbox" checked={showBought} onChange={(e) => onShowBoughtChange(e.target.checked)} />
             <span>
-              Показать заказанные и купленные{boughtCount > 0 ? ` (${boughtCount})` : ""}
+              {t(language, "client.purchasePanel.showClosed", {
+                suffix: boughtCount > 0 ? ` (${boughtCount})` : "",
+              })}
             </span>
           </label>
         )}
       </div>
       {effectiveMode === "closed" && (
         <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-          Всё, что отмечено «Заказано» или «Куплено». После оплаты — одна кнопка на позиции, повторное нажатие — «Куплено».
+          {t(language, "client.purchasePanel.closedHint")}
         </p>
       )}
       {effectiveMode === "list" && (
         <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-          Полный список по крупным блокам — стеллажи, сантехника, электрика и т.д. Одинаковые позиции уже объединены.
+          {t(language, "client.purchasePanel.listHint")}
         </p>
       )}
       {effectiveMode === "suppliers" && (
         <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-          Все поставщики свёрнуты — нажмите на название, чтобы развернуть список позиций.
+          {t(language, "client.purchasePanel.suppliersHint")}
         </p>
       )}
       {effectiveMode === "plumber" && (
         <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-          Список для сантехника по разделам — можно передать ссылку или PDF из вкладки «Документы».
+          {t(language, "client.purchasePanel.plumberHint")}
         </p>
       )}
       {specialistActive && effectiveMode !== "plumber" && (
         <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-          Склеенный список для передачи специалисту — с расшифровкой, из каких модулей взялось количество.
+          {t(language, "client.purchasePanel.specialistHint")}
         </p>
       )}
-      {simple && effectiveMode === "categories" && <BuyNowInstructions />}
+      {simple && effectiveMode === "categories" && <BuyNowInstructions language={language} />}
       {todo.length > 0 ? (
         <>
           <h3 className="purchase-section-title">
-            {isClosedMode ? `Заказано/Куплено · ${todo.length}` : `К закупке · ${todo.length}`}
+            {t(language, isClosedMode ? "client.purchasePanel.closedSectionTitle" : "client.purchasePanel.todoSectionTitle", { n: todo.length })}
           </h3>
           {renderList(todo, isClosedMode)}
         </>
       ) : effectiveMode === "climate" ? (
         <div className="client-purchase-empty" style={{ textAlign: "center", padding: "40px 20px" }}>
-          <h3 style={{ margin: "0 0 10px" }}>В разделе «Климат» пока нет позиций.</h3>
+          <h3 style={{ margin: "0 0 10px" }}>{t(language, "client.purchasePanel.emptyClimate.title")}</h3>
           <p className="muted" style={{ margin: "0 0 20px", fontSize: 13 }}>
-            Возможно, климатические позиции ещё не назначены ответственному «Климат» или скрыты текущими фильтрами.
+            {t(language, "client.purchasePanel.emptyClimate.hint")}
           </p>
           <div className="row" style={{ justifyContent: "center", gap: 8 }}>
             <button type="button" className="btn btn-primary" onClick={() => onModeChange("categories")}>
-              Показать все позиции
+              {t(language, "client.purchasePanel.showAll")}
             </button>
             <button type="button" className="btn btn-ghost" onClick={() => {
               if (onFilterChange) onFilterChange("todo");
             }}>
-              Сбросить фильтры
+              {t(language, "client.purchasePanel.resetFilters")}
             </button>
           </div>
         </div>
       ) : isSpecialistPurchaseMode(effectiveMode) ? (
         <div className="client-purchase-empty" style={{ textAlign: "center", padding: "40px 20px" }}>
-          <h3 style={{ margin: "0 0 10px" }}>В этом разделе пока нет позиций.</h3>
+          <h3 style={{ margin: "0 0 10px" }}>{t(language, "client.purchasePanel.emptySpecialist.title")}</h3>
           <p className="muted" style={{ margin: "0 0 20px", fontSize: 13 }}>
-            Позиции ещё не добавлены или скрыты фильтрами.
+            {t(language, "client.purchasePanel.emptySpecialist.hint")}
           </p>
           <div className="row" style={{ justifyContent: "center", gap: 8 }}>
             <button type="button" className="btn btn-primary" onClick={() => onModeChange("categories")}>
-              Показать все позиции
+              {t(language, "client.purchasePanel.showAll")}
             </button>
           </div>
         </div>
       ) : (
         <p className="muted" style={{ fontSize: 14, margin: "16px 0" }}>
           {isClosedMode
-            ? "Пока нет заказанных или купленных позиций. Когда вы отметите товар как заказанный или купленный, он появится здесь."
-            : "Всё из фильтра уже куплено (или скрыто)."}
+            ? t(language, "client.purchasePanel.emptyClosed")
+            : t(language, "client.purchasePanel.emptyTodo")}
         </p>
       )}
       {showBought && bought.length > 0 && (
         <div className="purchase-bought-block">
-          <h3 className="purchase-section-title purchase-section-title--done">Заказано / куплено · {bought.length}</h3>
+          <h3 className="purchase-section-title purchase-section-title--done">
+            {t(language, "client.purchasePanel.closedSectionTitle", { n: bought.length })}
+          </h3>
           {renderList(bought, true)}
         </div>
       )}

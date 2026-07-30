@@ -22,8 +22,10 @@ import {
   frameDrawingSaveHint,
   buildStellagesReturnLabel,
 } from '../../shared/frameDrawingContext.js';
+import { presetFramePlannerCopy } from '../lib/frameDrawingPresetUx.js';
 import { api } from '../lib/api.js';
 import { useToast } from '../components/Toast.jsx';
+import { useStore } from '../store/StoreContext.jsx';
 import {
   requestFrameBomAddConfirmation,
   applyFrameBomProjectAdd,
@@ -41,6 +43,7 @@ const RACK_TYPE_LABELS = {
 export default function FrameConstructorPage() {
   const [searchParams] = useSearchParams();
   const { confirm } = useToast();
+  const { actions } = useStore();
   const drawingContext = useMemo(
     () => parseFrameDrawingSearchParams(searchParams),
     [searchParams],
@@ -115,12 +118,20 @@ export default function FrameConstructorPage() {
       if (!ok) return;
 
       setBomAddSaving(true);
+      let catalog = materials;
+      if (!catalog?.length) {
+        catalog = await api.getMaterials();
+        setMaterials(catalog);
+      }
+      if (!catalog?.length) {
+        throw new Error("Не удалось загрузить базу материалов для BOM.");
+      }
       const outcome = await applyFrameBomProjectAdd({
         project,
         purchaseDraft,
         drawingContext: { ...drawingContext, projectId: drawingContext.projectId },
-        updateProject: api.updateProject,
-        materials,
+        updateProject: (id, patch) => actions.projectUpdate(id, patch),
+        materials: catalog,
       });
       if (outcome.skipped) return;
       setProject(outcome.updated);
@@ -177,6 +188,7 @@ export default function FrameConstructorPage() {
   const showSaveTarget = hasFrameDrawingSaveTarget(drawingContext);
   const bindingLabel = frameDrawingBindingLabel(drawingContext);
   const saveHint = frameDrawingSaveHint(drawingContext);
+  const presetCopy = presetFramePlannerCopy(drawingContext);
 
   return (
     <div className="page frame-constructor-page">
@@ -201,10 +213,19 @@ export default function FrameConstructorPage() {
 
       {showSaveTarget && (
         <div className="fc-alert fc-alert--info" role="status">
-          {drawingContext.projectName && (
-            <div><strong>Проект:</strong> {drawingContext.projectName}</div>
+          {presetCopy ? (
+            <>
+              <div>{presetCopy.heading}</div>
+              <div style={{ fontSize: 16, fontWeight: 700, marginTop: 2 }}>{presetCopy.name}</div>
+            </>
+          ) : (
+            <>
+              {drawingContext.projectName && (
+                <div><strong>Проект:</strong> {drawingContext.projectName}</div>
+              )}
+              {bindingLabel && <div><strong>Привязка:</strong> {bindingLabel}</div>}
+            </>
           )}
-          {bindingLabel && <div><strong>Привязка:</strong> {bindingLabel}</div>}
           {saveHint && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{saveHint}</div>}
           {drawingContext.mode === 'new_version' && (
             <div style={{ fontSize: 12, marginTop: 4 }}>Будет создана новая версия схемы.</div>
@@ -212,10 +233,10 @@ export default function FrameConstructorPage() {
           {drawingContext.mode === 'replace' && (
             <div style={{ fontSize: 12, marginTop: 4 }}>Текущий PDF будет заменён.</div>
           )}
-          {drawingContext.returnTo && drawingContext.projectId && (
+          {drawingContext.returnTo && (
             <div style={{ marginTop: 6 }}>
               <Link to={drawingContext.returnTo}>
-                ← {buildStellagesReturnLabel(drawingContext.returnTo)}
+                ← {presetCopy?.returnLabel || buildStellagesReturnLabel(drawingContext.returnTo)}
               </Link>
             </div>
           )}

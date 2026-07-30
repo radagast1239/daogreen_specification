@@ -6,7 +6,9 @@ import { DEFAULT_MANUAL_PARAMS } from "../../lib/itemHelpers.js";
 import { defaultStellageGroupIds } from "../../lib/referenceData.js";
 import { materialInModule } from "../../../shared/materialModules.js";
 import StellageModulePicker from "../../components/StellageModulePicker.jsx";
+import ProjectCurrencyFields, { applyCurrencyDescToForm } from "../../components/ProjectCurrencyFields.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
+import { DEFAULT_PROJECT_CURRENCY } from "../../../shared/projectCurrency.js";
 
 const blankZone = () => ({
   id: `z_${Date.now()}`,
@@ -34,7 +36,11 @@ export default function NewProjectPage() {
     height: "",
     sowingArea: "",
     type: "проточка",
-    currency: "₽",
+    currency: DEFAULT_PROJECT_CURRENCY.symbol,
+    currencyCode: DEFAULT_PROJECT_CURRENCY.code,
+    currencySymbol: DEFAULT_PROJECT_CURRENCY.symbol,
+    currencyName: DEFAULT_PROJECT_CURRENCY.name,
+    currencyCustom: false,
     vat: false,
     comment: "",
   });
@@ -129,10 +135,10 @@ export default function NewProjectPage() {
               <label>Посевная площадь, м²</label>
               <input type="number" value={form.sowingArea} onChange={(e) => set("sowingArea", e.target.value)} />
             </div>
-            <div className="field">
-              <label>Валюта</label>
-              <input value={form.currency} onChange={(e) => set("currency", e.target.value)} />
-            </div>
+            <ProjectCurrencyFields
+              value={form}
+              onChange={(desc) => setForm((f) => applyCurrencyDescToForm(f, desc))}
+            />
           </div>
         </div>
 

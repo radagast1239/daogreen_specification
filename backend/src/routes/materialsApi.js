@@ -24,13 +24,36 @@ import { bulkMatchUploads, importPhotosFromDir } from "../services/photoImport.j
 import { findDuplicateGroups, mergeMaterials } from "../services/materialMerge.js";
 import { getPriceHistory } from "../services/priceHistory.js";
 import { saveFile } from "../storage/index.js";
+import { MaterialCatalogError, assertReplaceAllowed } from "../services/materialReferenceGuard.js";
+import { resolveUploadRoot } from "../services/uploadRoot.js";
+import {
+  assertValidImageUpload,
+  UploadValidationError,
+} from "../services/uploadValidation.js";
+import { multerFileFilter } from "../services/uploadFilter.js";
+import { sendSafeUploadFile } from "../services/secureFileServe.js";
+import {
+  getMaterialTranslation,
+  materialTranslationCoverage,
+  upsertMaterialTranslation,
+} from "../services/materialTranslationService.js";
 import XLSX from "xlsx";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadDir = path.join(__dirname, "../../uploads");
-fs.mkdirSync(uploadDir, { recursive: true });
+function sendMaterialCatalogError(res, e) {
+  if (e instanceof MaterialCatalogError) {
+    return res.status(e.status || 409).json({
+      error: e.code,
+      code: e.code,
+      message: e.message,
+      ...(e.references ? { references: e.references } : {}),
+    });
+  }
+  return null;
+}
 
-import { multerFileFilter } from "../services/uploadFilter.js";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const uploadDir = path.join(resolveUploadRoot(), "public");
+fs.mkdirSync(uploadDir, { recursive: true });
 
 const memUpload = multer({
   storage: multer.memoryStorage(),
@@ -51,8 +74,29 @@ router.get("/", (req, res) => {
       module: req.query.module,
       category: req.query.category,
       q: req.query.q,
+      translationFilter: req.query.translationFilter || req.query.translationStatus,
     })
   );
+});
+
+router.get("/meta/translation-coverage", (_req, res) => {
+  res.json(materialTranslationCoverage());
+});
+
+router.put("/:id/translation", (req, res) => {
+  try {
+    const locale = req.body?.locale || "en";
+    const dto = upsertMaterialTranslation(req.params.id, req.body || {}, locale);
+    res.json(dto);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message, code: e.code });
+  }
+});
+
+router.get("/:id/translation", (req, res) => {
+  const dto = getMaterialTranslation(req.params.id, req.query.locale || "en");
+  if (!dto) return res.status(404).json({ error: "Not found" });
+  res.json(dto);
 });
 
 router.get("/modules", (_req, res) => res.json(listModules()));
@@ -69,6 +113,22 @@ router.post("/merge", (req, res) => {
 
 router.get("/:id/price-history", (req, res) => {
   res.json(getPriceHistory(req.params.id));
+});
+
+router.get("/:id/photo", (req, res) => {
+  const m = getMaterial(req.params.id);
+  if (!m) return res.status(404).json({ error: "Not found" });
+  const url = String(m.imageUrl || m.photoUrl || "").trim();
+  if (!url || !url.startsWith("/uploads/")) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  // Legacy private material photos until migrated to /uploads/public/; public URLs also work here.
+  return sendSafeUploadFile(res, {
+    url,
+    filename: path.basename(url),
+    inline: true,
+    cacheControl: "private, max-age=300",
+  });
 });
 
 router.get("/:id", (req, res) => {
@@ -92,16 +152,25 @@ router.patch("/:id", (req, res) => {
 });
 
 router.delete("/:id", (req, res) => {
-  deleteMaterial(req.params.id);
-  res.status(204).end();
+  try {
+    const existing = getMaterial(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Not found" });
+    deleteMaterial(req.params.id);
+    res.status(204).end();
+  } catch (e) {
+    if (sendMaterialCatalogError(res, e)) return;
+    res.status(400).json({ error: e.message });
+  }
 });
 
-router.post("/import/excel", memUpload.single("file"), async (req, res) => {
+router.post("/import/excel", memUploadDocs.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file" });
   const moduleName = req.body.module || "Импорт";
   const mode = req.body.mode || "merge";
   const withPhotos = req.body.photos !== "false";
   try {
+    // Fail closed before parsing / photo side effects when replace is requested.
+    assertReplaceAllowed(mode);
     const result = parseExcelBuffer(req.file.buffer, moduleName);
     let photosLinked = 0;
     if (withPhotos) {
@@ -112,6 +181,7 @@ router.post("/import/excel", memUpload.single("file"), async (req, res) => {
     const count = bulkUpsertMaterials(result.materials, mode);
     res.json({ ...result, imported: count, photosLinked });
   } catch (e) {
+    if (sendMaterialCatalogError(res, e)) return;
     res.status(400).json({ error: e.message });
   }
 });
@@ -138,11 +208,15 @@ router.post("/import/excel-photos", memUpload.single("file"), async (req, res) =
 router.post("/upload-photo", memUpload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file" });
   try {
+    assertValidImageUpload(req.file);
     const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
     const filename = `${nanoid(12)}${ext}`;
-    const url = await saveFile(req.file.buffer, filename);
+    const url = await saveFile(req.file.buffer, filename, { visibility: "public" });
     res.json({ url, filename });
   } catch (e) {
+    if (e instanceof UploadValidationError) {
+      return res.status(e.status || 400).json({ error: e.code, code: e.code, message: e.message });
+    }
     res.status(500).json({ error: e.message });
   }
 });
@@ -153,6 +227,9 @@ router.post("/bulk-photos", memUpload.array("files", 500), async (req, res) => {
     const result = await bulkMatchUploads(req.files, uploadDir);
     res.json(result);
   } catch (e) {
+    if (e instanceof UploadValidationError) {
+      return res.status(e.status || 400).json({ error: e.code, code: e.code, message: e.message });
+    }
     res.status(500).json({ error: e.message });
   }
 });

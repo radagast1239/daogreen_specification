@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   stellagesFromProject,
   stellagesForProjectSave,
+  shouldPersistStellageDraft,
+  isMeaningfulRackDraft,
   hydrateBuilderFromProject,
   validateStellageForFrameDrawing,
   projectItemToBuilderLine,
@@ -12,6 +14,7 @@ import {
   mergeFrameBomQtyFromBuilderLines,
   frameBomProjectItemToBuilderLine,
   FRAME_BOM_SOURCE_LABEL,
+  farmSectionLinesFromProject,
 } from '../src/lib/projectBuilderHydrate.js';
 import { hydrateCatalogEditorLine } from '../src/lib/specLineCore.js';
 import { syncFastenersFromCrabs } from '../shared/fastenerRules.js';
@@ -27,6 +30,49 @@ import {
 import { FRAME_BOM_SOURCE, mergeFrameBomIntoProjectItems } from '../shared/frameBomProjectItems.js';
 
 describe('projectBuilderHydrate', () => {
+  it('keeps farm-wide project price and links marked as overrides after reload', () => {
+    const materials = [{
+      id: 'm-farm',
+      name: 'Расходник',
+      unit: 'шт.',
+      basePrice: 100,
+      link: 'https://catalog.example/item',
+      linkAlt: 'https://catalog.example/item-alt',
+    }];
+    const sections = [{ id: 'farm-sec', name: 'Расходники запуска' }];
+    const farmCatalogs = {
+      'farm-sec': [{ materialId: 'm-farm', qty: 1, included: true }],
+    };
+    const project = {
+      items: [{
+        id: 'farm-item',
+        materialId: 'm-farm',
+        name: 'Расходник',
+        unit: 'шт.',
+        section: 'Расходники запуска',
+        module: 'Расходники запуска',
+        qty: 3,
+        price: 125,
+        link: 'https://project.example/item',
+        linkAlt: 'https://project.example/item-alt',
+        includedInProject: true,
+        enabled: true,
+      }],
+      stellageConfigs: [],
+    };
+
+    const [line] = farmSectionLinesFromProject(project, sections, farmCatalogs, materials)['farm-sec'];
+    expect(line).toMatchObject({
+      price: 125,
+      priceOverridden: true,
+      link: 'https://project.example/item',
+      linkOverridden: true,
+      linkAlt: 'https://project.example/item-alt',
+      linkAltOverridden: true,
+    });
+    expect(materials[0].basePrice).toBe(100);
+  });
+
   const project = {
     id: 'p1',
     name: 'Тестовая ферма',
@@ -99,7 +145,7 @@ describe('projectBuilderHydrate', () => {
     expect(merged.find((ln) => ln.name === 'Краб')?.included).toBe(false);
   });
 
-  it('includes current draft in save payload list even without selected items', () => {
+  it('does not persist empty auto-draft as a second rack', () => {
     const draft = {
       id: 'st2',
       name: 'Стеллаж 2',
@@ -108,8 +154,62 @@ describe('projectBuilderHydrate', () => {
       items: [{ id: 'ln2', name: 'Краб', included: false, qty: 4 }],
     };
     const merged = stellagesForProjectSave(stellagesFromProject(project), draft);
-    expect(merged).toHaveLength(2);
-    expect(merged[1].id).toBe('st2');
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe('st1');
+  });
+
+  it('editingExisting alone does not invent empty Стеллаж 2', () => {
+    const emptyEditing = {
+      id: 'st2',
+      name: 'Стеллаж 2',
+      moduleId: 'mod1',
+      editingExisting: true,
+      items: [{ id: 'ln2', name: 'Краб', included: false, qty: 4 }],
+    };
+    expect(isMeaningfulRackDraft(emptyEditing)).toBe(false);
+    expect(shouldPersistStellageDraft(emptyEditing, [{ id: 'st1' }])).toBe(false);
+    expect(stellagesForProjectSave(stellagesFromProject(project), emptyEditing)).toHaveLength(1);
+  });
+
+  it('persists draft with included lines or wasInProjectList checkout', () => {
+    const withIncluded = {
+      id: 'st2',
+      name: 'Стеллаж 2',
+      moduleId: 'mod1',
+      items: [{ id: 'ln2', name: 'Краб', included: true, qty: 4 }],
+    };
+    expect(isMeaningfulRackDraft(withIncluded)).toBe(true);
+    expect(stellagesForProjectSave(stellagesFromProject(project), withIncluded)).toHaveLength(2);
+
+    const editing = {
+      id: 'st1',
+      name: 'Стеллаж 1',
+      moduleId: 'mod1',
+      editingExisting: true,
+      wasInProjectList: true,
+      items: [{ id: 'ln1', name: 'Труба', included: false, qty: 1 }],
+    };
+    const mergedEdit = stellagesForProjectSave([], editing);
+    expect(mergedEdit).toHaveLength(1);
+    expect(mergedEdit[0].id).toBe('st1');
+    expect(mergedEdit[0].editingExisting).toBeUndefined();
+    expect(mergedEdit[0].wasInProjectList).toBeUndefined();
+  });
+
+  it('forcePersistForFrame saves rack opened for scheme even without included lines', () => {
+    const draft = {
+      id: 'st2',
+      name: 'Стеллаж 2',
+      moduleId: 'mod1',
+      forcePersistForFrame: true,
+      hasFrameDrawing: true,
+      items: [{ id: 'ln2', name: 'Краб', included: false, qty: 4 }],
+    };
+    expect(isMeaningfulRackDraft(draft)).toBe(true);
+    const merged = stellagesForProjectSave([], draft);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe('st2');
+    expect(merged[0].forcePersistForFrame).toBeUndefined();
   });
 
   it('validates stellage before frame drawing without requiring selected items', () => {
@@ -130,15 +230,65 @@ describe('projectBuilderHydrate', () => {
     expect(hydrated.stellages[0].name).toBe('Стеллаж 1');
   });
 
+  it('keeps explicit empty rooms array (no default rooms invent)', () => {
+    const hydrated = hydrateBuilderFromProject({
+      ...project,
+      rooms: [],
+      stellageConfigs: [],
+      items: [],
+    });
+    expect(hydrated.rooms).toEqual([]);
+    expect(hydrated.stellages).toEqual([]);
+  });
+
   it('projectItemToBuilderLine divides qty by stellage count', () => {
     const line = projectItemToBuilderLine({ id: 'st1__ln1', name: 'A', qty: 6 }, { stCount: 3 });
     expect(line.qty).toBe(2);
+  });
+
+  it('infers project-local price and link overrides from the catalog snapshot', () => {
+    const materials = [{ id: 'm1', basePrice: 100, link: 'https://catalog.example/a', linkAlt: '' }];
+    const line = projectItemToBuilderLine({
+      id: 'st1__ln1', materialId: 'm1', name: 'A', qty: 1, price: 85,
+      link: 'https://project.example/a', linkAlt: 'https://project.example/alt',
+    }, { materials });
+    expect(line.priceOverridden).toBe(true);
+    expect(line.linkOverridden).toBe(true);
+    expect(line.linkAltOverridden).toBe(true);
+  });
+
+  it('does not mark catalog values as project overrides after reset', () => {
+    const materials = [{ id: 'm1', basePrice: 100, link: 'https://catalog.example/a', linkAlt: 'https://catalog.example/alt' }];
+    const line = projectItemToBuilderLine({
+      id: 'st1__ln1', materialId: 'm1', name: 'A', qty: 1, price: 100,
+      link: 'https://catalog.example/a', linkAlt: 'https://catalog.example/alt',
+    }, { materials });
+    expect(line.priceOverridden).toBe(false);
+    expect(line.linkOverridden).toBe(false);
+    expect(line.linkAltOverridden).toBe(false);
   });
 
   it('findStellageByEditRack matches rack id or moduleRackKey', () => {
     const stellages = [{ id: 'st1', moduleId: 'mod1', name: 'A' }];
     expect(findStellageByEditRack(stellages, 'st1')?.id).toBe('st1');
     expect(findStellageByEditRack(stellages, 'mod1:st1')?.id).toBe('st1');
+  });
+
+  it('preserveFrameBomProjectItems keeps legacy frame BOM rows without source field', () => {
+    const builderItems = [{ id: 'st1__ln1', name: 'Труба' }];
+    const loadedItems = [
+      ...builderItems,
+      {
+        id: 'it_fbom_legacy',
+        sourceKey: 'frame_bom:d1:mod1:st1:profile_tube_20x20',
+        sourceObjectIds: { moduleRackKey: 'mod1:st1', bomKey: 'profile_tube_20x20' },
+        pipeCuts: [{ lengthMm: 1000, qty: 2 }],
+        name: 'BOM tube',
+      },
+    ];
+    const merged = preserveFrameBomProjectItems(builderItems, loadedItems);
+    expect(merged).toHaveLength(2);
+    expect(merged[1].id).toBe('it_fbom_legacy');
   });
 
   it('preserveFrameBomProjectItems keeps frame_bom lines on builder save', () => {
@@ -386,21 +536,145 @@ describe('projectBuilderHydrate', () => {
   });
 
   it('mergeFrameBomQtyFromBuilderLines applies editor qty to preserved project items', () => {
+    const rackKey = 'mod1:st1';
     const preserved = preserveFrameBomProjectItems(
       [{ id: 'st1__ln1', name: 'Труба' }],
-      [{ id: 'fb_bolt', source: FRAME_BOM_SOURCE, materialId: 'm073', qty: 312 }],
+      [{
+        id: 'fb_bolt',
+        source: FRAME_BOM_SOURCE,
+        materialId: 'm073',
+        moduleRackKey: rackKey,
+        qty: 312,
+      }],
     );
     const stellages = [{
       id: 'st1',
+      moduleId: 'mod1',
       items: [{
         materialId: 'm073',
         qty: 400,
         source: FRAME_BOM_SOURCE,
         sourceType: FRAME_BOM_SOURCE,
+        moduleRackKey: rackKey,
       }],
     }];
     const merged = mergeFrameBomQtyFromBuilderLines(preserved, stellages);
     expect(merged.find((it) => it.materialId === 'm073')?.qty).toBe(400);
+  });
+
+  it('mergeFrameBomQtyFromBuilderLines scopes qty by rack, not materialId only', () => {
+    const st1Key = 'mod1:st1';
+    const st2Key = 'mod1:st2';
+    const items = [
+      {
+        id: 'fb_st1',
+        materialId: 'm073',
+        moduleRackKey: st1Key,
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        qty: 10,
+        pipeCuts: ['1000', '2000'],
+      },
+      {
+        id: 'fb_st2',
+        materialId: 'm073',
+        moduleRackKey: st2Key,
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        qty: 22,
+        pipeCuts: ['3000', '4000'],
+      },
+    ];
+    const stellages = [
+      {
+        id: 'st1',
+        moduleId: 'mod1',
+        items: [{
+          materialId: 'm073',
+          moduleRackKey: st1Key,
+          source: FRAME_BOM_SOURCE,
+          sourceType: FRAME_BOM_SOURCE,
+          qty: 99,
+          pipeCuts: ['1000', '2000'],
+        }],
+      },
+      {
+        id: 'st2',
+        moduleId: 'mod1',
+        items: [{
+          materialId: 'm073',
+          moduleRackKey: st2Key,
+          source: FRAME_BOM_SOURCE,
+          sourceType: FRAME_BOM_SOURCE,
+          qty: 55,
+          pipeCuts: ['3000', '4000'],
+        }],
+      },
+    ];
+    const merged = mergeFrameBomQtyFromBuilderLines(items, stellages);
+    const st1 = merged.find((it) => it.id === 'fb_st1');
+    const st2 = merged.find((it) => it.id === 'fb_st2');
+    expect(st1?.qty).toBe(99);
+    expect(st1?.pipeCuts).toEqual(['1000', '2000']);
+    expect(st2?.qty).toBe(55);
+    expect(st2?.pipeCuts).toEqual(['3000', '4000']);
+  });
+
+  it('mergeFrameBomQtyFromBuilderLines fail-closed when rack lineage missing', () => {
+    const items = [{
+      id: 'fb_amb',
+      materialId: 'm073',
+      source: FRAME_BOM_SOURCE,
+      sourceType: FRAME_BOM_SOURCE,
+      qty: 10,
+      pipeCuts: ['1000'],
+    }];
+    const stellages = [{
+      items: [{
+        materialId: 'm073',
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        qty: 999,
+        pipeCuts: ['9999'],
+      }],
+    }];
+    const merged = mergeFrameBomQtyFromBuilderLines(items, stellages);
+    expect(merged[0].qty).toBe(10);
+    expect(merged[0].pipeCuts).toEqual(['1000']);
+  });
+
+  it('mergeFrameBomQtyFromBuilderLines keeps ordinary line when same materialId in frame BOM', () => {
+    const rackKey = 'mod1:st1';
+    const items = [
+      {
+        id: 'fb_pipe',
+        materialId: 'm073',
+        moduleRackKey: rackKey,
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        qty: 10,
+      },
+      {
+        id: 'ord_pipe',
+        materialId: 'm073',
+        source: 'builder',
+        qty: 3,
+      },
+    ];
+    const stellages = [{
+      id: 'st1',
+      moduleId: 'mod1',
+      items: [{
+        materialId: 'm073',
+        moduleRackKey: rackKey,
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        qty: 44,
+      }],
+    }];
+    const merged = mergeFrameBomQtyFromBuilderLines(items, stellages);
+    expect(merged.find((it) => it.id === 'fb_pipe')?.qty).toBe(44);
+    expect(merged.find((it) => it.id === 'ord_pipe')?.qty).toBe(3);
   });
 
   it('frameBomProjectItemToBuilderLine sets defaultQty equal to BOM qty', () => {
@@ -464,6 +738,27 @@ describe('projectBuilderHydrate', () => {
     expect(tube?.included).toBe(true);
     expect(tube?.qty).toBe(70);
     expect(crab?.included).toBeFalsy();
+  });
+
+  it('shouldPersistStellageDraft rejects blank auto draft', () => {
+    expect(shouldPersistStellageDraft({
+      id: 'st2',
+      name: 'Стеллаж 2',
+      items: [{ included: false }],
+    }, [{ id: 'st1' }])).toBe(false);
+    expect(shouldPersistStellageDraft({
+      id: 'st2',
+      name: 'Стеллаж 2',
+      editingExisting: true,
+      items: [{ included: false }],
+    }, [])).toBe(false);
+    expect(shouldPersistStellageDraft({
+      id: 'st2',
+      name: 'Стеллаж 2',
+      editingExisting: true,
+      wasInProjectList: true,
+      items: [{ included: false }],
+    }, [])).toBe(true);
   });
 });
 

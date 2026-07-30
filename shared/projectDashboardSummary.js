@@ -7,6 +7,7 @@ import {
   isPurchasableLineType,
   isCoolingSpecItem,
 } from "./itemTypes.js";
+import { lineGross } from "./moneyCalc.js";
 import {
   computeReadinessStats,
   runPrePublishCheck,
@@ -57,11 +58,6 @@ function hasNoClientSubsection(it) {
   const subs = subsectionsForSection(section);
   if (!section || !subs.length) return false;
   return !subsection || !isSubsectionValid(section, subsection);
-}
-
-function lineGross(it) {
-  const net = (Number(it.qty) || 0) * (Number(it.price) || 0);
-  return net + net * ((Number(it.vatRate) || 0) / 100);
 }
 
 function emptyPurchaseStatusCounts() {
@@ -239,9 +235,28 @@ export const PROJECT_DASHBOARD_FILTERS = [
   { id: "need_help", label: "Нужна помощь" },
   { id: "replacement_check", label: "Замена на проверке" },
   { id: "not_fit", label: "Не подходит" },
+  { id: "not_bought", label: "Не куплено" },
+  { id: "ordered", label: "Заказано" },
+  { id: "purchase_closed", label: "Куплено/доставлено" },
   { id: "frame_bom", label: "Из схемы стеллажа" },
   { id: "no_client_section", label: "Без раздела" },
   { id: "problems", label: "Проблемные" },
+];
+
+/** Фильтры блока «Клиентская выдача». */
+export const CLIENT_DELIVERY_FILTERS = [
+  { id: "client_visible", label: "Все клиентские" },
+  { id: "client_hidden", label: "Скрытые" },
+  { id: "no_price", label: "Без цены" },
+  { id: "no_link", label: "Без ссылки" },
+  { id: "no_supplier", label: "Без поставщика" },
+  { id: "frame_bom", label: "Из схемы каркаса" },
+  { id: "not_bought", label: "Не куплено" },
+  { id: "ordered", label: "Заказано" },
+  { id: "purchase_closed", label: "Куплено/доставлено" },
+  { id: "need_help", label: "Нужна помощь" },
+  { id: "not_fit", label: "Не подходит" },
+  { id: "replacement_check", label: "Замена на проверке" },
 ];
 
 export function filterProjectItems(items, filterId) {
@@ -259,7 +274,9 @@ export function metricTone(count, { warnFrom = 1, badFrom = 1 } = {}) {
 /** Человекочитаемая подпись активного фильтра таблицы. */
 export function resolveDashboardFilterLabel(filterId) {
   if (!filterId) return "Все позиции";
-  const row = PROJECT_DASHBOARD_FILTERS.find((f) => f.id === filterId);
+  const row =
+    CLIENT_DELIVERY_FILTERS.find((f) => f.id === filterId) ||
+    PROJECT_DASHBOARD_FILTERS.find((f) => f.id === filterId);
   return row?.label || filterId;
 }
 

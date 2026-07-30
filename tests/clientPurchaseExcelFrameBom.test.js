@@ -141,12 +141,30 @@ describe("client Excel — frame_bom", () => {
   });
 
   it("missing price shows Без цены, not zero", () => {
-    const row = { name: "Без цены", qty: 2, price: 0, unit: "шт." };
+    const row = { name: "Без цены", qty: 2, price: null, unit: "шт." };
     expect(formatClientUnitPrice(row)).toBe(CLIENT_PRICE_MISSING);
     expect(formatClientLineTotal(row)).toBe("");
   });
 
+  it("explicit price 0 shows 0", () => {
+    const row = { name: "Бесплатно", qty: 2, price: 0, unit: "шт." };
+    expect(formatClientUnitPrice(row)).toBe(0);
+    expect(formatClientLineTotal(row)).toBe(0);
+  });
+
   it("cooling_spec without price shows цена уточняется", () => {
+    const row = {
+      name: "Сплит",
+      qty: 1,
+      price: null,
+      sumVat: 0,
+      sourceItems: [{ kind: "cooling_spec" }],
+    };
+    expect(formatClientUnitPrice(row)).toBe(CLIENT_PRICE_TBD);
+    expect(formatClientLineTotal(row)).toBe(CLIENT_PRICE_TBD);
+  });
+
+  it("cooling_spec with explicit price 0 shows 0 (not TBD)", () => {
     const row = {
       name: "Сплит",
       qty: 1,
@@ -154,8 +172,8 @@ describe("client Excel — frame_bom", () => {
       sumVat: 0,
       sourceItems: [{ kind: "cooling_spec" }],
     };
-    expect(formatClientUnitPrice(row)).toBe(CLIENT_PRICE_TBD);
-    expect(formatClientLineTotal(row)).toBe(CLIENT_PRICE_TBD);
+    expect(formatClientUnitPrice(row)).toBe(0);
+    expect(formatClientLineTotal(row)).toBe(0);
   });
 
   it("groups by section then subsection in sheet 04", () => {

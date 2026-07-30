@@ -3,19 +3,38 @@ import path from "path";
 import fs from "fs";
 import multer from "multer";
 import { nanoid } from "nanoid";
-import { fileURLToPath } from "url";
 import { db } from "../db.js";
 import { multerFileFilter } from "../services/uploadFilter.js";
+import {
+  assertCanDeleteOrOverwriteAsset,
+  isAssetPinnedByPublishedRelease,
+} from "../services/publishedAssetRetention.js";
+import { resolveUploadRoot } from "../services/uploadRoot.js";
+import {
+  assertValidPdfUpload,
+  UploadValidationError,
+  FRAME_DRAWING_PDF_REQUIRED,
+} from "../services/uploadValidation.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadRoot = process.env.UPLOAD_ROOT
-  ? path.resolve(process.env.UPLOAD_ROOT)
-  : path.join(__dirname, "../../uploads");
+/** Always resolve at call time so UPLOAD_ROOT matches saveFile/static. */
+function uploadRoot() {
+  return resolveUploadRoot();
+}
+
+function resolveUnderUploadRoot(relPath) {
+  const root = path.resolve(uploadRoot());
+  const rel = String(relPath || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!rel || rel.includes("..") || path.isAbsolute(rel)) return null;
+  const abs = path.resolve(root, rel);
+  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
+  if (abs !== root && !abs.startsWith(rootWithSep)) return null;
+  return abs;
+}
 
 const pdfUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 30 * 1024 * 1024 },
-  fileFilter: multerFileFilter({ allowDocs: true }),
+  fileFilter: multerFileFilter({ pdfOnly: true }),
 });
 
 const router = Router();
@@ -41,6 +60,7 @@ function rowToDrawing(row) {
     frameConfig,
     pdfUrl: row.pdf_url,
     pdfFilename: row.pdf_filename,
+    downloadUrl: `/api/frame-drawings/${row.id}/download`,
     fileId: row.file_id || null,
     isClientVisible: !!row.is_client_visible,
     version: row.version,
@@ -107,13 +127,20 @@ function resolvePdfSubdir(body) {
 }
 
 function writePdfBuffer(buffer, body, drawingId) {
+  const root = resolveUploadRoot();
   const subdir = resolvePdfSubdir(body);
-  const absDir = path.join(uploadRoot, subdir);
+  const absDir = path.join(root, subdir);
   fs.mkdirSync(absDir, { recursive: true });
   const filename = `${drawingId}.pdf`;
-  const absPath = path.join(absDir, filename);
+  const rel = path.join(subdir, filename).replace(/\\/g, "/");
+  const absPath = resolveUnderUploadRoot(rel);
+  if (!absPath) throw new Error("Invalid frame drawing upload path");
+  fs.mkdirSync(path.dirname(absPath), { recursive: true });
+  if (fs.existsSync(absPath)) {
+    assertCanDeleteOrOverwriteAsset({ url: `/uploads/${rel}` });
+  }
   fs.writeFileSync(absPath, buffer);
-  const urlPath = `/uploads/${subdir.replace(/\\/g, "/")}/${filename}`;
+  const urlPath = `/uploads/${rel}`;
   return { urlPath, absPath, filename };
 }
 
@@ -185,9 +212,13 @@ function syncDrawingFilesVisibility({
 
 function safeDeleteFrameDrawingPdf(pdfUrl) {
   if (!isFrameDrawingUploadPath(pdfUrl)) return;
+  if (isAssetPinnedByPublishedRelease({ url: pdfUrl })) {
+    console.warn(`[frame-drawings] skip delete of pinned PDF: ${pdfUrl}`);
+    return;
+  }
   const rel = pdfUrl.replace(/^\/uploads\/?/, "");
-  const abs = path.join(uploadRoot, rel);
-  if (!fs.existsSync(abs)) return;
+  const abs = resolveUnderUploadRoot(rel);
+  if (!abs || !fs.existsSync(abs)) return;
   try {
     fs.unlinkSync(abs);
   } catch (err) {
@@ -245,13 +276,23 @@ router.get("/:id/download", (req, res) => {
   const row = db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(req.params.id);
   if (!row) return res.status(404).json({ error: "Not found" });
   const rel = row.pdf_url.replace(/^\/uploads\/?/, "");
-  const abs = path.join(uploadRoot, rel);
-  if (!fs.existsSync(abs)) return res.status(404).json({ error: "File not found" });
+  const abs = resolveUnderUploadRoot(rel);
+  if (!abs || !fs.existsSync(abs)) return res.status(404).json({ error: "File not found" });
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Cache-Control", "private, no-store");
   res.download(abs, row.pdf_filename || `${row.id}.pdf`);
 });
 
 router.post("/", pdfUpload.single("file"), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "PDF file required" });
+  if (!req.file) return res.status(400).json({ error: "PDF file required", code: FRAME_DRAWING_PDF_REQUIRED });
+  try {
+    assertValidPdfUpload(req.file);
+  } catch (e) {
+    if (e instanceof UploadValidationError) {
+      return res.status(e.status || 400).json({ error: e.code, code: e.code, message: e.message });
+    }
+    return res.status(400).json({ error: e.message });
+  }
   return saveDrawing(req, res, req.body || {});
 });
 
@@ -282,8 +323,53 @@ function saveDrawing(req, res, body) {
   const now = new Date().toISOString();
 
   if (replace) {
+    const prevRow = db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(updateId);
+    if (!prevRow) return res.status(404).json({ error: "Not found" });
+    const prevUrl = prevRow.pdf_url || "";
+    // Pinned published drawings must keep their PDF bytes. Create a new drawing id/path instead.
+    if (isAssetPinnedByPublishedRelease({ url: prevUrl, drawingId: updateId })) {
+      const id = nanoid(12);
+      const { urlPath } = writePdfBuffer(req.file.buffer, { projectId, presetId }, id);
+      const fileId = projectId
+        ? syncDrawingFilesVisibility({
+            projectId,
+            isClientVisible,
+            fileId: null,
+            pdfFilename,
+            pdfUrl: urlPath,
+            title,
+          })
+        : null;
+      const version = computeNextVersion({
+        projectId,
+        stellageId,
+        moduleId,
+        moduleRackKey,
+        presetId,
+        sourceType,
+      });
+      db.prepare(`
+        INSERT INTO frame_drawings (
+          id, project_id, module_id, stellage_id, module_rack_key, preset_id, source_type,
+          title, rack_type, frame_config_json, pdf_url, pdf_filename, file_id,
+          is_client_visible, version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id, projectId, moduleId, stellageId, moduleRackKey, presetId, sourceType,
+        title, rackType, frameConfigJson, urlPath, pdfFilename, fileId,
+        isClientVisible ? 1 : 0, version, now, now,
+      );
+      const drawing = rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(id));
+      return res.json({
+        ...drawing,
+        existingVersions: existingCount,
+        replaced: false,
+        createdNewDueToPin: true,
+        preservedDrawingId: updateId,
+      });
+    }
     const { urlPath } = writePdfBuffer(req.file.buffer, { projectId, presetId }, updateId);
-    const prev = db.prepare("SELECT version, file_id FROM frame_drawings WHERE id = ?").get(updateId);
+    const prev = { version: prevRow.version, file_id: prevRow.file_id };
     const fileId = projectId
       ? syncDrawingFilesVisibility({
           projectId,
@@ -391,6 +477,15 @@ router.patch("/:id", (req, res) => {
 router.delete("/:id", (req, res) => {
   const row = db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(req.params.id);
   if (!row) return res.status(404).json({ error: "Not found" });
+
+  try {
+    assertCanDeleteOrOverwriteAsset({ url: row.pdf_url, drawingId: row.id });
+  } catch (e) {
+    if (e.code === "ASSET_PINNED_BY_RELEASE") {
+      return res.status(409).json({ error: e.message, code: e.code, details: e.details });
+    }
+    throw e;
+  }
 
   removeDrawingFilesRow(row.file_id);
   safeDeleteFrameDrawingPdf(row.pdf_url);

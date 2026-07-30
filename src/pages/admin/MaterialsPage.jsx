@@ -77,12 +77,17 @@ const blank = {
   alternativeMaterialId: "",
   minOrderQty: 0,
   orderStep: 1,
+  nameEn: "",
+  descriptionEn: "",
+  unitEn: "",
+  translationStatus: "fallback_original",
+  translatorNote: "",
 };
 
 export default function MaterialsPage() {
   const { state, actions } = useStore();
   const ref = state.reference;
-  const { confirm, success } = useToast();
+  const { confirm, success, error } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = ["import", "duplicates", "quality"].includes(searchParams.get("tab"))
     ? searchParams.get("tab")
@@ -90,17 +95,22 @@ export default function MaterialsPage() {
   const setTab = (t) => setSearchParams(t === "base" ? {} : { tab: t });
   const [q, setQ] = useState("");
   const [catF, setCatF] = useState("");
+  const [translationFilter, setTranslationFilter] = useState("all");
+  const [coverage, setCoverage] = useState(null);
   const [editing, setEditing] = useState(null);
   const [priceDraft, setPriceDraft] = useState({});
   const [suppliers, setSuppliers] = useState([]);
   const [categories, setCategories] = useState([...CATEGORIES]);
   const [farmSections, setFarmSections] = useState([]);
   useEffect(() => {
-    Promise.all([api.getSuppliers(), api.getSettings()]).then(([sup, settings]) => {
-      setSuppliers(sup);
-      setCategories(resolveCategories(settings));
-      setFarmSections(resolveFarmSections(settings));
-    });
+    Promise.all([api.getSuppliers(), api.getSettings(), api.getMaterialTranslationCoverage().catch(() => null)]).then(
+      ([sup, settings, cov]) => {
+        setSuppliers(sup);
+        setCategories(resolveCategories(settings));
+        setFarmSections(resolveFarmSections(settings));
+        if (cov) setCoverage(cov);
+      },
+    );
   }, []);
 
   const activeModules = useMemo(
@@ -116,12 +126,25 @@ export default function MaterialsPage() {
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
     return state.materials
-      .filter(
-        (m) =>
-          (!ql || m.name.toLowerCase().includes(ql)) && (!catF || m.category === catF)
-      )
+      .filter((m) => {
+        if (catF && m.category !== catF) return false;
+        if (ql) {
+          const hay = `${m.name || ""} ${m.nameEn || ""}`.toLowerCase();
+          if (!hay.includes(ql)) return false;
+        }
+        if (translationFilter === "missing" && m.translation) return false;
+        if (translationFilter === "needs_review" && m.translationStatus !== "needs_review") return false;
+        if (translationFilter === "stale" && !m.translationStale) return false;
+        if (
+          translationFilter === "translated" &&
+          m.translationStatus !== "translated"
+        ) {
+          return false;
+        }
+        return true;
+      })
       .sort((a, b) => a.name.localeCompare(b.name, "ru"));
-  }, [state.materials, q, catF]);
+  }, [state.materials, q, catF, translationFilter]);
 
   const clientSectionOptions = useMemo(() => {
     const fromRef = state.reference?.clientSections?.filter((s) => !s.hidden);
@@ -185,8 +208,28 @@ export default function MaterialsPage() {
       patchMaterialModules({ ...editing, defaultQty: 0, responsible: editing.responsible || "general" }, mods),
       editing.farmSections ?? resolveMaterialFarmSections(editing)
     );
+    let savedId = payload.id;
     if (payload.id) await actions.materialUpdate(payload.id, payload);
-    else await actions.materialAdd(payload);
+    else {
+      const created = await actions.materialAdd(payload);
+      savedId = created?.id || payload.id;
+    }
+    if (savedId && (editing.nameEn || editing.descriptionEn || editing.unitEn || editing.translationStatus)) {
+      await api.upsertMaterialTranslation(savedId, {
+        locale: "en",
+        name: editing.nameEn || "",
+        description: editing.descriptionEn || "",
+        unit: editing.unitEn || "",
+        translationStatus: editing.translationStatus || "translated",
+        translatorNote: editing.translatorNote || "",
+      });
+      await actions.refreshMaterials();
+      try {
+        setCoverage(await api.getMaterialTranslationCoverage());
+      } catch {
+        /* ignore */
+      }
+    }
     setEditing(null);
   };
 
@@ -246,6 +289,7 @@ export default function MaterialsPage() {
             <MaterialsQualityPanel
               materials={state.materials}
               modules={state.modules}
+              suppliers={suppliers}
               onEditMaterial={openMaterialEdit}
               onPatchMaterial={patchMaterialFromQuality}
             />
@@ -253,15 +297,30 @@ export default function MaterialsPage() {
         ) : (
           <>
         <div className="toolbar" style={{ marginTop: 16 }}>
-          <input placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />
+          <input placeholder="Поиск RU/EN…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />
           <select value={catF} onChange={(e) => setCatF(e.target.value)} style={{ width: "auto" }}>
             <option value="">Все категории</option>
             {categories.map((c) => (
               <option key={c}>{c}</option>
             ))}
           </select>
+          <select
+            value={translationFilter}
+            onChange={(e) => setTranslationFilter(e.target.value)}
+            style={{ width: "auto" }}
+            title="Фильтр перевода"
+          >
+            <option value="all">Все переводы</option>
+            <option value="missing">Без английского перевода</option>
+            <option value="needs_review">Требует проверки</option>
+            <option value="stale">Устарел после RU-изменения</option>
+            <option value="translated">Переведено</option>
+          </select>
           <span className="muted" style={{ marginLeft: "auto" }}>
             {filtered.length} найдено
+            {coverage
+              ? ` · EN ${coverage.translatedOrReview ?? coverage.translated ?? 0} из ${coverage.total ?? "—"}`
+              : ""}
           </span>
         </div>
 
@@ -292,13 +351,23 @@ export default function MaterialsPage() {
                     onEdit={() => openMaterialEdit(m.id)}
                     onDelete={async () => {
                       if (
-                        await confirm({
+                        !(await confirm({
                           title: "Удалить позицию?",
                           message: m.name,
                           confirmLabel: "Удалить",
-                        })
+                        }))
                       )
-                        actions.materialDelete(m.id);
+                        return;
+                      try {
+                        await actions.materialDelete(m.id);
+                        success("Удалено");
+                      } catch (e) {
+                        if (e.code === "MATERIAL_IN_USE" || e.status === 409) {
+                          error(e.message || "Материал используется и не может быть удалён.");
+                        } else {
+                          error(e.message || "Не удалось удалить материал");
+                        }
+                      }
                     }}
                   />
                 ))}
@@ -331,6 +400,56 @@ export default function MaterialsPage() {
           <div className="field">
             <label>Наименование *</label>
             <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+          </div>
+          <div className="card" style={{ padding: 12, marginBottom: 14, background: "var(--bg-light, #f7faf8)" }}>
+            <strong style={{ fontSize: 13 }}>Английская версия</strong>
+            <p className="muted" style={{ fontSize: 12, margin: "4px 0 10px" }}>
+              Для клиентской ссылки на English. Русское название не изменяется.
+            </p>
+            {editing.translationStale && (
+              <p style={{ color: "var(--warn, #b8860b)", fontSize: 12, margin: "0 0 8px" }}>
+                Русский оригинал изменился после перевода — проверьте английскую версию.
+              </p>
+            )}
+            <div className="field">
+              <label>Название на английском</label>
+              <input
+                value={editing.nameEn || ""}
+                onChange={(e) => setEditing({ ...editing, nameEn: e.target.value })}
+                placeholder="English name"
+              />
+            </div>
+            <div className="field">
+              <label>Описание на английском</label>
+              <textarea
+                rows={2}
+                value={editing.descriptionEn || ""}
+                onChange={(e) => setEditing({ ...editing, descriptionEn: e.target.value })}
+                placeholder="English description (optional)"
+              />
+            </div>
+            <div className="form-grid">
+              <div className="field">
+                <label>Единица на английском</label>
+                <input
+                  value={editing.unitEn || ""}
+                  onChange={(e) => setEditing({ ...editing, unitEn: e.target.value })}
+                  placeholder="pcs / m / set…"
+                />
+              </div>
+              <div className="field">
+                <label>Статус перевода</label>
+                <select
+                  value={editing.translationStatus || "fallback_original"}
+                  onChange={(e) => setEditing({ ...editing, translationStatus: e.target.value })}
+                >
+                  <option value="translated">translated</option>
+                  <option value="needs_review">needs_review</option>
+                  <option value="do_not_translate">do_not_translate</option>
+                  <option value="fallback_original">fallback_original</option>
+                </select>
+              </div>
+            </div>
           </div>
           <div className="form-grid">
             <div className="field">
@@ -560,6 +679,17 @@ const MaterialRow = function MaterialRow({ m, priceDraft, setPriceDraft, patchPr
       </td>
       <td style={{ minWidth: 220 }} className="material-name">
         {m.name}
+        {m.nameEn ? (
+          <div className="muted" style={{ fontSize: 11, marginTop: 2, fontWeight: 400 }}>
+            {m.nameEn}
+            {m.translationStale ? " · устарел" : ""}
+            {m.translationStatus === "needs_review" ? " · review" : ""}
+          </div>
+        ) : (
+          <div className="muted" style={{ fontSize: 11, marginTop: 2, fontWeight: 400 }}>
+            нет EN
+          </div>
+        )}
         {materialSpecSubtitle(m) && (
           <div className="muted" style={{ fontSize: 11, marginTop: 4, fontWeight: 400 }}>
             {materialSpecSubtitle(m)}
@@ -580,6 +710,16 @@ const MaterialRow = function MaterialRow({ m, priceDraft, setPriceDraft, patchPr
           onChange={(e) => setPriceDraft((d) => ({ ...d, [m.id]: e.target.value }))}
           onBlur={() => {
             if (priceDraft[m.id] == null) return;
+            const next = Number(priceDraft[m.id]) || 0;
+            const prev = Number(m.basePrice) || 0;
+            if (next === prev) {
+              setPriceDraft((d) => {
+                const copy = { ...d };
+                delete copy[m.id];
+                return copy;
+              });
+              return;
+            }
             patchPrice(m.id, priceDraft[m.id]);
           }}
         />

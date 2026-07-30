@@ -24,7 +24,8 @@ export default function SettingsPage() {
     logoUrl: "",
   });
   const [adminUsers, setAdminUsers] = useState([]);
-  const [newUser, setNewUser] = useState({ name: "", apiKey: "" });
+  const [newUserName, setNewUserName] = useState("");
+  const [createdKeyOnce, setCreatedKeyOnce] = useState(null);
   const [categories, setCategories] = useState([...CATEGORIES]);
   const [clientSections, setClientSections] = useState([]);
   const [newCat, setNewCat] = useState("");
@@ -147,31 +148,114 @@ export default function SettingsPage() {
 
         <div className="card" style={{ padding: 22, marginTop: 24 }}>
           <h3 style={{ marginTop: 0 }}>Ключи доступа</h3>
-          <p className="muted" style={{ fontSize: 13 }}>Дополнительные ключи админки. Основной — в ADMIN_KEY на сервере.</p>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Дополнительные ключи админки. Основной — в ADMIN_KEY на сервере (не хранится в БД).
+          </p>
           {adminUsers.map((u) => (
             <div key={u.id} className="row between" style={{ fontSize: 13, marginBottom: 8 }}>
-              <span>{u.name}</span>
-              <code style={{ fontSize: 11 }}>{u.apiKey.slice(0, 8)}…</code>
+              <span>{u.name}{u.active === false ? " (отключён)" : ""}</span>
+              <code style={{ fontSize: 11 }}>…{u.keyHint || "????"}</code>
             </div>
           ))}
           <div className="row" style={{ gap: 8, marginTop: 12 }}>
-            <input placeholder="Имя" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
-            <input placeholder="Ключ" value={newUser.apiKey} onChange={(e) => setNewUser({ ...newUser, apiKey: e.target.value })} />
+            <input
+              placeholder="Имя"
+              value={newUserName}
+              onChange={(e) => setNewUserName(e.target.value)}
+            />
             <button
               type="button"
               className="btn btn-sm"
               onClick={async () => {
-                await api.createAdminUser(newUser);
+                const name = newUserName.trim();
+                if (!name) return;
+                const created = await api.createAdminUser({ name });
                 setAdminUsers(await api.getAdminUsers());
-                setNewUser({ name: "", apiKey: "" });
-                success("Ключ добавлен");
+                setNewUserName("");
+                setCreatedKeyOnce(created?.apiKey || null);
+                success("Ключ создан");
               }}
             >
               Добавить
             </button>
           </div>
+          <div style={{ marginTop: 16 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={async () => {
+                if (!(await confirm({
+                  title: "Выйти на всех устройствах?",
+                  message: "Все активные сессии админки будут отозваны. Ключи API продолжат работать.",
+                }))) return;
+                await api.revokeAllSessions();
+                success("Сессии отозваны на всех устройствах");
+              }}
+            >
+              Выйти на всех устройствах
+            </button>
+          </div>
         </div>
       </div>
+
+      {createdKeyOnce ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 16,
+          }}
+        >
+          <div className="card" style={{ maxWidth: 480, width: "100%", padding: 22 }}>
+            <h3 style={{ marginTop: 0 }}>Новый ключ доступа</h3>
+            <p style={{ fontSize: 14 }}>
+              Скопируйте ключ сейчас. После закрытия окна он больше не будет показан.
+            </p>
+            <code
+              style={{
+                display: "block",
+                wordBreak: "break-all",
+                fontSize: 12,
+                padding: 12,
+                background: "var(--surface-2, #f4f4f4)",
+                borderRadius: 8,
+              }}
+            >
+              {createdKeyOnce}
+            </code>
+            <div className="row" style={{ gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(createdKeyOnce);
+                    success("Ключ скопирован");
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              >
+                Копировать
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setCreatedKeyOnce(null)}
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAdminKey, api, setAdminKey } from "../../lib/api.js";
 import { clearClientScope } from "../../components/ClientGuard.jsx";
+import { loginErrorMessage } from "../../lib/requestErrors.js";
 
 export default function LoginPage() {
   const nav = useNavigate();
@@ -19,8 +20,8 @@ export default function LoginPage() {
       clearClientScope();
       nav("/", { replace: true });
       window.location.reload();
-    } catch {
-      setErr("Неверный ключ или API недоступен.");
+    } catch (error) {
+      setErr(loginErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -39,6 +40,9 @@ export default function LoginPage() {
         <h2 style={{ margin: "0 0 8px" }}>Вход в спецификации</h2>
         <p className="muted" style={{ fontSize: 13, marginBottom: 20 }}>
           Ключ из <code>backend/.env</code> (ADMIN_KEY).
+        </p>
+        <p className="muted" style={{ fontSize: 13, marginBottom: 20 }}>
+          Для автоматического входа откройте персональную ссылку доступа.
         </p>
         <div className="field">
           <label>Ключ доступа</label>

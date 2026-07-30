@@ -23,12 +23,23 @@ export const PROJECT_LINE_TYPE_LABELS = {
 };
 
 export const REFRESH_FROM_MATERIAL_FIELDS = [
+  "name",
   "price",
   "link",
   "supplier",
   "photo",
   "clientSection",
 ];
+
+/** Catalog supplier wins; the project value remains an orphan/manual fallback. */
+export function resolveEffectiveSupplier(item, material = null) {
+  if (item?.materialId && material) return material.supplier || "";
+  return item?.supplier || "";
+}
+
+export function reconcileItemCatalogFields(item, material = null) {
+  return { ...item, supplier: resolveEffectiveSupplier(item, material) };
+}
 
 export function resolveItemType(it) {
   return it?.itemType || it?.item_type || "material";
@@ -112,6 +123,11 @@ export function resolveItemClientVisibility(it, material = null) {
 
   if (it.visibleToClient === true) return true;
   if (it.visibleToClient === false) {
+    // Explicit hide payload (showToClient/clientVisible/visible/approved all false)
+    // must win over a single stale legacy flag after PATCH.
+    if (it.showToClient === false || it.clientVisible === false) return false;
+    if (it.visible === false && it.approved === false) return false;
+    // Legacy stale row: visible_to_client=false but visible/approved still true → show.
     const legacy = legacyItemClientVisible(it);
     if (legacy === true) return true;
     return false;
@@ -174,4 +190,35 @@ export function itemFlagsToDb(it) {
     visible: visibleToClient ? 1 : 0,
     approved: visibleToClient ? 1 : 0,
   };
+}
+
+/** Единый payload show/hide для bulk actions и fallback PATCH. */
+export function buildClientVisibilityPatch(visible) {
+  if (visible) {
+    return {
+      visibleToClient: true,
+      visible: true,
+      approved: true,
+      showToClient: true,
+      clientVisible: true,
+    };
+  }
+  return {
+    visibleToClient: false,
+    visible: false,
+    approved: false,
+    showToClient: false,
+    clientVisible: false,
+  };
+}
+
+/** Принудительно применить show/hide без legacy override после reload. */
+export function applyClientVisibilityPatch(item, patch = {}) {
+  if (patch.visibleToClient === true) {
+    return { ...item, ...buildClientVisibilityPatch(true) };
+  }
+  if (patch.visibleToClient === false) {
+    return { ...item, ...buildClientVisibilityPatch(false) };
+  }
+  return reconcileItemClientVisibilityFlags({ ...item, ...patch });
 }

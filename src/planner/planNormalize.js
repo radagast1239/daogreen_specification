@@ -8,7 +8,7 @@ import { planHasDrawnWalls } from "./wallGeometry.js";
 import { ensureWallNetwork, mergeCloseNodes, resolvePlanWalls } from "./wallNetwork.js";
 import { upgradeLegacyWall } from "./core/walls/wallModel.js";
 import { normalizeDimensions } from "./core/dimensions/model.js";
-import { normalizeLegacyRoomsFromZones, syncRooms } from "./core/rooms/index.js";
+import { normalizeLegacyRoomsFromZones, syncRoomsSafe } from "./core/rooms/index.js";
 import { normalizePlannerObject } from "./farmObjects.js";
 import { isPipeLine, normalizePipe, syncPlanPipes } from "./pipes.js";
 import { syncElectricalPlan } from "./electrical.js";
@@ -20,9 +20,23 @@ export function stripManualZones(zones = []) {
   return zones.filter((z) => z.auto);
 }
 
-export function normalizePlan(raw) {
+/**
+ * PHASE 0G corrective — result-aware нормализация.
+ *
+ * normalizePlan() остаётся compatibility wrapper (возвращает только plan) для
+ * всех мест, где diagnostic некуда показать. normalizePlanResult() — источник
+ * правды: возвращает { plan, diagnostics }, где diagnostics — session-only
+ * массив (обычно [] или [ROOM_DETECTION_FAILED]), который НЕ записан внутрь
+ * plan. Production load path с доступным UI (см. PlanPage.jsx) должен вызывать
+ * именно normalizePlanResult и передавать diagnostics в session-only state.
+ *
+ * options.roomSyncFn — точка инъекции для controlled-failure тестов room
+ * detection (см. syncRoomsSafe). Production-код всегда вызывает без него;
+ * параметр не меняет схему plan.
+ */
+export function normalizePlanResult(raw, options = {}) {
   const d = DEFAULT_PLAN();
-  if (!raw) return d;
+  if (!raw) return { plan: d, diagnostics: [] };
 
   const plan = {
     ...d,
@@ -95,19 +109,24 @@ export function normalizePlan(raw) {
   };
 
   const hasDrawnWalls = planHasDrawnWalls(plan.walls);
+  let diagnostics = [];
   if (hasDrawnWalls) {
-    try {
-      const resolved = resolvePlanWalls(plan);
-      const synced = syncRooms({ ...plan, walls: resolved });
+    const resolved = resolvePlanWalls(plan);
+    const synced = options.roomSyncFn
+      ? syncRoomsSafe({ ...plan, walls: resolved }, options.roomSyncFn)
+      : syncRoomsSafe({ ...plan, walls: resolved });
+    // PHASE 0G: на ok:false (сбой room-engine, не «нет комнат») сохраняем уже
+    // вычисленные выше legacy rooms/zones как есть — без auto-fix. Diagnostic
+    // возвращается вызывающему коду отдельно от plan (не записан внутрь него).
+    if (synced.ok) {
       plan.rooms = synced.rooms;
       plan.zones = synced.zones;
       plan.validationWarnings = [
         ...(plan.validationWarnings || []).filter((w) => w.source !== "rooms"),
         ...(synced.validationWarnings || []),
       ];
-    } catch (_) {
-      plan.zones = plan.zones.filter((z) => z.auto);
-      plan.rooms = plan.rooms.filter((r) => r.type === "room");
+    } else {
+      diagnostics = synced.diagnostics;
     }
   } else {
     plan.zones = [];
@@ -118,5 +137,10 @@ export function normalizePlan(raw) {
   plan.nodes = networked.nodes;
   plan.walls = networked.walls;
 
-  return syncClimatePlan(syncElectricalPlan(syncPlanPipes(plan)));
+  return { plan: syncClimatePlan(syncElectricalPlan(syncPlanPipes(plan))), diagnostics };
+}
+
+/** Compatibility wrapper — там, где diagnostic показать некуда (см. normalizePlanResult). */
+export function normalizePlan(raw, options = {}) {
+  return normalizePlanResult(raw, options).plan;
 }

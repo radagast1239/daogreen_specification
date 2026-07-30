@@ -2,7 +2,7 @@
 
 import { resolveClientSection } from "./clientSections.js";
 import { purchaseMergeKey, findPurchaseDuplicateGroups } from "./purchaseMerge.js";
-import { projectItemMatchKey } from "./projectItemKey.js";
+import { projectItemCompareKey } from "./projectItemKey.js";
 import { lineVisibleToClient } from "./itemTypes.js";
 
 export const IMPORT_KIND_LABELS = {
@@ -55,7 +55,7 @@ export function selectItemsForImport(sourceItems, { kind, module, itemIds } = {}
 function indexByMatchKey(items) {
   const map = new Map();
   for (const it of items || []) {
-    const key = projectItemMatchKey(it);
+    const key = projectItemCompareKey(it);
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(it);
   }
@@ -80,7 +80,7 @@ export function buildImportPreview({ sourceItems, targetItems, kind, module, ite
   );
 
   for (const it of toImport) {
-    const matchKey = projectItemMatchKey(it);
+    const matchKey = projectItemCompareKey(it);
     const existing = targetIndex.get(matchKey) || [];
     const row = {
       itemId: it.id,

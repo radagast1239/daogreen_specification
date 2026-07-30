@@ -8,8 +8,10 @@ import { parseFlowSpecsFromDb } from "../../shared/flowSpecs.js";
 import { parseSplitSpecsFromDb } from "../../shared/splitSpecs.js";
 import { resolveMaterialModules } from "../../shared/materialModules.js";
 import { resolveMaterialFarmSections } from "../../shared/materialFarmSections.js";
-import { normalizeItemFlags, resolveItemType } from "../../shared/itemTypes.js";
+import { normalizeItemFlags, resolveItemType, resolveEffectiveSupplier } from "../../shared/itemTypes.js";
 import { runSqlMigrations } from "./migrations/runner.js";
+import { resolveProjectPlanFields } from "./plannerPlanState.js";
+import { normalizeProjectCurrency } from "../../shared/projectCurrency.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.DATABASE_PATH || path.join(__dirname, "../data/daogreen.db");
@@ -39,7 +41,7 @@ export const db = new Proxy(
       if (prop === "transaction") {
         return (fn) => {
           return (...args) => {
-            d.exec("BEGIN");
+            d.exec("BEGIN IMMEDIATE");
             try {
               const result = fn(...args);
               d.exec("COMMIT");
@@ -70,6 +72,7 @@ export function initDb() {
     CREATE TABLE IF NOT EXISTS modules (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      name_overridden INTEGER NOT NULL DEFAULT 0,
       type TEXT NOT NULL DEFAULT 'general',
       tech TEXT DEFAULT '',
       section TEXT DEFAULT '',
@@ -124,6 +127,7 @@ export function initDb() {
       zones TEXT NOT NULL DEFAULT '[]',
       stellage_configs TEXT NOT NULL DEFAULT '[]',
       manual_params TEXT NOT NULL DEFAULT '{}',
+      revision INTEGER NOT NULL DEFAULT 1,
       version INTEGER NOT NULL DEFAULT 1,
       last_client_activity_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -196,6 +200,7 @@ function migrateDb() {
       db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
     }
   };
+  addCol("project_items", "name_overridden", "INTEGER NOT NULL DEFAULT 0");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS suppliers (
@@ -235,6 +240,9 @@ function migrateDb() {
   addCol("project_items", "internal_note", "TEXT DEFAULT ''");
   addCol("project_items", "delivery_days", "INTEGER DEFAULT 0");
   addCol("project_items", "item_role", "TEXT DEFAULT 'purchase'");
+  addCol("project_items", "name_en", "TEXT NOT NULL DEFAULT ''");
+  addCol("project_items", "description_en", "TEXT NOT NULL DEFAULT ''");
+  addCol("project_items", "unit_en", "TEXT NOT NULL DEFAULT ''");
   addCol("projects", "client_token_expires_at", "TEXT DEFAULT ''");
   addCol("projects", "purchase_started_at", "TEXT DEFAULT ''");
   addCol("projects", "installation_done_at", "TEXT DEFAULT ''");
@@ -275,6 +283,11 @@ function migrateDb() {
   addCol("project_items", "source_object_ids", "TEXT NOT NULL DEFAULT '[]'");
   addCol("projects", "planner_plan", "TEXT NOT NULL DEFAULT '{}'");
   addCol("projects", "planner_sync_at", "TEXT DEFAULT ''");
+  // Technical optimistic-lock revision. Adding the column is non-destructive:
+  // SQLite assigns the DEFAULT to existing rows without rewriting project data.
+  addCol("projects", "revision", "INTEGER NOT NULL DEFAULT 1");
+  // Optional admin-only note for a published version; null for legacy rows.
+  addCol("spec_versions", "release_comment", "TEXT");
   addCol("material_price_history", "changed_by", "TEXT DEFAULT ''");
 
   const needsItemFlagBackfill = db
@@ -357,6 +370,42 @@ function migrateDb() {
     ON frame_drawings(module_id, module_rack_key);
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS storage_quarantine (
+      id TEXT PRIMARY KEY,
+      original_asset_path TEXT NOT NULL,
+      quarantine_relative_path TEXT NOT NULL UNIQUE,
+      filename TEXT NOT NULL DEFAULT '',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      content_hash TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL DEFAULT '',
+      quarantined_at TEXT NOT NULL,
+      quarantined_by TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL DEFAULT '',
+      inventory_scan_id TEXT NOT NULL DEFAULT '',
+      original_modified_at TEXT,
+      restored_at TEXT,
+      status TEXT NOT NULL DEFAULT 'QUARANTINED'
+    );
+    CREATE INDEX IF NOT EXISTS idx_storage_quarantine_status ON storage_quarantine(status);
+    CREATE INDEX IF NOT EXISTS idx_storage_quarantine_hash ON storage_quarantine(content_hash);
+    CREATE INDEX IF NOT EXISTS idx_storage_quarantine_original ON storage_quarantine(original_asset_path);
+
+    CREATE TABLE IF NOT EXISTS storage_quarantine_events (
+      id TEXT PRIMARY KEY,
+      action TEXT NOT NULL,
+      actor TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      asset_path TEXT NOT NULL DEFAULT '',
+      quarantine_id TEXT,
+      content_hash TEXT NOT NULL DEFAULT '',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      result TEXT NOT NULL DEFAULT '',
+      detail_json TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_storage_quarantine_events_created ON storage_quarantine_events(created_at);
+  `);
+
   const visibleDefaultMigrated = db
     .prepare("SELECT 1 FROM settings WHERE key = 'migration_client_visible_default_v2'")
     .get();
@@ -383,6 +432,8 @@ export function rowToMaterial(row) {
   return {
     id: row.id,
     name: row.name,
+    nameOverridden: !!row.name_overridden,
+    name_overridden: !!row.name_overridden,
     unit: row.unit,
     basePrice: row.base_price,
     defaultQty: row.default_qty,
@@ -396,7 +447,10 @@ export function rowToMaterial(row) {
     farmSectionId: row.farm_section_id || "",
     farmSections: resolveMaterialFarmSections(row),
     itemType: row.item_type,
-    supplier: row.supplier,
+    supplier: resolveEffectiveSupplier(
+      { materialId: row.material_id, supplier: row.supplier },
+      row.material_id && row.material_exists ? { supplier: row.material_supplier || "" } : null,
+    ),
     link: row.link,
     linkAlt: row.link_alt,
     photoUrl: row.photo_url,
@@ -460,6 +514,11 @@ export function rowToItem(row) {
     module: row.module,
     section: row.section,
     name: row.name,
+    nameOverridden: !!row.name_overridden,
+    name_overridden: !!row.name_overridden,
+    nameEn: row.name_en || "",
+    descriptionEn: row.description_en || "",
+    unitEn: row.unit_en || "",
     unit: row.unit,
     category: row.category,
     clientSection: row.client_section || "",
@@ -516,9 +575,11 @@ export function rowToProject(row, items = []) {
   if (!row) return null;
   const mpRaw = JSON.parse(row.manual_params || "{}");
   const { floorPlan, ...manualParams } = mpRaw;
-  let plan = {};
-  try { plan = JSON.parse(row.planner_plan || "{}"); } catch { plan = {}; }
-  if ((!plan || !Object.keys(plan).length) && floorPlan) plan = floorPlan;
+  // PHASE 0B: повреждённый planner_plan диагностируется явно и НЕ превращается
+  // молча в пустой план (см. backend/src/plannerPlanState.js).
+  const planFields = resolveProjectPlanFields(row.planner_plan, floorPlan);
+  // Attach normalized currency fields on DTO only — never write back on GET.
+  const desc = normalizeProjectCurrency({ currency: row.currency, manualParams });
   return {
     id: row.id,
     name: row.name,
@@ -528,7 +589,12 @@ export function rowToProject(row, items = []) {
     height: row.height,
     sowingArea: row.sowing_area,
     type: row.type,
-    currency: row.currency,
+    // Prefer normalized meta/code over a stale DB currency column (e.g. ₽ + USD meta).
+    currency: desc.currencySymbol,
+    currencyCode: desc.currencyCode,
+    currencySymbol: desc.currencySymbol,
+    currencyName: desc.currencyName,
+    currencyCustom: !!desc.currencyCustom,
     vat: !!row.vat,
     comment: row.comment,
     status: row.status,
@@ -537,10 +603,12 @@ export function rowToProject(row, items = []) {
     zones: JSON.parse(row.zones || "[]"),
     stellageConfigs: JSON.parse(row.stellage_configs || "[]"),
     manualParams,
-    plan: Object.keys(plan).length ? plan : null,
+    plan: planFields.plan,
+    ...(planFields.plannerPlanState ? { plannerPlanState: planFields.plannerPlanState } : {}),
     plannerSyncAt: row.planner_sync_at || mpRaw.plannerSyncAt || "",
     rooms: JSON.parse(row.rooms || "[]"),
     version: row.version,
+    revision: Number(row.revision) || 1,
     lastClientActivityAt: row.last_client_activity_at,
     clientTokenExpiresAt: row.client_token_expires_at || "",
     purchaseStartedAt: row.purchase_started_at || "",
@@ -553,7 +621,10 @@ export function rowToProject(row, items = []) {
 
 export function loadProjectItems(projectId) {
   return db
-    .prepare("SELECT * FROM project_items WHERE project_id = ? ORDER BY sort_order, module, name")
+    .prepare(`SELECT pi.*, m.supplier AS material_supplier,
+                     CASE WHEN m.id IS NULL THEN 0 ELSE 1 END AS material_exists
+              FROM project_items pi LEFT JOIN materials m ON m.id = pi.material_id
+              WHERE pi.project_id = ? ORDER BY pi.sort_order, pi.module, pi.name`)
     .all(projectId)
     .map(rowToItem);
 }

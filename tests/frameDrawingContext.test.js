@@ -75,8 +75,8 @@ describe('frameDrawingContext', () => {
     const link = buildFrameDrawingLink(ctx);
     expect(link).toContain('projectId=p1');
     expect(link).toContain('moduleRackKey=mod1%3Ast1');
-    expect(link).toContain('returnTo=%2Fproject%2Fp1%3Fsection%3Dstellages');
-    expect(ctx.returnTo).toBe('/project/p1?section=stellages');
+    expect(link).toContain('returnTo=%2Fnew%3FprojectId%3Dp1%26mode%3Ddraft%26step%3Dstellages%26editRack%3Dmod1%253Ast1');
+    expect(ctx.returnTo).toBe('/new?projectId=p1&mode=draft&step=stellages&editRack=mod1%3Ast1');
   });
 
   it('builder frame drawing context uses wizard return path', () => {

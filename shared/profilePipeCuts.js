@@ -78,20 +78,87 @@ export function pipeCutsClientNote(cuts) {
   return label ? `Сегменты: ${label}` : "";
 }
 
+/** Сумма отрезков в погонных метрах (lengthMm × qty / 1000). */
+export function totalPipeCutMeters(pipeCuts) {
+  const totalMm = normalizePipeCuts(pipeCuts).reduce(
+    (sum, c) => sum + (Number(c.lengthMm) || 0) * (Number(c.qty) || 0),
+    0,
+  );
+  return Math.round((totalMm / 1000) * 100) / 100;
+}
+
+/** Единицы, для которых qty должен считаться из сегментов. */
+export function isLinearMeterPipeUnit(unit) {
+  const u = String(unit || "")
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/\s+/g, "");
+  return u === "м" || u === "м." || u === "мп" || u === "м.п" || u === "м.п." || u.includes("м.п");
+}
+
 /** Склеивает отрезки из нескольких строк (стеллажей): одинаковые длины суммируются */
-export function mergePipeCutsFromItems(items) {
+export function mergePipeCutsFromItems(items, options = {}) {
+  const scaleOf = typeof options.scaleOf === "function" ? options.scaleOf : () => 1;
   const byLen = new Map();
   for (const it of items || []) {
+    const scale = Math.max(1, Number(scaleOf(it)) || 1);
     for (const c of resolvePipeCuts(it)) {
       const len = Number(c.lengthMm) || 0;
-      const qty = Number(c.qty) || 0;
+      const qty = (Number(c.qty) || 0) * scale;
       if (!len || !qty) continue;
       byLen.set(len, (byLen.get(len) || 0) + qty);
     }
   }
   return [...byLen.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([lengthMm, qty]) => ({ lengthMm, qty }));
+    .map(([lengthMm, qty]) => ({ lengthMm, qty: Math.round(qty * 100) / 100 }));
+}
+
+/** Умножить/разделить qty сегментов (для count стеллажей). */
+export function scalePipeCuts(cuts, factor) {
+  const f = Number(factor);
+  if (!Number.isFinite(f) || f === 1) return normalizePipeCuts(cuts);
+  return normalizePipeCuts(cuts).map((c) => ({
+    lengthMm: c.lengthMm,
+    qty: Math.round((Number(c.qty) || 0) * f * 100) / 100,
+  }));
+}
+
+/** Lean counts for client DTO (no photos / internal fields). */
+export function leanStellageCounts(stellageConfigs = []) {
+  return (Array.isArray(stellageConfigs) ? stellageConfigs : [])
+    .map((c) => ({
+      id: String(c?.id || "").trim(),
+      name: String(c?.name || "").trim(),
+      moduleName: String(c?.moduleName || "").trim(),
+      count: Math.max(1, Number(c?.count) || 1),
+    }))
+    .filter((c) => c.id || c.name);
+}
+
+/**
+ * Количество одинаковых стеллажей для позиции спецификации.
+ * Frame BOM уже сохранён с учётом count — вызывающий код не должен умножать повторно.
+ */
+export function resolveStellageCountForProjectItem(item, stellageConfigs = []) {
+  const embedded = Number(item?.stellageCount ?? item?.rackCount);
+  if (Number.isFinite(embedded) && embedded >= 1) return Math.max(1, embedded);
+
+  const configs = Array.isArray(stellageConfigs) ? stellageConfigs : [];
+  if (!configs.length) return 1;
+  const id = String(item?.id || "");
+  for (const cfg of configs) {
+    const cfgId = String(cfg?.id || "").trim();
+    if (cfgId && id.startsWith(`${cfgId}__`)) {
+      return Math.max(1, Number(cfg.count) || 1);
+    }
+  }
+  const section = String(item?.section || item?.module || "").trim();
+  if (!section) return 1;
+  const cfg = configs.find(
+    (c) => String(c?.name || "").trim() === section || String(c?.moduleName || "").trim() === section,
+  );
+  return Math.max(1, Number(cfg?.count) || 1);
 }
 
 export function profilePipeSubtitle(matOrLine) {
@@ -112,3 +179,4 @@ export function patchWithPipeCuts(obj, cuts) {
     clientNote: pipeCutsClientNote(normalized) || obj?.clientNote || "",
   };
 }
+

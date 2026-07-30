@@ -8,6 +8,11 @@ export const PDF_PHOTO_COL_WIDTH_MM = PDF_THUMB_MM + PDF_THUMB_PAD_MM * 2;
 
 const imageCache = new Map();
 
+/** Per-image fetch budget — broken/slow CDN URLs must not block the whole PDF. */
+export const PDF_IMAGE_FETCH_TIMEOUT_MS = 4000;
+/** Cap concurrent photo loads (Promise.all on 200+ rows stalls browser + proxy). */
+export const PDF_IMAGE_CONCURRENCY = 6;
+
 function apiBase() {
   return (import.meta.env.VITE_API_URL || import.meta.env.BASE_URL || "").replace(/\/$/, "");
 }
@@ -89,13 +94,24 @@ export async function loadImageDataUrl(url, opts = {}) {
   if (!url) return null;
   const fetchUrl = resolvePdfFetchUrl(url, opts);
   if (!fetchUrl) return null;
+  const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : PDF_IMAGE_FETCH_TIMEOUT_MS;
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  let timer = null;
   try {
     const headers = {};
     if (fetchUrl.includes("/api/media/image")) {
       const key = getAdminKey();
       if (key) headers["X-Admin-Key"] = key;
     }
-    const res = await fetch(fetchUrl, { headers, credentials: "same-origin", cache: "no-store" });
+    if (controller) {
+      timer = setTimeout(() => controller.abort(), timeoutMs);
+    }
+    const res = await fetch(fetchUrl, {
+      headers,
+      credentials: "same-origin",
+      cache: "force-cache",
+      signal: controller?.signal,
+    });
     if (!res || !res.ok) return null;
     // Отбраковываем не-картинки: HTML/index.html, JSON, 404-страницы и т.п.
     if (!isAllowedImageContentType(res.headers?.get?.("content-type"))) return null;
@@ -111,6 +127,8 @@ export async function loadImageDataUrl(url, opts = {}) {
     return dataUrl;
   } catch {
     return null;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -177,6 +195,8 @@ export async function loadPdfImage(url, opts = {}) {
     .then((dataUrl) => (dataUrl ? normalizePdfImage(dataUrl) : null))
     .then(async (img) => {
       if (!img || !isPdfImageDataUrl(img.dataUrl) || !img.format) return null;
+      // JPEG/PNG already passed content-type + data-URL checks; skip expensive Image() probe.
+      if (img.format === "JPEG" || img.format === "PNG") return img;
       const ok = await probePdfImage(img.dataUrl);
       return ok ? img : null;
     });
@@ -184,14 +204,31 @@ export async function loadPdfImage(url, opts = {}) {
   return promise;
 }
 
+/** Run async mapper over items with a fixed concurrency pool. */
+export async function mapWithConcurrency(items, concurrency, mapper) {
+  const list = items || [];
+  const limit = Math.max(1, Math.min(concurrency || 1, list.length || 1));
+  const out = new Array(list.length);
+  let next = 0;
+  async function worker() {
+    while (next < list.length) {
+      const i = next;
+      next += 1;
+      out[i] = await mapper(list[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, list.length) }, () => worker()));
+  return out;
+}
+
 export async function buildPdfPhotoMap(rows, urlPicker = mergedRowPhotoUrl, opts = {}) {
   const map = new Map();
-  await Promise.all(
-    (rows || []).map(async (row, index) => {
-      const img = await loadPdfImage(urlPicker(row), opts);
-      if (img) map.set(index, img);
-    })
-  );
+  const list = rows || [];
+  const concurrency = Number(opts.concurrency) > 0 ? Number(opts.concurrency) : PDF_IMAGE_CONCURRENCY;
+  await mapWithConcurrency(list, concurrency, async (row, index) => {
+    const img = await loadPdfImage(urlPicker(row), opts);
+    if (img) map.set(index, img);
+  });
   return map;
 }
 

@@ -1,0 +1,26 @@
+{
+  "_fixture": "planner-spec-ownership",
+  "_note": "Объект-стеллаж (item kind=rack, includedInProject=true), создающий planner-owned позицию спецификации. createPlannerSpecItems выдаёт строку с source=planner и sourceObjectIds=[rk1]. Проверка сохранения ownership-метаданных при нормализации.",
+  "unit": "mm",
+  "room": { "w": 12000, "h": 8000, "wallThk": 120, "height": 3000 },
+  "walls": [],
+  "items": [
+    {
+      "id": "rk1",
+      "kind": "rack",
+      "type": "farm_object",
+      "category": "rack",
+      "name": "Стеллаж",
+      "x": 500,
+      "y": 500,
+      "w": 1200,
+      "h": 600,
+      "angle": 0,
+      "includedInProject": true,
+      "specMode": "custom",
+      "specQty": 1
+    }
+  ],
+  "lines": [],
+  "dimensions": []
+}

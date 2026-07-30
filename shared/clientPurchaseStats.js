@@ -6,6 +6,7 @@ import {
   PURCHASE_STATUS,
   isClosedPurchaseStatusId,
 } from "./purchaseStatusRules.js";
+import { computeLineMoney, lineGross } from "./moneyCalc.js";
 
 const CLOSED_PURCHASE = new Set([
   PURCHASE_STATUS.BOUGHT,
@@ -15,14 +16,8 @@ const CLOSED_PURCHASE = new Set([
 
 const ORDERED_PURCHASE = new Set([PURCHASE_STATUS.ORDERED, PURCHASE_STATUS.SEARCHING]);
 
-function lineGross(it) {
-  const net = (Number(it.qty) || 0) * (Number(it.price) || 0);
-  return net + net * ((Number(it.vatRate) || 0) / 100);
-}
-
-function factSum(it) {
-  const price = it.actualPrice != null ? Number(it.actualPrice) : Number(it.price) || 0;
-  return (Number(it.qty) || 0) * price;
+function factGross(it) {
+  return computeLineMoney(it, { priceMode: "actual", contributeCheck: false }).gross;
 }
 
 function pool(items) {
@@ -47,7 +42,7 @@ export function clientPurchaseDashboard(items) {
     totalSum += lineGross(it);
     if (CLOSED_PURCHASE.has(ps)) {
       boughtCount++;
-      boughtSum += factSum(it);
+      boughtSum += factGross(it);
     } else if (ORDERED_PURCHASE.has(ps)) {
       orderedCount++;
     }
@@ -135,7 +130,7 @@ export function supplierPurchaseProgress(items) {
     row.totalSum += lineGross(it);
     if (CLOSED_PURCHASE.has(ps)) {
       row.boughtCount++;
-      row.boughtSum += factSum(it);
+      row.boughtSum += factGross(it);
     } else if (ORDERED_PURCHASE.has(ps)) {
       row.orderedCount++;
       row.remainingCount++;

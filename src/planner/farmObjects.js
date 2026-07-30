@@ -49,6 +49,7 @@ export const FARM_OBJECT_CATEGORIES = [
   "cart",
   "cold_room_equipment",
   "sanitation",
+  "personnel",
   "storage",
   "custom",
 ];
@@ -131,6 +132,7 @@ const KIND_TO_CATEGORY = {
   trap: "sanitation",
   dispenser: "sanitation",
   dezmat: "sanitation",
+  person: "personnel",
 };
 
 const DEFAULT_VISIBLE_BY_CATEGORY = {
@@ -179,6 +181,7 @@ const DEFAULT_VISIBLE_BY_CATEGORY = {
   cart: ["equipment", "racks", "specification"],
   cold_room_equipment: ["equipment", "climate", "specification"],
   sanitation: ["safety", "plumbing", "specification"],
+  personnel: ["safety", "specification"],
   storage: ["equipment", "racks", "specification"],
   custom: ["equipment", "racks", "specification"],
 };

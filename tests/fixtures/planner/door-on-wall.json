@@ -1,0 +1,29 @@
+{
+  "_fixture": "door-on-wall",
+  "_note": "Одна стена (n1-n2) и дверь-item, привязанная текущим способом: item.wallId + item.wallSeg{a,b} + позиция x/y/w/h. Проверка привязки проёма к стене.",
+  "unit": "mm",
+  "room": { "w": 12000, "h": 8000, "wallThk": 120, "height": 3000 },
+  "nodes": {
+    "n1": { "x": 0, "y": 0 },
+    "n2": { "x": 4000, "y": 0 }
+  },
+  "walls": [
+    { "id": "w1", "a": "n1", "b": "n2", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w1" }
+  ],
+  "items": [
+    {
+      "id": "d1",
+      "kind": "door",
+      "x": 1550,
+      "y": -50,
+      "w": 900,
+      "h": 100,
+      "angle": 0,
+      "wallId": "w1",
+      "wallSeg": { "a": { "x": 0, "y": 0 }, "b": { "x": 4000, "y": 0 } },
+      "doorSwing": "left"
+    }
+  ],
+  "lines": [],
+  "dimensions": []
+}

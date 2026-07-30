@@ -1,0 +1,16 @@
+{
+  "_fixture": "engineering-route",
+  "_note": "Одна инженерная трасса — line с layer=irrigation и pts[]. normalizePlan прогоняет её через normalizePipe (pipeSystem/pipeRole/diameterMm заполняются по умолчанию).",
+  "unit": "mm",
+  "room": { "w": 12000, "h": 8000, "wallThk": 120, "height": 3000 },
+  "walls": [],
+  "items": [],
+  "lines": [
+    {
+      "id": "pipe1",
+      "layer": "irrigation",
+      "pts": [{ "x": 500, "y": 500 }, { "x": 500, "y": 3500 }, { "x": 4000, "y": 3500 }]
+    }
+  ],
+  "dimensions": []
+}

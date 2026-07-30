@@ -5,7 +5,20 @@ import {
   DEFAULT_CLIENT_PDF_OPTION,
   pdfExportOptionStats,
 } from "../src/lib/clientPdfExportMeta.js";
-import { groupRowsBySupplier, rowsWithoutLink, clientPdfMoneyOrTbd, getShortPdfTableHead } from "../src/lib/clientPdfExport.js";
+import {
+  groupRowsBySupplier,
+  rowsWithoutLink,
+  clientPdfMoneyOrTbd,
+  getShortPdfTableHead,
+  getClientPurchasePdfInstructionLines,
+  clientPurchasePdfIncludesNoLinkSection,
+  buildClientPurchasePdfOutline,
+} from "../src/lib/clientPdfExport.js";
+import {
+  buildProjectPreSendChecklist,
+  selectAllPreSendProblemIds,
+} from "../shared/projectPreSendChecklist.js";
+import { PURCHASE_STATUS } from "../shared/purchaseStatusRules.js";
 
 describe("formatQty — клиентское количество", () => {
   it("не выводит 10.10 шт (округляет вверх для штук)", () => {
@@ -63,6 +76,13 @@ describe("PDF export options", () => {
     expect(def.detail.toLowerCase()).toContain("без списков специалистов");
   });
 
+  it("закупочный PDF больше не обещает отдельный блок без ссылок", () => {
+    const def = CLIENT_PDF_EXPORT_OPTIONS.find((o) => o.id === "client_purchase");
+    expect(def.detail).not.toContain("Позиции без ссылок / требуют подбора");
+    expect(def.detail).not.toContain("требуют подбора");
+    expect(def.detail.toLowerCase()).toContain("без отдельной секции");
+  });
+
   it("подпись полного комплекта объясняет повторяющиеся представления", () => {
     const line = pdfExportOptionStats("client_full", { mergedCount: 105 });
     expect(line).toContain("повторяются");
@@ -80,17 +100,22 @@ describe("PDF export options", () => {
 
 describe("clientPdfMoneyOrTbd", () => {
   it('cooling_spec без цены возвращает "цена уточняется"', () => {
-    const row = { price: 0, sumVat: 0, sourceItems: [{ kind: "cooling_spec" }] };
+    const row = { price: null, sumVat: 0, sourceItems: [{ kind: "cooling_spec" }] };
     expect(clientPdfMoneyOrTbd(row, "₽")).toBe("цена уточняется");
   });
 
-  it("обычная строка без цены остаётся денежным форматом 0 ₽", () => {
+  it("обычная строка с явной ценой 0 остаётся денежным форматом 0 ₽", () => {
     const row = { price: 0, sumVat: 0, qty: 1, sourceItems: [{ kind: "material" }] };
     expect(clientPdfMoneyOrTbd(row, "₽")).toBe("0 ₽");
   });
 
+  it("cooling_spec с явной ценой 0 показывает 0 ₽ (не TBD)", () => {
+    const row = { price: 0, sumVat: 0, qty: 1, sourceItems: [{ kind: "cooling_spec" }] };
+    expect(clientPdfMoneyOrTbd(row, "₽")).toBe("0 ₽");
+  });
+
   it("cooling_spec без цены в client_short (та же колонка суммы) — «цена уточняется»", () => {
-    const row = { price: 0, sumVat: 0, sourceItems: [{ kind: "cooling_spec" }] };
+    const row = { price: "", sumVat: 0, sourceItems: [{ kind: "cooling_spec" }] };
     expect(getShortPdfTableHead()).not.toContain("Фото");
     expect(clientPdfMoneyOrTbd(row, "₽")).toBe("цена уточняется");
   });
@@ -179,6 +204,106 @@ describe("rowsWithoutLink", () => {
       { name: "C", link: "   " },
     ];
     expect(rowsWithoutLink(rows).map((r) => r.name)).toEqual(["B", "C"]);
+  });
+});
+
+describe("client purchase PDF — no separate no-link section", () => {
+  const merged = [
+    { name: "Ссылка есть", supplier: "Леруа", sumVat: 100, link: "http://x" },
+    { name: "Без ссылки OBI", supplier: "OBI", sumVat: 200, link: "" },
+    { name: "Без ссылки Леруа", supplier: "Леруа", sumVat: 50, link: "" },
+  ];
+
+  it("client PDF does not render no-link separate section", () => {
+    expect(clientPurchasePdfIncludesNoLinkSection()).toBe(false);
+    const outline = buildClientPurchasePdfOutline(merged);
+    expect(outline.includeNoLinkSection).toBe(false);
+  });
+
+  it('phrase "Позиции без ссылок требуют подбора" is absent', () => {
+    const text = getClientPurchasePdfInstructionLines().join("\n");
+    expect(text).not.toContain("Позиции без ссылок требуют подбора");
+    expect(text).not.toContain("собраны отдельным блоком");
+  });
+
+  it('phrase "Позиции без ссылок / требуют подбора" is absent', () => {
+    const outline = buildClientPurchasePdfOutline(merged);
+    const blob = JSON.stringify(outline);
+    expect(blob).not.toContain("Позиции без ссылок / требуют подбора");
+    expect(getClientPurchasePdfInstructionLines().join(" ")).not.toContain(
+      "Позиции без ссылок / требуют подбора"
+    );
+  });
+
+  it("no-link items still present in supplier/grouped purchase section", () => {
+    const outline = buildClientPurchasePdfOutline(merged);
+    const names = outline.supplierGroups.flatMap((g) => g.rows.map((r) => r.name));
+    expect(names).toContain("Без ссылки OBI");
+    expect(names).toContain("Без ссылки Леруа");
+    expect(outline.noLinkInSupplierGroups.map((r) => r.name).sort()).toEqual([
+      "Без ссылки OBI",
+      "Без ссылки Леруа",
+    ]);
+  });
+
+  it("total amount unchanged", () => {
+    const outline = buildClientPurchasePdfOutline(merged);
+    expect(outline.totalSum).toBe(350);
+    expect(outline.supplierGroups.reduce((s, g) => s + g.sum, 0)).toBe(350);
+  });
+
+  it("unique item count unchanged", () => {
+    const outline = buildClientPurchasePdfOutline(merged);
+    expect(outline.uniqueCount).toBe(3);
+    expect(outline.supplierGroups.reduce((s, g) => s + g.count, 0)).toBe(3);
+  });
+
+  it("instruction uses neutral online-version phrase", () => {
+    expect(getClientPurchasePdfInstructionLines()).toContain(
+      "Актуальные ссылки и статусы доступны в онлайн-версии."
+    );
+  });
+});
+
+describe("no_link remains info outside PDF", () => {
+  function baseItem(over = {}) {
+    return {
+      id: over.id || "it1",
+      name: "Болт",
+      unit: "шт",
+      qty: 1,
+      price: 10,
+      itemType: "material",
+      includedInProject: true,
+      visibleToClient: true,
+      approved: true,
+      clientSection: "stellage",
+      clientSubsection: "Каркас и профиль",
+      supplier: "Shop",
+      link: "https://example.com",
+      photoUrl: "/p.jpg",
+      purchaseStatus: PURCHASE_STATUS.NOT_BOUGHT,
+      ...over,
+    };
+  }
+
+  it("no_link remains info in UI/checklist helpers", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem(),
+      baseItem({ id: "l", link: "" }),
+    ]);
+    expect(checklist.groups.find((g) => g.key === "no_link").severity).toBe("info");
+    expect(checklist.blockers).toBe(0);
+    expect(checklist.warnings).toBe(0);
+  });
+
+  it("no_link not included in blocker/problem selection", () => {
+    const checklist = buildProjectPreSendChecklist([
+      baseItem({ id: "l", link: "" }),
+      baseItem({ id: "p", price: 0 }),
+    ]);
+    expect(selectAllPreSendProblemIds(checklist)).toEqual(["p"]);
+    expect(selectAllPreSendProblemIds(checklist)).not.toContain("l");
   });
 });
 

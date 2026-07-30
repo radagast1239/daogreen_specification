@@ -46,8 +46,10 @@ function insertDrawingWithFile({
   title = 'Rack',
   sourceType = 'project_stellage',
   frameConfigJson = '{}',
+  version = 1,
+  updatedAt = null,
 }) {
-  const now = new Date().toISOString();
+  const now = updatedAt || new Date().toISOString();
   const configJson = typeof frameConfigJson === 'string'
     ? frameConfigJson
     : JSON.stringify(frameConfigJson);
@@ -56,7 +58,7 @@ function insertDrawingWithFile({
       id, project_id, stellage_id, module_rack_key, source_type, title, rack_type,
       frame_config_json, pdf_url, pdf_filename, file_id,
       is_client_visible, version, created_at, updated_at
-    ) VALUES (?, ?, ?, NULL, ?, ?, 'nft', ?, ?, ?, ?, ?, 1, ?, ?)
+    ) VALUES (?, ?, ?, NULL, ?, ?, 'nft', ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     drawingId,
     projectId,
@@ -68,6 +70,7 @@ function insertDrawingWithFile({
     `${drawingId}.pdf`,
     fileId,
     visible ? 1 : 0,
+    version,
     now,
     now,
   );
@@ -117,6 +120,25 @@ afterAll(() => {
 });
 
 describe('getClientProjectDocuments', () => {
+  it('returns only the latest visible frame drawing version for one stellage', () => {
+    const oldFileId = insertFile({ id: 'old-file', type: 'frame_drawing', url: '/uploads/frame-drawings/proj1/old.pdf' });
+    const newFileId = insertFile({ id: 'new-file', type: 'frame_drawing', url: '/uploads/frame-drawings/proj1/new.pdf' });
+    insertDrawingWithFile({
+      drawingId: 'old-drawing', fileId: oldFileId, stellageId: 'st_1', version: 1,
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    });
+    insertDrawingWithFile({
+      drawingId: 'new-drawing', fileId: newFileId, stellageId: 'st_1', version: 2,
+      updatedAt: '2026-07-17T10:00:00.000Z',
+    });
+
+    const docs = getClientProjectDocuments('proj1');
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0].url).toBe('/uploads/frame-drawings/proj1/new.pdf');
+    expect(docs[0].drawingVersion).toBe(2);
+  });
+
   it('uses isolated temp database, not production file', () => {
     expect(getDbPath()).toBe(tempDbPath);
     expect(getDbPath()).not.toMatch(/backend[\\/]data[\\/]daogreen\.db$/);

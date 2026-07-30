@@ -2,11 +2,17 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { buildReferenceData } from "../lib/referenceData.js";
 import { applyClientSectionsFromSettings } from "../lib/clientSectionsConfig.js";
 import { buildItemsFromModules } from "../lib/apiHelpers.js";
-import { api as apiClient } from "../lib/api.js";
+import { api as apiClient, getCachedProjectRevision } from "../lib/api.js";
 import {
   reconcileItemClientVisibilityFlags,
   reconcileProjectItemsVisibility,
+  applyClientVisibilityPatch,
 } from "../../shared/itemTypes.js";
+import { patchTouchesClientDelivery } from "../../shared/projectPublishedRelease.js";
+import { createItemPatchQueue } from "./itemPatchQueue.js";
+import { Modal } from "../components/ui.jsx";
+import { reconcileItemCatalogFields } from "../../shared/itemTypes.js";
+import { createDebouncedTask } from "../lib/debouncedTask.js";
 
 export { buildItemsFromModules };
 
@@ -16,7 +22,7 @@ function reconcileStoredItem(item, materials = []) {
   const material = item?.materialId
     ? materials.find((m) => m.id === item.materialId)
     : null;
-  return reconcileItemClientVisibilityFlags(item, material);
+  return reconcileItemClientVisibilityFlags(reconcileItemCatalogFields(item, material), material);
 }
 
 function reducer(state, action) {
@@ -69,16 +75,36 @@ function reducer(state, action) {
     case "PROJECT_ITEM_UPDATE":
       return {
         ...state,
+        projects: state.projects.map((p) => {
+          if (p.id !== action.projectId) return p;
+          const next = {
+            ...p,
+            updatedAt: action.updatedAt === undefined ? p.updatedAt : action.updatedAt,
+            items: p.items.map((it) =>
+              it.id === action.itemId
+                ? reconcileStoredItem({ ...it, ...action.item }, state.materials)
+                : it
+            ),
+          };
+          // Optimistic: any client-facing edit after a published release needs republish.
+          if (p.publishedRelease && patchTouchesClientDelivery(action.item)) {
+            next.hasUnpublishedChanges = true;
+          }
+          return next;
+        }),
+      };
+    case "PROJECT_RELEASE_FLAGS":
+      return {
+        ...state,
         projects: state.projects.map((p) =>
           p.id === action.projectId
             ? {
                 ...p,
-                updatedAt: action.updatedAt || new Date().toISOString(),
-                items: p.items.map((it) =>
-                  it.id === action.itemId
-                    ? reconcileStoredItem({ ...it, ...action.item }, state.materials)
-                    : it
-                ),
+                hasUnpublishedChanges: action.hasUnpublishedChanges,
+                unpublishedSummary: action.unpublishedSummary ?? p.unpublishedSummary,
+                publishedRelease: action.publishedRelease !== undefined
+                  ? action.publishedRelease
+                  : p.publishedRelease,
               }
             : p
         ),
@@ -87,7 +113,13 @@ function reducer(state, action) {
       return {
         ...state,
         projects: state.projects.map((p) =>
-          p.id === action.projectId ? { ...p, items: [...p.items, action.item] } : p
+          p.id === action.projectId
+            ? {
+                ...p,
+                items: [...p.items, action.item],
+                ...(p.publishedRelease ? { hasUnpublishedChanges: true } : {}),
+              }
+            : p
         ),
       };
     case "PROJECT_ITEM_REMOVE":
@@ -95,10 +127,32 @@ function reducer(state, action) {
         ...state,
         projects: state.projects.map((p) =>
           p.id === action.projectId
-            ? { ...p, items: p.items.filter((it) => it.id !== action.itemId) }
+            ? {
+                ...p,
+                items: p.items.filter((it) => it.id !== action.itemId),
+                ...(p.publishedRelease ? { hasUnpublishedChanges: true } : {}),
+              }
             : p
         ),
       };
+    case "PROJECT_ITEMS_VISIBILITY_PATCH": {
+      const idSet = new Set(action.itemIds || []);
+      return {
+        ...state,
+        projects: state.projects.map((p) =>
+          p.id !== action.projectId
+            ? p
+            : {
+                ...p,
+                items: p.items.map((it) =>
+                  idSet.has(it.id)
+                    ? applyClientVisibilityPatch(it, action.patch)
+                    : it
+                ),
+              }
+        ),
+      };
+    }
     case "PROJECT_ENSURE": {
       const project = reconcileProjectItemsVisibility(action.project, state.materials);
       return state.projects.some((p) => p.id === project.id)
@@ -129,9 +183,105 @@ const initial = {
 
 export function StoreProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initial);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const revisionRef = useRef(new Map());
+  const projectWriteTailsRef = useRef(new Map());
+  const [revisionConflict, setRevisionConflict] = useState(null);
   const [, tick] = useState(0);
   const materialsInflight = useRef(null);
   const modulesInflight = useRef(null);
+  const itemPatchQueueRef = useRef(null);
+
+  const currentProjectRevision = useCallback((projectId) => {
+    const fromRef = revisionRef.current.has(projectId) ? Number(revisionRef.current.get(projectId)) : 0;
+    const fromCache = Number(getCachedProjectRevision(projectId)) || 0;
+    const fromState = Number(stateRef.current.projects.find((project) => project.id === projectId)?.revision) || 0;
+    return Math.max(fromRef, fromCache, fromState, 1);
+  }, []);
+
+  const noteRevisionConflict = useCallback((error, projectId) => {
+    if (error?.code !== "PROJECT_REVISION_CONFLICT") return false;
+    setRevisionConflict({
+      projectId: projectId || error.projectId,
+      expectedRevision: error.expectedRevision,
+      currentRevision: error.currentRevision,
+      scope: "admin",
+    });
+    return true;
+  }, []);
+
+  const runProjectWrite = useCallback((projectId, sender) => {
+    const previous = projectWriteTailsRef.current.get(projectId) || Promise.resolve();
+    const next = previous.catch(() => {}).then(async () => {
+      const expectedRevision = currentProjectRevision(projectId);
+      try {
+        const result = await sender(expectedRevision);
+        const revision = Number(result?.revision);
+        if (revision > 0) revisionRef.current.set(projectId, revision);
+        return result;
+      } catch (error) {
+        noteRevisionConflict(error, projectId);
+        throw error;
+      }
+    });
+    projectWriteTailsRef.current.set(projectId, next);
+    next.finally(() => {
+      if (projectWriteTailsRef.current.get(projectId) === next) projectWriteTailsRef.current.delete(projectId);
+    }).catch(() => {});
+    return next;
+  }, [currentProjectRevision, noteRevisionConflict]);
+
+  const releaseFlagsRefreshRef = useRef(new Map());
+  const scheduleReleaseFlagsRefresh = useCallback((projectId) => {
+    if (!projectId) return;
+    let task = releaseFlagsRefreshRef.current.get(projectId);
+    if (!task) {
+      task = createDebouncedTask(async () => {
+        try {
+          const p = await apiClient.getProject(projectId);
+          const revision = Number(p?.revision);
+          if (revision > 0) revisionRef.current.set(projectId, revision);
+          dispatch({
+            type: "PROJECT_RELEASE_FLAGS",
+            projectId,
+            hasUnpublishedChanges: !!p.hasUnpublishedChanges,
+            unpublishedSummary: p.unpublishedSummary,
+            publishedRelease: p.publishedRelease,
+          });
+        } catch {
+          /* ignore transient refresh errors */
+        }
+      }, 450);
+      releaseFlagsRefreshRef.current.set(projectId, task);
+    }
+    task.schedule();
+  }, []);
+
+  const scheduleReleaseFlagsRefreshRef = useRef(scheduleReleaseFlagsRefresh);
+  scheduleReleaseFlagsRefreshRef.current = scheduleReleaseFlagsRefresh;
+
+  if (!itemPatchQueueRef.current) {
+    itemPatchQueueRef.current = createItemPatchQueue({
+      send: ({ projectId, itemId, patch }) => runProjectWrite(projectId, (expectedRevision) =>
+        apiClient.patchItem(projectId, itemId, patch, expectedRevision)
+      ),
+      onOptimistic: ({ projectId, itemId, patch }) => {
+        dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId, item: patch });
+      },
+      onSettled: (item, { projectId, itemId }) => {
+        dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId, item });
+        scheduleReleaseFlagsRefreshRef.current(projectId);
+      },
+      onLatestError: (_error, { projectId, itemId }, _revision, lastConfirmed) => {
+        // Do not reload the project after a transient save failure: a stale snapshot
+        // could overwrite a qty already confirmed by an earlier queued PATCH.
+        if (lastConfirmed) {
+          dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId, item: lastConfirmed });
+        }
+      },
+    });
+  }
 
   const refreshSettings = useCallback(async () => {
     const settings = await apiClient.getSettings();
@@ -268,11 +418,14 @@ export function StoreProvider({ children }) {
       },
       async projectCreate(data) {
         const p = await apiClient.createProject(data);
+        revisionRef.current.set(p.id, Number(p.revision) || 1);
         dispatch({ type: "PROJECT_PREPEND", project: p });
         return p;
       },
       async projectUpdate(id, patch) {
-        const p = await apiClient.updateProject(id, patch);
+        const p = await runProjectWrite(id, (expectedRevision) =>
+          apiClient.updateProject(id, { ...patch, expectedRevision })
+        );
         dispatch({ type: "PROJECT_SET", project: p });
         return p;
       },
@@ -286,13 +439,13 @@ export function StoreProvider({ children }) {
         return p;
       },
       async approveAll(id) {
-        const p = await apiClient.approveAll(id);
+        const p = await runProjectWrite(id, (expectedRevision) => apiClient.approveAll(id, expectedRevision));
         dispatch({ type: "PROJECT_SET", project: p });
         return p;
       },
       async createVersion(id, opts = {}) {
         try {
-          return await apiClient.createVersion(id, opts);
+          return await runProjectWrite(id, (expectedRevision) => apiClient.createVersion(id, opts, expectedRevision));
         } catch (e) {
           const err = new Error(e.message);
           if (e.problems) err.problems = e.problems;
@@ -300,27 +453,27 @@ export function StoreProvider({ children }) {
         }
       },
       async regenerateToken(id) {
-        const { clientToken } = await apiClient.regenerateToken(id);
+        const { clientToken } = await runProjectWrite(id, (expectedRevision) => apiClient.regenerateToken(id, expectedRevision));
         dispatch({ type: "PROJECT_TOKEN", id, clientToken });
         return clientToken;
       },
       async archiveProject(id) {
-        await apiClient.archiveProject(id);
+        await runProjectWrite(id, (expectedRevision) => apiClient.archiveProject(id, expectedRevision));
         dispatch({ type: "PROJECT_REMOVE", id });
       },
       async itemUpdate(projectId, itemId, patch) {
-        const item = await apiClient.patchItem(projectId, itemId, patch);
-        dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId, item });
-        return item;
+        return itemPatchQueueRef.current(`${projectId}:${itemId}`, { projectId, itemId, patch });
       },
       async itemAdd(projectId, item) {
-        const created = await apiClient.addItem(projectId, item);
+        const created = await runProjectWrite(projectId, (expectedRevision) => apiClient.addItem(projectId, item, expectedRevision));
         dispatch({ type: "PROJECT_ITEM_ADD", projectId, item: created });
+        scheduleReleaseFlagsRefresh(projectId);
         return created;
       },
       async itemDelete(projectId, itemId) {
-        await apiClient.deleteItem(projectId, itemId);
+        await runProjectWrite(projectId, (expectedRevision) => apiClient.deleteItem(projectId, itemId, expectedRevision));
         dispatch({ type: "PROJECT_ITEM_REMOVE", projectId, itemId });
+        scheduleReleaseFlagsRefresh(projectId);
       },
       async importExcel(file, opts) {
         const result = await apiClient.importExcel(file, opts);
@@ -329,8 +482,12 @@ export function StoreProvider({ children }) {
       },
       async loadProject(id) {
         const p = await apiClient.getProject(id);
+        revisionRef.current.set(id, Number(p.revision) || 1);
         dispatch({ type: "PROJECT_ENSURE", project: p });
         return p;
+      },
+      applyItemsVisibilityPatch(projectId, itemIds, patch) {
+        dispatch({ type: "PROJECT_ITEMS_VISIBILITY_PATCH", projectId, itemIds, patch });
       },
       async clientPatchItem(token, itemId, patch) {
         return apiClient.patchClientItem(token, itemId, patch);
@@ -338,9 +495,40 @@ export function StoreProvider({ children }) {
       async loadClientProject(token) {
         return apiClient.getClientProject(token);
       },
-      async clientPatchCooling(token, safetyFactor) {
-        return apiClient.patchClientCooling(token, safetyFactor);
+      async clientPatchCooling(_token, _safetyFactor) {
+        // Engineering cooling factor is immutable for clients after publish.
+        return { ok: false, code: "CLIENT_ENGINEERING_MUTATION_FORBIDDEN" };
       },
+      async bulkPatchItems(projectId, body) {
+        return runProjectWrite(projectId, (expectedRevision) =>
+          apiClient.bulkPatchItems(projectId, { ...body, expectedRevision })
+        );
+      },
+      async refreshItemsFromMaterial(projectId, body, context) {
+        const result = await runProjectWrite(projectId, (expectedRevision) =>
+          apiClient.refreshItemsFromMaterial(projectId, { ...body, expectedRevision }, context)
+        );
+        for (const it of result?.updated || []) {
+          dispatch({ type: "PROJECT_ITEM_UPDATE", projectId, itemId: it.id, item: it });
+        }
+        return result;
+      },
+      async applySectionTemplate(projectId, body) {
+        return runProjectWrite(projectId, (expectedRevision) =>
+          apiClient.applySectionTemplate(projectId, { ...body, expectedRevision })
+        );
+      },
+      async importFromProject(projectId, body) {
+        return runProjectWrite(projectId, (expectedRevision) =>
+          apiClient.importFromProject(projectId, { ...body, expectedRevision })
+        );
+      },
+      async reviewReplacement(projectId, itemId, body) {
+        return runProjectWrite(projectId, (expectedRevision) =>
+          apiClient.reviewReplacement(projectId, itemId, { ...body, expectedRevision })
+        );
+      },
+      noteRevisionConflict,
       rerender: () => tick((n) => n + 1),
     }),
     [
@@ -353,11 +541,39 @@ export function StoreProvider({ children }) {
       refreshModules,
       refreshProjects,
       refreshDashboard,
+      runProjectWrite,
+      noteRevisionConflict,
+      scheduleReleaseFlagsRefresh,
     ]
   );
 
   const value = useMemo(() => ({ state, dispatch, actions }), [state, actions]);
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  const loadCurrentProject = async () => {
+    const projectId = revisionConflict?.projectId;
+    if (!projectId) return;
+    const project = await apiClient.getProject(projectId);
+    revisionRef.current.set(projectId, Number(project.revision) || 1);
+    dispatch({ type: "PROJECT_ENSURE", project });
+    setRevisionConflict(null);
+  };
+  return (
+    <StoreContext.Provider value={value}>
+      {children}
+      {revisionConflict && (
+        <Modal
+          title="Конфликт изменений проекта"
+          onClose={() => setRevisionConflict(null)}
+          footer={<>
+            <button type="button" className="btn" onClick={() => setRevisionConflict(null)}>Остаться и скопировать свои изменения</button>
+            <button type="button" className="btn btn-primary" onClick={loadCurrentProject}>Загрузить актуальную версию</button>
+          </>}
+        >
+          <p>Проект изменён в другой вкладке. Ваши изменения не сохранены поверх новой версии.</p>
+          <p className="muted">Серверная версия: {revisionConflict.currentRevision}; версия этой вкладки: {revisionConflict.expectedRevision}.</p>
+        </Modal>
+      )}
+    </StoreContext.Provider>
+  );
 }
 
 export function useStore() {

@@ -112,3 +112,48 @@ export function syncRooms(plan) {
   const validationWarnings = validateRooms(plan, rooms);
   return { rooms, zones, validationWarnings };
 }
+
+export const ROOM_DETECTION_FAILED = "ROOM_DETECTION_FAILED";
+
+function roomDetectionFailedDiagnostic() {
+  return {
+    code: ROOM_DETECTION_FAILED,
+    severity: "error",
+    entityType: "plan",
+    entityId: null,
+    path: "",
+    message: "Не удалось определить помещения. Проверьте соединения и пересечения стен.",
+    relatedEntityIds: [],
+    metadata: { source: "room-detection" },
+  };
+}
+
+/**
+ * PHASE 0G — единственная точка перехвата исключений room detection.
+ *
+ * Низкоуровневые pure-функции (detectRooms/findClosedLoops/...) могут бросить
+ * исключение на некорректной геометрии — это ожидаемо для внутреннего слоя.
+ * syncRoomsSafe — внешняя orchestration-граница, которая превращает такое
+ * исключение в структурированный result-контракт вместо того, чтобы каждый
+ * caller (normalizePlan, PlanPage) держал собственный catch { rooms: [] }.
+ *
+ * Гарантии:
+ *   • не мутирует plan;
+ *   • успех и «нет замкнутых контуров» различимы: оба ok:true, но последнее —
+ *     честный rooms:[] БЕЗ diagnostics, а сбой движка — ok:false, rooms:null,
+ *     с diagnostic ROOM_DETECTION_FAILED;
+ *   • raw Error/stack наружу не возвращается — только dev console.error.
+ *
+ * @param {object} plan
+ * @param {(plan:object)=>{rooms,zones,validationWarnings}} [syncFn] — точка
+ *   инъекции для тестов controlled-failure; production вызывает без аргумента.
+ */
+export function syncRoomsSafe(plan, syncFn = syncRooms) {
+  try {
+    const { rooms, zones, validationWarnings } = syncFn(plan);
+    return { ok: true, rooms, zones, validationWarnings, diagnostics: [] };
+  } catch (err) {
+    console.error("[room-detection] syncRooms failed", err);
+    return { ok: false, rooms: null, zones: null, validationWarnings: null, diagnostics: [roomDetectionFailedDiagnostic()] };
+  }
+}

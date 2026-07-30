@@ -1,0 +1,20 @@
+{
+  "_fixture": "t-junction",
+  "_note": "Основная стена (n1-n3-n2) с промежуточным узлом n3 и примыкающая стена (n3-n4). T-соединение через общий узел n3.",
+  "unit": "mm",
+  "room": { "w": 12000, "h": 8000, "wallThk": 120, "height": 3000 },
+  "nodes": {
+    "n1": { "x": 0, "y": 0 },
+    "n2": { "x": 6000, "y": 0 },
+    "n3": { "x": 3000, "y": 0 },
+    "n4": { "x": 3000, "y": 3000 }
+  },
+  "walls": [
+    { "id": "w1", "a": "n1", "b": "n3", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w1" },
+    { "id": "w2", "a": "n3", "b": "n2", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w2" },
+    { "id": "w3", "a": "n3", "b": "n4", "thk": 100, "role": "partition", "kind": "new", "thicknessSide": "center", "height": 3000, "type": "wall", "chainId": "w3" }
+  ],
+  "items": [],
+  "lines": [],
+  "dimensions": []
+}

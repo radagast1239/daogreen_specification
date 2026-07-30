@@ -1,5 +1,6 @@
 import { mergedPurchaseRows } from "../store/helpers.js";
 import { clientPurchaseItems, itemsByResponsible } from "./itemHelpers.js";
+import { t } from "../../shared/clientI18n.js";
 
 /** Вариант PDF для клиента, выбранный по умолчанию */
 export const DEFAULT_CLIENT_PDF_OPTION = "client_purchase";
@@ -43,7 +44,7 @@ export const CLIENT_PDF_EXPORT_OPTIONS = [
     recommended: true,
     summary: "Без дублей. Для закупки и контроля.",
     detail:
-      "Итоги, закупка по поставщикам, отдельный блок «без ссылок / требует подбора», закупка по разделам и QR на онлайн-версию. Без списков специалистов, чтобы не было ощущения повторов.",
+      "Итоги, закупка по поставщикам, сводка по разделам и QR на онлайн-версию. Позиции без ссылок остаются в обычных блоках поставщиков — без отдельной секции-дубля. Без списков специалистов, чтобы не было ощущения повторов.",
     useWhen: "Обычный вариант для клиента — покупка по одному списку без дублей.",
   },
   {
@@ -93,17 +94,18 @@ export const CLIENT_PDF_EXPORT_OPTIONS = [
   },
 ];
 
-export function getClientPdfExportStats(items) {
+export function getClientPdfExportStats(items, project = null) {
+  const opts = { stellageConfigs: project?.stellageConfigs || project?.stellageCounts || [] };
   const purchase = clientPurchaseItems({ items: items || [] });
-  const merged = mergedPurchaseRows(purchase);
+  const merged = mergedPurchaseRows(purchase, opts);
   const mergedCount = merged.length;
   const rawCount = purchase.length;
 
-  const plumberMerged = mergedPurchaseRows(itemsByResponsible(purchase, "plumber")).length;
-  const electricMerged = mergedPurchaseRows(itemsByResponsible(purchase, "electrician")).length;
-  const installerMerged = mergedPurchaseRows(itemsByResponsible(purchase, "installer")).length;
-  const climateMerged = mergedPurchaseRows(itemsByResponsible(purchase, "climate")).length;
-  const clientMerged = mergedPurchaseRows(itemsByResponsible(purchase, "client")).length;
+  const plumberMerged = mergedPurchaseRows(itemsByResponsible(purchase, "plumber"), opts).length;
+  const electricMerged = mergedPurchaseRows(itemsByResponsible(purchase, "electrician"), opts).length;
+  const installerMerged = mergedPurchaseRows(itemsByResponsible(purchase, "installer"), opts).length;
+  const climateMerged = mergedPurchaseRows(itemsByResponsible(purchase, "climate"), opts).length;
+  const clientMerged = mergedPurchaseRows(itemsByResponsible(purchase, "client"), opts).length;
 
   const fullPdfTableRows =
     mergedCount * 2 + plumberMerged + electricMerged + installerMerged + climateMerged;
@@ -121,28 +123,28 @@ export function getClientPdfExportStats(items) {
   };
 }
 
-export function pdfExportOptionStats(optionId, stats) {
+export function pdfExportOptionStats(optionId, stats, language = "ru") {
   switch (optionId) {
     case "client_short":
-      return `${stats.mergedCount} позиций · без фото`;
+      return t(language, "client.pdfExport.stats.countNoPhoto", { n: stats.mergedCount });
     case "client_purchase":
-      return `${stats.mergedCount} уникальных позиций. Без дублей.`;
+      return t(language, "client.pdfExport.stats.countUnique", { n: stats.mergedCount });
     case "supplier":
-      return `${stats.mergedCount} позиций по поставщикам`;
+      return t(language, "client.pdfExport.stats.countBySupplier", { n: stats.mergedCount });
     case "merged":
-      return `${stats.mergedCount} строк в PDF`;
+      return t(language, "client.pdfExport.stats.countRows", { n: stats.mergedCount });
     case "client_full":
-      return `В закупке ${stats.mergedCount} уникальных позиций. В полном комплекте строк больше, потому что те же позиции повторяются в разделах и списках специалистов.`;
+      return t(language, "client.pdfExport.stats.countFull", { n: stats.mergedCount });
     case "plumber":
-      return stats.plumberMerged ? `${stats.plumberMerged} строк` : "нет позиций";
+      return stats.plumberMerged ? t(language, "client.pdfExport.stats.countRows", { n: stats.plumberMerged }) : t(language, "client.pdfExport.stats.none");
     case "electric":
-      return stats.electricMerged ? `${stats.electricMerged} строк` : "нет позиций";
+      return stats.electricMerged ? t(language, "client.pdfExport.stats.countRows", { n: stats.electricMerged }) : t(language, "client.pdfExport.stats.none");
     case "installer":
-      return stats.installerMerged ? `${stats.installerMerged} строк` : "нет позиций";
+      return stats.installerMerged ? t(language, "client.pdfExport.stats.countRows", { n: stats.installerMerged }) : t(language, "client.pdfExport.stats.none");
     case "climate":
-      return stats.climateMerged ? `${stats.climateMerged} строк` : "нет позиций";
+      return stats.climateMerged ? t(language, "client.pdfExport.stats.countRows", { n: stats.climateMerged }) : t(language, "client.pdfExport.stats.none");
     case "client_role":
-      return stats.clientMerged ? `${stats.clientMerged} строк` : "нет позиций";
+      return stats.clientMerged ? t(language, "client.pdfExport.stats.countRows", { n: stats.clientMerged }) : t(language, "client.pdfExport.stats.none");
     default:
       return "";
   }
