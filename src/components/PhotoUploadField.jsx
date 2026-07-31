@@ -102,7 +102,7 @@ export default function PhotoUploadField({
       >
         <div className="row wrap" style={{ gap: 8, alignItems: "center" }}>
           <label className="btn btn-sm" style={{ cursor: "pointer" }}>
-            {uploading ? "Загрузка…" : "Выбрать файл"}
+            {uploading ? "Загрузка…" : "Выбрать фото"}
             <input type="file" accept="image/*" hidden disabled={uploading} onChange={onFileInput} />
           </label>
           <span className="muted" style={{ fontSize: 12 }}>{PASTE_HINT}</span>

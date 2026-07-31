@@ -8,19 +8,40 @@ import { getSidebarCollapsed, setSidebarCollapsed } from "../lib/sidebarPrefs.js
 import { NavIcon } from "./NavIcons.jsx";
 import { useStore } from "../store/StoreContext.jsx";
 
-const NAV = [
-  { to: "/", label: "Проекты", icon: "projects", end: true },
-  { to: "/projects/in-progress", label: "В процессе", icon: "progress" },
-  { to: "/clients", label: "Клиенты", icon: "clients" },
-  { to: "/materials", label: "Материалы", icon: "materials" },
-  { to: "/modules", label: "Модули и шаблоны", icon: "modules" },
-  { to: "/suppliers", label: "Поставщики", icon: "suppliers" },
-  { to: "/reports", label: "Отчёты", icon: "reports" },
-  { to: "/archive", label: "Архив", icon: "archive" },
-  { to: "/storage", label: "Файлы и хранилище", icon: "archive" },
-  { to: "/settings", label: "Настройки", icon: "settings" },
-  { to: "/new", label: "Новый проект", icon: "new" },
+const NAV_GROUPS = [
+  {
+    id: "projects",
+    label: "Проекты",
+    items: [
+      { to: "/", label: "Проекты", icon: "projects", end: true },
+      { to: "/clients", label: "Клиенты", icon: "clients" },
+      { to: "/reports", label: "Отчёты", icon: "reports" },
+      { to: "/storage", label: "Файлы и хранилище", icon: "archive" },
+      { to: "/projects/in-progress", label: "В процессе", icon: "progress", secondary: true },
+      { to: "/archive", label: "Архив", icon: "archive", secondary: true },
+      { to: "/new", label: "+ Создать проект", icon: "new", cta: true },
+    ],
+  },
+  {
+    id: "base",
+    label: "База",
+    items: [
+      { to: "/materials", label: "Материалы", icon: "materials" },
+      { to: "/suppliers", label: "Поставщики", icon: "suppliers" },
+      { to: "/modules", label: "Шаблоны и справочники", icon: "modules" },
+    ],
+  },
+  {
+    id: "design",
+    label: "Проектирование",
+    items: [
+      { to: "/planner", label: "Планировщик", icon: "planner" },
+      { to: "/planner/frame", label: "Конструктор каркасов", icon: "modules" },
+    ],
+  },
 ];
+
+const SYSTEM_ITEMS = [{ to: "/settings", label: "Настройки", icon: "settings" }];
 
 const CALC_LINKS = [
   { href: economicCalculatorUrl, label: "Калькулятор салатов", icon: "calc" },
@@ -28,12 +49,15 @@ const CALC_LINKS = [
   { href: berryCalculatorUrl, label: "Калькулятор ягод", icon: "berry" },
 ];
 
-function NavItem({ to, end, label, icon, onNavigate, collapsed }) {
+function NavItem({ to, end, label, icon, onNavigate, collapsed, secondary, cta }) {
+  const extra = [secondary ? "navlink--secondary" : "", cta ? "navlink--cta" : ""]
+    .filter(Boolean)
+    .join(" ");
   return (
     <NavLink
       to={to}
       end={end}
-      className={({ isActive }) => "navlink" + (isActive ? " active" : "")}
+      className={({ isActive }) => "navlink" + (isActive ? " active" : "") + (extra ? ` ${extra}` : "")}
       onClick={onNavigate}
       title={collapsed ? label : undefined}
     >
@@ -79,21 +103,29 @@ function SidebarNav({ compact, collapsed, onToggleCompact, onToggleCollapse, onN
         </button>
       </div>
 
-      {NAV.map((n) => (
-        <NavItem key={n.to} {...n} onNavigate={onNavigate} collapsed={collapsed} />
+      {NAV_GROUPS.map((group) => (
+        <div key={group.id} className="sidebar__group">
+          <div className="sidebar__sep" title={collapsed ? group.label : undefined}>
+            <span className="sidebar__sep-text">{group.label}</span>
+          </div>
+          {group.items.map((n) => (
+            <NavItem key={n.to} {...n} onNavigate={onNavigate} collapsed={collapsed} />
+          ))}
+        </div>
       ))}
-
-      <div className="sidebar__sep" title={collapsed ? "Планировщик" : undefined}>
-        <span className="sidebar__sep-text">Планировщик</span>
-      </div>
-      <NavItem to="/planner" label="Планировщик" icon="planner" onNavigate={onNavigate} collapsed={collapsed} />
-      <NavItem to="/planner/frame" label="Конструктор каркасов" icon="modules" onNavigate={onNavigate} collapsed={collapsed} />
 
       <div className="sidebar__sep" title={collapsed ? "Калькуляторы" : undefined}>
         <span className="sidebar__sep-text">Калькуляторы</span>
       </div>
       {CALC_LINKS.map((n) => (
         <ExtNavItem key={n.label} {...n} onNavigate={onNavigate} collapsed={collapsed} />
+      ))}
+
+      <div className="sidebar__sep" title={collapsed ? "Система" : undefined}>
+        <span className="sidebar__sep-text">Система</span>
+      </div>
+      {SYSTEM_ITEMS.map((n) => (
+        <NavItem key={n.to} {...n} onNavigate={onNavigate} collapsed={collapsed} />
       ))}
 
       <div className="spacer" />

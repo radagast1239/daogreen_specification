@@ -1,3 +1,12 @@
+/** Manual review marker — matches quality helpers and clientSections. */
+export const REVIEW_CLIENT_SECTION = "requires_review";
+
+/** Legacy review state stored in category before 1G.2.1. */
+export const LEGACY_REVIEW_CATEGORY = "Требует разбора";
+
+/** Default category when DB/API normalizes empty category (see backend matToParams). */
+export const DEFAULT_MATERIAL_CATEGORY = "Прочее";
+
 export function buildBulkPatchPayload(actionType, actionValue, extraValue) {
   switch (actionType) {
     case "responsible":
@@ -13,12 +22,34 @@ export function buildBulkPatchPayload(actionType, actionValue, extraValue) {
     case "hideClient":
       return { clientVisibleDefault: false };
     case "setReview":
-      return { category: "Требует разбора", clientSection: "requires_review" };
+      return { clientSection: REVIEW_CLIENT_SECTION };
     case "clearReview":
-      return { clientSection: "" }; // Will trigger "no_client_section" which is better than being stuck in review
+      return { clientSection: "" };
     default:
       return {};
   }
+}
+
+/** Per-material review toggle — preserves real category except legacy cleanup. */
+export function buildReviewPatchPayload(material, actionType) {
+  if (actionType === "setReview") {
+    return { clientSection: REVIEW_CLIENT_SECTION };
+  }
+  if (actionType === "clearReview") {
+    const patch = { clientSection: "" };
+    if ((material?.category || "").trim() === LEGACY_REVIEW_CATEGORY) {
+      patch.category = DEFAULT_MATERIAL_CATEGORY;
+    }
+    return patch;
+  }
+  return {};
+}
+
+export function resolveBulkPatchPayload(actionType, actionValue, extraValue, material = null) {
+  if (actionType === "setReview" || actionType === "clearReview") {
+    return buildReviewPatchPayload(material, actionType);
+  }
+  return buildBulkPatchPayload(actionType, actionValue, extraValue);
 }
 
 export function formatBulkActionConfirmation(actionType, actionValue, extraValue, count) {
@@ -43,10 +74,10 @@ export function formatBulkActionConfirmation(actionType, actionValue, extraValue
       fields = `Показывать клиенту по умолчанию = Нет`;
       break;
     case "setReview":
-      fields = `Категория = Требует разбора, Раздел = На проверке`;
+      fields = `Раздел клиента = На проверке (${REVIEW_CLIENT_SECTION})`;
       break;
     case "clearReview":
-      fields = `Убрать из "На проверке" (очистить раздел)`;
+      fields = `Снять «На проверке» (очистить clientSection; legacy category «${LEGACY_REVIEW_CATEGORY}» → «${DEFAULT_MATERIAL_CATEGORY}»)`;
       break;
     default:
       fields = "Неизвестное действие";

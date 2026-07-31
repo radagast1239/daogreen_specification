@@ -6,8 +6,9 @@ import { clientLink } from "../../lib/api.js";
 import { api } from "../../lib/api.js";
 import { PageHeader } from "../../components/Layout.jsx";
 import { Progress, Empty, ClientLinkModal } from "../../components/ui.jsx";
+import { RowActionsMenu } from "../../components/modulesUi.jsx";
 import { useToast } from "../../components/Toast.jsx";
-import { getPinnedIds, isPinned, sortWithPinned, togglePinned } from "../../lib/pinnedProjects.js";
+import { getPinnedIds, isPinned, togglePinned } from "../../lib/pinnedProjects.js";
 import { parsePublishRulesSettings } from "../../lib/publishRulesConfig.js";
 import HomeDashboard from "../../components/HomeDashboard.jsx";
 import DuplicateProjectModal from "../../components/DuplicateProjectModal.jsx";
@@ -29,6 +30,13 @@ import {
   resolveProjectKind,
 } from "../../../shared/projectCreation.js";
 import ProjectListFilters from "../../components/ProjectListFilters.jsx";
+import {
+  PROJECT_SORT_OPTIONS,
+  projectsFilterEmptyTitle,
+  projectsHaveActiveFilters,
+  projectsSourceEmptyCopy,
+  sortProjects,
+} from "../../lib/projectsListView.js";
 
 function clientKey(name) {
   return (name || "Без имени").trim().toLowerCase().replace(/\s+/g, " ");
@@ -47,6 +55,202 @@ function formatUpdatedShort(iso) {
   } catch {
     return "—";
   }
+}
+
+function ProjectCard({
+  p,
+  isInProgress,
+  problemIds,
+  pinnedOn,
+  onPin,
+  onArchive,
+  onRemove,
+  onRegenerate,
+  onDupSource,
+  onQuickCopy,
+  onOpenLinkModal,
+  onEdit,
+}) {
+  const t = p.totals || projectTotals(p);
+  const link = !isInProgress && p.clientToken ? clientLink(p.clientToken) : "";
+  const openPath = projectOpenPath(p);
+  const lifecycleBadge = projectLifecycleBadge(p);
+  const projectStatusLabel = getProjectStatusLabel(p.status);
+  const kindBadge = getProjectKindBadge(resolveProjectKind(p));
+  const itemCount = Array.isArray(p.items) ? p.items.length : Number(p.itemCount) || 0;
+  const readinessLabel =
+    itemCount === 0
+      ? "Проект ещё не заполнен"
+      : problemIds.has(String(p.id))
+        ? "Есть проблемы"
+        : null;
+  const remainingZero = Number(t.remaining) === 0;
+  const progressZero = Number(t.progress) === 0;
+
+  const menuItems = [
+    !isInProgress && {
+      id: "edit",
+      label: "Редактировать проект",
+      onClick: () => onEdit(p),
+    },
+    link && {
+      id: "new-link",
+      label: "Создать новую клиентскую ссылку",
+      onClick: () => onRegenerate(p),
+    },
+    link && {
+      id: "open-client",
+      label: "Открыть клиента",
+      onClick: () => window.open(link, "_blank", "noopener,noreferrer"),
+    },
+    !isInProgress && {
+      id: "copy",
+      label: "Создать копию",
+      children: [
+        {
+          id: "copy-quick",
+          label: "Быстрая копия",
+          onClick: () => onQuickCopy(p),
+        },
+        {
+          id: "copy-based",
+          label: "На основе этого проекта",
+          onClick: () => onDupSource(p),
+        },
+      ],
+    },
+    { id: "sep-danger", separator: true },
+    {
+      id: "archive",
+      label: "Архивировать",
+      danger: true,
+      onClick: () => onArchive(p),
+    },
+    {
+      id: "delete",
+      label: "Удалить",
+      danger: true,
+      onClick: () => onRemove(p),
+    },
+  ];
+
+  return (
+    <article className="card projects-card">
+      <div className="projects-card__top">
+        <button
+          type="button"
+          className={"pin-btn" + (pinnedOn ? " pin-btn--on" : "")}
+          title={pinnedOn ? "Открепить" : "Закрепить"}
+          aria-label={pinnedOn ? "Открепить" : "Закрепить"}
+          onClick={() => onPin(p.id)}
+        >
+          ★
+        </button>
+
+        <Link to={openPath} className="projects-card__head-link">
+          <div className="projects-card__meta">
+            <span className="eyebrow">
+              {p.type || "ферма"} · v{p.version || 1}
+            </span>
+            {lifecycleBadge && <span className="chip">{lifecycleBadge}</span>}
+            {!isInProgress && kindBadge ? (
+              <span className="chip chip--neutral">{kindBadge}</span>
+            ) : null}
+            {!isInProgress && (
+              <span className="chip chip--brand">{projectStatusLabel}</span>
+            )}
+            {!isInProgress && readinessLabel && (
+              <span className={`chip ${itemCount === 0 ? "chip--neutral" : "chip--amber"}`}>
+                {readinessLabel}
+              </span>
+            )}
+          </div>
+          <h3 className="projects-card__title">{p.name}</h3>
+          <div className="projects-card__sub muted">
+            <span>{p.client || "—"}</span>
+            {p.city ? <span> · {p.city}</span> : null}
+            {p.area ? <span> · {p.area} м²</span> : null}
+            {isInProgress && (
+              <span>
+                {" · шаг: "}
+                {resolveBuilderWizardStep(p, "basics")}
+              </span>
+            )}
+          </div>
+          {!isInProgress && (
+            <div className="projects-card__updated muted">
+              Обновлено: {formatUpdatedShort(p.updatedAt || p.updated_at)}
+              {p.itemCount != null ? ` · позиций: ${p.itemCount}` : ""}
+            </div>
+          )}
+        </Link>
+
+        {link && (
+          <a
+            className="projects-card__client-link"
+            href={link}
+            target="_blank"
+            rel="noreferrer"
+            title="Открыть клиентский экран"
+          >
+            Клиент ↗
+          </a>
+        )}
+      </div>
+
+      {!isInProgress && (
+        <div className="projects-card__finance">
+          <div
+            className={
+              "projects-card__progress" + (progressZero ? " projects-card__progress--zero" : "")
+            }
+          >
+            <div className="between">
+              <span className="muted">Прогресс закупки</span>
+              <span className="num projects-card__progress-value">{t.progress}%</span>
+            </div>
+            <Progress value={t.progress} />
+          </div>
+
+          <div className="projects-card__stat-grid">
+            <div className="projects-card__stat projects-card__stat--total">
+              <div className="eyebrow">Итого</div>
+              <div className="num projects-card__stat-value">{money(t.budget, p.currency)}</div>
+            </div>
+            <div
+              className={
+                "projects-card__stat projects-card__stat--remain" +
+                (remainingZero ? " projects-card__stat--done" : "")
+              }
+            >
+              <div className="eyebrow">Осталось</div>
+              <div className="num projects-card__stat-value">
+                {remainingZero ? "Закупка завершена" : money(t.remaining, p.currency)}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="projects-card__actions">
+        <Link className="btn btn-sm btn-primary" to={openPath}>
+          {projectOpenLabel(p)}
+        </Link>
+        {link && (
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() =>
+              onOpenLinkModal({ url: link, projectName: p.name, clientName: p.client })
+            }
+          >
+            Ссылка
+          </button>
+        )}
+        <RowActionsMenu items={menuItems} label="Действия проекта" />
+      </div>
+    </article>
+  );
 }
 
 export default function ProjectsPage({ variant = "active" } = {}) {
@@ -71,6 +275,7 @@ export default function ProjectsPage({ variant = "active" } = {}) {
   const [projectStatusF, setProjectStatusF] = useState("all");
   const [dateF, setDateF] = useState("");
   const [problemsOnly, setProblemsOnly] = useState(false);
+  const [sortF, setSortF] = useState("default");
   const [matCount, setMatCount] = useState(null);
 
   useEffect(() => {
@@ -106,7 +311,7 @@ export default function ProjectsPage({ variant = "active" } = {}) {
     const ql = q.trim().toLowerCase();
     const now = Date.now();
     const day = 86400000;
-    let list = visibleProjects.filter((p) => {
+    const list = visibleProjects.filter((p) => {
       if (ql) {
         const hay = `${p.name} ${p.client || ""} ${p.city || ""}`.toLowerCase();
         if (!hay.includes(ql)) return false;
@@ -122,8 +327,36 @@ export default function ProjectsPage({ variant = "active" } = {}) {
       }
       return true;
     });
-    return sortWithPinned(list, pinned);
-  }, [visibleProjects, q, clientF, projectStatusF, dateF, problemsOnly, problemIds, pinned, isInProgress]);
+    return sortProjects(list, sortF, { pinned, problemIds });
+  }, [
+    visibleProjects,
+    q,
+    clientF,
+    projectStatusF,
+    dateF,
+    problemsOnly,
+    problemIds,
+    pinned,
+    isInProgress,
+    sortF,
+  ]);
+
+  const filtersActive = projectsHaveActiveFilters({
+    q,
+    clientF,
+    projectStatusF: isInProgress ? "all" : projectStatusF,
+    dateF,
+    problemsOnly,
+  });
+
+  const resetFilters = () => {
+    setQ("");
+    setClientF("");
+    setProjectStatusF("all");
+    setDateF("");
+    setProblemsOnly(false);
+    setSortF("default");
+  };
 
   const onPin = (id) => setPinned(togglePinned(id));
 
@@ -153,6 +386,17 @@ export default function ProjectsPage({ variant = "active" } = {}) {
     setLinkModal(clientLink(token));
   };
 
+  const quickCopy = async (p) => {
+    await actions.projectDuplicate(p.id, { name: `${p.name} (копия)` });
+  };
+
+  const sourceEmpty = visibleProjects.length === 0;
+  const showHeaderCreate = !(isInProgress && sourceEmpty);
+  const pageTitle = isInProgress ? "В процессе" : "Проекты";
+  const pageSub = isInProgress
+    ? "Черновики и незавершённые проекты"
+    : `${visibleProjects.length} проект(ов)${matCount != null ? ` · база: ${matCount} материалов` : ""}`;
+
   return (
     <>
       {dupSource && (
@@ -178,221 +422,107 @@ export default function ProjectsPage({ variant = "active" } = {}) {
         />
       )}
       <PageHeader
-        title={isInProgress ? "Проекты в настройке" : "Проекты"}
-        sub={`${visibleProjects.length} ${isInProgress ? "черновик(ов)" : "проект(ов)"}${matCount != null ? ` · база: ${matCount} материалов` : ""}`}
+        title={pageTitle}
+        sub={pageSub}
         actions={
-          <button className="btn btn-primary" onClick={() => nav("/new")}>
-            Создать проект
-          </button>
+          showHeaderCreate ? (
+            <button className="btn btn-primary" onClick={() => nav("/new")}>
+              Создать проект
+            </button>
+          ) : null
         }
       />
       <div className="content">
         {!isInProgress && <HomeDashboard dash={dash} />}
 
-        {!isInProgress && (
-          <div style={{ marginBottom: 12 }}>
-            <ProjectListFilters value={projectStatusF} onChange={setProjectStatusF} />
-          </div>
+        {!sourceEmpty && (
+          <>
+            {!isInProgress && (
+              <div style={{ marginBottom: 12 }}>
+                <ProjectListFilters value={projectStatusF} onChange={setProjectStatusF} />
+              </div>
+            )}
+
+            <div className="project-filters no-print">
+              <input
+                placeholder="Поиск…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                style={{ maxWidth: 200 }}
+              />
+              <select value={clientF} onChange={(e) => setClientF(e.target.value)} style={{ width: "auto" }}>
+                <option value="">Все клиенты</option>
+                {clients.map(([k, name]) => (
+                  <option key={k} value={k}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <select value={dateF} onChange={(e) => setDateF(e.target.value)} style={{ width: "auto" }}>
+                <option value="">Любая дата</option>
+                <option value="7d">Обновлялись 7 дней</option>
+                <option value="30d">30 дней</option>
+                <option value="90d">90 дней</option>
+              </select>
+              <select value={sortF} onChange={(e) => setSortF(e.target.value)} style={{ width: "auto" }}>
+                {PROJECT_SORT_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <label className="row" style={{ fontSize: 13, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={problemsOnly}
+                  onChange={(e) => setProblemsOnly(e.target.checked)}
+                />
+                С проблемами
+              </label>
+              <span className="muted" style={{ marginLeft: "auto", fontSize: 13 }}>
+                {filtered.length} из {visibleProjects.length}
+              </span>
+            </div>
+          </>
         )}
 
-        <div className="project-filters no-print">
-          <input placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 200 }} />
-          <select value={clientF} onChange={(e) => setClientF(e.target.value)} style={{ width: "auto" }}>
-            <option value="">Все клиенты</option>
-            {clients.map(([k, name]) => (
-              <option key={k} value={k}>
-                {name}
-              </option>
-            ))}
-          </select>
-          <select value={dateF} onChange={(e) => setDateF(e.target.value)} style={{ width: "auto" }}>
-            <option value="">Любая дата</option>
-            <option value="7d">Обновлялись 7 дней</option>
-            <option value="30d">30 дней</option>
-            <option value="90d">90 дней</option>
-          </select>
-          <label className="row" style={{ fontSize: 13, cursor: "pointer" }}>
-            <input type="checkbox" checked={problemsOnly} onChange={(e) => setProblemsOnly(e.target.checked)} />
-            С проблемами
-          </label>
-          <span className="muted" style={{ marginLeft: "auto", fontSize: 13 }}>
-            {filtered.length} из {visibleProjects.length}
-          </span>
-        </div>
-
-        {visibleProjects.length === 0 ? (
+        {sourceEmpty ? (
           <Empty
-            title={isInProgress ? "Нет проектов в настройке" : "Пока нет проектов"}
-            hint={isInProgress ? "Сохраните черновик в мастере — он появится здесь." : "Создай первый проект через мастер."}
+            title={projectsSourceEmptyCopy(isInProgress ? "in-progress" : "active").title}
+            hint={projectsSourceEmptyCopy(isInProgress ? "in-progress" : "active").hint}
           >
             <button className="btn btn-primary" onClick={() => nav("/new")}>
-              {isInProgress ? "Новый проект" : "Создать проект"}
+              {projectsSourceEmptyCopy(isInProgress ? "in-progress" : "active").cta}
             </button>
           </Empty>
         ) : filtered.length === 0 ? (
-          <Empty title="Нет проектов по фильтрам" hint="Сбросьте фильтры." />
+          <Empty
+            title={projectsFilterEmptyTitle(isInProgress ? "in-progress" : "active")}
+            hint={filtersActive ? "Измените или сбросьте фильтры." : "Сбросьте фильтры."}
+          >
+            <button type="button" className="btn" onClick={resetFilters}>
+              Сбросить фильтры
+            </button>
+          </Empty>
         ) : (
           <div className="grid projects-grid">
-            {filtered.map((p) => {
-              const t = p.totals || projectTotals(p);
-              const link = !isInProgress && p.clientToken ? clientLink(p.clientToken) : "";
-              const pinnedOn = isPinned(p.id);
-              const openPath = projectOpenPath(p);
-              const lifecycleBadge = projectLifecycleBadge(p);
-              const projectStatusLabel = getProjectStatusLabel(p.status);
-              const kindBadge = getProjectKindBadge(resolveProjectKind(p));
-              const itemCount = Array.isArray(p.items)
-                ? p.items.length
-                : Number(p.itemCount) || 0;
-              const readinessLabel =
-                itemCount === 0
-                  ? "Проект ещё не заполнен"
-                  : problemIds.has(String(p.id))
-                    ? "Есть проблемы"
-                    : null;
-              return (
-                <div key={p.id} className="card" style={{ padding: 18 }}>
-                  <div className="between">
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        className="row"
-                        style={{ gap: 6, marginBottom: 4, flexWrap: "wrap", maxWidth: "100%" }}
-                      >
-                        <button
-                          type="button"
-                          className={"pin-btn" + (pinnedOn ? " pin-btn--on" : "")}
-                          title={pinnedOn ? "Открепить" : "Закрепить"}
-                          onClick={() => onPin(p.id)}
-                        >
-                          ★
-                        </button>
-                        <div className="eyebrow">{p.type || "ферма"} · v{p.version || 1}</div>
-                        {lifecycleBadge && (
-                          <span className="chip" style={{ fontSize: 10 }}>
-                            {lifecycleBadge}
-                          </span>
-                        )}
-                        {!isInProgress && kindBadge ? (
-                          <span className="chip chip--neutral" style={{ fontSize: 10 }}>
-                            {kindBadge}
-                          </span>
-                        ) : null}
-                        {!isInProgress && (
-                          <span className="chip chip--brand" style={{ fontSize: 10 }}>
-                            {projectStatusLabel}
-                          </span>
-                        )}
-                        {!isInProgress && readinessLabel && (
-                          <span
-                            className={`chip ${itemCount === 0 ? "chip--neutral" : "chip--amber"}`}
-                            style={{ fontSize: 10 }}
-                          >
-                            {readinessLabel}
-                          </span>
-                        )}
-                      </div>
-                      <Link to={openPath} style={{ fontSize: 16, fontWeight: 700 }}>
-                        {p.name}
-                      </Link>
-                      <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-                        {p.client || "—"}
-                        {p.city ? ` · ${p.city}` : ""}
-                        {p.area ? ` · ${p.area} м²` : ""}
-                        {isInProgress && (
-                          <span>
-                            {" · шаг: "}
-                            {resolveBuilderWizardStep(p, "basics")}
-                          </span>
-                        )}
-                      </div>
-                      {!isInProgress && (
-                        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                          Обновлено: {formatUpdatedShort(p.updatedAt || p.updated_at)}
-                          {p.itemCount != null ? ` · позиций: ${p.itemCount}` : ""}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {!isInProgress && (
-                    <>
-                      <div className="between" style={{ marginTop: 14, marginBottom: 6 }}>
-                        <span className="muted" style={{ fontSize: 12 }}>
-                          Прогресс закупки
-                        </span>
-                        <span className="num" style={{ fontWeight: 700 }}>
-                          {t.progress}%
-                        </span>
-                      </div>
-                      <Progress value={t.progress} />
-
-                      <div className="stat-grid" style={{ marginTop: 14 }}>
-                        <div>
-                          <div className="eyebrow">Итог</div>
-                          <div className="num" style={{ fontWeight: 700 }}>
-                            {money(t.budget, p.currency)}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="eyebrow">Осталось</div>
-                          <div className="num" style={{ fontWeight: 700 }}>
-                            {money(t.remaining, p.currency)}
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  <div className="row wrap" style={{ marginTop: 16, gap: 6 }}>
-                    <Link className={`btn btn-sm${isInProgress ? " btn-primary" : " btn-primary"}`} to={openPath}>
-                      {projectOpenLabel(p)}
-                    </Link>
-                    {link && (
-                      <>
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          onClick={() =>
-                            setLinkModal({ url: link, projectName: p.name, clientName: p.client })
-                          }
-                        >
-                          Ссылка
-                        </button>
-                        <button type="button" className="btn btn-sm btn-ghost" onClick={() => regenerate(p)}>
-                          Новая ссылка
-                        </button>
-                        <a className="btn btn-sm" href={link} target="_blank" rel="noreferrer">
-                          Клиент ↗
-                        </a>
-                      </>
-                    )}
-                    {!isInProgress && (
-                      <>
-                        <Link
-                          className="btn btn-sm"
-                          to={buildBuilderContinuePath(p)}
-                          title="Открыть мастер без создания нового projectId"
-                        >
-                          Редактировать проект
-                        </Link>
-                        <button className="btn btn-sm" onClick={() => setDupSource(p)}>
-                          На основе прошлого
-                        </button>
-                        <button className="btn btn-sm btn-ghost" onClick={() => actions.projectDuplicate(p.id, { name: `${p.name} (копия)` })}>
-                          Быстрая копия
-                        </button>
-                      </>
-                    )}
-                    <button className="btn btn-sm btn-ghost" onClick={() => archive(p)}>
-                      Архив
-                    </button>
-                    <button className="btn btn-sm btn-ghost" onClick={() => remove(p)}>
-                      Удалить
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+            {filtered.map((p) => (
+              <ProjectCard
+                key={p.id}
+                p={p}
+                isInProgress={isInProgress}
+                problemIds={problemIds}
+                pinnedOn={isPinned(p.id)}
+                onPin={onPin}
+                onArchive={archive}
+                onRemove={remove}
+                onRegenerate={regenerate}
+                onDupSource={setDupSource}
+                onQuickCopy={quickCopy}
+                onOpenLinkModal={setLinkModal}
+                onEdit={(project) => nav(buildBuilderContinuePath(project))}
+              />
+            ))}
           </div>
         )}
       </div>

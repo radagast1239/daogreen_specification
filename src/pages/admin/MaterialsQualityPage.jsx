@@ -11,7 +11,7 @@ import {
   qualityReportRows,
   qualitySummaryRows,
 } from "../../../shared/materialQualityCheck.js";
-import { buildBulkPatchPayload, formatBulkActionConfirmation } from "../../../shared/materialBulkActions.js";
+import { buildBulkPatchPayload, buildReviewPatchPayload, formatBulkActionConfirmation, resolveBulkPatchPayload } from "../../../shared/materialBulkActions.js";
 import { DEFAULT_RESPONSIBLE_ROLES } from "../../lib/responsibleRoles.js";
 import { getClientSections, subsectionsForSection } from "../../../shared/clientSections.js";
 import { api } from "../../lib/api.js";
@@ -22,9 +22,16 @@ const SEV_STYLE = {
   info: { color: "var(--muted)", chip: "chip chip--neutral", label: "Рекомендация" },
 };
 
+function worstSeverity(issues) {
+  if (issues.some((i) => i.severity === "critical")) return "critical";
+  if (issues.some((i) => i.severity === "warning")) return "warning";
+  return "info";
+}
+
 export function MaterialsQualityPanel({ materials, modules, suppliers = [], onEditMaterial, onPatchMaterial }) {
   const [qualityFilter, setQualityFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [expandedIssueIds, setExpandedIssueIds] = useState(new Set());
   const [bulkAction, setBulkAction] = useState("");
   const [bulkValue, setBulkValue] = useState("");
   const [bulkSubValue, setBulkSubValue] = useState("");
@@ -98,12 +105,15 @@ export function MaterialsQualityPanel({ materials, modules, suppliers = [], onEd
     setIsApplying(true);
     let successCount = 0;
     let errorCount = 0;
-    const payload = buildBulkPatchPayload(bulkAction, bulkValue, bulkSubValue);
+    const succeeded = new Set();
 
     for (const id of selectedIds) {
+      const material = materials.find((m) => m.id === id);
+      const payload = resolveBulkPatchPayload(bulkAction, bulkValue, bulkSubValue, material);
       try {
         await onPatchMaterial(id, payload, true); // true to skip individual success toasts if supported
         successCount++;
+        succeeded.add(id);
       } catch (e) {
         errorCount++;
       }
@@ -112,10 +122,16 @@ export function MaterialsQualityPanel({ materials, modules, suppliers = [], onEd
     setIsApplying(false);
     if (successCount > 0) {
       success(`Успешно обновлено: ${successCount}`);
-      setSelectedIds(new Set());
-      setBulkAction("");
-      setBulkValue("");
-      setBulkSubValue("");
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of succeeded) next.delete(id);
+        return next;
+      });
+      if (successCount === selectedIds.size) {
+        setBulkAction("");
+        setBulkValue("");
+        setBulkSubValue("");
+      }
     }
     if (errorCount > 0) {
       error(`Ошибок при обновлении: ${errorCount}`);
@@ -126,54 +142,54 @@ export function MaterialsQualityPanel({ materials, modules, suppliers = [], onEd
   const currentSubsections = bulkAction === "clientSection" && bulkValue ? subsectionsForSection(bulkValue) : [];
 
   return (
-    <>
-      <section className="card" style={{ marginBottom: 16, padding: 16 }}>
-        <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>Проверка базы материалов</h3>
-        <div className="stat-grid">
-          <div className="stat">
-            <div className="k">Всего материалов</div>
-            <div className="v num">{report.totalMaterials}</div>
+    <div className="materials-quality-polish">
+      <section className="card quality-stats-card">
+        <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Проверка базы материалов</h3>
+        <div className="quality-stat-grid">
+          <div className="quality-stat">
+            <div className="quality-stat__k">Всего</div>
+            <div className="quality-stat__v num">{report.totalMaterials}</div>
           </div>
-          <div className="stat">
-            <div className="k">Критичных проблем</div>
-            <div className="v num" style={{ color: "var(--danger)" }}>
+          <div className="quality-stat">
+            <div className="quality-stat__k">Критические</div>
+            <div className="quality-stat__v num" style={{ color: "var(--danger)" }}>
               {report.criticalIssueCount}
             </div>
           </div>
-          <div className="stat">
-            <div className="k">Предупреждений</div>
-            <div className="v num" style={{ color: "var(--warn)" }}>
+          <div className="quality-stat">
+            <div className="quality-stat__k">Предупреждения</div>
+            <div className="quality-stat__v num" style={{ color: "var(--warn)" }}>
               {report.warningIssueCount}
             </div>
           </div>
-          <div className="stat">
-            <div className="k">Рекомендаций</div>
-            <div className="v num">{report.infoIssueCount}</div>
+          <div className="quality-stat">
+            <div className="quality-stat__k">Рекомендации</div>
+            <div className="quality-stat__v num">{report.infoIssueCount}</div>
           </div>
-          <div className="stat">
-            <div className="k">Готовы к клиентской выдаче</div>
-            <div className="v num" style={{ color: "var(--ok)" }}>
+          <div className="quality-stat">
+            <div className="quality-stat__k">Готово</div>
+            <div className="quality-stat__v num" style={{ color: "var(--ok)" }}>
               {report.readyCount}
             </div>
           </div>
         </div>
       </section>
 
-      <div className="toolbar" style={{ marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-        <span className="muted">
-          {report.problematicEntries?.length || 0} материалов с замечаниями · {issueTotal} замечаний
+      <div className="toolbar" style={{ marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+        <span className="muted" style={{ fontSize: 13 }}>
+          {report.problematicEntries?.length || 0} с замечаниями · {issueTotal} замечаний
         </span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button type="button" className="btn" onClick={exportCsv} disabled={!issueTotal}>
+          <button type="button" className="btn btn-sm" onClick={exportCsv} disabled={!issueTotal}>
             CSV ↓
           </button>
-          <button type="button" className="btn btn-primary" onClick={exportXlsx} disabled={!issueTotal}>
+          <button type="button" className="btn btn-sm btn-primary" onClick={exportXlsx} disabled={!issueTotal}>
             Excel ↓
           </button>
         </span>
       </div>
 
-      <div className="toolbar" style={{ marginBottom: 16, flexWrap: "wrap", gap: 6 }}>
+      <div className="toolbar" style={{ marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
         {QUALITY_QUICK_FILTERS.map((f) => (
           <button
             key={f.id}
@@ -189,237 +205,234 @@ export function MaterialsQualityPanel({ materials, modules, suppliers = [], onEd
         ))}
       </div>
 
-      <div className="card" style={{ marginBottom: 16, padding: "12px 16px", background: "var(--surface-alt)" }}>
-        <div className="row wrap" style={{ gap: 12, alignItems: "center" }}>
-          <strong>Выбрано: {selectedIds.size}</strong>
-          <button type="button" className="btn btn-sm btn-ghost" onClick={selectVisible}>
-            Выбрать видимые
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-ghost"
-            disabled={selectedIds.size === 0}
-            onClick={() => setSelectedIds(new Set())}
-          >
-            Снять выбор
-          </button>
+      {selectedIds.size > 0 && (
+        <div className="card quality-bulk-bar">
+          <div className="row wrap" style={{ gap: 10, alignItems: "center" }}>
+            <strong>Выбрано: {selectedIds.size}</strong>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={selectVisible}>
+              Выбрать видимые
+            </button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setSelectedIds(new Set())}>
+              Снять выбор
+            </button>
 
-          <div style={{ flex: 1 }} />
+            <div style={{ flex: 1 }} />
 
-          <select
-            className="input-sm"
-            value={bulkAction}
-            onChange={(e) => {
-              setBulkAction(e.target.value);
-              setBulkValue("");
-              setBulkSubValue("");
-            }}
-            disabled={selectedIds.size === 0 || isApplying}
-            style={{ width: 200 }}
-          >
-            <option value="">— Выберите действие —</option>
-            <option value="responsible">Назначить ответственного</option>
-            <option value="supplier">Назначить поставщика</option>
-            <option value="clientSection">Назначить клиентский раздел</option>
-            <option value="showClient">Показать клиенту</option>
-            <option value="hideClient">Скрыть от клиента</option>
-            <option value="setReview">Отправить на проверку</option>
-            <option value="clearReview">Снять «на проверке»</option>
-          </select>
-
-          {bulkAction === "responsible" && (
             <select
               className="input-sm"
-              value={bulkValue}
-              onChange={(e) => setBulkValue(e.target.value)}
+              value={bulkAction}
+              onChange={(e) => {
+                setBulkAction(e.target.value);
+                setBulkValue("");
+                setBulkSubValue("");
+              }}
               disabled={isApplying}
+              style={{ width: 200 }}
             >
-              <option value="">Общий (сброс)</option>
-              {DEFAULT_RESPONSIBLE_ROLES.filter((r) => r.id !== "general").map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
+              <option value="">— Выберите действие —</option>
+              <option value="responsible">Назначить ответственного</option>
+              <option value="supplier">Назначить поставщика</option>
+              <option value="clientSection">Назначить клиентский раздел</option>
+              <option value="showClient">Показать клиенту</option>
+              <option value="hideClient">Скрыть от клиента</option>
+              <option value="setReview">Отправить на проверку</option>
+              <option value="clearReview">Снять «на проверке»</option>
             </select>
-          )}
 
-          {bulkAction === "supplier" && (
-            <select
-              className="input-sm"
-              value={bulkValue}
-              onChange={(e) => setBulkValue(e.target.value)}
-              disabled={isApplying}
-            >
-              <option value="">Без поставщика</option>
-              {suppliers.map((supplier) => (
-                <option key={supplier.id} value={supplier.name}>{supplier.name}</option>
-              ))}
-            </select>
-          )}
-
-          {bulkAction === "clientSection" && (
-            <>
+            {bulkAction === "responsible" && (
               <select
                 className="input-sm"
                 value={bulkValue}
-                onChange={(e) => {
-                  setBulkValue(e.target.value);
-                  setBulkSubValue("");
-                }}
+                onChange={(e) => setBulkValue(e.target.value)}
                 disabled={isApplying}
               >
-                <option value="">— Раздел —</option>
-                {clientSections.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
+                <option value="">Общий (сброс)</option>
+                {DEFAULT_RESPONSIBLE_ROLES.filter((r) => r.id !== "general").map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
                   </option>
                 ))}
               </select>
-              {currentSubsections.length > 0 && (
+            )}
+
+            {bulkAction === "supplier" && (
+              <select
+                className="input-sm"
+                value={bulkValue}
+                onChange={(e) => setBulkValue(e.target.value)}
+                disabled={isApplying}
+              >
+                <option value="">Без поставщика</option>
+                {suppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.name}>{supplier.name}</option>
+                ))}
+              </select>
+            )}
+
+            {bulkAction === "clientSection" && (
+              <>
                 <select
                   className="input-sm"
-                  value={bulkSubValue}
-                  onChange={(e) => setBulkSubValue(e.target.value)}
+                  value={bulkValue}
+                  onChange={(e) => {
+                    setBulkValue(e.target.value);
+                    setBulkSubValue("");
+                  }}
                   disabled={isApplying}
                 >
-                  <option value="">— Подраздел —</option>
-                  {currentSubsections.map((sub) => (
-                    <option key={sub} value={sub}>
-                      {sub}
+                  <option value="">— Раздел —</option>
+                  {clientSections.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
                     </option>
                   ))}
                 </select>
-              )}
-            </>
-          )}
+                {currentSubsections.length > 0 && (
+                  <select
+                    className="input-sm"
+                    value={bulkSubValue}
+                    onChange={(e) => setBulkSubValue(e.target.value)}
+                    disabled={isApplying}
+                  >
+                    <option value="">— Подраздел —</option>
+                    {currentSubsections.map((sub) => (
+                      <option key={sub} value={sub}>
+                        {sub}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </>
+            )}
 
-          <button
-            type="button"
-            className="btn btn-sm btn-primary"
-            disabled={!bulkAction || selectedIds.size === 0 || isApplying}
-            onClick={applyBulkAction}
-          >
-            {isApplying ? "Применение..." : "Применить к выбранным"}
-          </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              disabled={!bulkAction || isApplying}
+              onClick={applyBulkAction}
+            >
+              {isApplying ? "Применение..." : "Применить к выбранным"}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {filteredEntries.length === 0 ? (
-        <div className="card" style={{ padding: 24, textAlign: "center" }}>
-          <p style={{ margin: 0, fontSize: 18 }}>
+        <div className="card" style={{ padding: 20, textAlign: "center" }}>
+          <p style={{ margin: 0, fontSize: 15 }}>
             {issueTotal === 0
               ? "Замечаний нет — база выглядит аккуратно."
               : "По выбранному фильтру проблемных материалов нет."}
           </p>
         </div>
       ) : (
-        filteredEntries.map((entry) => {
-          const visibleIssues =
-            qualityFilter === "all"
-              ? entry.issues
-              : entry.issues.filter((issue) => {
-                  if (qualityFilter === "critical") return issue.severity === "critical";
-                  if (qualityFilter === "duplicates") {
-                    return issue.id === "duplicate_name_unit" || issue.id === "duplicate_purchase_key";
-                  }
-                  return issue.id === qualityFilter;
-                });
+        <div className="quality-row-list">
+          {filteredEntries.map((entry) => {
+            const visibleIssues =
+              qualityFilter === "all"
+                ? entry.issues
+                : entry.issues.filter((issue) => {
+                    if (qualityFilter === "critical") return issue.severity === "critical";
+                    if (qualityFilter === "duplicates") {
+                      return issue.id === "duplicate_name_unit" || issue.id === "duplicate_purchase_key";
+                    }
+                    return issue.id === qualityFilter;
+                  });
 
-          if (!visibleIssues.length) return null;
+            if (!visibleIssues.length) return null;
 
-          return (
-            <article key={entry.row.id} className="card" style={{ marginBottom: 12, padding: 16 }}>
-              <header
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 12,
-                  marginBottom: 12,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div style={{ paddingTop: 2 }}>
+            const expanded = expandedIssueIds.has(entry.row.id);
+            const shownIssues = expanded ? visibleIssues : visibleIssues.slice(0, 3);
+            const topSev = SEV_STYLE[worstSeverity(visibleIssues)] || SEV_STYLE.warning;
+
+            return (
+              <article key={entry.row.id} className="quality-row card">
+                <div className="quality-row__main">
                   <input
                     type="checkbox"
                     checked={selectedIds.has(entry.row.id)}
                     onChange={() => toggleSelection(entry.row.id)}
                   />
-                </div>
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <div style={{ fontWeight: 600, fontSize: 15 }}>{entry.row.name || "—"}</div>
-                  <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                    {entry.row.unit || "—"} · {entry.row.clientSectionLabel || entry.row.clientSection || "—"} ·{" "}
-                    {entry.row.supplier || "без поставщика"}
+                  <div className="quality-row__info">
+                    <div className="quality-row__title">{entry.row.name || "—"}</div>
+                    <div className="muted quality-row__meta">
+                      {entry.row.clientSectionLabel || entry.row.clientSection || entry.row.category || "—"}
+                      {" · "}
+                      {entry.row.supplier || "без поставщика"}
+                    </div>
                   </div>
+                  <span className="quality-row__count muted">{visibleIssues.length}</span>
+                  <span className={topSev.chip} style={{ fontSize: 11 }}>
+                    {topSev.label}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    onClick={() => onEditMaterial?.(entry.row.id)}
+                  >
+                    Открыть
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-primary"
-                  onClick={() => onEditMaterial?.(entry.row.id)}
-                >
-                  Открыть материал
-                </button>
-              </header>
 
-              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 10 }}>
-                {visibleIssues.map((issue) => {
-                  const sev = SEV_STYLE[issue.severity] || SEV_STYLE.warning;
-                  return (
-                    <li
-                      key={`${entry.row.id}-${issue.id}`}
-                      style={{
-                        border: "1px solid var(--line)",
-                        borderRadius: 8,
-                        padding: "10px 12px",
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span className={sev.chip} style={{ fontSize: 11 }}>
+                <ul className="quality-row__issues">
+                  {shownIssues.map((issue) => {
+                    const sev = SEV_STYLE[issue.severity] || SEV_STYLE.warning;
+                    return (
+                      <li key={`${entry.row.id}-${issue.id}`}>
+                        <span className={sev.chip} style={{ fontSize: 10 }}>
                           {sev.label}
                         </span>
-                        <strong style={{ fontSize: 13 }}>{issue.label}</strong>
+                        <span>{issue.label}</span>
                         {(issue.duplicateCount || 0) > 1 && (
-                          <span className="muted" style={{ fontSize: 12 }}>
-                            ({issue.duplicateCount} шт.)
-                          </span>
+                          <span className="muted">({issue.duplicateCount})</span>
                         )}
-                      </div>
-                      {issue.hint && (
-                        <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
-                          {issue.hint}
-                        </p>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
+                      </li>
+                    );
+                  })}
+                </ul>
 
-              {onPatchMaterial && (
-                <div className="row" style={{ gap: 4, flexWrap: "wrap", marginTop: 12 }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => onPatchMaterial(entry.row.id, { active: false, status: "archived" })}
-                  >
-                    Скрыть
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() =>
-                      onPatchMaterial(entry.row.id, {
-                        category: "Требует разбора",
-                        clientSection: "requires_review",
-                      })
-                    }
-                  >
-                    На проверку
-                  </button>
+                <div className="quality-row__actions">
+                  {visibleIssues.length > 3 && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => {
+                        setExpandedIssueIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(entry.row.id)) next.delete(entry.row.id);
+                          else next.add(entry.row.id);
+                          return next;
+                        });
+                      }}
+                    >
+                      {expanded ? "Свернуть проблемы" : "Показать все"}
+                    </button>
+                  )}
+                  {onPatchMaterial && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => onPatchMaterial(entry.row.id, { active: false, status: "archived" })}
+                      >
+                        Скрыть
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() =>
+                          onPatchMaterial(entry.row.id, buildReviewPatchPayload(entry.row, "setReview"))
+                        }
+                      >
+                        На проверку
+                      </button>
+                    </>
+                  )}
                 </div>
-              )}
-            </article>
-          );
-        })
+              </article>
+            );
+          })}
+        </div>
       )}
 
       <p className="muted" style={{ fontSize: 12, marginTop: 16 }}>
@@ -427,7 +440,7 @@ export function MaterialsQualityPanel({ materials, modules, suppliers = [], onEd
         отдельными закупочными позициями — объединяйте вручную через «Дубликаты», только если это одна и
         та же позиция.
       </p>
-    </>
+    </div>
   );
 }
 

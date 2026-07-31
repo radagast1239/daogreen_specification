@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildBulkPatchPayload, formatBulkActionConfirmation } from "../shared/materialBulkActions.js";
-
+import {
+  buildBulkPatchPayload,
+  buildReviewPatchPayload,
+  DEFAULT_MATERIAL_CATEGORY,
+  LEGACY_REVIEW_CATEGORY,
+  REVIEW_CLIENT_SECTION,
+  formatBulkActionConfirmation,
+} from "../shared/materialBulkActions.js";
 describe("materialBulkActions", () => {
   it("Bulk payload для responsible содержит только responsible", () => {
     const payload = buildBulkPatchPayload("responsible", "plumber");
@@ -26,10 +32,32 @@ describe("materialBulkActions", () => {
   });
 
   it("bulk payloads never include frame_bom technical keys", () => {
-    const types = ["responsible", "supplier", "clientSection", "showClient", "hideClient", "setReview"];
+    const types = ["responsible", "supplier", "clientSection", "showClient", "hideClient", "setReview", "clearReview"];
     for (const t of types) {
       const payload = buildBulkPatchPayload(t, "x", "y");
       expect(JSON.stringify(payload)).not.toMatch(/frame_bom|sourceKey|sourceType/i);
     }
+  });
+
+  it("setReview and clearReview preserve material category (1g.2.1)", () => {
+    expect(buildBulkPatchPayload("setReview")).toEqual({
+      clientSection: REVIEW_CLIENT_SECTION,
+    });
+    expect("category" in buildBulkPatchPayload("setReview")).toBe(false);
+    expect(buildBulkPatchPayload("clearReview")).toEqual({
+      clientSection: "",
+    });
+    expect("category" in buildBulkPatchPayload("clearReview")).toBe(false);
+  });
+
+  it("buildReviewPatchPayload legacy clearReview normalizes category", () => {
+    const legacy = { category: LEGACY_REVIEW_CATEGORY, clientSection: REVIEW_CLIENT_SECTION };
+    expect(buildReviewPatchPayload(legacy, "clearReview")).toEqual({
+      clientSection: "",
+      category: DEFAULT_MATERIAL_CATEGORY,
+    });
+    const normal = { category: "Электрика и свет", clientSection: REVIEW_CLIENT_SECTION };
+    expect(buildReviewPatchPayload(normal, "clearReview")).toEqual({ clientSection: "" });
+    expect("category" in buildReviewPatchPayload(normal, "clearReview")).toBe(false);
   });
 });
