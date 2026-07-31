@@ -254,7 +254,10 @@ export default function ProjectsPage({ variant = "active" } = {}) {
                 <div key={p.id} className="card" style={{ padding: 18 }}>
                   <div className="between">
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="row" style={{ gap: 6, marginBottom: 4 }}>
+                      <div
+                        className="row"
+                        style={{ gap: 6, marginBottom: 4, flexWrap: "wrap", maxWidth: "100%" }}
+                      >
                         <button
                           type="button"
                           className={"pin-btn" + (pinnedOn ? " pin-btn--on" : "")}

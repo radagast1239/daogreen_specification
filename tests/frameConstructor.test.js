@@ -932,13 +932,30 @@ describe('Frame Constructor PDF export', () => {
     const perTier = countNftChannelsAcrossDepth(700);
     expect(perTier).toBe(6);
     expect(geom.nftChannels.runs.length).toBe(7 * perTier);
-    expect(geom.nftChannels.drops.length).toBe(6 * perTier);
+    // 2 колена на канал на ярус → drops = tierCount × channels
+    expect(geom.nftChannels.drops.length).toBe(7 * perTier);
     expect(geom.nftChannels.elbows.length).toBe(geom.nftChannels.drops.length * NFT_ELBOWS_PER_TIER_JOINT);
+    expect(countNftChannelElbows(params, geom)).toBe(7 * perTier * NFT_ELBOWS_PER_TIER_JOINT);
     expect(geom.nftChannels.runs[0].width).toBe(NFT_CHANNEL_WIDTH_MM);
     expect(geom.nftChannels.runs[0].height).toBe(NFT_CHANNEL_HEIGHT_MM);
     expect(geom.nftChannels.runs[0].length).toBe(3000);
     expect(geom.nftChannels.drops[0].connectSide).toBe('right');
     expect(geom.nftChannels.drops[6].connectSide).toBe('left');
+  });
+
+  it('NFT elbows are 2 per channel per tier (6×9 → 108)', () => {
+    const params = {
+      ...defaultFrameParams,
+      rackType: 'nft',
+      channelsEnabled: true,
+      depthMm: 1000,
+      tierCount: 6,
+      postCountY: 2,
+    };
+    const geom = calculateFrameGeometry(params);
+    expect(countNftChannelsAcrossDepth(1000)).toBe(9);
+    expect(countNftChannelElbows(params, geom)).toBe(108);
+    expect(geom.nftChannels.elbows.length).toBe(108);
   });
 
   it('shouldShowNftChannels respects toggles', () => {
@@ -1003,6 +1020,25 @@ describe('Frame Constructor PDF export', () => {
     expect(bill.verticalLines).toBe(geom.nftChannels.drops.length);
     expect(bill.sleeveQty).toBe(nftChannelQtyWithMargin(bill.sleeveCount, bill.sleeveMarginPct));
     expect(bill.elbowQty).toBe(nftChannelQtyWithMargin(bill.elbowCount, bill.elbowMarginPct));
+  });
+
+  it('calculateNftChannelBill uses tier spacing for vertical channel length', () => {
+    const params = {
+      ...defaultFrameParams,
+      rackType: 'nft',
+      channelsEnabled: true,
+      depthMm: 700,
+      tierCount: 7,
+      tierSpacingMm: 350,
+      postCountY: 2,
+    };
+    const geom = calculateFrameGeometry(params);
+    const bill = calculateNftChannelBill(params, geom);
+    expect(bill.verticalDropLengthMm).toBe(350);
+    expect(bill.verticalTotalMm).toBe(bill.verticalLines * 350);
+    expect(bill.verticalBreakdownDesc).toContain('350 мм');
+    // 3D-длина перемычки может быть короче шага — в закупку идёт шаг ярусов
+    expect(Math.round(geom.nftChannels.drops[0].length)).toBeLessThan(350);
   });
 
   it('calculateNftChannelBill uses separate margin pct for stock, sleeves and elbows', () => {

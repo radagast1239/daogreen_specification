@@ -98,18 +98,20 @@ export function nftChannelSleevesForRun(runLengthMm) {
   return nftChannelSegmentsForRun(runLengthMm) - 1;
 }
 
-/** Колено на каждой стороне канала при межярусном стыке (верх + низ) */
+/** 2 колена на канал на ярус (верх + низ стыка) */
 export const NFT_ELBOWS_PER_TIER_JOINT = 2;
 
-/** Кол-во колен: 2 шт на канал на каждый межярусный переход */
+/**
+ * Кол-во колен: 2 шт на каждый канал на каждом ярусе.
+ * Пример: 6 ярусов × 9 каналов → 6 × 9 × 2 = 108.
+ */
 export function countNftChannelElbows(params, geom) {
   if (!params?.channelsEnabled || !supportsNftChannels(params.rackType)) return 0;
-  const tierCount = params.tierCount ?? 0;
-  if (tierCount < 2) return 0;
+  const tierCount = Number(params.tierCount) || 0;
+  if (tierCount < 1) return 0;
   const channelsPerRow = countNftChannelsAcrossDepth(params.depthMm);
   const yBayCount = Math.max(1, (params.postCountY ?? 2) - 1);
-  const tierJoints = tierCount - 1;
-  return tierJoints * channelsPerRow * yBayCount * NFT_ELBOWS_PER_TIER_JOINT;
+  return tierCount * channelsPerRow * yBayCount * NFT_ELBOWS_PER_TIER_JOINT;
 }
 
 /** Кол-во штук с запасом (колена, муфты, заготовки) */
@@ -148,12 +150,13 @@ export function calculateNftChannelBill(params, geom) {
 
   const elbowCount = countNftChannelElbows(params, geom);
   const elbowQty = nftChannelQtyWithMargin(elbowCount, margins.elbowPct);
-  const tierJoints = Math.max(0, params.tierCount - 1);
+  const tierJoints = Math.max(0, Number(params.tierCount) || 0);
 
-  const verticalLines = nft.drops?.length ?? 0;
-  const verticalDropLengthMm = verticalLines > 0 ? Math.round(nft.drops[0].length) : 0;
-  const verticalTotalMm = (nft.drops || []).reduce((sum, drop) => sum + drop.length, 0);
   const tierSpacingMm = Math.round(params.tierSpacingMm ?? 0);
+  // Закупка: длина вертикали = расстояние между ярусами (не геом. зазор между каналами)
+  const verticalLines = nft.drops?.length ?? 0;
+  const verticalDropLengthMm = verticalLines > 0 ? tierSpacingMm : 0;
+  const verticalTotalMm = verticalLines * verticalDropLengthMm;
 
   const totalChannelLengthMm = horizontalTotalMm + verticalTotalMm;
   const totalStockPieces = Math.ceil(totalChannelLengthMm / NFT_CHANNEL_STOCK_MM);
@@ -161,7 +164,7 @@ export function calculateNftChannelBill(params, geom) {
 
   const horizontalBreakdownDesc = buildLineSegmentBreakdown(channelRunLength, horizontalLines);
   const verticalBreakdownDesc = verticalLines > 0
-    ? `шаг ${tierSpacingMm} мм, ${verticalLines}×${verticalDropLengthMm} мм`
+    ? `${verticalLines}×${verticalDropLengthMm} мм (шаг ярусов)`
     : '';
 
   return {
@@ -280,7 +283,8 @@ export function generateNftChannels({
       }
     }
 
-    for (let tier = 0; tier < tierCount - 1; tier++) {
+    // tierCount стыков: между рабочими ярусами и до верхнего уровня балок (zLevels.length = tierCount + 1)
+    for (let tier = 0; tier < tierCount; tier++) {
       const zBottom = zLevels[tier] + gapAboveBeam + NFT_CHANNEL_HEIGHT_MM / 2;
       const zTop = zLevels[tier + 1] + gapAboveBeam - NFT_CHANNEL_HEIGHT_MM / 2;
       const connectOnRight = tier % 2 === 0;
