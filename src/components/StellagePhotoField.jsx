@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { api, photoSrc } from "../lib/api.js";
 import { getClipboardImageFile } from "../lib/clipboardPhoto.js";
+import AuthMediaImg from "./AuthMediaImg.jsx";
 
 /** Фото стеллажа — превью + загрузка + вставка из буфера */
 export default function StellagePhotoField({
@@ -55,7 +56,7 @@ export default function StellagePhotoField({
         title={pasteHint}
       >
         {src ? (
-          <img src={src} alt="" className="stellage-photo-field__thumb" />
+          <AuthMediaImg src={src} alt="" className="stellage-photo-field__thumb" />
         ) : (
           <div className="stellage-photo-field__empty">?</div>
         )}
@@ -101,9 +102,9 @@ export default function StellagePhotoField({
         </div>
       </div>
       {src && (
-        <button type="button" className="stellage-photo-field__preview" onClick={() => window.open(src, "_blank")}>
-          <img src={src} alt="" />
-        </button>
+        <div className="stellage-photo-field__preview">
+          <AuthMediaImg src={src} alt="" />
+        </div>
       )}
     </div>
   );
@@ -112,5 +113,5 @@ export default function StellagePhotoField({
 export function StellagePhotoThumb({ url, size = 56 }) {
   const src = url ? photoSrc(url) : "";
   if (!src) return <div className="stellage-photo-thumb stellage-photo-thumb--empty" style={{ width: size, height: size }} />;
-  return <img src={src} alt="" className="stellage-photo-thumb" style={{ width: size, height: size }} />;
+  return <AuthMediaImg src={src} alt="" className="stellage-photo-thumb" style={{ width: size, height: size }} />;
 }

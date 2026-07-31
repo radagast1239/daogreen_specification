@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { api, photoSrc } from "../lib/api.js";
+import AuthMediaImg from "./AuthMediaImg.jsx";
 import FloorPlanViewer from "./FloorPlanViewer.jsx";
 import { addRackImage, moveRackImage, normalizeRackImages, updateRackImage } from "../lib/rackImages.js";
 
@@ -42,7 +43,7 @@ export default function RackImagesEditor({ rackId, images, onChange, onConfirmRe
           {list.map((image, index) => (
             <article key={image.id} className="rack-image-card">
               <button type="button" className="rack-image-card__thumb" onClick={() => setViewerIndex(index)}>
-                <img src={photoSrc(image.url)} alt={image.title} />
+                <AuthMediaImg src={photoSrc(image.url)} alt={image.title} />
               </button>
               <input aria-label="Название изображения" value={image.title} onChange={(e) => onChange(updateRackImage(list, image.id, { title: e.target.value }))} />
               <label className="rack-image-card__visibility">

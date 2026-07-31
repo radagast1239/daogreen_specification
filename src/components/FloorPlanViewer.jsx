@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { photoSrc } from "../lib/api.js";
 import { isPdfScheme, schemeOpenRel } from "../lib/schemeMedia.js";
+import AuthMediaImg from "./AuthMediaImg.jsx";
 
 /** Полноэкранный просмотр схемы — Esc или клик по фону закрывает */
 export default function FloorPlanViewer({
@@ -115,7 +116,7 @@ export default function FloorPlanViewer({
             </a>
           </div>
         ) : (
-          <img src={src} alt={heading} className="floor-plan-fullscreen__img" draggable="false" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }} />
+          <AuthMediaImg src={src} alt={heading} className="floor-plan-fullscreen__img" draggable="false" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }} />
         )}
       </div>
       {canNav && (
@@ -131,7 +132,7 @@ export default function FloorPlanViewer({
               {isPdfScheme(s) ? (
                 <span style={{ display: "grid", placeItems: "center", width: "100%", height: "100%", fontSize: 11, fontWeight: 700 }}>PDF</span>
               ) : (
-                <img src={photoSrc(s.accessUrl || s.url)} alt="" />
+                <AuthMediaImg src={photoSrc(s.accessUrl || s.url)} alt="" />
               )}
             </button>
           ))}

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { t } from "../../shared/clientI18n.js";
 import { api, photoSrc } from "../lib/api.js";
+import AuthMediaImg from "./AuthMediaImg.jsx";
 import FloorPlanViewer from "./FloorPlanViewer.jsx";
 import { useClipboardImagePaste } from "../lib/useClipboardImagePaste.js";
 import { isPdfScheme, SCHEME_FILE_ACCEPT, schemeOpenRel } from "../lib/schemeMedia.js";
@@ -183,7 +184,7 @@ export default function ClientSchemesEditor({
                   onClick={() => openScheme(scheme.id)}
                   title="Открыть"
                 >
-                  <img src={src} alt={scheme.title} />
+                  <AuthMediaImg src={src} alt={scheme.title} />
                 </button>
               ) : (
                 <div className="client-scheme-card__empty muted">Нет файла</div>
@@ -362,7 +363,7 @@ export function ClientRackImagesViewer({ images = [] }) {
       <div className="client-schemes-viewer__grid">
         {group.images.map((image, index) => (
           <button key={image.id} type="button" className="client-scheme-view-btn" onClick={() => setViewer({ schemes: group.images, activeIndex: index })}>
-            <img src={photoSrc(image.accessUrl || image.url)} alt="" />
+            <AuthMediaImg src={photoSrc(image.accessUrl || image.url)} alt="" />
             <span>{image.title}</span>
           </button>
         ))}

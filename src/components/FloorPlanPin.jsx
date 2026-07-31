@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { photoSrc } from "../lib/api.js";
+import AuthMediaImg from "./AuthMediaImg.jsx";
 import FloorPlanViewer from "./FloorPlanViewer.jsx";
 import { findSchemeIndexByKey } from "../lib/clientSchemes.js";
 import { isPdfScheme } from "../lib/schemeMedia.js";
@@ -97,7 +98,7 @@ export default function FloorPlanPin({
           {isPdfScheme(s) ? (
             <span className="floor-plan-pin__option-img" style={{ display: "grid", placeItems: "center", fontWeight: 700, fontSize: 11 }}>PDF</span>
           ) : (
-            <img src={photoSrc(s.url)} alt="" className="floor-plan-pin__option-img" />
+            <AuthMediaImg src={photoSrc(s.url)} alt="" className="floor-plan-pin__option-img" />
           )}
           <span className="floor-plan-pin__option-meta">
             <strong>{s.title || `Схема ${i + 1}`}</strong>
@@ -138,7 +139,7 @@ export default function FloorPlanPin({
         aria-expanded={multi ? selectorOpen : undefined}
       >
         {src ? (
-          <img src={src} alt="" className="floor-plan-pin__img" />
+          <AuthMediaImg src={src} alt="" className="floor-plan-pin__img" />
         ) : (
           <span className="floor-plan-pin__img" style={{ display: "grid", placeItems: "center", fontWeight: 700, fontSize: 12 }}>PDF</span>
         )}
