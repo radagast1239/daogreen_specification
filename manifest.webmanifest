@@ -1,0 +1,19 @@
+{
+  "name": "Daogreen Spec",
+  "short_name": "Daogreen",
+  "description": "Список закупки для вертикальной фермы",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#0c2820",
+  "theme_color": "#116355",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
