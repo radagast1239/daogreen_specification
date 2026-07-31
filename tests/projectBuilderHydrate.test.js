@@ -572,6 +572,7 @@ describe('projectBuilderHydrate', () => {
     const stellages = [{
       id: 'st1',
       moduleId: 'mod1',
+      count: 1,
       items: [{
         materialId: 'm073',
         qty: 400,
@@ -582,6 +583,51 @@ describe('projectBuilderHydrate', () => {
     }];
     const merged = mergeFrameBomQtyFromBuilderLines(preserved, stellages);
     expect(merged.find((it) => it.materialId === 'm073')?.qty).toBe(400);
+  });
+
+  it('mergeFrameBomQtyFromBuilderLines multiplies per-rack editor qty by stellage count', () => {
+    const rackKey = 'mod1:st1';
+    const items = [{
+      id: 'fb_bolt',
+      source: FRAME_BOM_SOURCE,
+      sourceType: FRAME_BOM_SOURCE,
+      materialId: 'm073',
+      moduleRackKey: rackKey,
+      qty: 136,
+    }];
+    const stellages = [{
+      id: 'st1',
+      moduleId: 'mod1',
+      count: 3,
+      items: [{
+        materialId: 'm073',
+        qty: 136,
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        moduleRackKey: rackKey,
+        pipeCuts: [{ lengthMm: 2500, qty: 4 }],
+      }],
+    }];
+    const merged = mergeFrameBomQtyFromBuilderLines(items, stellages);
+    const row = merged.find((it) => it.materialId === 'm073');
+    expect(row.qty).toBe(408);
+    expect(row.stellageCount).toBe(3);
+    expect(row.pipeCuts?.[0]?.qty).toBe(12);
+  });
+
+  it('frameBomProjectItemToBuilderLine divides only when stellageCount is stored on item', () => {
+    const scaled = frameBomProjectItemToBuilderLine(
+      { id: 'fb1', source: FRAME_BOM_SOURCE, qty: 408, stellageCount: 3, pipeCuts: [{ lengthMm: 2500, qty: 12 }] },
+      { stCount: 3 },
+    );
+    expect(scaled.qty).toBe(136);
+    expect(scaled.pipeCuts?.[0]?.qty).toBe(4);
+
+    const legacy = frameBomProjectItemToBuilderLine(
+      { id: 'fb2', source: FRAME_BOM_SOURCE, qty: 136 },
+      { stCount: 3 },
+    );
+    expect(legacy.qty).toBe(136);
   });
 
   it('mergeFrameBomQtyFromBuilderLines scopes qty by rack, not materialId only', () => {

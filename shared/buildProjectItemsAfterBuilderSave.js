@@ -87,19 +87,32 @@ function mergeProjectOwnedFields(existing, generated) {
     merged.nameOverridden = true;
     merged.name_overridden = true;
   }
-  // Project-local commercial overrides stay on this row (never borrow from a peer).
-  if (existing.priceOverridden || (existing.price != null && generated?.price != null && Number(existing.price) !== Number(generated.price))) {
+  // Builder-explicit commercial overrides win; otherwise keep existing project overrides.
+  // (Previously existing.priceOverridden always blocked new builder prices.)
+  if (generated?.priceOverridden) {
+    merged.price = generated.price;
+    merged.priceOverridden = true;
+  } else if (
+    existing.priceOverridden
+    || (existing.price != null && generated?.price != null && Number(existing.price) !== Number(generated.price))
+  ) {
     // Prefer explicit override flag; also keep DB price when it differs from regenerated catalog.
     if (existing.priceOverridden || existing.price != null) {
       merged.price = existing.price;
       if (existing.priceOverridden) merged.priceOverridden = true;
     }
   }
-  if (existing.linkOverridden) {
+  if (generated?.linkOverridden) {
+    merged.link = generated.link || "";
+    merged.linkOverridden = true;
+  } else if (existing.linkOverridden) {
     merged.link = existing.link;
     merged.linkOverridden = true;
   }
-  if (existing.linkAltOverridden) {
+  if (generated?.linkAltOverridden) {
+    merged.linkAlt = generated.linkAlt || "";
+    merged.linkAltOverridden = true;
+  } else if (existing.linkAltOverridden) {
     merged.linkAlt = existing.linkAlt;
     merged.linkAltOverridden = true;
   }
@@ -308,11 +321,9 @@ export function buildProjectItemsAfterBuilderSave({
       updatedBuilderIds.push(ex.id);
       if (gen.id) matchedGeneratedIds.add(gen.id);
     } else {
-      // No match: preserve existing rather than dropping when generated still has
-      // same-section material peers (extra duplicate left over after pairing),
-      // or when the row carries SpecEditor / procurement activity.
-      const peers = generated.filter((g) => sameBuilderSectionMaterial(ex, g));
-      if (peers.length > 0 || projectItemHasAdminActivity(ex)) {
+      // No match: drop leftover builder duplicates after catalog line ids regenerate.
+      // Keep only rows with SpecEditor / procurement activity.
+      if (projectItemHasAdminActivity(ex)) {
         items.push(ex);
         resultIds.add(ex.id);
       } else {

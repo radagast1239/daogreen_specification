@@ -23,6 +23,7 @@ import { normalizePurchaseStatus, getPurchaseStatusLabel } from "../../../shared
 import { applyPublishedProjectMeta } from "../../../shared/publishedClientMeta.js";
 import { leanStellageCounts } from "../../../shared/profilePipeCuts.js";
 import { documentsFromPinnedFrameDrawings } from "../../../shared/publishedAssetPin.js";
+import { frameDrawingClientTargetKey } from "../../../shared/clientFrameDocuments.js";
 import { normalizeDocumentManifest } from "../../../shared/publishedDocumentManifest.js";
 import { publishedPlannedTotal } from "../../../shared/publishedPurchaseTotals.js";
 import { formatReleaseSummaryText } from "../../../shared/releaseHistoryDiff.js";
@@ -433,7 +434,7 @@ export function getProjectReleaseInfo(project) {
     drawingId: d.drawingId,
     drawingVersion: d.drawingVersion,
     url: d.pdfUrl || d.url,
-    targetKey: d.moduleRackKey || d.stellageId || d.presetId || d.drawingId,
+    targetKey: frameDrawingClientTargetKey(d),
   }));
   const unpublished = release
     ? detectUnpublishedChanges(
@@ -512,7 +513,7 @@ export function shouldPublishOnStatusChange(currentProject, nextStatus) {
     drawingId: d.drawingId,
     drawingVersion: d.drawingVersion,
     url: d.pdfUrl || d.url,
-    targetKey: d.moduleRackKey || d.stellageId || d.presetId || d.drawingId,
+    targetKey: frameDrawingClientTargetKey(d),
   }));
   const snapshotExtrasChanged = detectUnpublishedChanges(
     currentProject?.items || [], publishedItems,

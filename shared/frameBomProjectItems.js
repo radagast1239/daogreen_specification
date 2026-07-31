@@ -1365,6 +1365,102 @@ export function stripResidualFrameBomTwins(items = []) {
 }
 
 /**
+ * Stellage id referenced by a canonical frame_bom row (sourceKey / id / prefix).
+ * @param {object} item
+ */
+export function resolveFrameBomStellageId(item) {
+  const fromPrefix = resolveBuilderPrefixedStellageId(item);
+  if (fromPrefix) return fromPrefix;
+  const obj = parseSourceObjectIds(item?.sourceObjectIds ?? item?.source_object_ids);
+  const fromObj = String(obj.stellageId || obj.stellage_id || item?.stellageId || "").trim();
+  if (fromObj) return fromObj;
+  const sk = String(item?.sourceKey || item?.source_key || "");
+  for (const part of sk.split(":")) {
+    if (part.startsWith("st_")) return part;
+  }
+  const rack = resolveFrameBomItemModuleRackKey(item);
+  if (rack.startsWith("stellage:")) return rack.slice("stellage:".length);
+  const colon = rack.lastIndexOf(":");
+  if (colon >= 0) {
+    const tail = rack.slice(colon + 1);
+    if (tail.startsWith("st_")) return tail;
+  }
+  const id = String(item?.id || "");
+  const m = id.match(/(st_[a-zA-Z0-9]+)/);
+  return m ? m[1] : "";
+}
+
+function normItemName(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Remove ordinary st_*__ln_* rows that duplicate a canonical frame_bom line
+ * (same stellage + materialId + name). Intentional dual lines with a different
+ * name (e.g. каркас vs полив) are kept.
+ *
+ * @param {object[]} items
+ * @returns {object[]}
+ */
+export function stripSameNameFrameBomBuilderTwins(items = []) {
+  const existing = Array.isArray(items) ? items : [];
+  const canons = existing.filter(
+    (it) => isCanonicalFrameBomLine(it) && !isExplicitManualProjectItem(it),
+  );
+  if (!canons.length) return [...existing];
+
+  const canonKeys = new Set();
+  for (const c of canons) {
+    const sid = resolveFrameBomStellageId(c);
+    const mid = String(c.materialId || "").trim();
+    const name = normItemName(c.name);
+    if (sid && mid && name) canonKeys.add(`${sid}::${mid}::${name}`);
+  }
+  if (!canonKeys.size) return [...existing];
+
+  return existing.filter((it) => {
+    if (!it || isExplicitManualProjectItem(it)) return true;
+    if (isCanonicalFrameBomLine(it) || isFrameBomLine(it)) return true;
+    const id = String(it.id || "");
+    if (!/^st_.+__ln_/.test(id)) return true;
+    const sid = resolveBuilderPrefixedStellageId(it);
+    const mid = String(it.materialId || "").trim();
+    const name = normItemName(it.name);
+    if (!sid || !mid || !name) return true;
+    return !canonKeys.has(`${sid}::${mid}::${name}`);
+  });
+}
+
+/**
+ * Rewrite module/section labels on stellage-scoped rows to the current stellage name.
+ * Fixes stale "Стеллаж 1/2" sections after rename.
+ *
+ * @param {object[]} items
+ * @param {object[]} stellages
+ * @returns {object[]}
+ */
+export function syncProjectItemStellageLabels(items = [], stellages = []) {
+  const nameById = new Map();
+  for (const st of stellages || []) {
+    const id = String(st?.id || "").trim();
+    if (!id) continue;
+    const name = String(st.name || st.moduleName || "").trim();
+    if (name) nameById.set(id, name);
+  }
+  if (!nameById.size) return Array.isArray(items) ? [...items] : [];
+
+  return (items || []).map((it) => {
+    const sid =
+      resolveBuilderPrefixedStellageId(it)
+      || (isFrameBomLine(it) ? resolveFrameBomStellageId(it) : "");
+    if (!sid || !nameById.has(sid)) return it;
+    const name = nameById.get(sid);
+    if (String(it.module || "") === name && String(it.section || "") === name) return it;
+    return { ...it, module: name, section: name };
+  });
+}
+
+/**
  * Count safe residual twins (for UI badge).
  * @param {object[]} items
  */

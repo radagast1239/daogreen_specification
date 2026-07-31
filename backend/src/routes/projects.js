@@ -100,10 +100,15 @@ import { diffReleaseSnapshots, buildPublishAutoSummaryText } from "../../../shar
 import { normalizeReleaseComment } from "../../../shared/releaseComment.js";
 import { clientExportHeader } from "../../../shared/publishedClientMeta.js";
 import * as XLSX from "xlsx";
-import { assertCanDeleteOrOverwriteAsset } from "../services/publishedAssetRetention.js";
+import { assertCanDeleteOrOverwriteAsset, syncFrameDrawingTitlesFromStellageConfigs } from "../services/publishedAssetRetention.js";
 import { publishedPlannedTotal } from "../../../shared/publishedPurchaseTotals.js";
 import { pinClientDocumentsForRelease } from "../services/releaseDocumentPinning.js";
 import { sendSafeUploadFile } from "../services/secureFileServe.js";
+import {
+  activeStellageIdSet,
+  filterClientProjectDocuments,
+  mergeLiveFrameDocumentsForClient,
+} from "../../../shared/clientFrameDocuments.js";
 import {
   findProjectScopedImageAsset,
   findManifestImageById,
@@ -824,6 +829,8 @@ function createVersionRecord(projectId, project, {
     }
   }
   const versionId = uid("v");
+  // Freeze current stellage names into frame_drawings before building the release snapshot.
+  syncFrameDrawingTitlesFromStellageConfigs(projectId);
   const liveDocuments = getClientProjectDocuments(projectId);
   const { documentManifest } = pinClientDocumentsForRelease({
     projectId,
@@ -1774,27 +1781,18 @@ export function getClientProjectDocuments(projectId) {
     ORDER BY f.uploaded_at DESC
   `).all(projectId);
 
-  const latestFrameDrawingByTarget = new Map();
-  return documents.filter((document) => {
-    if (document.type !== "frame_drawing") return true;
-    const targetKey =
-      document.moduleRackKey ||
-      document.stellageId ||
-      document.presetId ||
-      document.id;
-    const current = latestFrameDrawingByTarget.get(targetKey);
-    if (!current) {
-      latestFrameDrawingByTarget.set(targetKey, document);
-      return true;
-    }
-    const currentVersion = Number(current.drawingVersion || 0);
-    const candidateVersion = Number(document.drawingVersion || 0);
-    if (candidateVersion <= currentVersion) return false;
-    const currentIndex = documents.indexOf(current);
-    if (currentIndex >= 0) documents[currentIndex].__supersededFrameDrawing = true;
-    latestFrameDrawingByTarget.set(targetKey, document);
-    return true;
-  }).filter((document) => !document.__supersededFrameDrawing);
+  let stellageConfigs = [];
+  let activeStellageIds;
+  try {
+    const row = db.prepare("SELECT stellage_configs FROM projects WHERE id = ?").get(projectId);
+    stellageConfigs = row ? JSON.parse(row.stellage_configs || "[]") : [];
+    activeStellageIds = activeStellageIdSet(stellageConfigs);
+  } catch {
+    activeStellageIds = undefined;
+    stellageConfigs = [];
+  }
+
+  return filterClientProjectDocuments(documents, { activeStellageIds, stellageConfigs });
 }
 
 function attachClientImageAccessUrls(manifest, token) {
@@ -1849,7 +1847,10 @@ function serveClientProject(req, res) {
   const versionInfo = versionInfoRaw
     ? (({ releaseComment: _rc, ...safe }) => safe)(versionInfoRaw)
     : null;
-  const documents = resolveClientDocumentsForRelease(parsedSnapshot).map((d) => {
+  const documents = mergeLiveFrameDocumentsForClient(
+    resolveClientDocumentsForRelease(parsedSnapshot),
+    getClientProjectDocuments(p.id),
+  ).map((d) => {
     const { url: _internalUrl, ...safe } = d;
     return {
       ...safe,
@@ -2136,15 +2137,23 @@ function serveClientReleaseFile(req, res) {
     return res.status(400).json({ error: "Invalid asset id" });
   }
 
-  const docs = resolveClientDocumentsForRelease(parsedSnapshot);
+  const docs = mergeLiveFrameDocumentsForClient(
+    resolveClientDocumentsForRelease(parsedSnapshot),
+    getClientProjectDocuments(p.id),
+  );
   const entry = docs.find((d) => d.id === assetId || d.sourceFileId === assetId);
   if (!entry) {
     return res.status(404).json({ error: "Not found" });
   }
 
-  // Pinned release files only — reject non-release paths (no live fallback).
+  // Pinned release files, or live frame drawings belonging to this project.
   const url = String(entry.url || "");
-  if (!url.startsWith(`/uploads/releases/${p.id}/`)) {
+  const releasePrefix = `/uploads/releases/${p.id}/`;
+  const liveFramePrefix = `/uploads/frame-drawings/${p.id}/`;
+  const allowed =
+    url.startsWith(releasePrefix)
+    || (entry.type === "frame_drawing" && url.startsWith(liveFramePrefix));
+  if (!allowed) {
     return res.status(404).json({ error: "Not found" });
   }
 

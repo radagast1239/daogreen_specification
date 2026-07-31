@@ -15,7 +15,7 @@ import {
   buildFrameDrawingLink,
   buildBuilderFrameDrawingContext,
 } from "../../../shared/frameDrawingContext.js";
-import { frameBomItemsForModuleRack, stripResidualFrameBomTwins } from "../../../shared/frameBomProjectItems.js";
+import { frameBomItemsForModuleRack, stripResidualFrameBomTwins, stripSameNameFrameBomBuilderTwins, syncProjectItemStellageLabels } from "../../../shared/frameBomProjectItems.js";
 import { buildProjectItemsAfterBuilderSave } from "../../../shared/buildProjectItemsAfterBuilderSave.js";
 import { buildModuleRackKey } from "../../../shared/moduleRackIds.js";
 import {
@@ -717,6 +717,8 @@ export default function ProjectBuilderPage() {
         activeStellageIds,
       });
       built.items = stripResidualFrameBomTwins(built.items);
+      built.items = stripSameNameFrameBomBuilderTwins(built.items);
+      built.items = syncProjectItemStellageLabels(built.items, stellageList);
       built.items = mergeFrameBomQtyFromBuilderLines(built.items, stellageList);
     }
     return built;

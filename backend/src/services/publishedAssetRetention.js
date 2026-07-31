@@ -11,9 +11,50 @@ import {
   normalizeUploadUrl,
   normalizePinnedFrameDrawings,
 } from "../../../shared/publishedAssetPin.js";
+import {
+  activeStellageIdSet,
+  frameDrawingClientTargetKey,
+  selectLatestFrameDocuments,
+  applyStellageNamesToFrameDocuments,
+  stellageNameById,
+} from "../../../shared/clientFrameDocuments.js";
 import { applyImageAssetMeta, buildClientImageManifest } from "../../../shared/clientImageManifest.js";
 import { parseReleaseSnapshot } from "../../../shared/projectPublishedRelease.js";
 import { localUploadDir } from "../storage/index.js";
+
+function loadStellageConfigsForProject(projectId) {
+  const row = db.prepare("SELECT stellage_configs FROM projects WHERE id = ?").get(projectId);
+  if (!row) return [];
+  try {
+    return JSON.parse(row.stellage_configs || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function loadActiveStellageIdsForProject(projectId) {
+  return activeStellageIdSet(loadStellageConfigsForProject(projectId));
+}
+
+/**
+ * Persist current stellage names onto frame_drawings.title so republish freezes the right labels.
+ * @returns {number} rows updated
+ */
+export function syncFrameDrawingTitlesFromStellageConfigs(projectId) {
+  const names = stellageNameById(loadStellageConfigsForProject(projectId));
+  if (!names.size) return 0;
+  const stmt = db.prepare(`
+    UPDATE frame_drawings
+    SET title = ?, updated_at = datetime('now')
+    WHERE project_id = ? AND stellage_id = ? AND IFNULL(title, '') != ?
+  `);
+  let changed = 0;
+  for (const [stellageId, name] of names) {
+    const r = stmt.run(name, projectId, stellageId, name);
+    changed += Number(r.changes) || 0;
+  }
+  return changed;
+}
 
 /** Same resolved root as saveFile + express.static /uploads. */
 export function getUploadRoot() {
@@ -136,23 +177,12 @@ export function listLatestClientVisibleFrameDrawings(projectId) {
     ORDER BY f.uploaded_at DESC
   `).all(projectId);
 
-  const latestByTarget = new Map();
-  for (const document of documents) {
-    const targetKey =
-      document.moduleRackKey ||
-      document.stellageId ||
-      document.presetId ||
-      document.drawingId;
-    const current = latestByTarget.get(targetKey);
-    if (!current) {
-      latestByTarget.set(targetKey, document);
-      continue;
-    }
-    const currentVersion = Number(current.drawingVersion || 0);
-    const candidateVersion = Number(document.drawingVersion || 0);
-    if (candidateVersion > currentVersion) latestByTarget.set(targetKey, document);
-  }
-  return [...latestByTarget.values()];
+  return applyStellageNamesToFrameDocuments(
+    selectLatestFrameDocuments(documents, {
+      activeStellageIds: loadActiveStellageIdsForProject(projectId),
+    }),
+    loadStellageConfigsForProject(projectId),
+  );
 }
 
 export function buildPinnedFrameDrawingsForPublish(projectId) {
@@ -169,7 +199,7 @@ export function buildPinnedFrameDrawingsForPublish(projectId) {
     pins.push({
       drawingId: doc.drawingId,
       drawingVersion: Number(doc.drawingVersion) || 0,
-      targetKey: doc.moduleRackKey || doc.stellageId || doc.presetId || doc.drawingId,
+      targetKey: frameDrawingClientTargetKey(doc),
       stellageId: doc.stellageId || "",
       moduleId: doc.moduleId || "",
       moduleRackKey: doc.moduleRackKey || "",

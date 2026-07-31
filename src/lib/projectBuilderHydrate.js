@@ -5,7 +5,7 @@ import { projectLinesFromCatalog } from "./farmSectionsConfig.js";
 import { AC_ITEM_SECTION } from "../../shared/roomAcSpec.js";
 import { defaultRooms } from "./roomHelpers.js";
 import { resolveBuilderLineQty } from "../../shared/flowSpecs.js";
-import { resolvePipeCuts } from "../../shared/profilePipeCuts.js";
+import { resolvePipeCuts, scalePipeCuts, pipeCutsClientNote } from "../../shared/profilePipeCuts.js";
 import { resolveBreakerSpecs } from "../../shared/breakerSpecs.js";
 import { resolveFlowSpecs } from "../../shared/flowSpecs.js";
 import { resolveSplitSpecs } from "../../shared/splitSpecs.js";
@@ -39,12 +39,21 @@ function materialExistsInCatalog(materialId, materials = []) {
   return materials.some((m) => (m.id || m.materialId) === materialId);
 }
 
-export function frameBomProjectItemToBuilderLine(item, { materials = null } = {}) {
+export function frameBomProjectItemToBuilderLine(item, { materials = null, stCount = 1 } = {}) {
   const enriched = materials?.length
     ? enrichProjectItemFromMaterial(item, materials)
     : item;
-  const line = projectItemToBuilderLine(enriched, { stCount: 1 });
+  // Totals are marked with stellageCount after scaled save. Legacy Frame BOM rows
+  // store per-rack qty (no stellageCount) — do not divide those.
+  const embedded = Number(item?.stellageCount ?? item?.rackCount);
+  const divideBy = Number.isFinite(embedded) && embedded >= 1
+    ? Math.max(1, embedded)
+    : 1;
+  void stCount;
+  const line = projectItemToBuilderLine(enriched, { stCount: divideBy });
   const bomQty = Number(line.qty) || 0;
+  const rawCuts = enriched.pipeCuts?.length ? enriched.pipeCuts : line.pipeCuts;
+  const perRackCuts = divideBy > 1 ? scalePipeCuts(rawCuts, 1 / divideBy) : rawCuts;
   return {
     ...line,
     qty: bomQty,
@@ -55,9 +64,13 @@ export function frameBomProjectItemToBuilderLine(item, { materials = null } = {}
     sourceKey: item.sourceKey || item.source_key || "",
     sourceLabel: FRAME_BOM_SOURCE_LABEL,
     visibleToClient: item.visibleToClient !== false && item.visible !== false,
-    pipeCuts: enriched.pipeCuts?.length ? enriched.pipeCuts : line.pipeCuts,
+    pipeCuts: perRackCuts,
     techNote: enriched.techNote || line.techNote,
-    clientNote: enriched.clientNote || enriched.comment || line.clientNote,
+    clientNote:
+      (perRackCuts?.length ? pipeCutsClientNote(perRackCuts) : "")
+      || enriched.clientNote
+      || enriched.comment
+      || line.clientNote,
   };
 }
 
@@ -120,7 +133,7 @@ function overlayFrameBomOnLines(lines, frameBomItems, { stCount = 1, materials =
     }
     if (!bom) return ln;
     usedBomIds.add(bom.id);
-    const bomLine = frameBomProjectItemToBuilderLine(bom, { materials });
+    const bomLine = frameBomProjectItemToBuilderLine(bom, { materials, stCount });
     const overlaid = applyFrameBomOverlayToCatalogLine(ln, bomLine);
     return materials?.length
       ? applyMaterialCatalogFields(overlaid, materials)
@@ -139,7 +152,7 @@ function overlayFrameBomOnLines(lines, frameBomItems, { stCount = 1, materials =
         .every((ln) => String(ln.source || ln.sourceType || "").trim() === "manual");
       if (!onlyManual) continue;
     }
-    merged.push(frameBomProjectItemToBuilderLine(bom, { materials }));
+    merged.push(frameBomProjectItemToBuilderLine(bom, { materials, stCount }));
     if (bom.materialId) usedMaterialIds.add(bom.materialId);
   }
   return merged;
@@ -676,17 +689,19 @@ function frameBomBuilderLineDedupeKey(line, stellage) {
 
 /**
  * Apply editor qty/pipeCuts from frame_bom builder lines back onto preserved project items.
+ * Editor stores per-rack amounts; project items store totals × stellage.count.
  * @param {object[]} projectItems
  * @param {object[]} stellages
  */
 export function mergeFrameBomQtyFromBuilderLines(projectItems = [], stellages = []) {
   const editorByKey = new Map();
   for (const st of stellages || []) {
+    const stCount = Math.max(1, Number(st.count) || 1);
     for (const ln of st.items || []) {
       if ((ln.source || ln.sourceType) !== FRAME_BOM_SOURCE) continue;
       const key = frameBomBuilderLineDedupeKey(ln, st);
       if (!key) continue;
-      editorByKey.set(key, ln);
+      editorByKey.set(key, { line: ln, stCount });
     }
   }
   if (!editorByKey.size) return projectItems;
@@ -694,12 +709,21 @@ export function mergeFrameBomQtyFromBuilderLines(projectItems = [], stellages = 
     if ((it.source || it.sourceType) !== FRAME_BOM_SOURCE) return it;
     const key = resolveFrameBomDedupeKey(it);
     if (!key) return it;
-    const editor = editorByKey.get(key);
-    if (!editor) return it;
-    const qty = Number(editor.qty);
-    const next = { ...it };
-    if (Number.isFinite(qty) && qty > 0) next.qty = qty;
-    if (editor.pipeCuts?.length) next.pipeCuts = editor.pipeCuts;
+    const hit = editorByKey.get(key);
+    if (!hit) return it;
+    const { line: editor, stCount } = hit;
+    const perRackQty = Number(editor.qty);
+    const next = { ...it, stellageCount: stCount };
+    if (Number.isFinite(perRackQty) && perRackQty > 0) {
+      next.qty = Math.round(perRackQty * stCount * 100) / 100;
+    }
+    if (editor.pipeCuts?.length) {
+      next.pipeCuts = stCount > 1
+        ? scalePipeCuts(editor.pipeCuts, stCount)
+        : editor.pipeCuts;
+      const note = pipeCutsClientNote(next.pipeCuts);
+      if (note) next.clientNote = note;
+    }
     return next;
   });
 }

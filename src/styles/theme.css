@@ -858,11 +858,19 @@ body.nav-open { overflow: hidden; }
 /* ---------- Client view (nikita-daogreen style) ---------- */
 .client-page {
   min-height: 100vh;
+  overflow-x: clip;
   background:
     radial-gradient(ellipse 100% 60% at 50% -10%, rgba(127, 201, 168, 0.18), transparent 55%),
     linear-gradient(180deg, #f0f7f4 0%, #e8f2ed 100%);
 }
-.client-wrap { max-width: var(--client-max); margin: 0 auto; padding: 16px 20px 80px; width: 100%; }
+.client-wrap {
+  max-width: min(var(--client-max), 100%);
+  margin: 0 auto;
+  padding: 16px 20px 80px;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: clip;
+}
 .client-hero {
   margin: 0 0 16px;
   padding: 20px 22px;
@@ -921,22 +929,36 @@ body.nav-open { overflow: hidden; }
   font-size: 16px;
   flex-shrink: 0;
 }
+.client-topbar__titles {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
 .client-topbar__eyebrow {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: .02em;
   color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .client-topbar__title {
   font-size: 1.1rem;
   font-weight: 800;
   margin: 1px 0 0;
   line-height: 1.25;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .client-topbar__sub {
   font-size: 12px;
   color: var(--muted);
   margin: 2px 0 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .client-topbar__actions {
   display: flex;
@@ -1315,10 +1337,16 @@ body.nav-open { overflow: hidden; }
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    overflow-wrap: normal;
+    word-break: normal;
   }
   .client-topbar--compact .client-topbar__brand {
     flex: 1 1 auto;
     min-width: 0;
+    max-width: 100%;
+  }
+  .client-topbar__toggle {
+    flex-shrink: 0;
   }
   .client-topbar--expanded .client-topbar__foot { flex-direction: column; align-items: stretch; }
   .client-topbar__progress-mini { max-width: none; }

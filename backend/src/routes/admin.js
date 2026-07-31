@@ -24,6 +24,10 @@ import {
   deleteLocalUploadFile,
 } from "../services/publishedAssetRetention.js";
 import {
+  activeStellageIdSet,
+  filterClientProjectDocuments,
+} from "../../../shared/clientFrameDocuments.js";
+import {
   runStorageInventoryScan,
   queryStorageInventory,
   isStorageInventoryScanning,
@@ -313,15 +317,47 @@ router.post("/session/revoke-all", (req, res) => {
 });
 
 router.get("/projects/:id/documents", (req, res) => {
-  const rows = db
-    .prepare("SELECT id, type, filename, url, uploaded_at as uploadedAt FROM files WHERE project_id = ? ORDER BY uploaded_at DESC")
-    .all(req.params.id);
-  res.json(
-    rows.map((r) => ({
-      ...r,
-      accessUrl: `/api/admin/files/${r.id}`,
-    })),
-  );
+  // Same visibility as client/publish: latest frame drawing per active stellage only.
+  const rows = db.prepare(`
+    SELECT
+      f.id,
+      f.type,
+      f.filename,
+      f.url,
+      f.uploaded_at as uploadedAt,
+      fd.title as drawingTitle,
+      fd.source_type as drawingSourceType,
+      fd.stellage_id as stellageId,
+      fd.module_id as moduleId,
+      fd.module_rack_key as moduleRackKey,
+      fd.preset_id as presetId,
+      fd.version as drawingVersion
+    FROM files f
+    LEFT JOIN frame_drawings fd ON fd.file_id = f.id
+    WHERE f.project_id = ?
+      AND (
+        f.type != 'frame_drawing'
+        OR (fd.id IS NOT NULL AND fd.is_client_visible = 1)
+      )
+    ORDER BY f.uploaded_at DESC
+  `).all(req.params.id);
+
+  let stellageConfigs = [];
+  let activeStellageIds;
+  try {
+    const prow = db.prepare("SELECT stellage_configs FROM projects WHERE id = ?").get(req.params.id);
+    stellageConfigs = prow ? JSON.parse(prow.stellage_configs || "[]") : [];
+    activeStellageIds = activeStellageIdSet(stellageConfigs);
+  } catch {
+    activeStellageIds = undefined;
+    stellageConfigs = [];
+  }
+
+  const docs = filterClientProjectDocuments(rows, { activeStellageIds, stellageConfigs }).map((r) => ({
+    ...r,
+    accessUrl: `/api/admin/files/${r.id}`,
+  }));
+  res.json(docs);
 });
 
 router.get("/files/:fileId", (req, res) => {

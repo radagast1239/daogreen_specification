@@ -22,6 +22,8 @@ import {
   rackFrameBomScopeItems,
   buildResidualFrameBomTwinRepairPlan,
   stripResidualFrameBomTwins,
+  stripSameNameFrameBomBuilderTwins,
+  syncProjectItemStellageLabels,
   countResidualFrameBomTwins,
   isCanonicalFrameBomLine,
 } from "../shared/frameBomProjectItems.js";
@@ -1220,5 +1222,71 @@ describe("buildResidualFrameBomTwinRepairPlan (project-wide A+B)", () => {
     const plan = buildResidualFrameBomTwinRepairPlan([twinOnly]);
     expect(plan.removeItemIds).toHaveLength(0);
     expect(plan.skippedAmbiguousGroups.length).toBe(1);
+  });
+});
+
+describe("stripSameNameFrameBomBuilderTwins + label sync", () => {
+  it("removes same-name st_*__ln_* twin when canonical it_fbom exists", () => {
+    const items = [
+      {
+        id: "it_fbom_d1_mod:st_ms933oqimo2vp_bolt_m6x20",
+        materialId: "m073",
+        name: "Болт М6×20",
+        module: "Стеллаж 2",
+        section: "Стеллаж 2",
+        source: "frame_bom",
+        sourceKey: "frame_bom:d1:mod:st_ms933oqimo2vp:bolt_m6x20",
+        qty: 136,
+      },
+      {
+        id: "st_ms933oqimo2vp__ln_old",
+        materialId: "m073",
+        name: "Болт М6×20",
+        module: "Стеллаж 2",
+        section: "Стеллаж 2",
+        qty: 408,
+      },
+      {
+        id: "st_ms933oqimo2vp__ln_plumb",
+        materialId: "m073",
+        name: "Болт полив",
+        module: "Стеллаж 2",
+        section: "Стеллаж 2",
+        qty: 12,
+      },
+    ];
+    const cleaned = stripSameNameFrameBomBuilderTwins(items);
+    expect(cleaned.map((i) => i.id)).toEqual([
+      "it_fbom_d1_mod:st_ms933oqimo2vp_bolt_m6x20",
+      "st_ms933oqimo2vp__ln_plumb",
+    ]);
+  });
+
+  it("syncs stale Стеллаж 1/2 labels to current stellage names", () => {
+    const items = [
+      {
+        id: "it_fbom_d1_mod:st_a_bolt",
+        materialId: "m073",
+        name: "Болт",
+        module: "Стеллаж 2",
+        section: "Стеллаж 2",
+        source: "frame_bom",
+        sourceKey: "frame_bom:d1:mod:st_a:bolt",
+        qty: 10,
+      },
+      {
+        id: "st_a__ln_x",
+        materialId: "m036",
+        name: "Труба",
+        module: "Стеллаж 2",
+        section: "Стеллаж 2",
+        qty: 5,
+      },
+    ];
+    const synced = syncProjectItemStellageLabels(items, [
+      { id: "st_a", name: "Основное отделение 35 см" },
+    ]);
+    expect(synced.every((i) => i.module === "Основное отделение 35 см")).toBe(true);
+    expect(synced.every((i) => i.section === "Основное отделение 35 см")).toBe(true);
   });
 });

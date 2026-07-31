@@ -516,6 +516,93 @@ describe("projectItemOwnership", () => {
   });
 });
 
+describe("builder commercial overrides on re-save", () => {
+  it("applies new builder priceOverridden over previous project price", () => {
+    const existing = [
+      {
+        id: "st_ms92yvoflhsu3__ln1",
+        materialId: "m073",
+        name: "Болт",
+        module: "Стеллаж 1",
+        section: "Стеллаж 1",
+        qty: 5,
+        price: 12,
+        priceOverridden: false,
+        purchaseStatus: "ordered",
+        actualPrice: 11,
+      },
+    ];
+    const generated = [
+      {
+        id: "st_ms92yvoflhsu3__ln1",
+        materialId: "m073",
+        name: "Болт",
+        module: "Стеллаж 1",
+        section: "Стеллаж 1",
+        qty: 9,
+        price: 8.5,
+        priceOverridden: true,
+      },
+    ];
+    const result = buildProjectItemsAfterBuilderSave({
+      existingItems: existing,
+      generatedBuilderItems: generated,
+      builderContext: { farmSectionNames: [], activeStellageIds: ["st_ms92yvoflhsu3"] },
+      materials,
+    });
+    expect(result.blocked).toBe(false);
+    const row = result.items.find((it) => it.id === "st_ms92yvoflhsu3__ln1");
+    expect(row.qty).toBe(9);
+    expect(row.price).toBe(8.5);
+    expect(row.priceOverridden).toBe(true);
+    expect(row.actualPrice).toBe(11);
+    expect(row.purchaseStatus).toBe("ordered");
+  });
+
+  it("drops unmatched leftover builder duplicate after catalog line id change", () => {
+    const existing = [
+      {
+        id: "st_ms92yvoflhsu3__ln_old",
+        materialId: "m073",
+        name: "Болт",
+        module: "Rack",
+        section: "Rack",
+        qty: 408,
+      },
+      {
+        id: "st_ms92yvoflhsu3__ln_new",
+        materialId: "m073",
+        name: "Болт",
+        module: "Rack",
+        section: "Rack",
+        qty: 408,
+      },
+    ];
+    const generated = [
+      {
+        id: "st_ms92yvoflhsu3__ln_new",
+        materialId: "m073",
+        name: "Болт",
+        module: "Rack",
+        section: "Rack",
+        qty: 100,
+      },
+    ];
+    const result = buildProjectItemsAfterBuilderSave({
+      existingItems: existing,
+      generatedBuilderItems: generated,
+      builderContext: { farmSectionNames: [], activeStellageIds: ["st_ms92yvoflhsu3"] },
+      materials,
+    });
+    expect(result.blocked).toBe(false);
+    const bolts = result.items.filter((it) => it.materialId === "m073");
+    expect(bolts).toHaveLength(1);
+    expect(bolts[0].id).toBe("st_ms92yvoflhsu3__ln_new");
+    expect(bolts[0].qty).toBe(100);
+    expect(result.removedBuilderIds).toContain("st_ms92yvoflhsu3__ln_old");
+  });
+});
+
 describe("deleted stellage orphan cleanup", () => {
   it("removes existing composition line when its rack is deleted", () => {
     const orphan = {
