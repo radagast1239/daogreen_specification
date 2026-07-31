@@ -132,6 +132,7 @@ describe("buildProjectItemsAfterBuilderSave", () => {
       section: "Стеллаж 1",
       source: "frame_bom",
       sourceType: "frame_bom",
+      moduleRackKey: "mod1:st1",
       qty: 6,
       price: 12,
       supplier: "snap",
@@ -503,6 +504,177 @@ describe("projectItemOwnership", () => {
     expect(classifyProjectItemOwnership({ id: "it_x", source: "manual" })).toBe(
       PROJECT_ITEM_OWNERSHIP.SPEC_MANUAL,
     );
+  });
+
+  it("classifies prefixed st_<id>__ lines as builder even when rack is inactive", () => {
+    expect(
+      classifyProjectItemOwnership(
+        { id: "st_a__ln_pipe", materialId: "m036", name: "Труба", qty: 1 },
+        { activeStellageIds: new Set() },
+      ),
+    ).toBe(PROJECT_ITEM_OWNERSHIP.BUILDER);
+  });
+});
+
+describe("deleted stellage orphan cleanup", () => {
+  it("removes existing composition line when its rack is deleted", () => {
+    const orphan = {
+      id: "st_a__ln_pipe",
+      materialId: "m036",
+      name: "Труба",
+      module: "Стеллаж A",
+      section: "Стеллаж A",
+      qty: 5,
+      price: 100,
+    };
+    const result = buildProjectItemsAfterBuilderSave({
+      existingItems: [orphan],
+      generatedBuilderItems: [],
+      builderContext: {
+        farmSectionNames: [],
+        activeStellageIds: new Set(["st_b"]),
+      },
+      materials,
+    });
+    expect(result.blocked).toBe(false);
+    expect(result.items.find((it) => it.id === orphan.id)).toBeFalsy();
+    expect(result.removedBuilderIds).toContain(orphan.id);
+  });
+
+  it("removes composition for deleted rack even when peers share section/material", () => {
+    const orphanA = {
+      id: "st_a__ln_pipe",
+      materialId: "m036",
+      name: "Труба",
+      module: "Стеллаж",
+      section: "Стеллаж",
+      qty: 5,
+      price: 100,
+    };
+    const generatedB = {
+      id: "st_b__ln_pipe",
+      materialId: "m036",
+      name: "Труба",
+      module: "Стеллаж",
+      section: "Стеллаж",
+      qty: 3,
+      price: 100,
+    };
+    const result = buildProjectItemsAfterBuilderSave({
+      existingItems: [orphanA],
+      generatedBuilderItems: [generatedB],
+      builderContext: {
+        farmSectionNames: [],
+        activeStellageIds: new Set(["st_b"]),
+      },
+      materials,
+    });
+    expect(result.blocked).toBe(false);
+    expect(result.items.find((it) => it.id === orphanA.id)).toBeFalsy();
+    expect(result.removedBuilderIds).toContain(orphanA.id);
+    expect(result.items.find((it) => it.id === generatedB.id)).toBeTruthy();
+  });
+
+  it("removes frame_bom for deleted rack without invariant block", () => {
+    const frameOrphan = {
+      id: "it_fbom_orphan",
+      materialId: "m073",
+      name: "Болт каркас",
+      module: "Стеллаж A",
+      section: "Стеллаж A",
+      source: "frame_bom",
+      sourceType: "frame_bom",
+      moduleRackKey: "mod1:st_a",
+      qty: 6,
+      price: 12,
+    };
+    const result = buildProjectItemsAfterBuilderSave({
+      existingItems: [frameOrphan],
+      generatedBuilderItems: [],
+      builderContext: {
+        farmSectionNames: [],
+        activeStellageIds: new Set(["st_b"]),
+      },
+      materials,
+    });
+    expect(result.blocked).toBe(false);
+    expect(result.items.find((it) => it.id === frameOrphan.id)).toBeFalsy();
+    expect(result.removedBuilderIds).toContain(frameOrphan.id);
+  });
+
+  it("still merges composition for an active rack", () => {
+    const existing = {
+      id: "st_a__ln_pipe",
+      materialId: "m036",
+      name: "Труба",
+      module: "Стеллаж A",
+      section: "Стеллаж A",
+      qty: 5,
+      price: 100,
+      status: "ordered",
+      actualPrice: 88,
+    };
+    const generated = {
+      id: "st_a__ln_pipe",
+      materialId: "m036",
+      name: "Труба",
+      module: "Стеллаж A",
+      section: "Стеллаж A",
+      qty: 7,
+      price: 100,
+    };
+    const result = buildProjectItemsAfterBuilderSave({
+      existingItems: [existing],
+      generatedBuilderItems: [generated],
+      builderContext: {
+        farmSectionNames: [],
+        activeStellageIds: new Set(["st_a"]),
+      },
+      materials,
+    });
+    expect(result.blocked).toBe(false);
+    const kept = result.items.find((it) => it.id === existing.id);
+    expect(kept).toBeTruthy();
+    expect(kept.qty).toBe(7);
+    expect(kept.status).toBe("ordered");
+    expect(kept.actualPrice).toBe(88);
+    expect(result.removedBuilderIds).not.toContain(existing.id);
+  });
+
+  it("still preserves SpecEditor manual items when racks are deleted", () => {
+    const specItem = {
+      id: "it_spec_manual",
+      materialId: "m073",
+      name: "Болт из SpecEditor",
+      module: "Ручной раздел",
+      section: "Ручной раздел",
+      source: "manual",
+      qty: 3,
+      price: 99,
+      actualPrice: 88,
+    };
+    const orphan = {
+      id: "st_a__ln_pipe",
+      materialId: "m036",
+      name: "Труба",
+      module: "Стеллаж A",
+      section: "Стеллаж A",
+      qty: 5,
+      price: 100,
+    };
+    const result = buildProjectItemsAfterBuilderSave({
+      existingItems: [specItem, orphan],
+      generatedBuilderItems: [],
+      builderContext: {
+        farmSectionNames: [],
+        activeStellageIds: new Set(),
+      },
+      materials,
+    });
+    expect(result.blocked).toBe(false);
+    expect(result.items.find((it) => it.id === specItem.id)).toBeTruthy();
+    expect(result.items.find((it) => it.id === orphan.id)).toBeFalsy();
+    expect(result.preservedManualIds).toContain(specItem.id);
   });
 });
 

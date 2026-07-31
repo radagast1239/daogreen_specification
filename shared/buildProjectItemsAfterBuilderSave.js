@@ -6,15 +6,26 @@
 import {
   classifyProjectItemOwnership,
   builderProjectItemLogicalKey,
+  itemBelongsToActiveStellage,
   PROJECT_ITEM_OWNERSHIP,
   PROJECT_OWNED_FIELD_KEYS,
 } from "./projectItemOwnership.js";
 import { copyCatalogSnapshotFromMaterial } from "./materialCatalogSnapshot.js";
-import { isFrameBomLine } from "./frameBomProjectItems.js";
+import { isFrameBomLine, resolveBuilderPrefixedStellageId } from "./frameBomProjectItems.js";
 
 function buildContext(builderContext = {}, existingItems = []) {
   const farmSectionNames = builderContext.farmSectionNames;
   const activeStellageIds = builderContext.activeStellageIds;
+  let resolvedActive;
+  if (activeStellageIds instanceof Set) {
+    resolvedActive = activeStellageIds;
+  } else if (Array.isArray(activeStellageIds)) {
+    resolvedActive = new Set(activeStellageIds);
+  } else if (activeStellageIds == null) {
+    resolvedActive = undefined;
+  } else {
+    resolvedActive = new Set();
+  }
   return {
     ...builderContext,
     existingItems,
@@ -22,10 +33,7 @@ function buildContext(builderContext = {}, existingItems = []) {
       farmSectionNames instanceof Set
         ? farmSectionNames
         : new Set(Array.isArray(farmSectionNames) ? farmSectionNames : []),
-    activeStellageIds:
-      activeStellageIds instanceof Set
-        ? activeStellageIds
-        : new Set(Array.isArray(activeStellageIds) ? activeStellageIds : []),
+    activeStellageIds: resolvedActive,
   };
 }
 
@@ -247,6 +255,13 @@ export function buildProjectItemsAfterBuilderSave({
     }
 
     if (ownership === PROJECT_ITEM_OWNERSHIP.FRAME) {
+      if (
+        ctx.activeStellageIds instanceof Set
+        && !itemBelongsToActiveStellage(ex, ctx.activeStellageIds)
+      ) {
+        removedBuilderIds.push(ex.id);
+        continue;
+      }
       const gen = findGeneratedMatch(ex, { byId, byKey }, generated, ctx, usedGenerated);
       const row = gen ? mergeFrameOwnedItem(ex, gen) : ex;
       items.push(row);
@@ -257,6 +272,18 @@ export function buildProjectItemsAfterBuilderSave({
         updatedBuilderIds.push(ex.id);
         if (gen.id) matchedGeneratedIds.add(gen.id);
       }
+      continue;
+    }
+
+    // BUILDER-owned: drop composition lines whose rack was deleted.
+    // Do not apply the same-section peer preserve exception for inactive racks.
+    const orphanStId = resolveBuilderPrefixedStellageId(ex);
+    if (
+      orphanStId
+      && ctx.activeStellageIds instanceof Set
+      && !ctx.activeStellageIds.has(orphanStId)
+    ) {
+      removedBuilderIds.push(ex.id);
       continue;
     }
 
@@ -305,6 +332,14 @@ export function buildProjectItemsAfterBuilderSave({
       ownership === PROJECT_ITEM_OWNERSHIP.FRAME
     ) {
       if (!resultIds.has(ex.id)) {
+        // Intentional drop: frame lines for deleted / inactive racks.
+        if (
+          ownership === PROJECT_ITEM_OWNERSHIP.FRAME
+          && ctx.activeStellageIds instanceof Set
+          && !itemBelongsToActiveStellage(ex, ctx.activeStellageIds)
+        ) {
+          continue;
+        }
         invariantErrors.push(`Lost ${ownership} item: ${ex.id} (${ex.name || "?"})`);
       }
     }
@@ -312,6 +347,13 @@ export function buildProjectItemsAfterBuilderSave({
 
   for (const ex of existing) {
     if (isFrameBomLine(ex) && !resultIds.has(ex.id)) {
+      // Lost frame BOM is OK when the line's rack is no longer active.
+      if (
+        ctx.activeStellageIds instanceof Set
+        && !itemBelongsToActiveStellage(ex, ctx.activeStellageIds)
+      ) {
+        continue;
+      }
       invariantErrors.push(`Lost frame BOM item: ${ex.id}`);
     }
   }
@@ -332,6 +374,13 @@ export function buildProjectItemsAfterBuilderSave({
           ownership === PROJECT_ITEM_OWNERSHIP.SPEC_MANUAL ||
           ownership === PROJECT_ITEM_OWNERSHIP.FRAME)
       ) {
+        if (
+          ownership === PROJECT_ITEM_OWNERSHIP.FRAME
+          && ctx.activeStellageIds instanceof Set
+          && !itemBelongsToActiveStellage(lost, ctx.activeStellageIds)
+        ) {
+          continue;
+        }
         invariantErrors.push(`Context collapsed: ${key}`);
       }
     }

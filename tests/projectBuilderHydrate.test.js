@@ -302,6 +302,28 @@ describe('projectBuilderHydrate', () => {
     expect(merged[1].source).toBe(FRAME_BOM_SOURCE);
   });
 
+  it('preserveFrameBomProjectItems drops frame_bom for inactive racks when filtered', () => {
+    const builderItems = [{ id: 'st_b__ln1', name: 'Труба' }];
+    const loadedItems = [
+      {
+        id: 'fbom_orphan',
+        source: FRAME_BOM_SOURCE,
+        name: 'BOM orphan',
+        moduleRackKey: 'mod1:st_a',
+      },
+      {
+        id: 'fbom_keep',
+        source: FRAME_BOM_SOURCE,
+        name: 'BOM keep',
+        moduleRackKey: 'mod1:st_b',
+      },
+    ];
+    const merged = preserveFrameBomProjectItems(builderItems, loadedItems, {
+      activeStellageIds: new Set(['st_b']),
+    });
+    expect(merged.map((it) => it.id)).toEqual(['st_b__ln1', 'fbom_keep']);
+  });
+
   it('frame_bom without catalog match is skipped when material missing from catalog', () => {
     const withBom = {
       ...project,

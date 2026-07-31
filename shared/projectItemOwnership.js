@@ -59,10 +59,10 @@ export function classifyProjectItemOwnership(item, builderContext = {}) {
 
   const stellageId = resolveBuilderPrefixedStellageId(item);
   if (stellageId) {
-    const active = builderContext.activeStellageIds;
-    if (!(active instanceof Set) || active.has(stellageId)) {
-      return PROJECT_ITEM_OWNERSHIP.BUILDER;
-    }
+    // Prefixed st_<id>__… lines are always builder-owned, even when the rack
+    // was deleted (activeStellageIds no longer contains id). Orphan cleanup
+    // happens in buildProjectItemsAfterBuilderSave — do not flip to AMBIGUOUS.
+    return PROJECT_ITEM_OWNERSHIP.BUILDER;
   }
 
   if (item.source === "planner") {
@@ -75,6 +75,40 @@ export function classifyProjectItemOwnership(item, builderContext = {}) {
   }
 
   return PROJECT_ITEM_OWNERSHIP.AMBIGUOUS;
+}
+
+/**
+ * Whether an item still belongs to an active stellage/rack.
+ * Prefers resolveBuilderPrefixedStellageId; else moduleRackKey
+ * (`moduleId:rackId` or `stellage:rackId`).
+ * When activeStellageIds is a Set and ownership cannot be proven → inactive.
+ * When activeStellageIds is not a Set → treat as active (no filter).
+ *
+ * @param {object} item
+ * @param {Set<string>} [activeStellageIds]
+ */
+export function itemBelongsToActiveStellage(item, activeStellageIds) {
+  if (!(activeStellageIds instanceof Set)) return true;
+
+  const prefixed = resolveBuilderPrefixedStellageId(item);
+  if (prefixed) return activeStellageIds.has(prefixed);
+
+  const rack = String(
+    item?.moduleRackKey
+      || item?.module_rack_key
+      || item?.sourceObjectIds?.moduleRackKey
+      || "",
+  ).trim();
+  if (!rack) return false;
+  if (rack.startsWith("stellage:")) {
+    return activeStellageIds.has(rack.slice("stellage:".length));
+  }
+  const colon = rack.lastIndexOf(":");
+  if (colon >= 0) {
+    const rackId = rack.slice(colon + 1).trim();
+    if (rackId) return activeStellageIds.has(rackId);
+  }
+  return false;
 }
 
 /**

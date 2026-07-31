@@ -713,7 +713,9 @@ export default function ProjectBuilderPage() {
         err.code = "BUILDER_MERGE_BLOCKED";
         throw err;
       }
-      built.items = preserveFrameBomProjectItems(mergeResult.items, loadedProject.items);
+      built.items = preserveFrameBomProjectItems(mergeResult.items, loadedProject.items, {
+        activeStellageIds,
+      });
       built.items = stripResidualFrameBomTwins(built.items);
       built.items = mergeFrameBomQtyFromBuilderLines(built.items, stellageList);
     }

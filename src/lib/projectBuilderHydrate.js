@@ -20,6 +20,7 @@ import {
   isFrameBomLine,
   resolveFrameBomDedupeKey,
 } from "../../shared/frameBomProjectItems.js";
+import { itemBelongsToActiveStellage } from "../../shared/projectItemOwnership.js";
 import { buildModuleRackKey } from "../../shared/moduleRackIds.js";
 import { builderWizardFromManualParams } from "../../shared/projectLifecycle.js";
 
@@ -593,11 +594,24 @@ export function findStellageByEditRack(stellages = [], editRack = "") {
   ) || null;
 }
 
-export function preserveFrameBomProjectItems(builderItems = [], loadedItems = []) {
+/**
+ * Re-attach frame_bom lines missing from builder output.
+ * @param {object[]} builderItems
+ * @param {object[]} loadedItems
+ * @param {{ activeStellageIds?: Set<string> }} [options]
+ *   When activeStellageIds is a Set, only preserve lines that still belong
+ *   to an active stellage (orphans from deleted racks are dropped).
+ */
+export function preserveFrameBomProjectItems(builderItems = [], loadedItems = [], options = {}) {
+  const activeStellageIds = options?.activeStellageIds;
   const ids = new Set((builderItems || []).map((it) => it.id));
   const preserved = (loadedItems || []).filter((it) => {
     if (ids.has(it.id)) return false;
-    return isFrameBomLine(it);
+    if (!isFrameBomLine(it)) return false;
+    if (activeStellageIds instanceof Set) {
+      return itemBelongsToActiveStellage(it, activeStellageIds);
+    }
+    return true;
   });
   return [...builderItems, ...preserved];
 }
