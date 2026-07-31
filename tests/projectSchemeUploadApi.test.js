@@ -128,9 +128,12 @@ describe("project scheme upload endpoint", () => {
       });
       expect(status).toBe(201);
       expect(data.mimeType).toBe("application/pdf");
-      expect(data.url).toMatch(/^\/uploads\/[A-Za-z0-9_-]+\.pdf$/);
+      expect(data.url).toMatch(/^\/uploads\/(?:public\/)?[A-Za-z0-9_-]+\.pdf$/);
       expect(data.url).not.toContain("..");
-      const stored = path.join(tempUploads, path.basename(data.url));
+      const stored = path.join(
+        tempUploads,
+        data.url.replace(/^\/uploads\//, "").replace(/\//g, path.sep),
+      );
       expect(fs.existsSync(stored)).toBe(true);
       expect(fs.readFileSync(stored).subarray(0, 5).toString("ascii")).toBe("%PDF-");
     } finally {

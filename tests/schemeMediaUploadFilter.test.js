@@ -52,7 +52,7 @@ describe("scheme media upload filter", () => {
     return Promise.all([
       expect(accept({ originalname: "a.pdf", mimetype: "application/pdf" })).resolves.toBe(true),
       expect(accept({ originalname: "a.jpg", mimetype: "image/jpeg" })).resolves.toBe(true),
-      expect(accept({ originalname: "a.svg", mimetype: "image/svg+xml" })).rejects.toThrow(/JPEG|PDF/i),
+      expect(accept({ originalname: "a.svg", mimetype: "image/svg+xml" })).rejects.toThrow(/SVG|JPEG|PDF/i),
     ]);
   });
 
