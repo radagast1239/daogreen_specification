@@ -869,7 +869,7 @@ export default function SpecEditorPage() {
             hidePrimaryActions
           />
 
-          <div className="card" style={{ marginBottom: 16, maxWidth: 420 }} data-testid="client-language-card">
+          <div className="card" style={{ marginBottom: 16, maxWidth: 420, padding: "14px 16px" }} data-testid="client-language-card">
             <label className="field" style={{ marginBottom: 0 }}>
               Язык клиентской версии
               <select
@@ -889,7 +889,7 @@ export default function SpecEditorPage() {
             const linkState = clientLinkActiveState(project);
             if (!linkState.needsPublishBeforeClientLink) return null;
             return (
-              <div className="card" style={{ marginBottom: 16, borderColor: "var(--warn)" }}>
+              <div className="card" style={{ marginBottom: 16, padding: "14px 16px", borderColor: "var(--warn)" }}>
                 <strong>Клиентская ссылка пока неактивна</strong>
                 <p className="muted" style={{ margin: "8px 0 12px" }}>
                   Токен клиента создан, но опубликованная версия отсутствует. Клиент увидит сообщение
@@ -903,7 +903,7 @@ export default function SpecEditorPage() {
           })()}
 
           {project.publishedRelease && project.hasUnpublishedChanges && (
-            <div className="card" style={{ marginBottom: 16, borderColor: "var(--warn)", background: "var(--warn-bg, rgba(255, 193, 7, 0.08))" }}>
+            <div className="card" style={{ marginBottom: 16, padding: "14px 16px", borderColor: "var(--warn)", background: "var(--warn-bg, rgba(255, 193, 7, 0.08))" }}>
               <strong>Есть неопубликованные изменения</strong>
               <p className="muted" style={{ margin: "8px 0 12px" }}>
                 Клиент видит опубликованную версию {project.publishedRelease.versionNumber}.
