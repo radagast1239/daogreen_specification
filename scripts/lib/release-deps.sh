@@ -137,13 +137,32 @@ release_git_tree_manifest() {
     | LC_ALL=C sort -k2
 }
 
+# Deploy-managed paths: replaced by release_link_shared_paths after the tree is
+# materialised, so the commit is not their source of truth. Everything else in
+# the release must reproduce the commit exactly.
+RELEASE_PROVENANCE_EXCLUDE_EXACT="backend/.env"
+RELEASE_PROVENANCE_EXCLUDE_PREFIXES="backend/data/ backend/uploads/"
+
+release_provenance_path_excluded() {
+  # Args: path — returns 0 when the path is deploy-managed (out of provenance scope).
+  # Prefixes carry a trailing slash on purpose: backend/data.js and
+  # backend/database/** stay in scope, and only backend/.env itself is exempt
+  # (backend/.env.example is still verified).
+  local path="$1" prefix
+  [[ "$path" == "$RELEASE_PROVENANCE_EXCLUDE_EXACT" ]] && return 0
+  for prefix in $RELEASE_PROVENANCE_EXCLUDE_PREFIXES; do
+    [[ "$path" == "$prefix"* ]] && return 0
+  done
+  return 1
+}
+
 _release_provenance_check() {
   # Args: release_dir git_src commit work_dir
   local release_dir="$1"
   local git_src="$2"
   local commit="$3"
   local work="$4"
-  local oid rel_path total=0 missing=0
+  local oid rel_path total=0 missing=0 excluded=0
 
   if ! git -C "$git_src" rev-parse --verify --quiet "$commit^{commit}" >/dev/null; then
     echo "PROVENANCE_FAIL REVISION is not a commit in $git_src: $commit" >&2
@@ -155,8 +174,15 @@ _release_provenance_check() {
   fi
   : > "$work/expected"
   : > "$work/paths"
+  echo "PROVENANCE_SCOPE excludes: $RELEASE_PROVENANCE_EXCLUDE_EXACT $(
+    for p in $RELEASE_PROVENANCE_EXCLUDE_PREFIXES; do printf '%s** ' "$p"; done)(deploy-managed)"
   while IFS=' ' read -r oid rel_path; do
     [[ -n "$rel_path" ]] || continue
+    if release_provenance_path_excluded "$rel_path"; then
+      excluded=$((excluded + 1))
+      echo "PROVENANCE_EXCLUDED $rel_path"
+      continue
+    fi
     total=$((total + 1))
     if [[ ! -f "$release_dir/$rel_path" ]]; then
       echo "PROVENANCE_MISSING $rel_path" >&2
@@ -185,7 +211,7 @@ _release_provenance_check() {
     echo "PROVENANCE_FAIL tree does not match $commit" >&2
     return 1
   }
-  echo "PROVENANCE_OK files=$total commit=$commit"
+  echo "PROVENANCE_OK files=$total excluded=$excluded commit=$commit"
 }
 
 release_assert_tree_matches_commit() {

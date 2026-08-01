@@ -108,6 +108,44 @@ function makeArchiveLikeRelease(tmp) {
   `;
 }
 
+/**
+ * Bash prelude: repo in $SRC committed as $SHA, extracted into $REL. Contains
+ * deploy-managed paths (backend/data/**, backend/uploads/**) alongside paths
+ * whose names merely look similar and must stay inside the provenance scope.
+ */
+function makeProvenanceRepo(tmp) {
+  return `
+    set -e
+    T="${tmp}"
+    SRC="$T/repo"
+    REL="$T/rel"
+    mkdir -p "$SRC/backend/src" "$SRC/backend/data" "$SRC/backend/uploads" "$SRC/backend/database" "$SRC/shared" "$REL"
+    cd "$SRC"
+    git init -q .
+    git config core.autocrlf false
+    git config commit.gpgsign false
+    git config user.email deploy@test
+    git config user.name deploy
+    printf 'export const a = 1;\\n'        > backend/src/index.js
+    printf 'export const marker = "m";\\n' > shared/marker.js
+    printf '{"name":"root"}\\n'            > package.json
+    printf 'ADMIN_KEY=\\n'                 > backend/.env.example
+    printf 'export const d = 1;\\n'        > backend/data.js
+    printf 'export const k = 1;\\n'        > backend/database/keep.js
+    printf 'export const u = 1;\\n'        > backend/uploads.js
+    printf '{}\\n'                         > backend/data/materialTranslations.en.json
+    printf ''                              > backend/uploads/.gitkeep
+    git add -A
+    git commit -qm init
+    SHA=$(git rev-parse HEAD)
+    git archive --format=tar "$SHA" | tar -x -C "$REL"
+    # What release_link_shared_paths leaves behind for these paths.
+    strip_deploy_managed() {
+      rm -rf "$1/backend/data" "$1/backend/uploads" "$1/backend/.env"
+    }
+  `;
+}
+
 describe("immutable release dependency helpers", () => {
   it("finds bash for shell helper tests", () => {
     expect(BASH).toBeTruthy();
@@ -247,6 +285,110 @@ describe("immutable release dependency helpers", () => {
     `, { ALLOW_UNVERIFIED_RELEASE: "1" });
     expect(allowed.stdout).toMatch(/PROVENANCE_UNVERIFIED/);
     expect(allowed.stdout).not.toMatch(/GATE_FAIL provenance unverified/);
+  });
+
+  it("provenance: deploy-managed paths are excluded, not reported missing", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dg-rel-exc-")).replace(/\\/g, "/");
+    const r = runBash(`${makeProvenanceRepo(tmp)}
+      strip_deploy_managed "$REL"
+      . "${LIB}"
+      release_assert_tree_matches_commit "$REL" "$SRC" "$SHA"
+    `);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/PROVENANCE_SCOPE excludes: backend\/\.env backend\/data\/\*\* backend\/uploads\/\*\*/);
+    expect(r.stdout).toMatch(/PROVENANCE_EXCLUDED backend\/data\/materialTranslations\.en\.json/);
+    expect(r.stdout).toMatch(/PROVENANCE_EXCLUDED backend\/uploads\/\.gitkeep/);
+    expect(r.stdout).toMatch(/PROVENANCE_OK files=7 excluded=2/);
+    expect(r.stdout + r.stderr).not.toMatch(/PROVENANCE_MISSING/);
+  });
+
+  it("provenance: a modified ordinary tracked source still mismatches", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dg-rel-exc-mod-")).replace(/\\/g, "/");
+    const r = runBash(`${makeProvenanceRepo(tmp)}
+      strip_deploy_managed "$REL"
+      printf 'tampered\\n' >> "$REL/backend/src/index.js"
+      . "${LIB}"
+      set +e
+      release_assert_tree_matches_commit "$REL" "$SRC" "$SHA"; echo status:$?
+    `);
+    expect(r.stdout + r.stderr).toMatch(/PROVENANCE_MISMATCH backend\/src\/index\.js/);
+    expect(r.stdout).toMatch(/status:1/);
+  });
+
+  it("provenance: a missing ordinary tracked source still reports missing", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dg-rel-exc-del-")).replace(/\\/g, "/");
+    const r = runBash(`${makeProvenanceRepo(tmp)}
+      strip_deploy_managed "$REL"
+      rm -f "$REL/shared/marker.js"
+      . "${LIB}"
+      set +e
+      release_assert_tree_matches_commit "$REL" "$SRC" "$SHA"; echo status:$?
+    `);
+    expect(r.stdout + r.stderr).toMatch(/PROVENANCE_MISSING shared\/marker\.js/);
+    expect(r.stdout).toMatch(/status:1/);
+  });
+
+  it("provenance: the exclusion does not leak to similarly named paths", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dg-rel-exc-near-")).replace(/\\/g, "/");
+    const r = runBash(`${makeProvenanceRepo(tmp)}
+      . "${LIB}"
+      set +e
+      for p in backend/.env.example backend/data.js backend/database/keep.js backend/uploads.js; do
+        rm -rf "$T/probe"; cp -r "$REL" "$T/probe"
+        strip_deploy_managed "$T/probe"
+        rm -f "$T/probe/$p"
+        out=$(release_assert_tree_matches_commit "$T/probe" "$SRC" "$SHA" 2>&1)
+        echo "probe:$p:$(printf '%s' "$out" | grep -c "PROVENANCE_MISSING $p")"
+      done
+    `);
+    expect(r.stdout).toMatch(/probe:backend\/\.env\.example:1/);
+    expect(r.stdout).toMatch(/probe:backend\/data\.js:1/);
+    expect(r.stdout).toMatch(/probe:backend\/database\/keep\.js:1/);
+    expect(r.stdout).toMatch(/probe:backend\/uploads\.js:1/);
+  });
+
+  it("provenance: path classifier matches only the deploy-managed paths", () => {
+    const r = runBash(`
+      . "${LIB}"
+      for p in backend/.env backend/data/x.json backend/data/deep/y.json backend/uploads/.gitkeep \\
+               backend/.env.example backend/data.js backend/database/keep.js backend/uploads.js \\
+               shared/backend/data/z.js src/index.js; do
+        release_provenance_path_excluded "$p" && echo "EXCLUDED $p" || echo "INSCOPE  $p"
+      done
+    `);
+    expect(r.stdout).toMatch(/EXCLUDED backend\/\.env\n/);
+    expect(r.stdout).toMatch(/EXCLUDED backend\/data\/x\.json/);
+    expect(r.stdout).toMatch(/EXCLUDED backend\/data\/deep\/y\.json/);
+    expect(r.stdout).toMatch(/EXCLUDED backend\/uploads\/\.gitkeep/);
+    expect(r.stdout).toMatch(/INSCOPE  backend\/\.env\.example/);
+    expect(r.stdout).toMatch(/INSCOPE  backend\/data\.js/);
+    expect(r.stdout).toMatch(/INSCOPE  backend\/database\/keep\.js/);
+    expect(r.stdout).toMatch(/INSCOPE  backend\/uploads\.js/);
+    expect(r.stdout).toMatch(/INSCOPE  shared\/backend\/data\/z\.js/);
+    expect(r.stdout).toMatch(/INSCOPE  src\/index\.js/);
+  });
+
+  it("provenance + shared layout: gate passes on the tree the service actually starts", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dg-rel-e2e-")).replace(/\\/g, "/");
+    const r = runBash(`${makeProvenanceRepo(tmp)}
+      SHARED="$T/shared"
+      mkdir -p "$SHARED/data" "$SHARED/uploads" "$SHARED/env"
+      printf 'PORT=3002\\n' > "$SHARED/env/production.env"
+      printf 'db\\n' > "$SHARED/data/daogreen.db"
+      ln -sfn "$SHARED/data" "$T/probe-link" 2>/dev/null || true
+      if [[ ! -L "$T/probe-link" ]]; then echo SYMLINK_UNSUPPORTED; exit 0; fi
+      . "${LIB}"
+      release_link_shared_paths "$REL" "$SHARED"
+      release_assert_tree_matches_commit "$REL" "$SRC" "$SHA"
+    `);
+    if (r.stdout.includes("SYMLINK_UNSUPPORTED")) {
+      const lib = fs.readFileSync(path.join(ROOT, "scripts", "lib", "release-deps.sh"), "utf8");
+      expect(lib).toMatch(/release_provenance_path_excluded "\$rel_path"/);
+      return;
+    }
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/SHARED_PATHS_OK/);
+    expect(r.stdout).toMatch(/PROVENANCE_OK files=7 excluded=2/);
   });
 
   it("shared paths: git-archive tree is reduced to the runtime layout", () => {
