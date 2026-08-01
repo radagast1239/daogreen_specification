@@ -1394,42 +1394,17 @@ function normItemName(value) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-/**
- * Remove ordinary st_*__ln_* rows that duplicate a canonical frame_bom line
- * (same stellage + materialId + name). Intentional dual lines with a different
- * name (e.g. каркас vs полив) are kept.
+/*
+ * There is deliberately no same-name twin stripper.
  *
- * @param {object[]} items
- * @returns {object[]}
+ * Removing an st_*__ln_* row because it shares stellage + materialId + display
+ * name with a canonical frame_bom line deleted legitimate rack lines (a rack
+ * may carry the same material twice under one title). Any row that really does
+ * come from a frame BOM carries machine-readable lineage (source, sourceKey,
+ * sourceObjectIds.bomKey, sourceLabel, __it_fbom_ id) and is already deduped by
+ * stripResidualFrameBomTwins / mergeFrameBomIntoProjectItems on that lineage.
+ * A row without lineage is legacy/unknown ownership and must be preserved.
  */
-export function stripSameNameFrameBomBuilderTwins(items = []) {
-  const existing = Array.isArray(items) ? items : [];
-  const canons = existing.filter(
-    (it) => isCanonicalFrameBomLine(it) && !isExplicitManualProjectItem(it),
-  );
-  if (!canons.length) return [...existing];
-
-  const canonKeys = new Set();
-  for (const c of canons) {
-    const sid = resolveFrameBomStellageId(c);
-    const mid = String(c.materialId || "").trim();
-    const name = normItemName(c.name);
-    if (sid && mid && name) canonKeys.add(`${sid}::${mid}::${name}`);
-  }
-  if (!canonKeys.size) return [...existing];
-
-  return existing.filter((it) => {
-    if (!it || isExplicitManualProjectItem(it)) return true;
-    if (isCanonicalFrameBomLine(it) || isFrameBomLine(it)) return true;
-    const id = String(it.id || "");
-    if (!/^st_.+__ln_/.test(id)) return true;
-    const sid = resolveBuilderPrefixedStellageId(it);
-    const mid = String(it.materialId || "").trim();
-    const name = normItemName(it.name);
-    if (!sid || !mid || !name) return true;
-    return !canonKeys.has(`${sid}::${mid}::${name}`);
-  });
-}
 
 /**
  * Rewrite module/section labels on stellage-scoped rows to the current stellage name.

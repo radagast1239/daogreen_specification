@@ -10,6 +10,7 @@ import {
   PROJECT_ITEM_OWNERSHIP,
   PROJECT_OWNED_FIELD_KEYS,
   projectItemHasAdminActivity,
+  projectItemHasProcurementActivity,
 } from "./projectItemOwnership.js";
 import { copyCatalogSnapshotFromMaterial } from "./materialCatalogSnapshot.js";
 import { isFrameBomLine, resolveBuilderPrefixedStellageId } from "./frameBomProjectItems.js";
@@ -17,15 +18,16 @@ import { isFrameBomLine, resolveBuilderPrefixedStellageId } from "./frameBomProj
 function buildContext(builderContext = {}, existingItems = []) {
   const farmSectionNames = builderContext.farmSectionNames;
   const activeStellageIds = builderContext.activeStellageIds;
+  // Fail-closed: an empty / missing / unusable rack set means "unknown", never
+  // "this project has no racks any more". undefined disables rack filtering, so
+  // an ordinary Save can never turn an empty config list into a delete-all.
   let resolvedActive;
   if (activeStellageIds instanceof Set) {
-    resolvedActive = activeStellageIds;
+    resolvedActive = activeStellageIds.size ? activeStellageIds : undefined;
   } else if (Array.isArray(activeStellageIds)) {
-    resolvedActive = new Set(activeStellageIds);
-  } else if (activeStellageIds == null) {
-    resolvedActive = undefined;
+    resolvedActive = activeStellageIds.length ? new Set(activeStellageIds) : undefined;
   } else {
-    resolvedActive = new Set();
+    resolvedActive = undefined;
   }
   return {
     ...builderContext,
@@ -243,6 +245,8 @@ export function buildProjectItemsAfterBuilderSave({
   const preservedSpecIds = [];
   const preservedManualIds = [];
   const ambiguousIds = [];
+  /** Rows kept despite an orphan rack because procurement work exists on them. */
+  const procurementBlockedIds = [];
   const invariantErrors = [];
 
   const items = [];
@@ -284,6 +288,12 @@ export function buildProjectItemsAfterBuilderSave({
         ctx.activeStellageIds instanceof Set
         && !itemBelongsToActiveStellage(ex, ctx.activeStellageIds)
       ) {
+        if (projectItemHasProcurementActivity(ex)) {
+          items.push(ex);
+          resultIds.add(ex.id);
+          procurementBlockedIds.push(ex.id);
+          continue;
+        }
         removedBuilderIds.push(ex.id);
         continue;
       }
@@ -308,6 +318,12 @@ export function buildProjectItemsAfterBuilderSave({
       && ctx.activeStellageIds instanceof Set
       && !ctx.activeStellageIds.has(orphanStId)
     ) {
+      if (projectItemHasProcurementActivity(ex)) {
+        items.push(ex);
+        resultIds.add(ex.id);
+        procurementBlockedIds.push(ex.id);
+        continue;
+      }
       removedBuilderIds.push(ex.id);
       continue;
     }
@@ -323,7 +339,13 @@ export function buildProjectItemsAfterBuilderSave({
     } else {
       // No match: drop leftover builder duplicates after catalog line ids regenerate.
       // Keep only rows with SpecEditor / procurement activity.
-      if (projectItemHasAdminActivity(ex)) {
+      // Fail-closed: without a known rack universe we cannot tell "the builder
+      // dropped this line" from "the racks were never hydrated", so rack-scoped
+      // rows are preserved rather than mass-deleted.
+      if (orphanStId && !(ctx.activeStellageIds instanceof Set)) {
+        items.push(ex);
+        resultIds.add(ex.id);
+      } else if (projectItemHasAdminActivity(ex)) {
         items.push(ex);
         resultIds.add(ex.id);
       } else {
@@ -433,6 +455,7 @@ export function buildProjectItemsAfterBuilderSave({
     preservedSpecIds,
     preservedManualIds,
     ambiguousIds,
+    procurementBlockedIds,
     invariantErrors: [],
     blocked: false,
     debug: {

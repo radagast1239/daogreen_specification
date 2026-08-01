@@ -22,11 +22,11 @@ import {
   rackFrameBomScopeItems,
   buildResidualFrameBomTwinRepairPlan,
   stripResidualFrameBomTwins,
-  stripSameNameFrameBomBuilderTwins,
   syncProjectItemStellageLabels,
   countResidualFrameBomTwins,
   isCanonicalFrameBomLine,
 } from "../shared/frameBomProjectItems.js";
+import * as frameBomProjectItems from "../shared/frameBomProjectItems.js";
 
 const TUBE_CUTS = [
   { lengthMm: 3200, qty: 6 },
@@ -1239,12 +1239,24 @@ describe("stripSameNameFrameBomBuilderTwins + label sync", () => {
         qty: 136,
       },
       {
+        // Legacy twin: same name AND machine-readable frame lineage.
         id: "st_ms933oqimo2vp__ln_old",
         materialId: "m073",
         name: "Болт М6×20",
         module: "Стеллаж 2",
         section: "Стеллаж 2",
+        sourceKey: "frame_bom:d1:mod:st_ms933oqimo2vp:bolt_m6x20",
         qty: 408,
+      },
+      {
+        // Same name and material, but no lineage — an ordinary rack line.
+        // A shared title must never authorise deletion.
+        id: "st_ms933oqimo2vp__ln_no_lineage",
+        materialId: "m073",
+        name: "Болт М6×20",
+        module: "Стеллаж 2",
+        section: "Стеллаж 2",
+        qty: 7,
       },
       {
         id: "st_ms933oqimo2vp__ln_plumb",
@@ -1255,11 +1267,11 @@ describe("stripSameNameFrameBomBuilderTwins + label sync", () => {
         qty: 12,
       },
     ];
-    const cleaned = stripSameNameFrameBomBuilderTwins(items);
-    expect(cleaned.map((i) => i.id)).toEqual([
-      "it_fbom_d1_mod:st_ms933oqimo2vp_bolt_m6x20",
-      "st_ms933oqimo2vp__ln_plumb",
-    ]);
+    // Name-based stripping is gone: lineage-only dedupe keeps every rack line.
+    expect(frameBomProjectItems.stripSameNameFrameBomBuilderTwins).toBeUndefined();
+    const cleaned = stripResidualFrameBomTwins(items);
+    expect(cleaned.map((i) => i.id)).toContain("st_ms933oqimo2vp__ln_no_lineage");
+    expect(cleaned.map((i) => i.id)).toContain("st_ms933oqimo2vp__ln_plumb");
   });
 
   it("syncs stale Стеллаж 1/2 labels to current stellage names", () => {

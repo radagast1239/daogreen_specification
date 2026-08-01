@@ -90,12 +90,20 @@ export function resolveBuilderSaveStatus(dbProject, patchStatus) {
   return patchStatus != null ? patchStatus : current;
 }
 
+/**
+ * Rack ids an ordinary builder save may reconcile against.
+ * Returns undefined when the config list is absent, empty or unusable: an
+ * ordinary Save must never read "no racks known" as "delete every rack row".
+ * There is no explicit "remove all racks" contract in the product, so the
+ * normal Save path deliberately cannot emulate one.
+ */
 function activeStellageIdsFromConfigs(stellageConfigs) {
+  if (!Array.isArray(stellageConfigs) || !stellageConfigs.length) return undefined;
   const ids = new Set();
-  for (const st of Array.isArray(stellageConfigs) ? stellageConfigs : []) {
+  for (const st of stellageConfigs) {
     if (st?.id) ids.add(String(st.id));
   }
-  return ids;
+  return ids.size ? ids : undefined;
 }
 
 function farmSectionNamesFromItems(items = []) {

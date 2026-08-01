@@ -754,7 +754,8 @@ describe("deleted stellage orphan cleanup", () => {
       generatedBuilderItems: [],
       builderContext: {
         farmSectionNames: [],
-        activeStellageIds: new Set(),
+        // A known rack universe that no longer contains st_a.
+        activeStellageIds: new Set(["st_b"]),
       },
       materials,
     });
@@ -762,6 +763,27 @@ describe("deleted stellage orphan cleanup", () => {
     expect(result.items.find((it) => it.id === specItem.id)).toBeTruthy();
     expect(result.items.find((it) => it.id === orphan.id)).toBeFalsy();
     expect(result.preservedManualIds).toContain(specItem.id);
+  });
+
+  it("an empty rack set is unknown, not a delete-all instruction", () => {
+    const orphan = {
+      id: "st_a__ln_pipe",
+      materialId: "m036",
+      name: "Труба",
+      module: "Стеллаж A",
+      section: "Стеллаж A",
+      qty: 5,
+      price: 100,
+    };
+    const result = buildProjectItemsAfterBuilderSave({
+      existingItems: [orphan],
+      generatedBuilderItems: [],
+      builderContext: { farmSectionNames: [], activeStellageIds: new Set() },
+      materials,
+    });
+    expect(result.blocked).toBe(false);
+    expect(result.items.find((it) => it.id === orphan.id)).toBeTruthy();
+    expect(result.removedBuilderIds).toEqual([]);
   });
 });
 

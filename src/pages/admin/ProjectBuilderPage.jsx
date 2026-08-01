@@ -15,7 +15,7 @@ import {
   buildFrameDrawingLink,
   buildBuilderFrameDrawingContext,
 } from "../../../shared/frameDrawingContext.js";
-import { frameBomItemsForModuleRack, stripResidualFrameBomTwins, stripSameNameFrameBomBuilderTwins, syncProjectItemStellageLabels } from "../../../shared/frameBomProjectItems.js";
+import { frameBomItemsForModuleRack, stripResidualFrameBomTwins, syncProjectItemStellageLabels } from "../../../shared/frameBomProjectItems.js";
 import { buildProjectItemsAfterBuilderSave } from "../../../shared/buildProjectItemsAfterBuilderSave.js";
 import { buildModuleRackKey } from "../../../shared/moduleRackIds.js";
 import {
@@ -716,8 +716,9 @@ export default function ProjectBuilderPage() {
       built.items = preserveFrameBomProjectItems(mergeResult.items, loadedProject.items, {
         activeStellageIds,
       });
+      // Lineage-based dedupe only. Name-based twin stripping was removed: a
+      // shared material title is not proof of frame BOM origin.
       built.items = stripResidualFrameBomTwins(built.items);
-      built.items = stripSameNameFrameBomBuilderTwins(built.items);
       built.items = syncProjectItemStellageLabels(built.items, stellageList);
       built.items = mergeFrameBomQtyFromBuilderLines(built.items, stellageList);
     }

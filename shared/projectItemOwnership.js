@@ -89,26 +89,56 @@ export function classifyProjectItemOwnership(item, builderContext = {}) {
  */
 export function itemBelongsToActiveStellage(item, activeStellageIds) {
   if (!(activeStellageIds instanceof Set)) return true;
+  const { known, rackId } = resolveItemRackLineage(item);
+  // Unknown lineage is not proof of an orphan — callers must not delete on it.
+  if (!known) return true;
+  return activeStellageIds.has(rackId);
+}
 
+/**
+ * Machine-readable rack lineage of a project item.
+ * `known` is true only when the row itself states which rack it belongs to;
+ * name, material id and section are never lineage.
+ *
+ * @param {object} item
+ * @returns {{ known: boolean, rackId: string }}
+ */
+export function resolveItemRackLineage(item) {
   const prefixed = resolveBuilderPrefixedStellageId(item);
-  if (prefixed) return activeStellageIds.has(prefixed);
+  if (prefixed) return { known: true, rackId: prefixed };
+
+  const objIds = item?.sourceObjectIds ?? item?.source_object_ids;
+  const parsed = typeof objIds === "string"
+    ? (() => {
+        try {
+          return JSON.parse(objIds) || {};
+        } catch {
+          return {};
+        }
+      })()
+    : (objIds || {});
+
+  const stellageId = String(parsed.stellageId || parsed.stellage_id || "").trim();
+  if (stellageId) return { known: true, rackId: stellageId };
 
   const rack = String(
     item?.moduleRackKey
       || item?.module_rack_key
-      || item?.sourceObjectIds?.moduleRackKey
+      || parsed.moduleRackKey
       || "",
   ).trim();
-  if (!rack) return false;
+  if (!rack) return { known: false, rackId: "" };
   if (rack.startsWith("stellage:")) {
-    return activeStellageIds.has(rack.slice("stellage:".length));
+    const id = rack.slice("stellage:".length).trim();
+    return id ? { known: true, rackId: id } : { known: false, rackId: "" };
   }
   const colon = rack.lastIndexOf(":");
   if (colon >= 0) {
     const rackId = rack.slice(colon + 1).trim();
-    if (rackId) return activeStellageIds.has(rackId);
+    if (rackId) return { known: true, rackId };
   }
-  return false;
+  // Malformed rack key — unknown, never an orphan proof.
+  return { known: false, rackId: "" };
 }
 
 /**
@@ -225,5 +255,39 @@ export function projectItemHasAdminActivity(item) {
   if (item.purchaseStatus != null && String(item.purchaseStatus).trim() && String(item.purchaseStatus) !== "not_bought") {
     return true;
   }
+  if (String(item.purchasePriority || item.purchase_priority || "").trim()) return true;
+  if (item.needsApproval || item.needs_approval) return true;
+  return false;
+}
+
+/**
+ * Explicit procurement work on a row, used to refuse silent deletion of an
+ * otherwise deletable builder line.
+ *
+ * Deliberately narrower than projectItemHasAdminActivity: purchaseKey, notes
+ * and supplier are auto-populated on generated rows (purchase_key is set on
+ * roughly half of all production rows, clientNote is written from pipe cuts),
+ * so counting them would make every builder row permanently undeletable and
+ * break legitimate orphan cleanup. Only fields an admin sets on purpose count.
+ *
+ * @param {object} item
+ */
+export function projectItemHasProcurementActivity(item) {
+  if (!item || typeof item !== "object") return false;
+  const status = String(item.status ?? "").trim();
+  if (status && status !== "not_bought") return true;
+  const actual = item.actualPrice ?? item.actual_price;
+  if (actual != null && actual !== "" && Number(actual) !== 0) return true;
+  if (String(item.purchasePriority || item.purchase_priority || "").trim()) return true;
+  if (Number(item.deliveryDays ?? item.delivery_days) > 0) return true;
+  if (item.replacementPrice != null || item.replacement_price != null) return true;
+  const replacement = [
+    item.replacementLink, item.replacement_link,
+    item.replacementComment, item.replacement_comment,
+    item.replacementProposedAt, item.replacement_proposed_at,
+  ];
+  if (replacement.some((v) => String(v || "").trim())) return true;
+  if (item.nameOverridden || item.name_overridden) return true;
+  if (item.needsApproval || item.needs_approval) return true;
   return false;
 }
