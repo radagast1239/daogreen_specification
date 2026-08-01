@@ -33,12 +33,21 @@ export function collectUrlsFromPinnedDrawings(pins = []) {
   return (Array.isArray(pins) ? pins : []).map((p) => p?.url || p?.pdfUrl).filter(Boolean).map(String);
 }
 
+export function collectUrlsFromDocumentManifest(documents = []) {
+  return (Array.isArray(documents) ? documents : [])
+    .map((d) => d?.url)
+    .filter(Boolean)
+    .map(String);
+}
+
 /** Collect all local upload URLs referenced by a parsed release snapshot. */
 export function collectPinnedAssetUrlsFromSnapshot(snapshot) {
   if (!snapshot || Array.isArray(snapshot)) return [];
   const urls = [
     ...collectUrlsFromImageManifest(snapshot.imageManifest),
     ...collectUrlsFromPinnedDrawings(snapshot.pinnedFrameDrawings),
+    // Frozen client documents are the only source a published link serves.
+    ...collectUrlsFromDocumentManifest(snapshot.documentManifest),
   ];
   const normalized = urls.map(normalizeUploadUrl).filter((u) => u.startsWith("/uploads/"));
   return [...new Set(normalized)];

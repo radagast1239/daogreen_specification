@@ -4,8 +4,8 @@ import {
   frameDrawingClientTargetKey,
   filterClientProjectDocuments,
   selectLatestFrameDocuments,
-  mergeLiveFrameDocumentsForClient,
 } from "../shared/clientFrameDocuments.js";
+import * as clientFrameDocuments from "../shared/clientFrameDocuments.js";
 
 describe("clientFrameDocuments helper", () => {
   it("unifies target key on stellageId even when moduleRackKey differs", () => {
@@ -95,15 +95,9 @@ describe("clientFrameDocuments helper", () => {
     expect(named[0].drawingTitle).toBe("Основное отделение");
   });
 
-  it("mergeLiveFrameDocumentsForClient keeps invoices and replaces frames", () => {
-    const pinned = [
-      { id: "inv", type: "pdf", filename: "a.pdf" },
-      { id: "old", type: "frame_drawing", stellageId: "st_a", drawingTitle: "Old" },
-    ];
-    const live = [
-      { id: "new", type: "frame_drawing", stellageId: "st_a", drawingTitle: "New Name" },
-    ];
-    const merged = mergeLiveFrameDocumentsForClient(pinned, live);
-    expect(merged.map((d) => d.id)).toEqual(["inv", "new"]);
+  // A published link must resolve documents from the release manifest alone.
+  // Re-adding a live-merge helper here would reopen the immutability hole.
+  it("exposes no helper that merges live frame drawings into a release", () => {
+    expect(clientFrameDocuments.mergeLiveFrameDocumentsForClient).toBeUndefined();
   });
 });

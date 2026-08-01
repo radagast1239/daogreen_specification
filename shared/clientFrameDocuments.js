@@ -131,14 +131,9 @@ export function filterClientProjectDocuments(documents = [], options = {}) {
   return filtered;
 }
 
-/**
- * Build client-facing documents: keep non-frame from published manifest,
- * replace frame drawings with live latest+active named list.
+/*
+ * A published client link resolves its documents from the release
+ * documentManifest only (resolveClientDocumentsForRelease). There is
+ * deliberately no helper that mixes live frame drawings into a published
+ * release — that would break the immutable release contract.
  */
-export function mergeLiveFrameDocumentsForClient(pinnedDocuments = [], liveDocuments = []) {
-  const pinned = Array.isArray(pinnedDocuments) ? pinnedDocuments : [];
-  const live = Array.isArray(liveDocuments) ? liveDocuments : [];
-  const nonFrame = pinned.filter((d) => d?.type !== "frame_drawing");
-  const liveFrames = live.filter((d) => d?.type === "frame_drawing");
-  return [...nonFrame, ...liveFrames];
-}

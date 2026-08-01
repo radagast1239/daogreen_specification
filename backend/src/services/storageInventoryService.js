@@ -239,6 +239,19 @@ function collectPublishedReferences() {
         url: normalizeUploadUrl(u),
       });
     }
+    // Frozen client documents: the only files a published link serves.
+    for (const doc of parsed.documentManifest || []) {
+      if (!doc?.url) continue;
+      pushRef(map, doc.url, {
+        ...base,
+        referenceType: doc.type === "frame_drawing"
+          ? "published:document_frame_drawing"
+          : "published:document",
+        field: "documentManifest",
+        drawingId: doc.drawingId || "",
+        url: normalizeUploadUrl(doc.url),
+      });
+    }
     // Legacy array snapshots: only item photo urls if present
     if (Array.isArray(raw)) {
       for (const it of raw) {

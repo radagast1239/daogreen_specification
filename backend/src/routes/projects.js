@@ -108,7 +108,6 @@ import { sendSafeUploadFile } from "../services/secureFileServe.js";
 import {
   activeStellageIdSet,
   filterClientProjectDocuments,
-  mergeLiveFrameDocumentsForClient,
 } from "../../../shared/clientFrameDocuments.js";
 import {
   findProjectScopedImageAsset,
@@ -1852,10 +1851,8 @@ function serveClientProject(req, res) {
   const versionInfo = versionInfoRaw
     ? (({ releaseComment: _rc, ...safe }) => safe)(versionInfoRaw)
     : null;
-  const documents = mergeLiveFrameDocumentsForClient(
-    resolveClientDocumentsForRelease(parsedSnapshot),
-    getClientProjectDocuments(p.id),
-  ).map((d) => {
+  // Frozen manifest only: live frame drawings must never reach a published link.
+  const documents = resolveClientDocumentsForRelease(parsedSnapshot).map((d) => {
     const { url: _internalUrl, ...safe } = d;
     return {
       ...safe,
@@ -2142,23 +2139,16 @@ function serveClientReleaseFile(req, res) {
     return res.status(400).json({ error: "Invalid asset id" });
   }
 
-  const docs = mergeLiveFrameDocumentsForClient(
-    resolveClientDocumentsForRelease(parsedSnapshot),
-    getClientProjectDocuments(p.id),
-  );
+  const docs = resolveClientDocumentsForRelease(parsedSnapshot);
   const entry = docs.find((d) => d.id === assetId || d.sourceFileId === assetId);
   if (!entry) {
     return res.status(404).json({ error: "Not found" });
   }
 
-  // Pinned release files, or live frame drawings belonging to this project.
+  // Pinned release files only — a live frame drawing must not be served under
+  // a published link even when it carries the same drawing id.
   const url = String(entry.url || "");
-  const releasePrefix = `/uploads/releases/${p.id}/`;
-  const liveFramePrefix = `/uploads/frame-drawings/${p.id}/`;
-  const allowed =
-    url.startsWith(releasePrefix)
-    || (entry.type === "frame_drawing" && url.startsWith(liveFramePrefix));
-  if (!allowed) {
+  if (!url.startsWith(`/uploads/releases/${p.id}/`)) {
     return res.status(404).json({ error: "Not found" });
   }
 
