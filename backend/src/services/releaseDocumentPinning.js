@@ -8,6 +8,7 @@ import { createHash } from "crypto";
 import { buildDocumentManifestEntry } from "../../../shared/publishedDocumentManifest.js";
 import { resolveUploadRoot } from "./uploadRoot.js";
 import { uploadsRelativeFromUrl } from "./uploadValidation.js";
+import { recordStagedDir, recordStagedFile } from "./publicationAssetStage.js";
 
 export { resolveUploadRoot };
 
@@ -48,7 +49,16 @@ export function pinClientDocumentsForRelease({
   }
 
   const releaseDir = path.join(uploadRoot, "releases", pid, vid);
+  // Fail closed: a version directory that already exists belongs to another
+  // attempt or an earlier release. Never merge, overwrite or reuse it.
+  if (fs.existsSync(releaseDir)) {
+    const err = new Error("Release asset directory already exists");
+    err.code = "RELEASE_ASSET_DIR_EXISTS";
+    throw err;
+  }
   fs.mkdirSync(releaseDir, { recursive: true });
+  recordStagedDir(releaseDir);
+  console.info(`PUBLICATION_ASSET_STAGE_CREATED project=${pid} version=${vid}`);
 
   const documentManifest = [];
   let pinnedCount = 0;
@@ -86,7 +96,10 @@ export function pinClientDocumentsForRelease({
     const destAbs = path.join(releaseDir, unique);
     try {
       fs.copyFileSync(srcAbs, destAbs);
+      // Journal before anything else can fail, so a partial copy is still owned.
+      recordStagedFile(destAbs);
     } catch {
+      recordStagedFile(destAbs);
       skippedCount++;
       continue;
     }

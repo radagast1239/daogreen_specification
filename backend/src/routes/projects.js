@@ -105,6 +105,7 @@ import { assertCanDeleteOrOverwriteAsset, syncFrameDrawingTitlesFromStellageConf
 import { hideOrphanFrameDrawingsForProject } from "../services/frameDrawingVisibility.js";
 import { publishedPlannedTotal } from "../../../shared/publishedPurchaseTotals.js";
 import { pinClientDocumentsForRelease } from "../services/releaseDocumentPinning.js";
+import { beginPublicationAssetScope } from "../services/publicationAssetStage.js";
 import { sendSafeUploadFile } from "../services/secureFileServe.js";
 import {
   activeStellageIdSet,
@@ -204,7 +205,17 @@ function mutateWithRevision(projectId, expectedValue, callback) {
     bumpRevision(projectId, expectedRevision);
     return { value, revision: expectedRevision + 1 };
   });
-  return run();
+  // SQLite rolls the DB back on throw; release assets copied by this attempt
+  // must be removed by the compensating journal.
+  const assets = beginPublicationAssetScope();
+  try {
+    const result = run();
+    assets.commit();
+    return result;
+  } catch (err) {
+    assets.rollback();
+    throw err;
+  }
 }
 
 function revisionErrorResponse(res, error) {
@@ -622,7 +633,16 @@ export function updateProject(id, patch) {
     return true;
   });
 
-  const found = run();
+  // Publish-on-status-change copies release assets inside this transaction.
+  const assets = beginPublicationAssetScope();
+  let found;
+  try {
+    found = run();
+    assets.commit();
+  } catch (err) {
+    assets.rollback();
+    throw err;
+  }
   if (!found) return null;
   const saved = loadProject(id);
   // Only after COMMIT: a rolled-back save must never report a result.
