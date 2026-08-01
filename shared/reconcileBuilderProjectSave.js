@@ -143,8 +143,29 @@ export function reconcileBuilderItemsAgainstDb({
       removedBuilderIds: result.removedBuilderIds || [],
       preservedSpecIds: result.preservedSpecIds || [],
       preservedManualIds: result.preservedManualIds || [],
+      procurementBlockedIds: result.procurementBlockedIds || [],
     },
   };
+}
+
+/** Machine-readable code for rows kept because procurement work exists on them. */
+export const PROCUREMENT_ACTIVE_ITEMS_PRESERVED = "PROCUREMENT_ACTIVE_ITEMS_PRESERVED";
+
+/**
+ * Structured warnings for a completed builder save. The message text is never
+ * the machine contract — callers switch on `code`.
+ *
+ * @param {object} meta reconcile meta
+ * @returns {{ code: string, count: number, itemIds: string[] }[]}
+ */
+export function buildBuilderSaveWarnings(meta = {}) {
+  const blocked = Array.isArray(meta?.procurementBlockedIds) ? meta.procurementBlockedIds : [];
+  if (!blocked.length) return [];
+  return [{
+    code: PROCUREMENT_ACTIVE_ITEMS_PRESERVED,
+    count: blocked.length,
+    itemIds: [...blocked],
+  }];
 }
 
 /**

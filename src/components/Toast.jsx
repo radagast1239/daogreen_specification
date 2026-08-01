@@ -22,6 +22,8 @@ export function ToastProvider({ children }) {
   const success = useCallback((msg) => toast(msg, { type: "ok" }), [toast]);
   const error = useCallback((msg) => toast(msg, { type: "danger", ms: 4500 }), [toast]);
   const info = useCallback((msg) => toast(msg, { type: "info" }), [toast]);
+  // Operation succeeded but needs attention — must not read as a failure.
+  const warning = useCallback((msg) => toast(msg, { type: "warn", ms: 9000 }), [toast]);
 
   const confirm = useCallback(
     ({ title = "Подтвердите", message = "", confirmLabel = "Да", cancelLabel = "Отмена" } = {}) =>
@@ -37,7 +39,7 @@ export function ToastProvider({ children }) {
   };
 
   return (
-    <ToastCtx.Provider value={{ toast, success, error, info, confirm }}>
+    <ToastCtx.Provider value={{ toast, success, error, info, warning, confirm }}>
       {children}
       <div className="toast-stack" aria-live="polite">
         {toasts.map((t) => (

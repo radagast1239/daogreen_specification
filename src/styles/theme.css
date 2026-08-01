@@ -1771,6 +1771,7 @@ input.spec-qty-input {
 .toast--ok { background: var(--ok-tint); color: var(--ok); border: 1px solid #9ed4b0; }
 .toast--danger { background: var(--danger-tint); color: var(--danger); border: 1px solid #e8b0a6; }
 .toast--info { background: var(--paper); color: var(--ink); border: 1px solid var(--line); }
+.toast--warn { background: rgba(245, 158, 11, 0.12); color: var(--warn, #b45309); border: 1px solid rgba(245, 158, 11, 0.45); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .confirm-modal { max-width: 420px; }
 

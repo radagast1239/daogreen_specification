@@ -18,6 +18,7 @@ import {
 } from "../services/buildItems.js";
 import { listMaterials, listModules } from "./materials.js";
 import {
+  buildBuilderSaveWarnings,
   isBuilderProjectSave,
   isBuilderTitleOnlySave,
   reconcileBuilderProjectPatch,
@@ -507,6 +508,9 @@ export function createProject(body) {
 export function updateProject(id, patch) {
   const expectedRevision = requireExpectedRevision(id, patch?.expectedRevision);
 
+  // Captured inside the transaction, reported only after it commits.
+  let reconcileMeta = null;
+
   const run = db.transaction(() => {
     const cur = loadProject(id);
     if (!cur) return null;
@@ -528,9 +532,10 @@ export function updateProject(id, patch) {
       builderSave: _builderSave,
       saveSource: _saveSource,
       builderSaveMode: _builderSaveMode,
-      _builderReconcileMeta: _meta,
+      _builderReconcileMeta: builderReconcileMeta,
       ...safePatch
     } = workingPatch;
+    reconcileMeta = builderReconcileMeta || null;
 
     // Title-only builder save: update name (and bump revision) without touching items / manualParams.
     if (isBuilderTitleOnlySave(patch) || isBuilderTitleOnlySave(workingPatch)) {
@@ -619,7 +624,16 @@ export function updateProject(id, patch) {
 
   const found = run();
   if (!found) return null;
-  return loadProject(id);
+  const saved = loadProject(id);
+  // Only after COMMIT: a rolled-back save must never report a result.
+  const warnings = buildBuilderSaveWarnings(reconcileMeta);
+  if (saved && warnings.length) {
+    saved.builderSaveMeta = {
+      procurementBlockedIds: reconcileMeta?.procurementBlockedIds || [],
+      warnings,
+    };
+  }
+  return saved;
 }
 
 export function deleteProject(id) {

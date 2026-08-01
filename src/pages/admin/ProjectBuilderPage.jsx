@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { PageHeader } from "../../components/Layout.jsx";
 import { useToast } from "../../components/Toast.jsx";
+import { formatBuilderSaveWarning } from "../../lib/builderSaveWarnings.js";
 import { api } from "../../lib/api.js";
 import SpecPickerTable, { countIncluded } from "../../components/SpecPickerTable.jsx";
 import { resolveCategories } from "../../lib/categories.js";
@@ -119,7 +120,7 @@ const STEPS = [
 export default function ProjectBuilderPage() {
   const { state, actions } = useStore();
   const ref = state.reference;
-  const { confirm, success, error } = useToast();
+  const { confirm, success, error, warning } = useToast();
   const nav = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const savedProjectIdFromUrl = String(searchParams.get("projectId") || "").trim();
@@ -749,6 +750,11 @@ export default function ProjectBuilderPage() {
     return requested;
   };
 
+  const notifyBuilderSaveWarning = (savedProject) => {
+    const message = formatBuilderSaveWarning(savedProject);
+    if (message) warning(message);
+  };
+
   const persistProject = async ({
     status = PROJECT_STATUS_DRAFT,
     nextStep = step,
@@ -775,6 +781,10 @@ export default function ProjectBuilderPage() {
         setLoadedProject(updated);
         syncBuilderProjectUrl(updated.id, nextStep);
         if (!silent) markSaved();
+        // Reconciliation kept rows it refused to delete — say so, once per save.
+        // Reported here so every save entry point surfaces it; a response without
+        // the warning shows nothing, so a stale notice cannot linger.
+        notifyBuilderSaveWarning(updated);
         return updated;
       }
       const guard = status === PROJECT_STATUS_ACTIVE ? createGuardRef.current : draftGuardRef.current;
