@@ -29,31 +29,50 @@ function byNewest(a, b) {
   return tb - ta;
 }
 
+/** Soft-hidden (is_client_visible=0) drawings stay in DB but are not "current" in admin UI. */
+export function isFrameDrawingClientVisible(drawing) {
+  if (!drawing) return false;
+  if (drawing.isClientVisible === false || drawing.is_client_visible === false) return false;
+  if (drawing.is_client_visible === 0 || drawing.is_client_visible === "0") return false;
+  // Legacy rows without the field → treat as visible.
+  return true;
+}
+
+export function filterClientVisibleFrameDrawings(drawings = [], options = {}) {
+  const list = Array.isArray(drawings) ? drawings : [];
+  if (options.includeHidden === true) return [...list];
+  return list.filter(isFrameDrawingClientVisible);
+}
+
 export function sortDrawingsNewestFirst(drawings = []) {
   return [...drawings].sort(byNewest);
 }
 
-export function drawingsForProjectStellage(drawings, stellageId) {
+export function drawingsForProjectStellage(drawings, stellageId, options = {}) {
   if (!stellageId) return [];
   return sortDrawingsNewestFirst(
-    drawings.filter((d) => d.stellageId === stellageId),
+    filterClientVisibleFrameDrawings(drawings, options).filter((d) => d.stellageId === stellageId),
   );
 }
 
-export function drawingsForModuleRack(drawings, moduleId, moduleRackKey) {
+export function drawingsForModuleRack(drawings, moduleId, moduleRackKey, options = {}) {
   if (!moduleId || !moduleRackKey) return [];
   return sortDrawingsNewestFirst(
-    drawings.filter((d) => d.moduleId === moduleId && d.moduleRackKey === moduleRackKey),
+    filterClientVisibleFrameDrawings(drawings, options).filter(
+      (d) => d.moduleId === moduleId && d.moduleRackKey === moduleRackKey,
+    ),
   );
 }
 
-export function drawingsForPreset(drawings, presetId) {
+export function drawingsForPreset(drawings, presetId, options = {}) {
   if (!presetId) return [];
-  return sortDrawingsNewestFirst(drawings.filter((d) => d.presetId === presetId));
+  return sortDrawingsNewestFirst(
+    filterClientVisibleFrameDrawings(drawings, options).filter((d) => d.presetId === presetId),
+  );
 }
 
-export function drawingStatusLabel(drawings) {
-  const list = sortDrawingsNewestFirst(drawings);
+export function drawingStatusLabel(drawings, options = {}) {
+  const list = sortDrawingsNewestFirst(filterClientVisibleFrameDrawings(drawings, options));
   if (!list.length) return 'Схема не создана';
   if (list.length === 1) return 'Схема прикреплена';
   return `Есть ${list.length} версий`;

@@ -101,6 +101,7 @@ import { normalizeReleaseComment } from "../../../shared/releaseComment.js";
 import { clientExportHeader } from "../../../shared/publishedClientMeta.js";
 import * as XLSX from "xlsx";
 import { assertCanDeleteOrOverwriteAsset, syncFrameDrawingTitlesFromStellageConfigs } from "../services/publishedAssetRetention.js";
+import { hideOrphanFrameDrawingsForProject } from "../services/frameDrawingVisibility.js";
 import { publishedPlannedTotal } from "../../../shared/publishedPurchaseTotals.js";
 import { pinClientDocumentsForRelease } from "../services/releaseDocumentPinning.js";
 import { sendSafeUploadFile } from "../services/secureFileServe.js";
@@ -610,6 +611,10 @@ export function updateProject(id, patch) {
       const current = db.prepare("SELECT revision FROM projects WHERE id = ?").get(id);
       throw revisionConflict(id, expectedRevision, Number(current?.revision || 0));
     }
+    // Soft-hide frame drawings for stellages removed from the project (no PDF delete).
+    hideOrphanFrameDrawingsForProject(id, merged.stellageConfigs || []);
+    // Keep drawing titles aligned with current stellage names (client overlay + next publish).
+    syncFrameDrawingTitlesFromStellageConfigs(id);
     return true;
   });
 

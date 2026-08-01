@@ -9,6 +9,7 @@ import {
   assertCanDeleteOrOverwriteAsset,
   isAssetPinnedByPublishedRelease,
 } from "../services/publishedAssetRetention.js";
+import { hideSupersededFrameDrawingVersions } from "../services/frameDrawingVisibility.js";
 import { resolveUploadRoot } from "../services/uploadRoot.js";
 import {
   assertValidPdfUpload,
@@ -360,6 +361,16 @@ function saveDrawing(req, res, body) {
         isClientVisible ? 1 : 0, version, now, now,
       );
       const drawing = rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(id));
+      if (isClientVisible) {
+        hideSupersededFrameDrawingVersions({
+          keepId: id,
+          projectId,
+          stellageId,
+          moduleId,
+          moduleRackKey,
+          presetId,
+        });
+      }
       return res.json({
         ...drawing,
         existingVersions: existingCount,
@@ -395,6 +406,16 @@ function saveDrawing(req, res, body) {
       isClientVisible ? 1 : 0, (prev?.version || 1) + 1, now,
       updateId,
     );
+    if (isClientVisible) {
+      hideSupersededFrameDrawingVersions({
+        keepId: updateId,
+        projectId,
+        stellageId,
+        moduleId,
+        moduleRackKey,
+        presetId,
+      });
+    }
     const drawing = rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(updateId));
     return res.json({ ...drawing, existingVersions: existingCount, replaced: true });
   }
@@ -432,6 +453,17 @@ function saveDrawing(req, res, body) {
     title, rackType, frameConfigJson, urlPath, pdfFilename, fileId,
     isClientVisible ? 1 : 0, version, now, now,
   );
+
+  if (isClientVisible) {
+    hideSupersededFrameDrawingVersions({
+      keepId: id,
+      projectId,
+      stellageId,
+      moduleId,
+      moduleRackKey,
+      presetId,
+    });
+  }
 
   const drawing = rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(id));
   return res.json({

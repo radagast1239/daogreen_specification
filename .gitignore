@@ -56,3 +56,4 @@ scripts/vps-download-restore.mjs
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+.aider*

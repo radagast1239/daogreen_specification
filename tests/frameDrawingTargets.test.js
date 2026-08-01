@@ -5,6 +5,7 @@ import {
   drawingsForModuleRack,
   drawingStatusLabel,
   groupClientFrameDocuments,
+  filterClientVisibleFrameDrawings,
 } from '../shared/frameDrawingTargets.js';
 import { MODULE_CATALOG_RACK_SLOT } from '../shared/moduleRackIds.js';
 
@@ -21,6 +22,19 @@ describe('frameDrawingTargets', () => {
     ], 'st1');
     expect(list).toHaveLength(2);
     expect(list[0].version).toBe(2);
+  });
+
+  it('drawingsForProjectStellage skips soft-hidden versions by default', () => {
+    const list = drawingsForProjectStellage([
+      { stellageId: 'st1', version: 1, updatedAt: '2020-01-01', isClientVisible: true },
+      { stellageId: 'st1', version: 2, updatedAt: '2025-01-01', isClientVisible: false },
+      { stellageId: 'st1', version: 3, updatedAt: '2026-01-01', isClientVisible: true },
+    ], 'st1');
+    expect(list.map((d) => d.version)).toEqual([3, 1]);
+    expect(filterClientVisibleFrameDrawings([
+      { id: 'a', is_client_visible: 0 },
+      { id: 'b' },
+    ]).map((d) => d.id)).toEqual(['b']);
   });
 
   it('drawingsForModuleRack filters by stable key', () => {

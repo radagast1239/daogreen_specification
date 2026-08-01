@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import FrameDrawingActions from './FrameDrawingActions.jsx';
+import {
+  filterClientVisibleFrameDrawings,
+  sortDrawingsNewestFirst,
+} from '../../shared/frameDrawingTargets.js';
 
 export default function FrameDrawingTargetRow({
   context,
@@ -19,7 +23,7 @@ export default function FrameDrawingTargetRow({
       return;
     }
     api.getFrameDrawings(fetchParams)
-      .then(setDrawings)
+      .then((rows) => setDrawings(sortDrawingsNewestFirst(filterClientVisibleFrameDrawings(rows))))
       .catch(() => setDrawings([]));
   }, [paramsKey]);
 
