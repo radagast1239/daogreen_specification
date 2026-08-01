@@ -93,6 +93,8 @@ import {
   loadPublishedReleaseSnapshot,
   loadVersionRow,
   prepareClientMutationItemResponse,
+  assertPublishedReleaseOwnership,
+  describePublishedPointerIntegrity,
   prepareReleaseSnapshotPayload,
   resolveClientDocumentsForRelease,
   shouldPublishOnStatusChange,
@@ -619,6 +621,18 @@ export function updateProject(id, patch) {
       }
     }
 
+    // Server-authoritative ownership: a request may not bind this project to
+    // another project's version. Only a genuinely new pointer is validated —
+    // echoing back the stored value must not fail an ordinary save, and a
+    // project whose pointer is already broken stays editable so it can be
+    // repaired. Checked inside the transaction, before UPDATE, so a rejected
+    // patch leaves revision, status and pointer untouched.
+    const nextPointerId = String(manualParams?.publishedRelease?.versionId || "").trim();
+    const prevPointerId = String(base.manualParams?.publishedRelease?.versionId || "").trim();
+    if (nextPointerId && nextPointerId !== prevPointerId) {
+      assertPublishedReleaseOwnership(id, manualParams.publishedRelease);
+    }
+
     const row = projectUpdateRow(merged);
     // PHASE 0B: не затирать повреждённый planner_plan пустым `{}` при апдейте,
     // где новый план не передан. Исходные байты остаются нетронутыми в SQLite.
@@ -1034,6 +1048,8 @@ function publishReleaseIfNeeded(projectId, project, targetStatus, assetScope) {
 }
 
 function persistPublishedRelease(projectId, publishedRelease) {
+  // A project may only publish a version it owns — checked before any write.
+  assertPublishedReleaseOwnership(projectId, publishedRelease);
   const row = db.prepare("SELECT manual_params FROM projects WHERE id = ?").get(projectId);
   if (!row) return;
   let mp = {};

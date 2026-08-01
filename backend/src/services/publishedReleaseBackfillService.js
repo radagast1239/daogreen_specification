@@ -13,6 +13,7 @@ import {
 } from "../../../shared/projectPublishedRelease.js";
 import { createVersion } from "../routes/projects.js";
 import { beginPublicationAssetScope } from "./publicationAssetStage.js";
+import { assertPublishedReleaseOwnership } from "./publishedReleaseService.js";
 
 function loadVersionRows(projectId) {
   return db
@@ -49,6 +50,8 @@ function loadProjectRowMeta(projectId) {
 }
 
 function persistPublishedReleaseOnly(projectId, publishedRelease) {
+  // Backfill may only bind a version the project actually owns.
+  assertPublishedReleaseOwnership(projectId, publishedRelease);
   const row = db.prepare("SELECT manual_params, status, client_token FROM projects WHERE id = ?").get(projectId);
   if (!row) throw new Error("project_not_found");
   let mp = {};

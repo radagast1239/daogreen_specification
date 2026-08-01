@@ -78,6 +78,97 @@ export function loadLatestVersionRow(projectId) {
   return loadVersionRow(projectId, row.id);
 }
 
+/**
+ * A published version must belong to the project that points at it.
+ * @param {string} projectId
+ * @param {string} versionId
+ */
+export function versionBelongsToProject(projectId, versionId) {
+  const pid = String(projectId || "").trim();
+  const vid = String(versionId || "").trim();
+  if (!pid || !vid) return false;
+  const row = db
+    .prepare("SELECT 1 AS ok FROM spec_versions WHERE id = ? AND project_id = ?")
+    .get(vid, pid);
+  return !!row;
+}
+
+/** Reasons a stored publishedRelease pointer is not usable. */
+export const PUBLISHED_POINTER_STATUS = Object.freeze({
+  VALID: "VALID_SAME_PROJECT",
+  NULL: "POINTER_NULL",
+  MALFORMED: "MALFORMED_POINTER",
+  MISSING: "VERSION_MISSING",
+  CROSS_PROJECT: "CROSS_PROJECT_POINTER",
+});
+
+/**
+ * Classify a project's stored pointer without touching it.
+ * @param {object} project loaded project (manualParams parsed)
+ */
+export function describePublishedPointerIntegrity(project) {
+  const projectId = String(project?.id || "").trim();
+  const raw = project?.manualParams?.publishedRelease;
+  if (raw == null) return { status: PUBLISHED_POINTER_STATUS.NULL, ok: true, versionId: null };
+  const release = parsePublishedRelease(project?.manualParams);
+  if (!release?.versionId) {
+    return { status: PUBLISHED_POINTER_STATUS.MALFORMED, ok: false, versionId: null };
+  }
+  const owner = db
+    .prepare("SELECT project_id FROM spec_versions WHERE id = ?")
+    .get(release.versionId);
+  if (!owner) {
+    return { status: PUBLISHED_POINTER_STATUS.MISSING, ok: false, versionId: release.versionId };
+  }
+  if (String(owner.project_id) !== projectId) {
+    return {
+      status: PUBLISHED_POINTER_STATUS.CROSS_PROJECT,
+      ok: false,
+      versionId: release.versionId,
+    };
+  }
+  return { status: PUBLISHED_POINTER_STATUS.VALID, ok: true, versionId: release.versionId };
+}
+
+/**
+ * Refuse to store a pointer at a version this project does not own.
+ * Server-authoritative: called on every pointer write path.
+ *
+ * @param {string} projectId
+ * @param {object|null} publishedRelease
+ */
+export function assertPublishedReleaseOwnership(projectId, publishedRelease) {
+  if (publishedRelease == null) return;
+  const versionId = String(publishedRelease?.versionId || "").trim();
+  if (!versionId || !versionBelongsToProject(projectId, versionId)) {
+    const err = new Error("Published version does not belong to this project");
+    err.code = "PUBLISHED_RELEASE_PROJECT_MISMATCH";
+    // Admin-context detail only; never surfaced on client routes.
+    err.projectId = String(projectId || "");
+    err.versionId = versionId;
+    throw err;
+  }
+}
+
+/** Read-only integrity report over every project pointer (admin/ops use). */
+export function findInvalidPublishedVersionPointers() {
+  const rows = db.prepare("SELECT id, manual_params FROM projects").all();
+  const invalid = [];
+  for (const row of rows) {
+    let manualParams = {};
+    try {
+      manualParams = JSON.parse(row.manual_params || "{}");
+    } catch {
+      manualParams = {};
+    }
+    const res = describePublishedPointerIntegrity({ id: row.id, manualParams });
+    if (!res.ok) {
+      invalid.push({ projectId: row.id, versionId: res.versionId, status: res.status });
+    }
+  }
+  return invalid;
+}
+
 export function loadPublishedReleaseSnapshot(project) {
   const release = parsePublishedRelease(project?.manualParams);
   if (!release) return null;
@@ -477,6 +568,7 @@ export function getProjectReleaseInfo(project) {
       })()
     : null;
   const legacyIncomplete = release ? isLegacyReleaseIncomplete(publishedSnapshot || {}) : false;
+  const pointerIntegrity = describePublishedPointerIntegrity(project);
   return {
     publishedRelease: release,
     publishedSnapshotItems: publishedItems,
@@ -495,6 +587,15 @@ export function getProjectReleaseInfo(project) {
     legacyReleaseIncomplete: legacyIncomplete,
     needsRepublish: legacyIncomplete,
     releaseSchema: publishedSnapshot?.schema || null,
+    // Admin-only diagnostic. Client routes never expose this.
+    publishedPointerIntegrity: pointerIntegrity.ok
+      ? null
+      : {
+          code: "PUBLISHED_RELEASE_PROJECT_MISMATCH",
+          status: pointerIntegrity.status,
+          projectId: project?.id || "",
+          versionId: pointerIntegrity.versionId || "",
+        },
   };
 }
 
