@@ -19,40 +19,40 @@ export const UI_EDITABLE_SETTINGS_SCHEMA = {
   brandBgColor: { type: "string", maxLength: 50, empty: true },
   logoUrl: { type: "string", maxLength: 1000, empty: true },
   clientHeroEyebrow: { type: "string", maxLength: 500, empty: true },
-  clientTrustLines: { type: "string", maxLength: 20000, empty: true }, // JSON array
-  clientVisibleTabs: { type: "string", maxLength: 2000, empty: true }, // JSON array
-  clientPdfColumns: { type: "string", maxLength: 2000, empty: true }, // JSON array
+  clientTrustLines: { type: "string", maxLength: 20000, empty: false, jsonType: "array" },
+  clientVisibleTabs: { type: "string", maxLength: 2000, empty: false, jsonType: "array" },
+  clientPdfColumns: { type: "string", maxLength: 2000, empty: false, jsonType: "array" },
   clientPdfFooter: { type: "string", maxLength: 1000, empty: true },
   clientPdfShowQr: { type: "string", enum: ["true", "false"], empty: true },
 
   // Client sections / purchase sections (PublishRulesTab + DirectoriesTab)
-  clientSectionsJson: { type: "string", maxLength: 200000, empty: true }, // JSON array
+  clientSectionsJson: { type: "string", maxLength: 200000, empty: false, jsonType: "array" },
 
   // Material categories (SettingsPage + DirectoriesTab)
-  materialCategories: { type: "string", maxLength: 50000, empty: true }, // JSON array
+  materialCategories: { type: "string", maxLength: 50000, empty: false, jsonType: "array" },
 
   // Client link TTL (SettingsPage links tab)
   clientLinkTtlDays: { type: "string", pattern: /^\d+$/, maxLength: 10, empty: true },
 
   // Publish rules (PublishRulesTab)
-  publishRules: { type: "string", maxLength: 50000, empty: true }, // JSON object
+  publishRules: { type: "string", maxLength: 50000, empty: false, jsonType: "object" },
   clientLinkTemplate: { type: "string", maxLength: 10000, empty: true },
 
   // Reference data (DirectoriesTab)
-  refTags: { type: "string", maxLength: 50000, empty: true }, // JSON array
-  refUnits: { type: "string", maxLength: 50000, empty: true }, // JSON array
-  refPurchaseStatuses: { type: "string", maxLength: 100000, empty: true }, // JSON array
-  refResponsibleRoles: { type: "string", maxLength: 100000, empty: true }, // JSON array
-  refFarmTypes: { type: "string", maxLength: 50000, empty: true }, // JSON array
-  refStellageGroups: { type: "string", maxLength: 100000, empty: true }, // JSON array
-  refFarmSectionGroups: { type: "string", maxLength: 100000, empty: true }, // JSON array
+  refTags: { type: "string", maxLength: 50000, empty: false, jsonType: "array" },
+  refUnits: { type: "string", maxLength: 50000, empty: false, jsonType: "array" },
+  refPurchaseStatuses: { type: "string", maxLength: 100000, empty: false, jsonType: "array" },
+  refResponsibleRoles: { type: "string", maxLength: 100000, empty: false, jsonType: "array" },
+  refFarmTypes: { type: "string", maxLength: 50000, empty: false, jsonType: "array" },
+  refStellageGroups: { type: "string", maxLength: 100000, empty: false, jsonType: "array" },
+  refFarmSectionGroups: { type: "string", maxLength: 100000, empty: false, jsonType: "array" },
 
   // Farm sections / templates (ModulesPage farm + stellage tabs)
-  farmSections: { type: "string", maxLength: 200000, empty: true }, // JSON array
-  farmSectionCatalogs: { type: "string", maxLength: 2000000, empty: true }, // JSON object
-  farmSectionVersions: { type: "string", maxLength: 1000000, empty: true }, // JSON object
-  stellageModuleCatalogs: { type: "string", maxLength: 2000000, empty: true }, // JSON object
-  stellageModuleMeta: { type: "string", maxLength: 500000, empty: true }, // JSON object
+  farmSections: { type: "string", maxLength: 200000, empty: false, jsonType: "array" },
+  farmSectionCatalogs: { type: "string", maxLength: 2000000, empty: false, jsonType: "record" },
+  farmSectionVersions: { type: "string", maxLength: 1000000, empty: false, jsonType: "record" },
+  stellageModuleCatalogs: { type: "string", maxLength: 2000000, empty: false, jsonType: "record" },
+  stellageModuleMeta: { type: "string", maxLength: 500000, empty: false, jsonType: "record" },
 };
 
 /** Keys that are never writable through the UI settings endpoint. */
@@ -72,6 +72,54 @@ function isForbiddenKey(key) {
   if (typeof key !== "string") return true;
   if (FORBIDDEN_KEY_PREFIXES.includes(key)) return true;
   return false;
+}
+
+const MAGIC_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/**
+ * Recursively check whether a JSON value contains dangerous keys that could be
+ * used for prototype pollution when the value is later spread or used as a map.
+ */
+function hasMagicKey(value) {
+  const stack = [value];
+  while (stack.length) {
+    const current = stack.pop();
+    if (current && typeof current === "object") {
+      if (Array.isArray(current)) {
+        for (const item of current) stack.push(item);
+      } else {
+        for (const key of Object.keys(current)) {
+          if (MAGIC_KEYS.has(key)) return true;
+          stack.push(current[key]);
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function validateJsonSetting(_key, raw, jsonType) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: "json_parse" };
+  }
+
+  if (jsonType === "array") {
+    if (!Array.isArray(parsed)) return { ok: false, reason: "json_type" };
+    return { ok: true };
+  }
+
+  if (jsonType === "object" || jsonType === "record") {
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false, reason: "json_type" };
+    }
+    if (hasMagicKey(parsed)) return { ok: false, reason: "json_magic_key" };
+    return { ok: true };
+  }
+
+  return { ok: false, reason: "unsupported_json_type" };
 }
 
 function normalizeSettingValue(value, schema) {
@@ -112,6 +160,10 @@ function validateSettingValue(key, value, schema) {
     if (str.length > schema.maxLength) return { ok: false, reason: "maxLength" };
     if (schema.pattern && !schema.pattern.test(str)) return { ok: false, reason: "pattern" };
     if (schema.enum && !schema.enum.includes(str)) return { ok: false, reason: "enum" };
+    if (schema.jsonType) {
+      const jsonResult = validateJsonSetting(key, str, schema.jsonType);
+      if (!jsonResult.ok) return { ok: false, reason: jsonResult.reason };
+    }
     return { ok: true, value: str };
   }
 

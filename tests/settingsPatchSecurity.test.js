@@ -131,40 +131,45 @@ afterAll(() => {
   }
 });
 
+const UI_KEY_VALID_VALUES = {
+  companyName: "ok",
+  contactPhone: "ok",
+  contactEmail: "ok",
+  contactTelegram: "ok",
+  brandColor: "#116355",
+  brandAccentColor: "#7fc9a8",
+  brandBgColor: "#f0f7f4",
+  logoUrl: "/uploads/public/logo.png",
+  clientHeroEyebrow: "ok",
+  clientTrustLines: JSON.stringify(["Фото и цены"]),
+  clientVisibleTabs: JSON.stringify(["overview", "purchase", "docs"]),
+  clientPdfColumns: JSON.stringify(["name", "qty", "unit", "price", "sum"]),
+  clientPdfFooter: "ok",
+  clientPdfShowQr: "true",
+  clientSectionsJson: JSON.stringify([{ id: "purchase", label: "Закупка" }]),
+  materialCategories: JSON.stringify(["Каркас"]),
+  clientLinkTtlDays: "30",
+  publishRules: JSON.stringify({ requirePrice: true }),
+  clientLinkTemplate: "ok",
+  refTags: JSON.stringify(["электрика"]),
+  refUnits: JSON.stringify(["шт."]),
+  refPurchaseStatuses: JSON.stringify([{ id: "bought", label: "Куплено" }]),
+  refResponsibleRoles: JSON.stringify([{ id: "manager", label: "Менеджер" }]),
+  refFarmTypes: JSON.stringify(["NFT"]),
+  refStellageGroups: JSON.stringify([{ id: "karkas", label: "Каркас" }]),
+  refFarmSectionGroups: JSON.stringify([{ id: "other", label: "Прочее" }]),
+  farmSections: JSON.stringify([{ id: "sec_1", name: "Каркас" }]),
+  farmSectionCatalogs: JSON.stringify({ sec_1: [] }),
+  farmSectionVersions: JSON.stringify({ sec_1: [] }),
+  stellageModuleCatalogs: JSON.stringify({}),
+  stellageModuleMeta: JSON.stringify({}),
+};
+
+const UI_EDITABLE_KEYS = Object.keys(UI_KEY_VALID_VALUES);
+
 describe("T6B settings PATCH schema", () => {
-  it.each([
-    ["companyName", "ok"],
-    ["contactPhone", "ok"],
-    ["contactEmail", "ok"],
-    ["contactTelegram", "ok"],
-    ["brandColor", "ok"],
-    ["brandAccentColor", "ok"],
-    ["brandBgColor", "ok"],
-    ["logoUrl", "ok"],
-    ["clientHeroEyebrow", "ok"],
-    ["clientTrustLines", "ok"],
-    ["clientVisibleTabs", "ok"],
-    ["clientPdfColumns", "ok"],
-    ["clientPdfFooter", "ok"],
-    ["clientPdfShowQr", "true"],
-    ["clientSectionsJson", "ok"],
-    ["materialCategories", "ok"],
-    ["clientLinkTtlDays", "30"],
-    ["publishRules", "ok"],
-    ["clientLinkTemplate", "ok"],
-    ["refTags", "ok"],
-    ["refUnits", "ok"],
-    ["refPurchaseStatuses", "ok"],
-    ["refResponsibleRoles", "ok"],
-    ["refFarmTypes", "ok"],
-    ["refStellageGroups", "ok"],
-    ["refFarmSectionGroups", "ok"],
-    ["farmSections", "ok"],
-    ["farmSectionCatalogs", "ok"],
-    ["farmSectionVersions", "ok"],
-    ["stellageModuleCatalogs", "ok"],
-    ["stellageModuleMeta", "ok"],
-  ])("allows UI key: %s", async (key, value) => {
+  it.each(UI_EDITABLE_KEYS)("allows UI key: %s", async (key) => {
+    const value = UI_KEY_VALID_VALUES[key];
     const app = adminApp();
     const res = await httpRequest(app, "PATCH", "/api/admin/settings", {
       headers: { "X-Admin-Key": ADMIN_KEY },
@@ -475,5 +480,124 @@ describe("T6B settings PATCH schema", () => {
       },
     });
     expect(res.status).toBe(200);
+  });
+
+  describe("structured settings JSON validation", () => {
+    it.each([
+      ["clientTrustLines", "{"],
+      ["clientTrustLines", "["],
+      ["clientTrustLines", '{"x":'],
+      ["clientTrustLines", ""],
+      ["clientTrustLines", "   "],
+      ["clientTrustLines", "undefined"],
+      ["clientTrustLines", "NaN"],
+      ["publishRules", "{"],
+      ["farmSectionCatalogs", "{"],
+      ["stellageModuleMeta", "{"],
+    ])("rejects malformed JSON for structured key %s: %p", async (key, badValue) => {
+      const app = adminApp();
+      const res = await httpRequest(app, "PATCH", "/api/admin/settings", {
+        headers: { "X-Admin-Key": ADMIN_KEY },
+        body: { [key]: badValue },
+      });
+      expect(res.status).toBe(422);
+      expect(res.body.invalidKeys).toContainEqual({ key, reason: "json_parse" });
+      // Response must only contain the key name and a safe reason code, never the value.
+      expect(res.body.invalidKeys).not.toContainEqual(
+        expect.objectContaining({ value: expect.anything() }),
+      );
+    });
+
+    it.each([
+      ["clientTrustLines", JSON.stringify({}), "array"],
+      ["clientVisibleTabs", JSON.stringify("overview"), "array"],
+      ["clientPdfColumns", JSON.stringify(123), "array"],
+      ["clientSectionsJson", JSON.stringify(true), "array"],
+      ["materialCategories", JSON.stringify(null), "array"],
+      ["publishRules", JSON.stringify([]), "object"],
+      ["publishRules", JSON.stringify("x"), "object"],
+      ["publishRules", JSON.stringify(123), "object"],
+      ["publishRules", JSON.stringify(true), "object"],
+      ["publishRules", JSON.stringify(null), "object"],
+      ["farmSectionCatalogs", JSON.stringify([]), "object"],
+      ["stellageModuleMeta", JSON.stringify("x"), "object"],
+    ])("rejects wrong top-level type for %s (expects %s)", async (key, badValue) => {
+      const app = adminApp();
+      const res = await httpRequest(app, "PATCH", "/api/admin/settings", {
+        headers: { "X-Admin-Key": ADMIN_KEY },
+        body: { [key]: badValue },
+      });
+      expect(res.status).toBe(422);
+      expect(res.body.invalidKeys).toContainEqual({ key, reason: "json_type" });
+    });
+
+    it.each([
+      ["publishRules", '{"__proto__":{"polluted":true}}'],
+      ["publishRules", JSON.stringify({ nested: { constructor: { polluted: true } } })],
+      ["farmSectionCatalogs", JSON.stringify({ constructor: [] })],
+      ["farmSectionVersions", '{"__proto__":{}}'],
+      ["stellageModuleCatalogs", JSON.stringify({ prototype: {} })],
+      ["stellageModuleMeta", JSON.stringify({ mod_1: { prototype: { polluted: true } } })],
+    ])("rejects recursive magic keys in %s", async (key, badValue) => {
+      const app = adminApp();
+      const res = await httpRequest(app, "PATCH", "/api/admin/settings", {
+        headers: { "X-Admin-Key": ADMIN_KEY },
+        body: { [key]: badValue },
+      });
+      expect(res.status).toBe(422);
+      expect(res.body.invalidKeys).toContainEqual({ key, reason: "json_magic_key" });
+      expect(res.text).not.toContain("polluted");
+    });
+
+    it("allows plain string value containing magic word", async () => {
+      const app = adminApp();
+      const res = await httpRequest(app, "PATCH", "/api/admin/settings", {
+        headers: { "X-Admin-Key": ADMIN_KEY },
+        body: { companyName: "constructor" },
+      });
+      expect(res.status).toBe(200);
+      expect(getSetting("companyName").value).toBe("constructor");
+    });
+
+    it("rejects mixed payload with malformed JSON atomically", async () => {
+      db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run("companyName", "Before");
+      db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run("clientTrustLines", JSON.stringify(["Before"]));
+      const app = adminApp();
+      const res = await httpRequest(app, "PATCH", "/api/admin/settings", {
+        headers: { "X-Admin-Key": ADMIN_KEY },
+        body: {
+          companyName: "After",
+          clientTrustLines: "{broken",
+        },
+      });
+      expect(res.status).toBe(422);
+      expect(getSetting("companyName").value).toBe("Before");
+      expect(getSetting("clientTrustLines").value).toBe(JSON.stringify(["Before"]));
+    });
+
+    it("SQLite round-trip preserves structured setting string", async () => {
+      const app = adminApp();
+      const payload = {
+        clientTrustLines: JSON.stringify(["Line 1", "Line 2"]),
+        publishRules: JSON.stringify({ requirePrice: true }),
+        farmSectionCatalogs: JSON.stringify({ sec_1: [{ materialId: "m1", qty: 1 }] }),
+      };
+      await httpRequest(app, "PATCH", "/api/admin/settings", {
+        headers: { "X-Admin-Key": ADMIN_KEY },
+        body: payload,
+      });
+      // The DB stores the exact JSON string sent by the frontend.
+      expect(getSetting("clientTrustLines").value).toBe(payload.clientTrustLines);
+      expect(getSetting("publishRules").value).toBe(payload.publishRules);
+      expect(getSetting("farmSectionCatalogs").value).toBe(payload.farmSectionCatalogs);
+
+      // GET merges publishRules defaults, so only the raw stored values are compared above.
+      const getRes = await httpRequest(app, "GET", "/api/admin/settings", {
+        headers: { "X-Admin-Key": ADMIN_KEY },
+      });
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.clientTrustLines).toBe(payload.clientTrustLines);
+      expect(getRes.body.farmSectionCatalogs).toBe(payload.farmSectionCatalogs);
+    });
   });
 });
