@@ -60,6 +60,29 @@ function makeFakeReleaseTree(base) {
   writeFile(path.join(base, "backend", "src", "index.js"), "export {};\n");
 }
 
+/** Bash prelude: build a one-commit repo in $SRC and extract it into $REL. */
+function makeCommitAndRelease(tmp) {
+  return `
+    set -e
+    SRC="${tmp}/repo"
+    REL="${tmp}/rel"
+    mkdir -p "$SRC/backend/src" "$SRC/shared" "$REL"
+    cd "$SRC"
+    git init -q .
+    git config core.autocrlf false
+    git config commit.gpgsign false
+    git config user.email deploy@test
+    git config user.name deploy
+    printf 'export const a = 1;\\n' > backend/src/index.js
+    printf 'export const marker = "m";\\n' > shared/marker.js
+    printf '{"name":"root"}\\n' > package.json
+    git add -A
+    git commit -qm init
+    SHA=$(git rev-parse HEAD)
+    git archive --format=tar "$SHA" | tar -x -C "$REL"
+  `;
+}
+
 describe("immutable release dependency helpers", () => {
   it("finds bash for shell helper tests", () => {
     expect(BASH).toBeTruthy();
@@ -128,6 +151,85 @@ describe("immutable release dependency helpers", () => {
     const r = runBash(`. "${LIB}"; release_pre_switch_gates "${unix}" "abc123"; echo status:$?`);
     expect(r.stdout + r.stderr).toMatch(/GATE_FAIL missing dist\/index\.html/);
     expect(r.stdout).toMatch(/status:1/);
+  });
+
+  it("provenance gate accepts a release built from git archive of DEPLOY_COMMIT", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dg-rel-prov-ok-")).replace(/\\/g, "/");
+    const r = runBash(`${makeCommitAndRelease(tmp)}
+      . "${LIB}"
+      release_assert_tree_matches_commit "$REL" "$SRC" "$SHA"
+    `);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/PROVENANCE_OK files=[1-9]/);
+  });
+
+  it("provenance gate rejects a release whose file content differs from the commit", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dg-rel-prov-bad-")).replace(/\\/g, "/");
+    const r = runBash(`${makeCommitAndRelease(tmp)}
+      printf 'tampered\\n' >> "$REL/backend/src/index.js"
+      . "${LIB}"
+      set +e
+      release_assert_tree_matches_commit "$REL" "$SRC" "$SHA"; echo status:$?
+    `);
+    expect(r.stdout + r.stderr).toMatch(/PROVENANCE_MISMATCH .*backend\/src\/index\.js/);
+    expect(r.stdout).toMatch(/status:1/);
+  });
+
+  it("provenance gate rejects a release missing a file tracked at the commit", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dg-rel-prov-miss-")).replace(/\\/g, "/");
+    const r = runBash(`${makeCommitAndRelease(tmp)}
+      rm -f "$REL/shared/marker.js"
+      . "${LIB}"
+      set +e
+      release_assert_tree_matches_commit "$REL" "$SRC" "$SHA"; echo status:$?
+    `);
+    expect(r.stdout + r.stderr).toMatch(/PROVENANCE_MISSING shared\/marker\.js/);
+    expect(r.stdout).toMatch(/status:1/);
+  });
+
+  it("pre-switch gates refuse an unverifiable release unless explicitly allowed", () => {
+    // Each run needs its own repo: makeCommitAndRelease commits into $SRC.
+    const buildBase = () => `${makeCommitAndRelease(
+      fs.mkdtempSync(path.join(os.tmpdir(), "dg-rel-prov-gate-")).replace(/\\/g, "/"),
+    )}
+      mkdir -p "$REL/dist/assets"
+      printf 'x' > "$REL/dist/index.html"
+      printf '%s' "$SHA" > "$REL/REVISION"
+      printf '{"name":"root","lockfileVersion":3}\\n' > "$REL/package-lock.json"
+      printf '{"name":"api","lockfileVersion":3}\\n' > "$REL/backend/package-lock.json"
+      for f in node_modules/vite/dist/node/cli.js \\
+               backend/node_modules/express-rate-limit/dist/index.mjs \\
+               backend/node_modules/express/package.json \\
+               backend/node_modules/dotenv/package.json \\
+               backend/node_modules/cors/package.json \\
+               backend/node_modules/helmet/package.json \\
+               backend/node_modules/multer/package.json \\
+               backend/node_modules/nanoid/package.json; do
+        mkdir -p "$REL/$(dirname "$f")"; printf 'x' > "$REL/$f"
+      done
+      . "${LIB}"`;
+
+    const denied = runBash(`${buildBase()}
+      set +e
+      release_pre_switch_gates "$REL" "$SHA"; echo status:$?
+    `);
+    expect(denied.stdout + denied.stderr).toMatch(/GATE_FAIL provenance unverified/);
+    expect(denied.stdout).toMatch(/status:1/);
+
+    const allowed = runBash(`${buildBase()}
+      set +e
+      release_pre_switch_gates "$REL" "$SHA"; echo status:$?
+    `, { ALLOW_UNVERIFIED_RELEASE: "1" });
+    expect(allowed.stdout).toMatch(/PROVENANCE_UNVERIFIED/);
+    expect(allowed.stdout).not.toMatch(/GATE_FAIL provenance unverified/);
+  });
+
+  it("deploy script builds the release from git archive when GIT_SRC is set", () => {
+    const script = fs.readFileSync(path.join(ROOT, "scripts", "immutable-release-deploy.sh"), "utf8");
+    expect(script).toMatch(/core\.autocrlf=false -c core\.eol=lf -C "\$GIT_SRC"/);
+    expect(script).toMatch(/archive --format=tar "\$COMMIT" \| tar -x -C "\$REL"/);
+    expect(script).toMatch(/REFUSING INCOMING overlay in GIT_SRC mode/);
+    expect(script).toMatch(/release_pre_switch_gates "\$REL" "\$COMMIT" "\$GIT_SRC"/);
   });
 
   it("rollback helper restores previous current symlink when OS supports symlinks", () => {

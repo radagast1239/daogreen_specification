@@ -127,9 +127,88 @@ JS
   )
 }
 
+release_git_tree_manifest() {
+  # Args: git_src commit
+  # Prints "<blob_oid> <path>" for every file tracked at <commit>, sorted by path.
+  local git_src="$1"
+  local commit="$2"
+  git -c core.quotepath=false -C "$git_src" ls-tree -r "$commit" \
+    | awk '$2 == "blob" { oid = $3; sub(/^[^\t]*\t/, ""); print oid " " $0 }' \
+    | LC_ALL=C sort -k2
+}
+
+_release_provenance_check() {
+  # Args: release_dir git_src commit work_dir
+  local release_dir="$1"
+  local git_src="$2"
+  local commit="$3"
+  local work="$4"
+  local oid rel_path total=0 missing=0
+
+  if ! git -C "$git_src" rev-parse --verify --quiet "$commit^{commit}" >/dev/null; then
+    echo "PROVENANCE_FAIL REVISION is not a commit in $git_src: $commit" >&2
+    return 1
+  fi
+  if ! release_git_tree_manifest "$git_src" "$commit" > "$work/manifest" 2>"$work/err"; then
+    echo "PROVENANCE_FAIL cannot read tree $commit: $(cat "$work/err")" >&2
+    return 1
+  fi
+  : > "$work/expected"
+  : > "$work/paths"
+  while IFS=' ' read -r oid rel_path; do
+    [[ -n "$rel_path" ]] || continue
+    total=$((total + 1))
+    if [[ ! -f "$release_dir/$rel_path" ]]; then
+      echo "PROVENANCE_MISSING $rel_path" >&2
+      missing=$((missing + 1))
+      continue
+    fi
+    printf '%s\n' "$oid" >> "$work/expected"
+    printf '%s\n' "$rel_path" >> "$work/paths"
+  done < "$work/manifest"
+
+  if [[ "$total" -eq 0 ]]; then
+    echo "PROVENANCE_FAIL empty tree for $commit" >&2
+    return 1
+  fi
+  if [[ "$missing" -ne 0 ]]; then
+    echo "PROVENANCE_FAIL missing=$missing of $total tracked files" >&2
+    return 1
+  fi
+  # Hash from inside the release tree: paths stay relative, no path translation.
+  if ! git -C "$release_dir" hash-object --no-filters --stdin-paths < "$work/paths" > "$work/actual" 2>"$work/err"; then
+    echo "PROVENANCE_FAIL cannot hash release tree: $(cat "$work/err")" >&2
+    return 1
+  fi
+  paste "$work/expected" "$work/actual" "$work/paths" \
+    | awk -F'\t' '$1 != $2 { print "PROVENANCE_MISMATCH " $3; bad++ } END { exit bad ? 1 : 0 }' >&2 || {
+    echo "PROVENANCE_FAIL tree does not match $commit" >&2
+    return 1
+  }
+  echo "PROVENANCE_OK files=$total commit=$commit"
+}
+
+release_assert_tree_matches_commit() {
+  # Args: release_dir git_src commit
+  # Release tree must reproduce every file tracked at <commit>, byte for byte.
+  local release_dir="$1"
+  local git_src="$2"
+  local commit="$3"
+  local work rc=0
+  if [[ -z "$git_src" || ! -d "$git_src" ]]; then
+    echo "PROVENANCE_FAIL git source unavailable: '$git_src'" >&2
+    return 1
+  fi
+  work="$(mktemp -d)"
+  _release_provenance_check "$release_dir" "$git_src" "$commit" "$work" || rc=1
+  rm -rf "$work"
+  return "$rc"
+}
+
 release_pre_switch_gates() {
   local release_dir="$1"
   local expected_revision="$2"
+  local git_src="${3:-${GIT_SRC:-}}"
   [[ -f "$release_dir/dist/index.html" ]] || {
     echo "GATE_FAIL missing dist/index.html" >&2
     return 1
@@ -146,6 +225,19 @@ release_pre_switch_gates() {
     echo "GATE_FAIL REVISION mismatch" >&2
     return 1
   }
+  # REVISION is self-declared: comparing it to $expected_revision proves nothing
+  # about the tree. Verify the release actually reproduces that commit.
+  if [[ -n "$git_src" ]]; then
+    release_assert_tree_matches_commit "$release_dir" "$git_src" "$expected_revision" || {
+      echo "GATE_FAIL release tree does not match $expected_revision" >&2
+      return 1
+    }
+  elif [[ "${ALLOW_UNVERIFIED_RELEASE:-0}" == "1" ]]; then
+    echo "PROVENANCE_UNVERIFIED ALLOW_UNVERIFIED_RELEASE=1 — release content is not tied to $expected_revision"
+  else
+    echo "GATE_FAIL provenance unverified: set GIT_SRC=<repo> or ALLOW_UNVERIFIED_RELEASE=1" >&2
+    return 1
+  fi
   [[ -d "$release_dir/backend/src" ]] || {
     echo "GATE_FAIL missing backend/src" >&2
     return 1

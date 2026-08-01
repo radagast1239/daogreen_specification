@@ -9,6 +9,9 @@
 #
 # Optional env:
 #   APP             default /opt/daogreen-spec
+#   GIT_SRC         repo/mirror on the deploy host; release tree is built from
+#                   `git archive $DEPLOY_COMMIT` and verified against it
+#   ALLOW_UNVERIFIED_RELEASE=1  build from PREV+INCOMING without provenance proof
 #   INCOMING        optional patch tree applied after copy (source only)
 #   PREPARE_ONLY=1  build release + gates, do not switch current
 #   SKIP_BACKUP=1   skip WAL backup (tests only)
@@ -32,6 +35,7 @@ REL="$APP/releases/$REL_NAME"
 SHARED="$APP/shared"
 DB="${DB_PATH:-$SHARED/data/daogreen.db}"
 INCOMING="${INCOMING:-}"
+GIT_SRC="${GIT_SRC:-}"
 PREPARE_ONLY="${PREPARE_ONLY:-0}"
 SKIP_BACKUP="${SKIP_BACKUP:-0}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -67,17 +71,31 @@ print("materials", c.execute("select count(*) from materials").fetchone()[0])
 PY
 fi
 
-echo "=== CREATE RELEASE (source only, no node_modules) ==="
-mkdir -p "$REL"
-# Never rsync node_modules from previous release into the new tree.
-rsync -a \
-  --exclude node_modules \
-  --exclude backend/node_modules \
-  --exclude dist \
-  --exclude backend/data \
-  --exclude backend/.env \
-  --exclude backend/uploads \
-  "$PREV/" "$REL/"
+if [[ -n "$GIT_SRC" ]]; then
+  echo "=== CREATE RELEASE (git archive $COMMIT from $GIT_SRC) ==="
+  # Provenance mode: the tree comes from the commit itself, never from $PREV.
+  if [[ -n "$INCOMING" ]]; then
+    echo "REFUSING INCOMING overlay in GIT_SRC mode (breaks provenance)" >&2
+    exit 1
+  fi
+  mkdir -p "$REL"
+  # Pin eol config: git archive honours core.autocrlf, and a CRLF-converted tree
+  # would no longer hash to the commit's blobs.
+  git -c core.autocrlf=false -c core.eol=lf -C "$GIT_SRC" \
+    archive --format=tar "$COMMIT" | tar -x -C "$REL"
+else
+  echo "=== CREATE RELEASE (source only, no node_modules) ==="
+  mkdir -p "$REL"
+  # Never rsync node_modules from previous release into the new tree.
+  rsync -a \
+    --exclude node_modules \
+    --exclude backend/node_modules \
+    --exclude dist \
+    --exclude backend/data \
+    --exclude backend/.env \
+    --exclude backend/uploads \
+    "$PREV/" "$REL/"
+fi
 
 # Drop any accidentally copied modules and stale dist.
 rm -rf "$REL/node_modules" "$REL/backend/node_modules" "$REL/dist"
@@ -123,7 +141,7 @@ chmod 755 "$REL"
 chmod -R a+rX "$REL"
 
 echo "=== PRE-SWITCH GATES ==="
-release_pre_switch_gates "$REL" "$COMMIT"
+release_pre_switch_gates "$REL" "$COMMIT" "$GIT_SRC"
 
 if [[ "$PREPARE_ONLY" == "1" ]]; then
   echo "PREPARE_ONLY=1 — skipping current switch"
