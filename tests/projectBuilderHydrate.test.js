@@ -391,15 +391,16 @@ describe('projectBuilderHydrate', () => {
     const crab = stellages[0].items.find((ln) => ln.materialId === 'm2');
     const unchecked = stellages[0].items.find((ln) => ln.materialId === 'm3');
     expect(tube?.included).toBe(true);
-    expect(tube?.qty).toBe(88.32);
-    expect(tube?.pipeCuts).toEqual([{ lengthMm: 3200, qty: 6 }]);
+    // stellageConfigs[0].count === 2 — stored totals are shown per rack in the editor.
+    expect(tube?.qty).toBe(44.16);
+    expect(tube?.pipeCuts).toEqual([{ lengthMm: 3200, qty: 3 }]);
     expect(tube?.source).toBe(FRAME_BOM_SOURCE);
     expect(tube?.sourceLabel).toBe(FRAME_BOM_SOURCE_LABEL);
     expect(tube?.price).toBe(80);
     expect(tube?.supplier).toBe('ТрубыРу');
     expect(tube?.imageUrl).toBe('/m1.jpg');
     expect(crab?.included).toBe(true);
-    expect(crab?.qty).toBe(252);
+    expect(crab?.qty).toBe(126);
     expect(crab?.price).toBe(40);
     expect(crab?.photoUrl).toBe('/m2.jpg');
     expect(unchecked?.included).toBe(false);
@@ -615,19 +616,85 @@ describe('projectBuilderHydrate', () => {
     expect(row.pipeCuts?.[0]?.qty).toBe(12);
   });
 
-  it('frameBomProjectItemToBuilderLine divides only when stellageCount is stored on item', () => {
-    const scaled = frameBomProjectItemToBuilderLine(
+  it('frameBomProjectItemToBuilderLine divides by stellage count with or without the marker', () => {
+    const marked = frameBomProjectItemToBuilderLine(
       { id: 'fb1', source: FRAME_BOM_SOURCE, qty: 408, stellageCount: 3, pipeCuts: [{ lengthMm: 2500, qty: 12 }] },
       { stCount: 3 },
     );
-    expect(scaled.qty).toBe(136);
-    expect(scaled.pipeCuts?.[0]?.qty).toBe(4);
+    expect(marked.qty).toBe(136);
+    expect(marked.pipeCuts?.[0]?.qty).toBe(4);
 
-    const legacy = frameBomProjectItemToBuilderLine(
-      { id: 'fb2', source: FRAME_BOM_SOURCE, qty: 136 },
+    // stellageCount is never persisted in project_items — the divisor must come
+    // from stellageConfigs[].count, otherwise the next save re-multiplies qty.
+    const afterDbRoundTrip = frameBomProjectItemToBuilderLine(
+      { id: 'fb2', source: FRAME_BOM_SOURCE, qty: 408, pipeCuts: [{ lengthMm: 2500, qty: 12 }] },
       { stCount: 3 },
     );
-    expect(legacy.qty).toBe(136);
+    expect(afterDbRoundTrip.qty).toBe(136);
+    expect(afterDbRoundTrip.pipeCuts?.[0]?.qty).toBe(4);
+  });
+
+  it('frame BOM qty and pipeCuts stay stable across repeated save cycles without the marker', () => {
+    const perRackQty = 136;
+    const perRackCuts = 4;
+    for (const count of [1, 2, 3, 7]) {
+      const rackKey = 'mod1:st1';
+      // DB state right after "Добавить BOM": totals already scaled by rack count.
+      let items = [{
+        id: 'st1__fb_bolt',
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        materialId: 'm073',
+        name: 'Труба профильная 20x20',
+        moduleRackKey: rackKey,
+        qty: perRackQty * count,
+        pipeCuts: [{ lengthMm: 2500, qty: perRackCuts * count }],
+      }];
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        const project = {
+          stellageConfigs: [{ id: 'st1', moduleId: 'mod1', moduleName: 'Модуль', name: 'Стеллаж', count }],
+          items,
+        };
+        const stellages = stellagesFromProject(project, {});
+        const editorLine = stellages[0].items.find((ln) => ln.materialId === 'm073');
+        expect(editorLine.qty).toBe(perRackQty);
+        expect(editorLine.pipeCuts?.[0]?.qty).toBe(perRackCuts);
+        // Save, then emulate the DB round-trip: stellageCount has no column.
+        items = mergeFrameBomQtyFromBuilderLines(items, stellages).map((it) => {
+          const { stellageCount, rackCount, ...rest } = it;
+          void stellageCount;
+          void rackCount;
+          return rest;
+        });
+        expect(items[0].qty).toBe(perRackQty * count);
+        expect(items[0].pipeCuts?.[0]?.qty).toBe(perRackCuts * count);
+      }
+    }
+  });
+
+  it('stellageConfigs groups snapshot does not override frame BOM qty', () => {
+    const project = {
+      stellageConfigs: [{
+        id: 'st1',
+        moduleId: 'mod1',
+        moduleName: 'Модуль',
+        name: 'Стеллаж',
+        count: 3,
+        groups: [{ name: 'Труба профильная 20x20', qty: 408 }],
+      }],
+      items: [{
+        id: 'st1__fb_bolt',
+        source: FRAME_BOM_SOURCE,
+        sourceType: FRAME_BOM_SOURCE,
+        materialId: 'm073',
+        name: 'Труба профильная 20x20',
+        moduleRackKey: 'mod1:st1',
+        qty: 408,
+      }],
+    };
+    const stellages = stellagesFromProject(project, {});
+    const line = stellages[0].items.find((ln) => ln.materialId === 'm073');
+    expect(line.qty).toBe(136);
   });
 
   it('mergeFrameBomQtyFromBuilderLines scopes qty by rack, not materialId only', () => {

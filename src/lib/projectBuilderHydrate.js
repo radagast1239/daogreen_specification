@@ -43,13 +43,14 @@ export function frameBomProjectItemToBuilderLine(item, { materials = null, stCou
   const enriched = materials?.length
     ? enrichProjectItemFromMaterial(item, materials)
     : item;
-  // Totals are marked with stellageCount after scaled save. Legacy Frame BOM rows
-  // store per-rack qty (no stellageCount) — do not divide those.
+  // Frame BOM rows store totals (per-rack × stellage count). The stellageCount
+  // marker lives only in memory — it is never written to project_items, so after
+  // a DB round-trip the divisor must come from stellageConfigs[].count (stCount).
   const embedded = Number(item?.stellageCount ?? item?.rackCount);
+  const configCount = Number(stCount);
   const divideBy = Number.isFinite(embedded) && embedded >= 1
     ? Math.max(1, embedded)
-    : 1;
-  void stCount;
+    : (Number.isFinite(configCount) && configCount >= 1 ? Math.max(1, configCount) : 1);
   const line = projectItemToBuilderLine(enriched, { stCount: divideBy });
   const bomQty = Number(line.qty) || 0;
   const rawCuts = enriched.pipeCuts?.length ? enriched.pipeCuts : line.pipeCuts;
@@ -254,6 +255,9 @@ function applyStellageGroupsToLines(lines = [], groups = []) {
   }
   if (!byName.size) return lines;
   return (lines || []).map((ln) => {
+    // Frame BOM qty is owned by the BOM snapshot; the name-keyed groups[] restore
+    // must not overwrite it, otherwise the per-rack division above is undone.
+    if ((ln.source || ln.sourceType) === FRAME_BOM_SOURCE) return ln;
     const g = byName.get(String(ln.name || "").trim());
     if (!g) return ln;
     const qty = Number(g.qty);
