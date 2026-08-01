@@ -8,7 +8,10 @@ import { createHash } from "crypto";
 import { buildDocumentManifestEntry } from "../../../shared/publishedDocumentManifest.js";
 import { resolveUploadRoot } from "./uploadRoot.js";
 import { uploadsRelativeFromUrl } from "./uploadValidation.js";
-import { recordStagedDir, recordStagedFile } from "./publicationAssetStage.js";
+import {
+  assertPublicationAssetScope,
+  publicationCheckpoint,
+} from "./publicationAssetStage.js";
 
 export { resolveUploadRoot };
 
@@ -41,7 +44,10 @@ export function pinClientDocumentsForRelease({
   versionId,
   liveDocuments = [],
   uploadRoot = resolveUploadRoot(),
+  assetScope = null,
 } = {}) {
+  // Explicit scope only: a write path must never journal into nothing.
+  const scope = assertPublicationAssetScope(assetScope);
   const pid = String(projectId || "").trim();
   const vid = String(versionId || "").trim();
   if (!pid || !vid) {
@@ -57,7 +63,7 @@ export function pinClientDocumentsForRelease({
     throw err;
   }
   fs.mkdirSync(releaseDir, { recursive: true });
-  recordStagedDir(releaseDir);
+  scope.recordDir(releaseDir);
   console.info(`PUBLICATION_ASSET_STAGE_CREATED project=${pid} version=${vid}`);
 
   const documentManifest = [];
@@ -94,15 +100,11 @@ export function pinClientDocumentsForRelease({
     usedNames.add(unique.toLowerCase());
 
     const destAbs = path.join(releaseDir, unique);
-    try {
-      fs.copyFileSync(srcAbs, destAbs);
-      // Journal before anything else can fail, so a partial copy is still owned.
-      recordStagedFile(destAbs);
-    } catch {
-      recordStagedFile(destAbs);
-      skippedCount++;
-      continue;
-    }
+    // Journal before the write: a partially written file is still owned.
+    scope.recordFile(destAbs);
+    publicationCheckpoint(pinnedCount === 0 ? "before_first_document_copy" : "before_next_document_copy");
+    fs.copyFileSync(srcAbs, destAbs);
+    publicationCheckpoint(pinnedCount === 0 ? "after_first_document_copy" : "after_next_document_copy");
 
     let sha256 = "";
     let size = 0;

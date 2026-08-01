@@ -49,6 +49,7 @@ let assertUploadRootForStartup;
 let resolveUploadRoot;
 let parseProxyImageUrl;
 let pinClientDocumentsForRelease;
+let beginPublicationAssetScope;
 let adminAuthMiddleware;
 let ADMIN_KEY;
 
@@ -216,6 +217,8 @@ beforeAll(async () => {
   const uploadRootMod = await import("../backend/src/services/uploadRoot.js");
   const imageProxyMod = await import("../backend/src/services/imageProxy.js");
   const pinMod = await import("../backend/src/services/releaseDocumentPinning.js");
+  const stageMod = await import("../backend/src/services/publicationAssetStage.js");
+  beginPublicationAssetScope = stageMod.beginPublicationAssetScope;
   const authMod = await import("../backend/src/auth.js");
 
   db = dbMod.db;
@@ -790,6 +793,8 @@ describe("pinning still works under upload root", () => {
       versionId: "v9",
       liveDocuments: [{ id: "f1", type: "manual", filename: "doc.pdf", url: live }],
       uploadRoot: tempUploads,
+      // Asset-producing calls must carry a compensating journal.
+      assetScope: beginPublicationAssetScope(),
     });
     expect(pinnedCount).toBe(1);
     expect(documentManifest[0].url).toContain("/uploads/releases/p1/v9/");

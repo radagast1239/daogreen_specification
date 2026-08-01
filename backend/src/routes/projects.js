@@ -105,7 +105,10 @@ import { assertCanDeleteOrOverwriteAsset, syncFrameDrawingTitlesFromStellageConf
 import { hideOrphanFrameDrawingsForProject } from "../services/frameDrawingVisibility.js";
 import { publishedPlannedTotal } from "../../../shared/publishedPurchaseTotals.js";
 import { pinClientDocumentsForRelease } from "../services/releaseDocumentPinning.js";
-import { beginPublicationAssetScope } from "../services/publicationAssetStage.js";
+import {
+  beginPublicationAssetScope,
+  publicationCheckpoint,
+} from "../services/publicationAssetStage.js";
 import { sendSafeUploadFile } from "../services/secureFileServe.js";
 import {
   activeStellageIdSet,
@@ -198,16 +201,17 @@ function bumpRevision(projectId, expectedRevision) {
 
 function mutateWithRevision(projectId, expectedValue, callback) {
   const expectedRevision = requireExpectedRevision(projectId, expectedValue);
+  // SQLite rolls the DB back on throw; release assets copied by this attempt
+  // must be removed by the compensating journal. The scope is handed to the
+  // callback so asset-producing calls can pass it on explicitly.
+  const assets = beginPublicationAssetScope();
   const run = db.transaction(() => {
     const existing = assertRevision(projectId, expectedRevision);
     if (!existing) return null;
-    const value = callback();
+    const value = callback(assets);
     bumpRevision(projectId, expectedRevision);
     return { value, revision: expectedRevision + 1 };
   });
-  // SQLite rolls the DB back on throw; release assets copied by this attempt
-  // must be removed by the compensating journal.
-  const assets = beginPublicationAssetScope();
   try {
     const result = run();
     assets.commit();
@@ -521,6 +525,8 @@ export function updateProject(id, patch) {
 
   // Captured inside the transaction, reported only after it commits.
   let reconcileMeta = null;
+  // Publish-on-status-change copies release assets inside this transaction.
+  const assets = beginPublicationAssetScope();
 
   const run = db.transaction(() => {
     const cur = loadProject(id);
@@ -606,7 +612,7 @@ export function updateProject(id, patch) {
     if (safePatch.status != null && safePatch.status !== base.status && isPublishWorkflowStatus(safePatch.status)) {
       // Build the release from the complete PATCH candidate. This keeps images and
       // metadata changed in the same request inside the immutable release_v2 snapshot.
-      const pub = publishReleaseIfNeeded(id, merged, safePatch.status);
+      const pub = publishReleaseIfNeeded(id, merged, safePatch.status, assets);
       if (pub.publishedRelease) {
         manualParams = { ...manualParams, publishedRelease: pub.publishedRelease };
         merged = { ...merged, manualParams };
@@ -633,8 +639,6 @@ export function updateProject(id, patch) {
     return true;
   });
 
-  // Publish-on-status-change copies release assets inside this transaction.
-  const assets = beginPublicationAssetScope();
   let found;
   try {
     found = run();
@@ -848,12 +852,34 @@ export function approveAll(id) {
   return loadProject(id);
 }
 
+/**
+ * Creates the release row and pins its assets.
+ *
+ * `assetScope` is the compensating journal of the enclosing transaction. When a
+ * caller owns one it must pass it in, so a rollback further out still cleans up.
+ * Without one this function opens its own scope, so there is no code path that
+ * can produce release assets with nothing journaling them.
+ */
 function createVersionRecord(projectId, project, {
   force = false,
   createdBy = "admin",
   snapshotPayload = null,
   releaseComment = null,
+  assetScope = null,
 } = {}) {
+  if (!assetScope) {
+    const ownScope = beginPublicationAssetScope();
+    try {
+      const result = createVersionRecord(projectId, project, {
+        force, createdBy, snapshotPayload, releaseComment, assetScope: ownScope,
+      });
+      ownScope.commit();
+      return result;
+    } catch (err) {
+      ownScope.rollback();
+      throw err;
+    }
+  }
   // Validate comment before any DB write so failed publish leaves no row.
   const comment = normalizeReleaseComment(releaseComment);
 
@@ -874,7 +900,9 @@ function createVersionRecord(projectId, project, {
     projectId,
     versionId,
     liveDocuments,
+    assetScope,
   });
+  publicationCheckpoint("after_documents_pinned");
   // Hash/read assets before the version-row write.
   const payload = prepareReleaseSnapshotPayload(project, { documentManifest });
   const snapshotJson = JSON.stringify(payload);
@@ -947,6 +975,7 @@ function createVersionRecord(projectId, project, {
   };
   const versionNumber = prev ? Number(prev.version_number) + 1 : 1;
 
+  publicationCheckpoint("before_version_insert");
   db.prepare(`
     INSERT INTO spec_versions (id, project_id, version_number, created_by, summary, snapshot, release_comment)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -960,6 +989,7 @@ function createVersionRecord(projectId, project, {
     comment,
   );
 
+  publicationCheckpoint("after_version_insert");
   db.prepare("UPDATE projects SET version = ?, updated_at = datetime('now') WHERE id = ?").run(
     versionNumber,
     projectId,
@@ -990,12 +1020,12 @@ function releaseSnapshotItemsFromRow(row) {
   }
 }
 
-function publishReleaseIfNeeded(projectId, project, targetStatus) {
+function publishReleaseIfNeeded(projectId, project, targetStatus, assetScope) {
   const existing = parsePublishedRelease(project?.manualParams);
   if (existing && !shouldPublishOnStatusChange(project, targetStatus)) {
     return { publishedRelease: existing, version: null, skipped: true };
   }
-  const version = createVersionRecord(projectId, project, { force: false });
+  const version = createVersionRecord(projectId, project, { force: false, assetScope });
   return {
     publishedRelease: buildPublishedReleaseMeta(version, targetStatus),
     version,
@@ -1019,7 +1049,11 @@ function persistPublishedRelease(projectId, publishedRelease) {
   );
 }
 
-export function createVersion(id, createdBy = "admin", { force = false, releaseComment = null } = {}) {
+export function createVersion(id, createdBy = "admin", {
+  force = false,
+  releaseComment = null,
+  assetScope = null,
+} = {}) {
   const p = loadProject(id);
   if (!p) return null;
   // Prepare snapshot (may throw PUBLISH_ASSET_MISSING) before mutating DB / revision.
@@ -1028,7 +1062,9 @@ export function createVersion(id, createdBy = "admin", { force = false, releaseC
   // Normalize comment early so validation errors happen before snapshot work when possible.
   normalizeReleaseComment(releaseComment);
   const snapshotPayload = prepareReleaseSnapshotPayload(p);
-  const version = createVersionRecord(id, p, { force, createdBy, snapshotPayload, releaseComment });
+  const version = createVersionRecord(id, p, {
+    force, createdBy, snapshotPayload, releaseComment, assetScope,
+  });
   const publishedRelease = buildPublishedReleaseMeta(version, p.status);
   persistPublishedRelease(id, publishedRelease);
   return version;
@@ -1381,10 +1417,11 @@ api.post("/:id/approve-all", (req, res) => {
 
 api.post("/:id/versions", (req, res) => {
   try {
-    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, () =>
+    const changed = mutateWithRevision(req.params.id, req.body?.expectedRevision, (assetScope) =>
       createVersion(req.params.id, req.body?.createdBy, {
         force: !!req.body?.force,
         releaseComment: req.body?.releaseComment,
+        assetScope,
       })
     );
     const v = changed?.value;

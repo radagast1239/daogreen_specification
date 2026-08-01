@@ -3,8 +3,12 @@
  *
  * Files are copied into /uploads/releases/<projectId>/<versionId>/ before the
  * surrounding SQLite transaction commits. SQLite cannot roll the filesystem
- * back, so every file an attempt creates is journaled and removed if that
- * transaction ends up rolling back.
+ * back, so every file an attempt creates is journaled on an explicit scope and
+ * removed if that transaction ends up rolling back.
+ *
+ * The scope is passed explicitly through the publication call chain — there is
+ * deliberately no ambient "current scope", so a write path can never silently
+ * journal nothing.
  *
  * Only paths this attempt created are ever removed, and only after a
  * containment check against the release root — never a recursive delete of a
@@ -13,13 +17,6 @@
 import fs from "fs";
 import path from "path";
 import { resolveUploadRoot } from "./uploadRoot.js";
-
-/** Active scopes, innermost last. Publication runs single-threaded per request. */
-const scopes = [];
-
-function activeScope() {
-  return scopes.length ? scopes[scopes.length - 1] : null;
-}
 
 function releasesRoot() {
   return path.join(resolveUploadRoot(), "releases");
@@ -40,10 +37,9 @@ export function isInsideReleasesRoot(abs) {
   } catch {
     return false;
   }
-  const parent = path.dirname(target);
   let realParent;
   try {
-    realParent = fs.realpathSync(parent);
+    realParent = fs.realpathSync(path.dirname(target));
   } catch {
     return false;
   }
@@ -69,9 +65,9 @@ function removeStagedFile(abs) {
   try {
     st = fs.lstatSync(abs);
   } catch {
+    // Journaled but never created (or already gone) — nothing to undo.
     return { ok: true, reason: "already_absent" };
   }
-  // Never follow a symlink out of the tree.
   if (!st.isFile() || st.isSymbolicLink()) return { ok: false, reason: "not_a_regular_file" };
   try {
     fs.unlinkSync(abs);
@@ -93,95 +89,100 @@ function removeStagedDir(abs) {
   }
 }
 
-function rollbackScope(scope) {
-  const failures = [];
-  let removedFiles = 0;
-  for (const abs of [...scope.files].reverse()) {
-    const res = removeStagedFile(abs);
-    if (res.ok) {
-      if (res.reason !== "already_absent") removedFiles += 1;
-    } else {
-      failures.push({ path: reportable(abs), reason: res.reason });
-    }
-  }
-  let removedDirs = 0;
-  for (const abs of [...scope.dirs].reverse()) {
-    const res = removeStagedDir(abs);
-    if (res.ok) {
-      if (res.reason !== "already_absent") removedDirs += 1;
-    } else {
-      failures.push({ path: reportable(abs), reason: res.reason });
-    }
-  }
-  return { removedFiles, removedDirs, failures };
-}
-
 /**
  * Open a journal for one publication attempt.
  * `commit()` keeps the files; `rollback()` removes exactly what was journaled.
- * Both are idempotent.
+ * Both are idempotent; neither throws.
  */
 export function beginPublicationAssetScope() {
-  const scope = { files: [], dirs: [], closed: false };
-  scopes.push(scope);
-
-  const close = () => {
-    if (scope.closed) return false;
-    scope.closed = true;
-    const idx = scopes.indexOf(scope);
-    if (idx >= 0) scopes.splice(idx, 1);
-    return true;
-  };
+  const files = [];
+  const dirs = [];
+  let closed = false;
 
   return {
+    /** Marker used to reject a missing/foreign scope at the pinning boundary. */
+    isPublicationAssetScope: true,
     get stagedFileCount() {
-      return scope.files.length;
+      return files.length;
     },
     /** Paths of this attempt, relative to the releases root (for quarantine follow-up). */
     stagedPaths() {
-      return scope.files.map(reportable);
+      return files.map(reportable);
+    },
+    recordFile(absPath) {
+      if (!closed && absPath) files.push(String(absPath));
+    },
+    recordDir(absPath) {
+      if (!closed && absPath) dirs.push(String(absPath));
     },
     commit() {
-      if (!close()) return null;
-      if (scope.files.length) {
-        console.info(
-          `PUBLICATION_ASSET_COMMIT files=${scope.files.length} dirs=${scope.dirs.length}`,
-        );
+      if (closed) return null;
+      closed = true;
+      if (files.length) {
+        console.info(`PUBLICATION_ASSET_COMMIT files=${files.length} dirs=${dirs.length}`);
       }
-      return { committed: true, files: scope.files.length };
+      return { committed: true, files: files.length };
     },
     rollback() {
-      if (!close()) return null;
-      if (!scope.files.length && !scope.dirs.length) return { removedFiles: 0, removedDirs: 0, failures: [] };
-      const result = rollbackScope(scope);
-      if (result.failures.length) {
+      if (closed) return null;
+      closed = true;
+      if (!files.length && !dirs.length) return { removedFiles: 0, removedDirs: 0, failures: [] };
+      const failures = [];
+      let removedFiles = 0;
+      for (const abs of [...files].reverse()) {
+        const res = removeStagedFile(abs);
+        if (res.ok) {
+          if (res.reason !== "already_absent") removedFiles += 1;
+        } else {
+          failures.push({ path: reportable(abs), reason: res.reason });
+        }
+      }
+      let removedDirs = 0;
+      for (const abs of [...dirs].reverse()) {
+        const res = removeStagedDir(abs);
+        if (res.ok) {
+          if (res.reason !== "already_absent") removedDirs += 1;
+        } else {
+          failures.push({ path: reportable(abs), reason: res.reason });
+        }
+      }
+      if (failures.length) {
         console.error(
-          `PUBLICATION_ASSET_ROLLBACK_FAIL removed=${result.removedFiles} `
-          + `remaining=${JSON.stringify(result.failures)}`,
+          `PUBLICATION_ASSET_ROLLBACK_FAIL removed=${removedFiles} `
+          + `remaining=${JSON.stringify(failures)}`,
         );
       } else {
-        console.warn(
-          `PUBLICATION_ASSET_ROLLBACK files=${result.removedFiles} dirs=${result.removedDirs}`,
-        );
+        console.warn(`PUBLICATION_ASSET_ROLLBACK files=${removedFiles} dirs=${removedDirs}`);
       }
-      return result;
+      return { removedFiles, removedDirs, failures };
     },
   };
 }
 
-/** Journal a file this attempt created. No-op outside a publication scope. */
-export function recordStagedFile(absPath) {
-  const scope = activeScope();
-  if (scope && absPath) scope.files.push(String(absPath));
+/** Throw unless a real scope was handed down the publication call chain. */
+export function assertPublicationAssetScope(scope) {
+  if (scope && scope.isPublicationAssetScope === true) return scope;
+  const err = new Error("Publication asset scope is required to create release assets");
+  err.code = "PUBLICATION_ASSET_SCOPE_REQUIRED";
+  throw err;
 }
 
-/** Journal a directory this attempt created (removed only if it ends up empty). */
-export function recordStagedDir(absPath) {
-  const scope = activeScope();
-  if (scope && absPath) scope.dirs.push(String(absPath));
+/**
+ * Test-only failure injection. Not reachable from any request body or route:
+ * the setter is exported for tests and ignored unless NODE_ENV === "test".
+ */
+let injectedFailurePoint = null;
+
+export function __setPublicationFailurePoint(name) {
+  injectedFailurePoint = name || null;
 }
 
-/** Test/diagnostic helper: number of open scopes. */
-export function openPublicationScopeCount() {
-  return scopes.length;
+/** Named point in the publication flow where a test may force a throw. */
+export function publicationCheckpoint(name) {
+  if (process.env.NODE_ENV !== "test") return;
+  if (!injectedFailurePoint || injectedFailurePoint !== name) return;
+  injectedFailurePoint = null;
+  const err = new Error(`injected_publication_failure_at_${name}`);
+  err.code = "INJECTED_PUBLICATION_FAILURE";
+  throw err;
 }

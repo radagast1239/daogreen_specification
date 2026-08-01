@@ -2,6 +2,9 @@
  * T7 — release assets copied during a publication attempt must not survive a
  * rolled-back publication, and must never touch anything the attempt did not
  * create. Temporary SQLite + temporary UPLOAD_ROOT only.
+ *
+ * Failure points are driven by publicationCheckpoint(), a test-only hook that
+ * is inert unless NODE_ENV === "test" and is not reachable from any request.
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import fs from "fs";
@@ -21,7 +24,8 @@ let updateProject;
 let pinClientDocumentsForRelease;
 let beginPublicationAssetScope;
 let isInsideReleasesRoot;
-let openPublicationScopeCount;
+let setFailurePoint;
+let runPublishedReleaseBackfill;
 
 const writeUpload = (rel, contents) => {
   const abs = path.join(tempUploads, rel);
@@ -45,6 +49,9 @@ const listReleaseFiles = () => {
   return out.sort();
 };
 
+const versionIds = () => db.prepare("SELECT id FROM spec_versions").all().map((r) => r.id).sort();
+const publishedPointer = (pid) => loadProject(pid)?.manualParams?.publishedRelease?.versionId || null;
+
 const clientItem = (id = "it1") => ({
   id,
   materialId: "mat1",
@@ -66,7 +73,7 @@ const clientItem = (id = "it1") => ({
 function seedProject(id) {
   db.prepare(`
     INSERT INTO projects (id, name, client, city, client_token, status, manual_params, rooms, currency, vat, version, comment, stellage_configs, revision)
-    VALUES (?, 'P', '', '', ?, 'active', '{}', '[]', '₽', 1, 0, '', '[]', 1)
+    VALUES (?, 'Проект', 'Клиент', 'Город', ?, 'active', '{}', '[]', '₽', 1, 0, '', '[]', 1)
   `).run(id, `tok-${id}`);
   // project_items.id is globally unique — scope the fixture id per project.
   saveItems(id, [clientItem(`it_${id}`)]);
@@ -79,6 +86,9 @@ function addDoc(projectId, fileId, name, contents) {
   return url;
 }
 
+const docRefs = (projectId, names) =>
+  names.map((n) => ({ id: `f${n}`, filename: `${n}.pdf`, url: `/uploads/docs/${projectId}-${n}.pdf` }));
+
 beforeAll(async () => {
   fs.mkdirSync(tempUploads, { recursive: true });
   process.env.DATABASE_PATH = path.join(tempDir, "t7.db");
@@ -90,6 +100,7 @@ beforeAll(async () => {
   const projectsMod = await import("../backend/src/routes/projects.js");
   const pinMod = await import("../backend/src/services/releaseDocumentPinning.js");
   const stageMod = await import("../backend/src/services/publicationAssetStage.js");
+  const backfillMod = await import("../backend/src/services/publishedReleaseBackfillService.js");
   db = dbMod.db;
   loadProject = dbMod.loadProject;
   saveItems = projectsMod.saveItems;
@@ -98,12 +109,14 @@ beforeAll(async () => {
   pinClientDocumentsForRelease = pinMod.pinClientDocumentsForRelease;
   beginPublicationAssetScope = stageMod.beginPublicationAssetScope;
   isInsideReleasesRoot = stageMod.isInsideReleasesRoot;
-  openPublicationScopeCount = stageMod.openPublicationScopeCount;
+  setFailurePoint = stageMod.__setPublicationFailurePoint;
+  runPublishedReleaseBackfill = backfillMod.runPublishedReleaseBackfill;
   (await import("../backend/src/services/activityLog.js")).initActivityLog();
   dbMod.initDb();
 });
 
 beforeEach(() => {
+  setFailurePoint(null);
   db.prepare("DELETE FROM spec_versions").run();
   db.prepare("DELETE FROM project_items").run();
   db.prepare("DELETE FROM files").run();
@@ -115,6 +128,7 @@ beforeEach(() => {
 });
 
 afterAll(() => {
+  setFailurePoint(null);
   delete process.env.DATABASE_PATH;
   delete process.env.DB_PATH;
   delete process.env.UPLOAD_ROOT;
@@ -129,7 +143,7 @@ afterAll(() => {
 describe("T7 — publication asset lifecycle", () => {
   it("A. a successful publication leaves the version and its assets in place", () => {
     seedProject("p1");
-    addDoc("p1", "fA", "a.pdf", "AAA");
+    addDoc("p1", "fa", "a.pdf", "AAA");
     const v = createVersion("p1", "admin", { force: true });
     const files = listReleaseFiles();
     expect(files).toHaveLength(1);
@@ -139,59 +153,33 @@ describe("T7 — publication asset lifecycle", () => {
     expect(snap.documentManifest).toHaveLength(1);
     const abs = path.join(tempUploads, snap.documentManifest[0].url.replace(/^\/uploads\//, ""));
     expect(fs.readFileSync(abs, "utf8")).toBe("AAA");
-    // No leftover staging directories.
-    expect(files.some((f) => f.includes(".staging"))).toBe(false);
-    expect(openPublicationScopeCount()).toBe(0);
   });
 
-  it("wiring: both publication transaction boundaries own a compensating scope", () => {
-    const routes = fs.readFileSync(
-      path.join(process.cwd(), "backend/src/routes/projects.js"), "utf8",
-    );
-    // mutateWithRevision (createVersion path) and updateProject (publish-on-status).
-    expect(routes.match(/beginPublicationAssetScope\(\)/g) || []).toHaveLength(2);
-    expect(routes.match(/assets\.rollback\(\)/g) || []).toHaveLength(2);
-    expect(routes.match(/assets\.commit\(\)/g) || []).toHaveLength(2);
-    const pinning = fs.readFileSync(
-      path.join(process.cwd(), "backend/src/services/releaseDocumentPinning.js"), "utf8",
-    );
-    expect(pinning).toMatch(/recordStagedDir\(releaseDir\)/);
-    expect(pinning).toMatch(/recordStagedFile\(destAbs\)/);
-    expect(pinning).toMatch(/RELEASE_ASSET_DIR_EXISTS/);
-    // Scopes must never leak between requests.
-    expect(openPublicationScopeCount()).toBe(0);
-  });
-
-  it("B. a failure raised before any copy leaves no version and no files", () => {
+  it("scope is mandatory: pinning without one refuses to create anything", () => {
     seedProject("p1");
-    addDoc("p1", "fA", "a.pdf", "AAA");
-    addDoc("p1", "fB", "b.pdf", "BBB");
-    const before = loadProject("p1");
-
-    // updateProject publishes on status change; a stale revision aborts the txn.
+    addDoc("p1", "fa", "a.pdf", "AAA");
     expect(() =>
-      updateProject("p1", { expectedRevision: before.revision + 7, status: "ready_to_send" }),
-    ).toThrow();
-
+      pinClientDocumentsForRelease({
+        projectId: "p1",
+        versionId: "v_noscope",
+        liveDocuments: docRefs("p1", ["a"]),
+        uploadRoot: tempUploads,
+      }),
+    ).toThrow(/scope is required/i);
     expect(listReleaseFiles()).toEqual([]);
-    expect(db.prepare("SELECT COUNT(*) c FROM spec_versions").get().c).toBe(0);
-    expect(loadProject("p1").revision).toBe(before.revision);
-    expect(openPublicationScopeCount()).toBe(0);
   });
 
   it("D. rollback removes files and the attempt directory, and is idempotent", () => {
     seedProject("p1");
-    addDoc("p1", "fA", "a.pdf", "AAA");
-    addDoc("p1", "fB", "b.pdf", "BBB");
+    addDoc("p1", "fa", "a.pdf", "AAA");
+    addDoc("p1", "fb", "b.pdf", "BBB");
     const scope = beginPublicationAssetScope();
     pinClientDocumentsForRelease({
       projectId: "p1",
       versionId: "v_attempt",
-      liveDocuments: [
-        { id: "fA", filename: "a.pdf", url: "/uploads/docs/p1-a.pdf" },
-        { id: "fB", filename: "b.pdf", url: "/uploads/docs/p1-b.pdf" },
-      ],
+      liveDocuments: docRefs("p1", ["a", "b"]),
       uploadRoot: tempUploads,
+      assetScope: scope,
     });
     expect(scope.stagedFileCount).toBe(2);
     expect(listReleaseFiles()).toHaveLength(2);
@@ -201,89 +189,49 @@ describe("T7 — publication asset lifecycle", () => {
     expect(first.failures).toEqual([]);
     expect(listReleaseFiles()).toEqual([]);
     expect(fs.existsSync(path.join(releasesRoot(), "p1", "v_attempt"))).toBe(false);
-    // Idempotent: a second rollback is a no-op, not an error.
     expect(scope.rollback()).toBeNull();
-    // The live source documents are untouched.
     expect(fs.existsSync(path.join(tempUploads, "docs", "p1-a.pdf"))).toBe(true);
   });
 
-  it("D2. commit keeps the files and closes the scope", () => {
+  it("D2. commit keeps the files; a later rollback cannot delete them", () => {
     seedProject("p1");
-    addDoc("p1", "fA", "a.pdf", "AAA");
+    addDoc("p1", "fa", "a.pdf", "AAA");
     const scope = beginPublicationAssetScope();
     pinClientDocumentsForRelease({
       projectId: "p1",
       versionId: "v_kept",
-      liveDocuments: [{ id: "fA", filename: "a.pdf", url: "/uploads/docs/p1-a.pdf" }],
+      liveDocuments: docRefs("p1", ["a"]),
       uploadRoot: tempUploads,
+      assetScope: scope,
     });
     expect(scope.commit()).toEqual({ committed: true, files: 1 });
     expect(listReleaseFiles()).toHaveLength(1);
-    // After commit a rollback must not delete the now-published files.
     expect(scope.rollback()).toBeNull();
     expect(listReleaseFiles()).toHaveLength(1);
-    expect(openPublicationScopeCount()).toBe(0);
   });
 
-  it("C/E. a mid-publication failure keeps earlier releases and drops only the new attempt", () => {
+  it("a journaled file that was never written is not a cleanup failure", () => {
     seedProject("p1");
-    addDoc("p1", "fA", "a.pdf", "AAA");
-    const good = createVersion("p1", "admin", { force: true });
-    const keptFiles = listReleaseFiles();
-    expect(keptFiles).toHaveLength(1);
-
-    // Second attempt: documents are copied, then the publication fails before
-    // the version row is written. The scope is the compensating boundary.
-    addDoc("p1", "fB", "b.pdf", "BBB");
+    addDoc("p1", "fa", "a.pdf", "AAA");
     const scope = beginPublicationAssetScope();
-    const attemptVersionId = "v_failed_attempt";
-    const { documentManifest } = pinClientDocumentsForRelease({
+    pinClientDocumentsForRelease({
       projectId: "p1",
-      versionId: attemptVersionId,
-      liveDocuments: [
-        { id: "fA", filename: "a.pdf", url: "/uploads/docs/p1-a.pdf" },
-        { id: "fB", filename: "b.pdf", url: "/uploads/docs/p1-b.pdf" },
-      ],
+      versionId: "v_ghost",
+      liveDocuments: docRefs("p1", ["a"]),
       uploadRoot: tempUploads,
+      assetScope: scope,
     });
-    expect(documentManifest.length).toBeGreaterThan(0);
-    expect(fs.existsSync(path.join(releasesRoot(), "p1", attemptVersionId))).toBe(true);
-
-    scope.rollback();
-
-    // The failed attempt left nothing; the earlier release survives untouched.
-    expect(fs.existsSync(path.join(releasesRoot(), "p1", attemptVersionId))).toBe(false);
-    expect(listReleaseFiles()).toEqual(keptFiles);
-    expect(fs.existsSync(path.join(releasesRoot(), "p1", good.id))).toBe(true);
-    const versions = db.prepare("SELECT id FROM spec_versions").all().map((r) => r.id);
-    expect(versions).toEqual([good.id]);
-  });
-
-  it("G. a cleanup failure surfaces the original error and reports the remaining path", () => {
-    const scope = beginPublicationAssetScope();
-    const dir = path.join(releasesRoot(), "p9", "v9");
-    fs.mkdirSync(dir, { recursive: true });
-    const missing = path.join(dir, "gone.pdf");
-    const real = path.join(dir, "kept.pdf");
-    fs.writeFileSync(real, "X");
-    // A path outside the release root can never be removed by rollback.
-    const outside = path.join(tempUploads, "outside.pdf");
-    fs.writeFileSync(outside, "OUT");
-
-    expect(scope.stagedPaths()).toEqual([]);
-    // Rollback may only ever act inside the release root.
-    expect(isInsideReleasesRoot(real)).toBe(true);
-    expect(isInsideReleasesRoot(outside)).toBe(false);
-    expect(isInsideReleasesRoot(missing)).toBe(true);
-    expect(isInsideReleasesRoot(releasesRoot())).toBe(false);
-    scope.rollback();
-    // The guard refused the outside file; it is still there.
-    expect(fs.existsSync(outside)).toBe(true);
+    // Simulate the file disappearing before rollback runs.
+    fs.rmSync(path.join(releasesRoot(), "p1", "v_ghost", "a.pdf"), { force: true });
+    const res = scope.rollback();
+    expect(res.failures).toEqual([]);
+    expect(res.removedFiles).toBe(0);
+    expect(fs.existsSync(path.join(releasesRoot(), "p1", "v_ghost"))).toBe(false);
   });
 
   it("H. an existing version directory is never merged or overwritten", () => {
     seedProject("p1");
-    addDoc("p1", "fA", "a.pdf", "AAA");
+    addDoc("p1", "fa", "a.pdf", "AAA");
     const dir = path.join(releasesRoot(), "p1", "v_fixed");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "existing.pdf"), "OLD");
@@ -292,43 +240,22 @@ describe("T7 — publication asset lifecycle", () => {
       pinClientDocumentsForRelease({
         projectId: "p1",
         versionId: "v_fixed",
-        liveDocuments: [{ id: "fA", filename: "a.pdf", url: "/uploads/docs/p1-a.pdf" }],
+        liveDocuments: docRefs("p1", ["a"]),
         uploadRoot: tempUploads,
+        assetScope: beginPublicationAssetScope(),
       }),
     ).toThrow(/already exists/);
 
-    expect(fs.readFileSync(path.join(dir, "existing.pdf"), "utf8")).toBe("OLD");
     expect(fs.readdirSync(dir)).toEqual(["existing.pdf"]);
-  });
-
-  it("I/J. a failed attempt in one project never touches another project or an older version", () => {
-    seedProject("p1");
-    seedProject("p2");
-    addDoc("p1", "fA1", "a.pdf", "A1");
-    addDoc("p2", "fA2", "a.pdf", "A2");
-    const v1 = createVersion("p1", "admin", { force: true });
-    const v2 = createVersion("p2", "admin", { force: true });
-    const baseline = listReleaseFiles();
-    expect(baseline).toHaveLength(2);
-
-    const before = loadProject("p1");
-    expect(() =>
-      updateProject("p1", { expectedRevision: before.revision + 9, status: "ready_to_send" }),
-    ).toThrow();
-
-    expect(listReleaseFiles()).toEqual(baseline);
-    expect(fs.existsSync(path.join(releasesRoot(), "p1", v1.id))).toBe(true);
-    expect(fs.existsSync(path.join(releasesRoot(), "p2", v2.id))).toBe(true);
+    expect(fs.readFileSync(path.join(dir, "existing.pdf"), "utf8")).toBe("OLD");
   });
 
   it("K. containment refuses traversal, absolute and out-of-root paths", () => {
     const root = releasesRoot();
     fs.mkdirSync(path.join(root, "p1", "v1"), { recursive: true });
     expect(isInsideReleasesRoot(path.join(root, "p1", "v1", "ok.pdf"))).toBe(true);
-    // Root itself and a bare project directory are not removable targets.
     expect(isInsideReleasesRoot(root)).toBe(false);
     expect(isInsideReleasesRoot(path.join(root, "p1"))).toBe(false);
-    // Escapes.
     expect(isInsideReleasesRoot(path.join(root, "p1", "v1", "..", "..", "..", "x.pdf"))).toBe(false);
     expect(isInsideReleasesRoot(path.join(tempUploads, "docs", "a.pdf"))).toBe(false);
     expect(isInsideReleasesRoot(path.join(os.tmpdir(), "elsewhere.pdf"))).toBe(false);
@@ -336,69 +263,199 @@ describe("T7 — publication asset lifecycle", () => {
     expect(isInsideReleasesRoot(null)).toBe(false);
   });
 
-  it("L. retrying after a failed attempt produces one clean version", () => {
+  it("O. two attempts for one project never share a version directory", () => {
     seedProject("p1");
-    addDoc("p1", "fA", "a.pdf", "AAA");
+    addDoc("p1", "fa", "a.pdf", "AAA");
+    const a = createVersion("p1", "admin", { force: true });
+    const b = createVersion("p1", "admin", { force: true });
+    expect(a.id).not.toBe(b.id);
+    expect(fs.readdirSync(path.join(releasesRoot(), "p1")).sort()).toEqual([a.id, b.id].sort());
+    for (const v of [a, b]) {
+      const snap = JSON.parse(db.prepare("SELECT snapshot FROM spec_versions WHERE id = ?").get(v.id).snapshot);
+      expect(snap.documentManifest[0].url).toContain(`/uploads/releases/p1/${v.id}/`);
+    }
+  });
+});
+
+describe("T7 — route-level failure after copy", () => {
+  /**
+   * Publishes through the real service entry point with an injected failure and
+   * asserts the full before/after contract.
+   * @param {string} point checkpoint name
+   */
+  function publishExpectingFailure(point, { docs = ["a", "b"] } = {}) {
+    seedProject("p1");
+    seedProject("p2");
+    for (const d of docs) addDoc("p1", `f${d}`, `${d}.pdf`, d.toUpperCase());
+    addDoc("p2", "fother", "other.pdf", "OTHER");
+    // A healthy earlier release for p1 and one for p2.
+    const prev = createVersion("p1", "admin", { force: true });
+    const otherProject = createVersion("p2", "admin", { force: true });
+    const filesBefore = listReleaseFiles();
+    const revBefore = loadProject("p1").revision;
+    const pointerBefore = publishedPointer("p1");
+    const versionsBefore = versionIds();
+
+    setFailurePoint(point);
+    let thrown = null;
+    try {
+      createVersion("p1", "admin", { force: true });
+    } catch (e) {
+      thrown = e;
+    }
+
+    expect(thrown, `expected ${point} to fail the publication`).toBeTruthy();
+    // The original error survives — cleanup must not replace it.
+    expect(thrown.message).toContain(`injected_publication_failure_at_${point}`);
+    expect(thrown.code).toBe("INJECTED_PUBLICATION_FAILURE");
+    // No new version, pointer and revision untouched.
+    expect(versionIds()).toEqual(versionsBefore);
+    expect(publishedPointer("p1")).toBe(pointerBefore);
+    expect(loadProject("p1").revision).toBe(revBefore);
+    // Not one stray file: the attempt directory is gone, everything else intact.
+    expect(listReleaseFiles()).toEqual(filesBefore);
+    expect(fs.existsSync(path.join(releasesRoot(), "p1", prev.id))).toBe(true);
+    expect(fs.existsSync(path.join(releasesRoot(), "p2", otherProject.id))).toBe(true);
+    return { prev, otherProject };
+  }
+
+  it("A-point: fails after the first document copy", () => {
+    publishExpectingFailure("after_first_document_copy");
+  });
+
+  it("B-point: fails after several copies, before the version insert", () => {
+    publishExpectingFailure("after_documents_pinned");
+  });
+
+  it("C-point: fails immediately before INSERT spec_versions", () => {
+    publishExpectingFailure("before_version_insert");
+  });
+
+  it("D-point: fails after INSERT, still inside the transaction", () => {
+    // createVersion has no transaction of its own — production always wraps it
+    // (mutateWithRevision / backfill tx), so the post-INSERT case must be driven
+    // through a transactional entry point for the DB rollback to apply.
+    // A neighbouring project with a healthy release must stay untouched.
+    seedProject("pkeep");
+    addDoc("pkeep", "fkeep", "a.pdf", "KEEP");
+    const kept = createVersion("pkeep", "admin", { force: true });
+    const filesBefore = listReleaseFiles();
+    const versionsBefore = versionIds();
+
+    // Fresh project with a client token and no release → backfill publishes it.
+    seedProject("pnew");
+    addDoc("pnew", "fnew", "a.pdf", "NEW");
+
+    setFailurePoint("after_version_insert");
+    const report = runPublishedReleaseBackfill({ projectIds: ["pnew"], dryRun: false });
+    expect(report.reports[0].ok).toBe(false);
+    expect(String(report.reports[0].error)).toContain("injected_publication_failure");
+
+    // The inserted row was rolled back with the transaction, assets removed.
+    expect(versionIds()).toEqual(versionsBefore);
+    expect(publishedPointer("pnew")).toBeNull();
+    expect(listReleaseFiles()).toEqual(filesBefore);
+    expect(fs.existsSync(path.join(releasesRoot(), "pkeep", kept.id))).toBe(true);
+  });
+
+  it("copy failure on the very first document leaves nothing behind", () => {
+    publishExpectingFailure("before_first_document_copy");
+  });
+
+  it("copy failure on a later document removes the already copied one", () => {
+    seedProject("p1");
+    addDoc("p1", "fa", "a.pdf", "AAA");
+    addDoc("p1", "fb", "b.pdf", "BBB");
+    setFailurePoint("before_next_document_copy");
+    expect(() => createVersion("p1", "admin", { force: true })).toThrow(/injected_publication_failure/);
+    // The first file was copied and journaled — it must be gone too.
+    expect(listReleaseFiles()).toEqual([]);
+    expect(versionIds()).toEqual([]);
+    expect(publishedPointer("p1")).toBeNull();
+  });
+
+  it("the publish-on-status route path owns a scope and stays clean on abort", () => {
+    seedProject("p1");
+    addDoc("p1", "fa", "a.pdf", "AAA");
     const before = loadProject("p1");
+    // Aborting before any copy must leave the project and disk untouched.
     expect(() =>
-      updateProject("p1", { expectedRevision: before.revision + 3, status: "ready_to_send" }),
+      updateProject("p1", { expectedRevision: before.revision + 5, status: "ready_to_send" }),
     ).toThrow();
+    expect(listReleaseFiles()).toEqual([]);
+    expect(versionIds()).toEqual([]);
+    expect(loadProject("p1").revision).toBe(before.revision);
+    expect(loadProject("p1").status).toBe("active");
+
+    // updateProject creates its own journal and hands it to the publish call.
+    const routes = fs.readFileSync(
+      path.join(process.cwd(), "backend/src/routes/projects.js"), "utf8",
+    );
+    expect(routes).toMatch(/publishReleaseIfNeeded\(id, merged, safePatch\.status, assets\)/);
+    expect(routes).toMatch(/createVersionRecord\(projectId, project, \{ force: false, assetScope \}\)/);
+  });
+
+  it("a retry after a failed attempt produces exactly one clean version", () => {
+    seedProject("p1");
+    addDoc("p1", "fa", "a.pdf", "AAA");
+    setFailurePoint("after_documents_pinned");
+    expect(() => createVersion("p1", "admin", { force: true })).toThrow();
     expect(listReleaseFiles()).toEqual([]);
 
     const v = createVersion("p1", "admin", { force: true });
     const files = listReleaseFiles();
     expect(files).toHaveLength(1);
     expect(files[0].startsWith(`p1/${v.id}/`)).toBe(true);
-    const snap = JSON.parse(db.prepare("SELECT snapshot FROM spec_versions WHERE id = ?").get(v.id).snapshot);
-    expect(snap.documentManifest).toHaveLength(1);
-    expect(snap.documentManifest[0].url).toContain(`/uploads/releases/p1/${v.id}/`);
+    expect(versionIds()).toEqual([v.id]);
+  });
+});
+
+describe("T7 — backfill asset lifecycle", () => {
+  function seedBackfillCandidate(pid) {
+    // Client token + no published release → BACKFILL_ACTION.CREATE_V1.
+    db.prepare(`
+      INSERT INTO projects (id, name, client, city, client_token, status, manual_params, rooms, currency, vat, version, comment, stellage_configs, revision)
+      VALUES (?, 'P', '', '', ?, 'active', '{}', '[]', '₽', 1, 0, '', '[]', 1)
+    `).run(pid, `tok-${pid}`);
+    saveItems(pid, [clientItem(`it_${pid}`)]);
+    addDoc(pid, `f${pid}`, "a.pdf", "AAA");
+  }
+
+  it("successful backfill creates the version and keeps its assets", () => {
+    seedBackfillCandidate("pbf");
+    const report = runPublishedReleaseBackfill({ projectIds: ["pbf"], dryRun: false });
+    expect(report.reports[0].ok).toBe(true);
+    const vid = publishedPointer("pbf");
+    expect(vid).toBeTruthy();
+    const files = listReleaseFiles();
+    expect(files).toHaveLength(1);
+    expect(files[0].startsWith(`pbf/${vid}/`)).toBe(true);
   });
 
-  it("N. a published release round-trips through a reopened DB with its assets", () => {
-    seedProject("p1");
-    addDoc("p1", "fA", "a.pdf", "AAA");
-    const v = createVersion("p1", "admin", { force: true });
-    const reloaded = loadProject("p1");
-    expect(reloaded.manualParams.publishedRelease.versionId).toBe(v.id);
-    const snap = JSON.parse(db.prepare("SELECT snapshot FROM spec_versions WHERE id = ?").get(v.id).snapshot);
-    const abs = path.join(tempUploads, snap.documentManifest[0].url.replace(/^\/uploads\//, ""));
-    expect(fs.existsSync(abs)).toBe(true);
-    expect(fs.readFileSync(abs, "utf8")).toBe("AAA");
+  it("backfill failure after copy removes the attempt assets and publishes nothing", () => {
+    seedBackfillCandidate("pbf");
+    setFailurePoint("after_documents_pinned");
+    const report = runPublishedReleaseBackfill({ projectIds: ["pbf"], dryRun: false });
+    expect(report.reports[0].ok).toBe(false);
+    expect(report.reports[0].error).toContain("injected_publication_failure");
+    expect(publishedPointer("pbf")).toBeNull();
+    expect(versionIds()).toEqual([]);
+    expect(listReleaseFiles()).toEqual([]);
   });
 
-  it("O. two attempts for one project never share a version directory", () => {
-    seedProject("p1");
-    addDoc("p1", "fA", "a.pdf", "AAA");
-    const a = createVersion("p1", "admin", { force: true });
-    const b = createVersion("p1", "admin", { force: true });
-    expect(a.id).not.toBe(b.id);
-    const dirs = fs.readdirSync(path.join(releasesRoot(), "p1")).sort();
-    expect(dirs).toEqual([a.id, b.id].sort());
-    // Each manifest points only at its own directory.
-    for (const v of [a, b]) {
-      const snap = JSON.parse(db.prepare("SELECT snapshot FROM spec_versions WHERE id = ?").get(v.id).snapshot);
-      expect(snap.documentManifest).toHaveLength(1);
-      expect(snap.documentManifest[0].url).toContain(`/uploads/releases/p1/${v.id}/`);
-    }
-  });
+  it("backfill failure does not disturb an existing release of another project", () => {
+    seedProject("pkeep");
+    addDoc("pkeep", "fkeep", "a.pdf", "KEEP");
+    const kept = createVersion("pkeep", "admin", { force: true });
+    const keptFiles = listReleaseFiles();
 
-  it("R. production-shape leftovers are left untouched by a new attempt", () => {
-    // Mirrors the production categories: a referenced version dir and an
-    // orphan dir whose spec_version no longer exists.
-    seedProject("p1");
-    addDoc("p1", "fA", "a.pdf", "AAA");
-    const v = createVersion("p1", "admin", { force: true });
-    const orphanDir = path.join(releasesRoot(), "p1", "v_orphan_leftover");
-    fs.mkdirSync(orphanDir, { recursive: true });
-    fs.writeFileSync(path.join(orphanDir, "leftover.pdf"), "LEFT");
+    seedBackfillCandidate("pbf");
+    setFailurePoint("before_version_insert");
+    const report = runPublishedReleaseBackfill({ projectIds: ["pbf"], dryRun: false });
+    expect(report.reports[0].ok).toBe(false);
 
-    const before = loadProject("p1");
-    expect(() =>
-      updateProject("p1", { expectedRevision: before.revision + 4, status: "ready_to_send" }),
-    ).toThrow();
-
-    // Neither the good release nor the pre-existing leftover is removed.
-    expect(fs.existsSync(path.join(releasesRoot(), "p1", v.id))).toBe(true);
-    expect(fs.readFileSync(path.join(orphanDir, "leftover.pdf"), "utf8")).toBe("LEFT");
+    expect(listReleaseFiles()).toEqual(keptFiles);
+    expect(fs.existsSync(path.join(releasesRoot(), "pkeep", kept.id))).toBe(true);
+    expect(publishedPointer("pkeep")).toBe(kept.id);
   });
 });

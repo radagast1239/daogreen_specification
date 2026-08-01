@@ -12,6 +12,7 @@ import {
   parsePublishedRelease,
 } from "../../../shared/projectPublishedRelease.js";
 import { createVersion } from "../routes/projects.js";
+import { beginPublicationAssetScope } from "./publicationAssetStage.js";
 
 function loadVersionRows(projectId) {
   return db
@@ -150,6 +151,10 @@ export function runPublishedReleaseBackfill({
       continue;
     }
 
+    // CREATE_V1 publishes a real release, so this transaction can copy files.
+    // The post-copy guards below (token/status/items/snapshot) throw inside the
+    // transaction, which is exactly the case the journal has to compensate.
+    const assetScope = beginPublicationAssetScope();
     try {
       const tx = db.transaction((pid) => {
         const snapBefore = loadVersionRows(pid);
@@ -173,7 +178,7 @@ export function runPublishedReleaseBackfill({
           };
           persistPublishedReleaseOnly(pid, publishedRelease);
         } else if (action === BACKFILL_ACTION.CREATE_V1) {
-          const version = createVersion(pid, createdBy, { force: true });
+          const version = createVersion(pid, createdBy, { force: true, assetScope });
           if (!version?.id) throw new Error("create_version_failed");
           versionId = version.id;
         } else if (action === BACKFILL_ACTION.NO_CLIENT_TOKEN) {
@@ -199,6 +204,7 @@ export function runPublishedReleaseBackfill({
       });
 
       const applied = tx(projectId);
+      assetScope.commit();
       const after = assessAfter(projectId);
       reports.push({
         ...before,
@@ -209,6 +215,8 @@ export function runPublishedReleaseBackfill({
       });
       if (!after.publishedReleaseValid) hadError = true;
     } catch (e) {
+      // The DB rolled back; drop only the files this attempt created.
+      assetScope.rollback();
       hadError = true;
       reports.push({
         ...before,
