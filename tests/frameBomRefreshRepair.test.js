@@ -3,6 +3,7 @@ import {
   applyFrameBomRefreshRepair,
   applyFrameBomLegacyDedupeRepair,
   applyResidualFrameBomTwinRepair,
+  buildFrameBomProjectMerge,
   deleteProjectItemsByIds,
   executeFrameBomRefreshFromDrawing,
 } from "../src/frameConstructor/frameBomAddToProject.js";
@@ -105,6 +106,46 @@ describe("applyFrameBomRefreshRepair", () => {
     expect(loadProject).toHaveBeenCalledWith("p1");
     expect(outcome.plan.removeItemIds.length).toBeGreaterThan(0);
     expect(outcome.summary.removedCount).toBeGreaterThan(0);
+  });
+
+  it("sends the rack-scaled draft and stays in parity with the Add BOM path", async () => {
+    const scaledProject = {
+      ...project,
+      stellageConfigs: [
+        { id: "st_mrdwu5kzthoor", moduleId: "mod_protochka", name: "Стеллаж 1", count: 3 },
+      ],
+    };
+    const refreshFrameBom = vi.fn().mockResolvedValue({
+      id: "p1",
+      revision: 1,
+      items: [],
+      plan: { removeItemIds: [], blocked: false },
+      summary: { removedCount: 0, addedCount: 1 },
+    });
+
+    await applyFrameBomRefreshRepair({
+      project: scaledProject,
+      purchaseDraft,
+      drawingContext,
+      materials,
+      refreshFrameBom,
+    });
+
+    // Backend stores body.purchaseDraft qty as-is — it must already be the total.
+    const body = refreshFrameBom.mock.calls[0][1];
+    expect(body.purchaseDraft[0].qty).toBe(936);
+
+    // "Обновить BOM" must persist the same qty as "Добавить BOM".
+    const { mergeResult } = buildFrameBomProjectMerge(
+      scaledProject,
+      purchaseDraft,
+      drawingContext,
+      materials,
+    );
+    const addBomItem = mergeResult.items.find(
+      (it) => (it.source || it.sourceType) === "frame_bom" && it.materialId === "m073",
+    );
+    expect(body.purchaseDraft[0].qty).toBe(addBomItem.qty);
   });
 
   it("requires refreshFrameBom API", async () => {

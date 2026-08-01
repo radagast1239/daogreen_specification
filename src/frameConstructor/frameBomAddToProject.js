@@ -440,7 +440,9 @@ export async function applyFrameBomRefreshRepair({
     stellageId: mergeOpts.stellageId,
     drawingId: mergeOpts.drawingId,
     rackLabel: mergeOpts.rackLabel,
-    purchaseDraft,
+    // Backend never scales by rack count — send the same draft the plan above was
+    // built from, otherwise the preview shows totals and the DB gets per-rack qty.
+    purchaseDraft: scaledDraft,
     mode: "full",
   });
 
