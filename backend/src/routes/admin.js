@@ -50,6 +50,9 @@ import {
   createVerifiedDownloadBackup,
   safeUnlink,
 } from "../sqliteBackup.js";
+import {
+  validateSettingsPatch,
+} from "../services/settingsSchema.js";
 
 const uploadDir = resolveUploadRoot();
 if (uploadDir) fs.mkdirSync(uploadDir, { recursive: true });
@@ -480,12 +483,30 @@ router.delete("/uploads", (req, res) => {
 });
 
 router.patch("/settings", (req, res) => {
-  const upsert = db.prepare(
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  );
-  for (const [key, value] of Object.entries(req.body)) {
-    upsert.run(key, typeof value === "string" ? value : JSON.stringify(value ?? ""));
+  const validation = validateSettingsPatch(req.body);
+  if (!validation.ok) {
+    return res.status(422).json({
+      error: "Invalid or forbidden settings keys",
+      code: "INVALID_SETTINGS_KEYS",
+      forbiddenKeys: validation.forbiddenKeys,
+      invalidKeys: validation.invalidKeys,
+    });
   }
+
+  try {
+    db.transaction(() => {
+      const upsert = db.prepare(
+        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      );
+      for (const [key, value] of validation.values) {
+        upsert.run(key, value);
+      }
+    })();
+  } catch (e) {
+    console.error("[settings] PATCH failed:", e?.message || e);
+    return res.status(500).json({ error: "Settings update failed", code: "SETTINGS_UPDATE_FAILED" });
+  }
+
   const rows = db.prepare("SELECT key, value FROM settings").all();
   const obj = Object.fromEntries(rows.map((r) => [r.key, r.value]));
   res.json({
