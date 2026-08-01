@@ -152,6 +152,87 @@ function parseBool(val, def = true) {
   return def;
 }
 
+/** Fields an admin may change through the ordinary PATCH /:id endpoint.
+ *  Everything else — including pdf_url, pdf_filename, file_id, project_id,
+ *  timestamps, version, ids — is server-owned and rejected. */
+const EDITABLE_PATCH_FIELDS = new Set(["title", "is_client_visible", "isClientVisible"]);
+
+/** Server-owned / internal frame_drawing columns used for clear error messages only. */
+const SERVER_OWNED_DRAWING_FIELDS = [
+  "id",
+  "project_id",
+  "module_id",
+  "stellage_id",
+  "module_rack_key",
+  "preset_id",
+  "source_type",
+  "rack_type",
+  "frame_config_json",
+  "pdf_url",
+  "pdf_filename",
+  "file_id",
+  "version",
+  "created_at",
+  "updated_at",
+  // camelCase aliases that may leak from a full drawing object
+  "projectId",
+  "moduleId",
+  "stellageId",
+  "moduleRackKey",
+  "presetId",
+  "sourceType",
+  "rackType",
+  "frameConfigJson",
+  "pdfUrl",
+  "pdfFilename",
+  "fileId",
+  "isClientVisible",
+  "createdAt",
+  "updatedAt",
+  "downloadUrl",
+];
+
+const MAX_DRAWING_TITLE_LENGTH = 500;
+
+function normalizePatchTitle(raw) {
+  if (raw === undefined || raw === null) return undefined;
+  return String(raw).trim().slice(0, MAX_DRAWING_TITLE_LENGTH);
+}
+
+function extractPatchDrawingBody(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return {
+      ok: false,
+      forbiddenKeys: ["__invalid_body_type"],
+      code: "INVALID_BODY",
+    };
+  }
+
+  const forbiddenKeys = [];
+  for (const key of Object.keys(body)) {
+    if (!EDITABLE_PATCH_FIELDS.has(key)) {
+      forbiddenKeys.push(key);
+    }
+  }
+
+  if (forbiddenKeys.length) {
+    return {
+      ok: false,
+      forbiddenKeys,
+      code: "FORBIDDEN_DRAWING_FIELDS",
+    };
+  }
+
+  const title = normalizePatchTitle(body.title);
+  const visible = body.is_client_visible ?? body.isClientVisible;
+
+  return {
+    ok: true,
+    title,
+    visible,
+  };
+}
+
 function parseFrameConfig(raw) {
   if (!raw) return {};
   if (typeof raw === "object") return raw;
@@ -477,31 +558,48 @@ router.patch("/:id", (req, res) => {
   const row = db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(req.params.id);
   if (!row) return res.status(404).json({ error: "Not found" });
 
-  const title = req.body.title ?? row.title;
-  const pdfFilename = req.body.pdf_filename ?? req.body.pdfFilename ?? row.pdf_filename;
-  const pdfUrl = req.body.pdf_url ?? req.body.pdfUrl ?? row.pdf_url;
-  const isClientVisibleRaw = req.body.is_client_visible ?? req.body.isClientVisible;
-  const visible = isClientVisibleRaw === undefined
+  const extracted = extractPatchDrawingBody(req.body);
+  if (!extracted.ok) {
+    return res.status(422).json({
+      error: "Forbidden or unknown fields in drawing patch",
+      code: extracted.code,
+      forbiddenKeys: extracted.forbiddenKeys,
+    });
+  }
+
+  const title = extracted.title !== undefined ? extracted.title : row.title;
+  const visible = extracted.visible === undefined
     ? !!row.is_client_visible
-    : parseBool(isClientVisibleRaw, true);
+    : parseBool(extracted.visible, true);
 
-  const fileId = row.project_id
-    ? syncDrawingFilesVisibility({
-        projectId: row.project_id,
-        isClientVisible: visible,
-        fileId: row.file_id || null,
-        pdfFilename,
-        pdfUrl,
-        title,
-      })
-    : null;
+  // pdf_url and pdf_filename are server-owned; keep the existing values.
+  const pdfUrl = row.pdf_url;
+  const pdfFilename = row.pdf_filename;
 
-  db.prepare(`
-    UPDATE frame_drawings SET
-      title = ?, pdf_filename = ?, pdf_url = ?, file_id = ?,
-      is_client_visible = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).run(title, pdfFilename, pdfUrl, fileId, visible ? 1 : 0, req.params.id);
+  try {
+    db.transaction(() => {
+      const fileId = row.project_id
+        ? syncDrawingFilesVisibility({
+            projectId: row.project_id,
+            isClientVisible: visible,
+            fileId: row.file_id || null,
+            pdfFilename,
+            pdfUrl,
+            title,
+          })
+        : null;
+
+      db.prepare(`
+        UPDATE frame_drawings SET
+          title = ?, pdf_filename = ?, pdf_url = ?, file_id = ?,
+          is_client_visible = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(title, pdfFilename, pdfUrl, fileId, visible ? 1 : 0, req.params.id);
+    })();
+  } catch (e) {
+    console.error("[frame-drawings] PATCH failed:", e?.message || e);
+    return res.status(500).json({ error: "Update failed", code: "PATCH_FAILED" });
+  }
 
   res.json(rowToDrawing(db.prepare("SELECT * FROM frame_drawings WHERE id = ?").get(req.params.id)));
 });
