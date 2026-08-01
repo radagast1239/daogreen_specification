@@ -75,7 +75,7 @@ describe("SettingsPage cleanup 1e", () => {
     expect(settingsPage).toContain("Срок действия клиентской ссылки");
     expect(settingsPage).toContain("Применяется к новым клиентским ссылкам");
     expect(settingsPage).toContain("api.saveSettings");
-    expect(settingsPage).toContain("clientSectionsToSettings");
+    expect(settingsPage).toContain("buildLinksSettingsPayload(form)");
     expect(settingsPage).toContain('success("Сохранено")');
   });
 

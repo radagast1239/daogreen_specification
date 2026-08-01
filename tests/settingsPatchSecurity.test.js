@@ -302,23 +302,15 @@ describe("T6B settings PATCH schema", () => {
 
   it("accepts current SettingsPage links-tab payload", async () => {
     const app = adminApp();
+    // Links-tab owns only clientLinkTtlDays (explicit allowlist; never ...form).
     const res = await httpRequest(app, "PATCH", "/api/admin/settings", {
       headers: { "X-Admin-Key": ADMIN_KEY },
       body: {
-        companyName: "Daogreen",
-        contactPhone: "+7",
-        contactEmail: "a@b.c",
-        contactTelegram: "@tg",
-        brandColor: "#116355",
-        materialCategories: JSON.stringify(["Каркас", "Полив"]),
         clientLinkTtlDays: "30",
-        logoUrl: "",
-        clientSectionsJson: JSON.stringify([{ id: "purchase", label: "Закупка", hidden: false }]),
       },
     });
     expect(res.status).toBe(200);
     expect(getSetting("clientLinkTtlDays").value).toBe("30");
-    expect(JSON.parse(getSetting("materialCategories").value)).toEqual(["Каркас", "Полив"]);
   });
 
   it("accepts current PublishRulesTab payload", async () => {

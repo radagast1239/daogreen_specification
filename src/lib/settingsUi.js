@@ -50,3 +50,18 @@ export function previewNames(list, limit = 4) {
   const names = (list || []).map((x) => (typeof x === "string" ? x : x?.name || x?.label || "")).filter(Boolean);
   return names.slice(0, limit);
 }
+
+/**
+ * Explicit PATCH payload for SettingsPage «Ссылки» tab.
+ *
+ * The links tab owns a single control (`clientLinkTtlDays`). Never spread the
+ * full GET /settings object — it carries legacy read-only and other-tab keys.
+ */
+export const LINKS_TAB_SETTINGS_KEYS = Object.freeze(["clientLinkTtlDays"]);
+
+export function buildLinksSettingsPayload(form = {}) {
+  const raw = form?.clientLinkTtlDays;
+  const clientLinkTtlDays =
+    raw === undefined || raw === null || String(raw).trim() === "" ? "0" : String(raw);
+  return { clientLinkTtlDays };
+}

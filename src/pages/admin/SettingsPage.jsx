@@ -8,13 +8,13 @@ import { TechDetails } from "../../components/modulesUi.jsx";
 import { useToast } from "../../components/Toast.jsx";
 import {
   resolveClientSections,
-  clientSectionsToSettings,
   applyClientSectionsFromSettings,
 } from "../../lib/clientSectionsConfig.js";
 import { resolveFarmSections } from "../../lib/farmSectionsConfig.js";
 import {
   SETTINGS_TABS,
   adminKeyFingerprint,
+  buildLinksSettingsPayload,
   filterExtraAdminUsers,
   formatAdminKeyCreatedAt,
   isPrimaryAdminUser,
@@ -89,14 +89,9 @@ export default function SettingsPage() {
   const saveLinkSettings = async () => {
     setSaving(true);
     try {
-      const payload = {
-        ...form,
-        materialCategories: JSON.stringify(categories),
-        ...clientSectionsToSettings(clientSections),
-      };
+      const payload = buildLinksSettingsPayload(form);
       await api.saveSettings(payload);
-      setForm(payload);
-      applyClientSectionsFromSettings(payload);
+      setForm((prev) => ({ ...prev, ...payload }));
       success("Сохранено");
     } finally {
       setSaving(false);
