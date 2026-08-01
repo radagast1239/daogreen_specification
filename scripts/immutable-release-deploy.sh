@@ -133,9 +133,10 @@ test -f "$REL/dist/index.html"
 test -d "$REL/dist/assets"
 
 printf '%s' "$COMMIT" > "$REL/REVISION"
-ln -sfn "$SHARED/env/production.env" "$REL/backend/.env"
-ln -sfn "$SHARED/data" "$REL/backend/data"
-# uploads stay under shared via app config / previous layout; do not invent new paths
+# Shared runtime layout (.env / data symlinks, service-writable uploads dir).
+# Must run for both source modes: git archive ships backend/data and
+# backend/uploads, which rsync mode used to exclude.
+release_link_shared_paths "$REL" "$SHARED"
 
 chmod 755 "$REL"
 chmod -R a+rX "$REL"

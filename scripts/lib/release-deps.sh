@@ -205,6 +205,64 @@ release_assert_tree_matches_commit() {
   return "$rc"
 }
 
+release_assert_shared_paths() {
+  # Args: release_dir shared_root
+  local release_dir="$1"
+  local shared_root="$2"
+  [[ -L "$release_dir/backend/.env" ]] || {
+    echo "SHARED_FAIL backend/.env is not a symlink" >&2
+    return 1
+  }
+  [[ -L "$release_dir/backend/data" ]] || {
+    echo "SHARED_FAIL backend/data is not a symlink" >&2
+    return 1
+  }
+  [[ "$(readlink "$release_dir/backend/data")" == "$shared_root/data" ]] || {
+    echo "SHARED_FAIL backend/data -> $(readlink "$release_dir/backend/data") != $shared_root/data" >&2
+    return 1
+  }
+  # `ln -sfn` into an existing directory nests the link instead of replacing it.
+  [[ ! -e "$release_dir/backend/data/data" ]] || {
+    echo "SHARED_FAIL nested backend/data/data — shared link was not replaced" >&2
+    return 1
+  }
+  # UPLOAD_ROOT points at $shared_root/uploads; backend/uploads stays a real,
+  # service-writable directory (the app mkdirs uploads/public at startup).
+  [[ -d "$release_dir/backend/uploads" && ! -L "$release_dir/backend/uploads" ]] || {
+    echo "SHARED_FAIL backend/uploads must be a real directory" >&2
+    return 1
+  }
+  echo "SHARED_PATHS_OK"
+}
+
+release_link_shared_paths() {
+  # Args: release_dir shared_root
+  # Runtime state lives in $SHARED, never in the commit. rsync mode excluded
+  # backend/data and backend/uploads; a `git archive` tree still contains them
+  # (backend/data/materialTranslations.en.json, backend/uploads/.gitkeep), so
+  # they must be reduced to the runtime layout before the service starts.
+  local release_dir="$1"
+  local shared_root="$2"
+  local owner=""
+
+  rm -rf "$release_dir/backend/.env" "$release_dir/backend/data"
+  ln -sfn "$shared_root/env/production.env" "$release_dir/backend/.env"
+  ln -sfn "$shared_root/data" "$release_dir/backend/data"
+
+  # Archive-created uploads/ is owned by the deploy user (root); the service
+  # runs as the shared/uploads owner and needs to write into it.
+  mkdir -p "$release_dir/backend/uploads"
+  if [[ -d "$shared_root/uploads" ]]; then
+    owner="$(stat -c '%U:%G' "$shared_root/uploads" 2>/dev/null || true)"
+  fi
+  if [[ -n "$owner" ]]; then
+    chown "$owner" "$release_dir/backend/uploads" 2>/dev/null \
+      || echo "SHARED_WARN could not chown backend/uploads to $owner" >&2
+  fi
+
+  release_assert_shared_paths "$release_dir" "$shared_root"
+}
+
 release_pre_switch_gates() {
   local release_dir="$1"
   local expected_revision="$2"

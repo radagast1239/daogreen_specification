@@ -2,7 +2,7 @@
  * Tests for scripts/lib/release-deps.sh deploy dependency gates.
  * Runs via Git Bash on Windows / bash on Linux.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -33,6 +33,10 @@ function findBash() {
 }
 
 const BASH = findBash();
+
+// Every case here spawns bash/git subprocesses; under a full-suite parallel run
+// they exceed the 5s default and flake.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 function runBash(script, env = {}) {
   if (!BASH) throw new Error("bash not available");
@@ -80,6 +84,27 @@ function makeCommitAndRelease(tmp) {
     git commit -qm init
     SHA=$(git rev-parse HEAD)
     git archive --format=tar "$SHA" | tar -x -C "$REL"
+  `;
+}
+
+/**
+ * Bash prelude: $REL is a release tree as `git archive` produces it — backend/data
+ * and backend/uploads are REAL directories carrying tracked files — plus a $SHARED
+ * root laid out like production. Echoes SYMLINK_UNSUPPORTED where links are denied.
+ */
+function makeArchiveLikeRelease(tmp) {
+  return `
+    set -e
+    REL="${tmp}/rel"
+    SHARED="${tmp}/shared"
+    mkdir -p "$REL/backend/src" "$REL/backend/data" "$REL/backend/uploads"
+    mkdir -p "$SHARED/data" "$SHARED/uploads" "$SHARED/env"
+    printf '{}\\n' > "$REL/backend/data/materialTranslations.en.json"
+    printf '' > "$REL/backend/uploads/.gitkeep"
+    printf 'PORT=3002\\n' > "$SHARED/env/production.env"
+    printf 'db\\n' > "$SHARED/data/daogreen.db"
+    ln -sfn "$SHARED/data" "${tmp}/probe-link" 2>/dev/null || true
+    if [[ ! -L "${tmp}/probe-link" ]]; then echo SYMLINK_UNSUPPORTED; exit 0; fi
   `;
 }
 
@@ -222,6 +247,61 @@ describe("immutable release dependency helpers", () => {
     `, { ALLOW_UNVERIFIED_RELEASE: "1" });
     expect(allowed.stdout).toMatch(/PROVENANCE_UNVERIFIED/);
     expect(allowed.stdout).not.toMatch(/GATE_FAIL provenance unverified/);
+  });
+
+  it("shared paths: git-archive tree is reduced to the runtime layout", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dg-rel-shared-")).replace(/\\/g, "/");
+    const r = runBash(`${makeArchiveLikeRelease(tmp)}
+      . "${LIB}"
+      release_link_shared_paths "$REL" "$SHARED"
+      echo "data_is_link:$([[ -L "$REL/backend/data" ]] && echo yes || echo no)"
+      echo "data_target:$(readlink "$REL/backend/data")"
+      echo "nested:$([[ -e "$REL/backend/data/data" ]] && echo yes || echo no)"
+      echo "env_is_link:$([[ -L "$REL/backend/.env" ]] && echo yes || echo no)"
+      echo "uploads_is_dir:$([[ -d "$REL/backend/uploads" && ! -L "$REL/backend/uploads" ]] && echo yes || echo no)"
+      echo "db_visible:$([[ -f "$REL/backend/data/daogreen.db" ]] && echo yes || echo no)"
+    `);
+    if (r.stdout.includes("SYMLINK_UNSUPPORTED")) {
+      const lib = fs.readFileSync(path.join(ROOT, "scripts", "lib", "release-deps.sh"), "utf8");
+      expect(lib).toMatch(/rm -rf "\$release_dir\/backend\/\.env" "\$release_dir\/backend\/data"/);
+      expect(lib).toMatch(/mkdir -p "\$release_dir\/backend\/uploads"/);
+      return;
+    }
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/SHARED_PATHS_OK/);
+    expect(r.stdout).toMatch(/data_is_link:yes/);
+    expect(r.stdout).toMatch(/data_target:.*\/shared\/data/);
+    // The production failure: ln -sfn nested the link inside the archived dir.
+    expect(r.stdout).toMatch(/nested:no/);
+    expect(r.stdout).toMatch(/env_is_link:yes/);
+    // uploads must stay a real dir — UPLOAD_ROOT already points at shared/uploads.
+    expect(r.stdout).toMatch(/uploads_is_dir:yes/);
+    // The DB under shared/ must be reachable through the link.
+    expect(r.stdout).toMatch(/db_visible:yes/);
+  });
+
+  it("shared paths: guard rejects a nested backend/data/data link", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dg-rel-nested-")).replace(/\\/g, "/");
+    const r = runBash(`${makeArchiveLikeRelease(tmp)}
+      # Reproduce the old code path verbatim: ln -sfn onto an existing directory.
+      ln -sfn "$SHARED/data" "$REL/backend/data"
+      echo "nested_created:$([[ -L "$REL/backend/data/data" ]] && echo yes || echo no)"
+      ln -sfn "$SHARED/env/production.env" "$REL/backend/.env"
+      . "${LIB}"
+      set +e
+      release_assert_shared_paths "$REL" "$SHARED"; echo status:$?
+    `);
+    if (r.stdout.includes("SYMLINK_UNSUPPORTED")) return;
+    expect(r.stdout).toMatch(/nested_created:yes/);
+    expect(r.stdout + r.stderr).toMatch(/SHARED_FAIL/);
+    expect(r.stdout).toMatch(/status:1/);
+  });
+
+  it("deploy script links shared paths instead of raw ln -sfn", () => {
+    const script = fs.readFileSync(path.join(ROOT, "scripts", "immutable-release-deploy.sh"), "utf8");
+    expect(script).toMatch(/release_link_shared_paths "\$REL" "\$SHARED"/);
+    expect(script).not.toMatch(/ln -sfn "\$SHARED\/data" "\$REL\/backend\/data"/);
+    expect(script).not.toMatch(/ln -sfn "\$SHARED\/env\/production\.env" "\$REL\/backend\/\.env"/);
   });
 
   it("deploy script builds the release from git archive when GIT_SRC is set", () => {
