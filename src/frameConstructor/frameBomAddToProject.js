@@ -16,8 +16,13 @@ import {
   FRAME_DRAWING_EDIT_SCHEME_LABEL,
   FRAME_DRAWING_OPEN_SCHEME_LABEL,
 } from "../../shared/frameDrawingActionsModel.js";
-import { parseFrameBomDecimal, roundFrameBomQty } from "../../shared/frameBomUnits.js";
-import { normalizePipeCuts, totalPipeCutMeters } from "../../shared/profilePipeCuts.js";
+import {
+  deriveFrameBomPipeCutMetres,
+  normalizeFrameBomDraftUnits,
+  parseFrameBomDecimal,
+  roundFrameBomQty,
+} from "../../shared/frameBomUnits.js";
+import { scalePipeCuts } from "../../shared/profilePipeCuts.js";
 
 export {
   FRAME_BOM_REFRESH_BUTTON_LABEL,
@@ -205,23 +210,16 @@ export function resolveFrameBomRackCount(project, drawingContext = {}) {
 
 export function scaleFrameBomDraftForRackCount(purchaseDraft = [], rackCount = 1) {
   const count = Math.max(1, parseFrameBomDecimal(rackCount, 1));
-  return (purchaseDraft || []).map((line) => {
-    const perRackCuts = normalizePipeCuts(line.pipeCuts);
-    const isTube = line.key === "profile_tube_20x20" || line.materialId === "m036";
-    // Pipe cuts are the authoritative mm source. This prevents a formatted metre
-    // value from being reinterpreted as a piece count before rack scaling.
-    const perRackQty = isTube && perRackCuts.length
-      ? totalPipeCutMeters(perRackCuts)
-      : parseFrameBomDecimal(line.qty, 0);
+  const normalizedDraft = normalizeFrameBomDraftUnits(purchaseDraft);
+  return normalizedDraft.items.map((line, index) => {
+    const originalCuts = purchaseDraft?.[index]?.pipeCuts;
+    // Cut list is physical (mm × pieces). Always scale valid cuts by rackCount.
+    // Commercial qty still comes only from unit-based normalization above.
+    const cutsOk = deriveFrameBomPipeCutMetres(originalCuts).ok;
     return {
       ...line,
-      qty: roundFrameBomQty(perRackQty * count),
-      pipeCuts: perRackCuts.length
-        ? perRackCuts.map((cut) => ({
-            ...cut,
-            qty: roundFrameBomQty(parseFrameBomDecimal(cut.qty, 0) * count),
-          }))
-        : line.pipeCuts,
+      qty: roundFrameBomQty(line.qty * count),
+      pipeCuts: cutsOk ? scalePipeCuts(originalCuts, count) : originalCuts,
     };
   });
 }

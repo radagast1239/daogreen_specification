@@ -21,11 +21,12 @@ import {
 } from "../../../shared/frameBomProjectItems.js";
 
 export class FrameBomRefreshError extends Error {
-  constructor(code, message, status = 409) {
+  constructor(code, message, status = 409, details = null) {
     super(message);
     this.name = "FrameBomRefreshError";
     this.code = code;
     this.status = status;
+    if (details) this.details = details;
   }
 }
 
@@ -50,6 +51,9 @@ function parseExpectedRevision(value) {
 
 export function assertSafeRemoveItemIds(removeItemIds, existingItems, moduleRackKey, options) {
   const byId = new Map((existingItems || []).map((it) => [String(it.id || ""), it]));
+  const exactTwinRemovedIds = new Set(
+    (options?.exactTwinRemovedIds || []).map((id) => String(id || "").trim()).filter(Boolean),
+  );
   const canons = (existingItems || []).filter(
     (it) => isCanonicalFrameBomLine(it) && !isExplicitManualProjectItem(it),
   );
@@ -83,7 +87,8 @@ export function assertSafeRemoveItemIds(removeItemIds, existingItems, moduleRack
     const allowed =
       shouldRemoveFrameBomOnMerge(item, moduleRackKey, mergeOpts)
       || isFrameBomLine(item)
-      || isProvenLegacyFrameBomTwin(item, canons);
+      || isProvenLegacyFrameBomTwin(item, canons)
+      || exactTwinRemovedIds.has(id);
     if (!allowed) {
       throw new FrameBomRefreshError(
         "FRAME_BOM_REFRESH_UNSAFE_DELETE",
@@ -225,10 +230,20 @@ export function refreshFrameBomProject(projectId, body = {}, deps) {
       code,
       plan.blockedReason || "Обновление BOM отменено.",
       code === "FRAME_BOM_REFRESH_UNSAFE_DELETE" ? 409 : 400,
+      {
+        duplicateGroupKey: plan.duplicateGroupKey || "",
+        canonicalIds: plan.canonicalIds || [],
+        twinIds: plan.twinIds || [],
+        reason: plan.reason || "",
+        unitNormalizationErrors: plan.unitNormalizationErrors || [],
+      },
     );
   }
 
-  assertSafeRemoveItemIds(plan.removeItemIds, project.items || [], rackKey, options);
+  assertSafeRemoveItemIds(plan.removeItemIds, project.items || [], rackKey, {
+    ...options,
+    exactTwinRemovedIds: plan.exactTwinRemovedIds || [],
+  });
 
   const run = db.transaction(() => {
     // Re-check revision inside IMMEDIATE txn so concurrent refresh conflicts safely.

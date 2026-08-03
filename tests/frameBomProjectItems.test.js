@@ -1328,3 +1328,125 @@ describe("stripSameNameFrameBomBuilderTwins + label sync", () => {
     expect(synced.every((i) => i.section === "Основное отделение 35 см")).toBe(true);
   });
 });
+
+describe("atomic exact Builder twin repair", () => {
+  const exactOpts = { ...baseOpts, stellageId: "st_rack_1" };
+  const canonical = (overrides = {}) => ({
+    id: "it_fbom_d1_rack1_bolt",
+    materialId: "m073",
+    name: "Болт М6×20",
+    unit: "шт.",
+    qty: 10,
+    source: "frame_bom",
+    sourceType: "frame_bom",
+    sourceKey: "frame_bom:d1:rack1:bolt",
+    sourceObjectIds: { drawingId: "d1", moduleRackKey: "rack1", stellageId: "st_rack_1", bomKey: "bolt" },
+    itemRole: "purchase",
+    ...overrides,
+  });
+  const twin = (id = "st_rack_1__ln_old", overrides = {}) => ({
+    id,
+    materialId: "m073",
+    name: "  Болт   М6×20 ",
+    unit: "шт.",
+    qty: 999,
+    itemRole: "purchase",
+    ...overrides,
+  });
+  const draft = [{ key: "bolt", materialId: "m073", name: "Болт М6×20", unit: "шт.", qty: 34 }];
+
+  it("removes one exact twin through repair plan and transfers all purchase metadata", () => {
+    const ordinary = twin("st_rack_1__ln_old", {
+      purchaseStatus: "ordered",
+      actualPrice: 0,
+      clientComment: "сохранить",
+      visibleToClient: false,
+      visible: false,
+      approved: false,
+      clientSection: "Каркас",
+      clientSubsection: "Крепёж",
+    });
+    const plan = buildFrameBomRepairPlan([canonical(), ordinary], draft, exactOpts);
+
+    expect(plan.blocked).toBe(false);
+    expect(plan.exactTwinRemovedIds).toEqual([ordinary.id]);
+    expect(plan.cleanedItems.map((item) => item.id)).not.toContain(ordinary.id);
+    expect(plan.cleanedItems).toHaveLength(1);
+    expect(plan.cleanedItems[0]).toMatchObject({
+      qty: 34,
+      status: "ordered",
+      purchaseStatus: "ordered",
+      actualPrice: 0,
+      clientComment: "сохранить",
+      visibleToClient: false,
+      visible: false,
+      approved: false,
+      clientSection: "Каркас",
+      clientSubsection: "Крепёж",
+      source: "frame_bom",
+    });
+  });
+
+  it("fails closed and leaves the exact input unchanged for one canonical plus two twins", () => {
+    const input = [canonical(), twin("st_rack_1__ln_a"), twin("st_rack_1__ln_b")];
+    const plan = buildFrameBomRepairPlan(input, draft, exactOpts);
+    expect(plan).toMatchObject({
+      blocked: true,
+      canonicalIds: [input[0].id],
+      twinIds: [input[1].id, input[2].id],
+      reason: "EXACT_TWIN_MULTIPLE_ORDINARY",
+      cleanedItems: input,
+      removeItemIds: [],
+      upsertItems: [],
+    });
+    expect(plan.cleanedItems[0]).toBe(input[0]);
+  });
+
+  it("fails closed and leaves the exact input unchanged for two canonicals plus one twin", () => {
+    const input = [canonical(), canonical({ id: "it_fbom_d2_rack1_bolt", sourceKey: "frame_bom:d2:rack1:bolt" }), twin()];
+    const plan = buildFrameBomRepairPlan(input, draft, exactOpts);
+    expect(plan).toMatchObject({
+      blocked: true,
+      canonicalIds: [input[0].id, input[1].id],
+      twinIds: [input[2].id],
+      reason: "EXACT_TWIN_MULTIPLE_CANONICAL",
+      cleanedItems: input,
+    });
+    expect(plan.cleanedItems[0]).toBe(input[0]);
+  });
+
+  it("preserves same material with another name, another rack, and explicit manual rows", () => {
+    const otherName = twin("st_rack_1__ln_other_name", { name: "Болт для полива" });
+    const otherRack = twin("st_st2__ln_old");
+    const manual = twin("st_rack_1__ln_manual", { source: "manual" });
+    const plan = buildFrameBomRepairPlan([canonical(), otherName, otherRack, manual], draft, exactOpts);
+    expect(plan.blocked).toBe(false);
+    expect(plan.cleanedItems.map((item) => item.id)).toEqual(expect.arrayContaining([
+      otherName.id,
+      otherRack.id,
+      manual.id,
+    ]));
+  });
+
+  it("fails closed when a same-rack same-material twin has empty name", () => {
+    const input = [
+      canonical({ name: "Болт М6×20" }),
+      twin("st_rack_1__ln_noname", { name: "" }),
+    ];
+    const plan = buildFrameBomRepairPlan(input, draft, exactOpts);
+    expect(plan).toMatchObject({
+      blocked: true,
+      reason: "EXACT_TWIN_IDENTITY_INCOMPLETE",
+      cleanedItems: input,
+      removeItemIds: [],
+    });
+  });
+
+  it("does not overwrite canonical fields with empty twin metadata", () => {
+    const merged = frameBomProjectItems.mergeBuilderTwinPurchaseFields(
+      canonical({ actualPrice: 7, clientComment: "canonical", clientSection: "Existing" }),
+      twin("st_rack_1__ln_old", { actualPrice: "", clientComment: "", clientSection: "" }),
+    );
+    expect(merged).toMatchObject({ actualPrice: 7, clientComment: "canonical", clientSection: "Existing" });
+  });
+});

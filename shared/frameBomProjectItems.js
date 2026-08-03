@@ -1,7 +1,12 @@
 import { FRAME_BOM_MATERIALS } from "./frameBomMaterialMap.js";
 import { normalizePipeCuts, pipeCutsClientNote } from "./profilePipeCuts.js";
 import { normalizePurchaseStatus } from "./purchaseStatusRules.js";
-import { parseFrameBomDecimal, roundFrameBomQty } from "./frameBomUnits.js";
+import {
+  normalizeFrameBomDraftUnits,
+  parseFrameBomDecimal,
+  resolveFrameBomUnitKind,
+  roundFrameBomQty,
+} from "./frameBomUnits.js";
 
 export const FRAME_BOM_SOURCE = "frame_bom";
 export const FRAME_BOM_ADMIN_SOURCE_LABEL = "Из схемы стеллажа";
@@ -52,9 +57,6 @@ export function isFrameBomLine(item) {
 export function resolveAdminItemSourceLabel(item) {
   return isFrameBomLine(item) ? FRAME_BOM_ADMIN_SOURCE_LABEL : "";
 }
-
-const PROFILE_TUBE_BOM_KEY = "profile_tube_20x20";
-const PROFILE_TUBE_MATERIAL_ID = "m036";
 
 /**
  * @param {{ drawingId?: string, moduleRackKey?: string }} options
@@ -516,10 +518,7 @@ function frameBomItemId({ drawingId, moduleRackKey, bomKey }) {
 }
 
 function resolvePipeCutsForDraft(draft) {
-  const bomKey = draft?.key || "";
-  const isProfileTube =
-    bomKey === PROFILE_TUBE_BOM_KEY || draft?.materialId === PROFILE_TUBE_MATERIAL_ID;
-  if (!isProfileTube) return [];
+  if (resolveFrameBomUnitKind(draft?.unit) !== "metre") return [];
   return normalizePipeCuts(draft.pipeCuts ?? []);
 }
 
@@ -773,8 +772,12 @@ export function frameBomDraftToProjectItem(draft, options, rackPrefix, sortOrder
  */
 export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, options = {}) {
   const warnings = [];
-  const existing = Array.isArray(existingItems) ? existingItems : [];
-  const draft = Array.isArray(purchaseDraft) ? purchaseDraft : [];
+  const originalExisting = Array.isArray(existingItems) ? existingItems : [];
+  let existing = originalExisting;
+  const normalizedDraft = normalizeFrameBomDraftUnits(
+    Array.isArray(purchaseDraft) ? purchaseDraft : [],
+  );
+  const draft = normalizedDraft.items;
   const materials = options.materials || null;
 
   const { prefix: sourceRackPrefix, warnings: prefixWarnings } = buildFrameBomSourceRackPrefix(options);
@@ -786,10 +789,10 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
     const blockedReason = "BOM не добавлен: нет привязки к стеллажу.";
     warnings.push(blockedReason);
     return {
-      items: [...existing],
+      items: [...originalExisting],
       removedCount: 0,
       addedCount: 0,
-      keptCount: existing.length,
+      keptCount: originalExisting.length,
       sourceRackPrefix,
       rackScopeKey: "",
       warnings,
@@ -799,16 +802,55 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
     };
   }
 
+  if (!normalizedDraft.ok) {
+    const blockedReason = "Обновление BOM отменено: некорректные единицы или pipeCuts.";
+    return {
+      items: [...originalExisting],
+      removedCount: 0,
+      addedCount: 0,
+      keptCount: originalExisting.length,
+      sourceRackPrefix,
+      rackScopeKey: moduleRackKey,
+      warnings: [...warnings, blockedReason],
+      blocked: true,
+      blockedReason,
+      missingMaterialIds: [],
+      unitNormalizationErrors: normalizedDraft.errors,
+    };
+  }
+
+  const exactTwinPreflight = buildExactFrameBomBuilderTwinPlan(existing, options);
+  if (exactTwinPreflight.blocked) {
+    const blockedReason = `Обновление BOM отменено: неоднозначный exact twin (${exactTwinPreflight.reason}).`;
+    return {
+      items: [...originalExisting],
+      removedCount: 0,
+      addedCount: 0,
+      keptCount: originalExisting.length,
+      sourceRackPrefix,
+      rackScopeKey: moduleRackKey,
+      warnings: [...warnings, blockedReason],
+      blocked: true,
+      blockedReason,
+      missingMaterialIds: [],
+      duplicateGroupKey: exactTwinPreflight.duplicateGroupKey,
+      canonicalIds: exactTwinPreflight.canonicalIds,
+      twinIds: exactTwinPreflight.twinIds,
+      reason: exactTwinPreflight.reason,
+    };
+  }
+  existing = exactTwinPreflight.cleanedItems;
+
   if (materials) {
     const missingMaterialIds = findMissingFrameBomMaterials(draft, materials);
     if (missingMaterialIds.length) {
       const blockedReason = formatFrameBomMissingMaterialsMessage(missingMaterialIds);
       warnings.push(blockedReason);
       return {
-        items: [...existing],
+        items: [...originalExisting],
         removedCount: 0,
         addedCount: 0,
-        keptCount: existing.length,
+        keptCount: originalExisting.length,
         sourceRackPrefix,
         rackScopeKey: moduleRackKey,
         warnings,
@@ -838,10 +880,10 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
       `Обновление BOM отменено: были бы удалены обычные позиции стеллажа (${nonFrameMissing.length}).`;
     warnings.push(blockedReason);
     return {
-      items: [...existing],
+      items: [...originalExisting],
       removedCount: 0,
       addedCount: 0,
-      keptCount: existing.length,
+      keptCount: originalExisting.length,
       sourceRackPrefix,
       rackScopeKey: moduleRackKey,
       warnings,
@@ -955,10 +997,10 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
       `Обновление BOM отменено: были бы удалены обычные позиции стеллажа (${nonFrameStillMissing.length}).`;
     warnings.push(blockedReason);
     return {
-      items: [...existing],
+      items: [...originalExisting],
       removedCount: 0,
       addedCount: 0,
-      keptCount: existing.length,
+      keptCount: originalExisting.length,
       sourceRackPrefix,
       rackScopeKey: moduleRackKey,
       warnings,
@@ -971,9 +1013,34 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
     };
   }
 
+  const mergedItems = [...keptFinal, ...added];
+  const exactTwinPostflight = buildExactFrameBomBuilderTwinPlan(mergedItems, options);
+  if (exactTwinPostflight.blocked) {
+    const blockedReason = `Обновление BOM отменено: неоднозначный exact twin (${exactTwinPostflight.reason}).`;
+    return {
+      items: [...originalExisting],
+      removedCount: 0,
+      addedCount: 0,
+      keptCount: originalExisting.length,
+      sourceRackPrefix,
+      rackScopeKey: moduleRackKey,
+      warnings: [...warnings, blockedReason],
+      blocked: true,
+      blockedReason,
+      missingMaterialIds: [],
+      duplicateGroupKey: exactTwinPostflight.duplicateGroupKey,
+      canonicalIds: exactTwinPostflight.canonicalIds,
+      twinIds: exactTwinPostflight.twinIds,
+      reason: exactTwinPostflight.reason,
+    };
+  }
+
   return {
-    items: [...keptFinal, ...added],
-    removedCount: removedBomItems.length,
+    items: exactTwinPostflight.cleanedItems,
+    removedCount:
+      removedBomItems.length
+      + exactTwinPreflight.removeItemIds.length
+      + exactTwinPostflight.removeItemIds.length,
     addedCount: added.length,
     keptCount: keptFinal.length,
     sourceRackPrefix,
@@ -981,6 +1048,10 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
     warnings,
     blocked: false,
     missingMaterialIds: [],
+    exactTwinRemovedIds: [
+      ...exactTwinPreflight.removeItemIds,
+      ...exactTwinPostflight.removeItemIds,
+    ],
   };
 }
 
@@ -1020,6 +1091,11 @@ export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = 
     return {
       blocked: true,
       blockedReason: mergeResult.blockedReason,
+      duplicateGroupKey: mergeResult.duplicateGroupKey || "",
+      canonicalIds: mergeResult.canonicalIds || [],
+      twinIds: mergeResult.twinIds || [],
+      reason: mergeResult.reason || "",
+      unitNormalizationErrors: mergeResult.unitNormalizationErrors || [],
       missingMaterialIds: mergeResult.missingMaterialIds || [],
       warnings: mergeResult.warnings || [],
       cleanedItems: [...existing],
@@ -1037,9 +1113,11 @@ export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = 
   const cleanedIds = new Set(
     mergeResult.items.map((it) => String(it.id || "")).filter(Boolean),
   );
+  const exactTwinRemovedIds = new Set(mergeResult.exactTwinRemovedIds || []);
 
   const ownedBefore = collectFrameBomOwnedItems(existing, options.moduleRackKey, options);
   const ownedIds = new Set(ownedBefore.map((it) => String(it.id || "")).filter(Boolean));
+  for (const id of exactTwinRemovedIds) ownedIds.add(String(id));
 
   // Also treat post-merge proven twins of new canons as owned (for DELETE list)
   const cleanedCanons = mergeResult.items.filter(
@@ -1061,7 +1139,9 @@ export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = 
     .map((it) => it.id);
 
   // Invariant: every non-frame id before must remain after
-  const nonFrameBefore = existing.filter((it) => isNonFrameRackItem(it, canons));
+  const nonFrameBefore = existing.filter(
+    (it) => isNonFrameRackItem(it, canons) && !exactTwinRemovedIds.has(String(it.id || "")),
+  );
   const missingNonFrame = nonFrameBefore.filter((it) => !cleanedIds.has(String(it.id || "")));
   if (missingNonFrame.length) {
     return {
@@ -1104,6 +1184,7 @@ export function buildFrameBomRepairPlan(existingItems, purchaseDraft, options = 
     blockedReason: "",
     missingMaterialIds: [],
     cleanedItems: mergeResult.items,
+    exactTwinRemovedIds: [...exactTwinRemovedIds],
     removeItemIds: [...new Set(removeItemIds)],
     upsertItems,
     preservedItems,
@@ -1417,11 +1498,11 @@ function hasDifferentFrameBomPurpose(item) {
     .some((value) => String(value || "").trim());
 }
 
-function mergeBuilderTwinPurchaseFields(canonical, twin) {
+export function mergeBuilderTwinPurchaseFields(canonical, twin) {
   const next = { ...canonical };
-  const twinStatus = normalizePurchaseStatus(twin);
-  const canonicalStatus = normalizePurchaseStatus(canonical);
-  if (twinStatus !== "not_bought" || canonicalStatus === "not_bought") {
+  const hasStatus = String(twin?.purchaseStatus ?? twin?.status ?? "").trim() !== "";
+  if (hasStatus) {
+    const twinStatus = normalizePurchaseStatus(twin);
     next.status = twinStatus;
     next.purchaseStatus = twinStatus;
   }
@@ -1438,47 +1519,161 @@ function mergeBuilderTwinPurchaseFields(canonical, twin) {
   if (!String(next.clientNote || "").trim() && String(twin.clientNote || "").trim()) {
     next.clientNote = twin.clientNote;
   }
+  for (const field of ["visibleToClient", "visible", "approved"]) {
+    if (twin[field] !== null && twin[field] !== undefined) next[field] = twin[field];
+  }
+  for (const field of ["clientSection", "clientSubsection"]) {
+    if (String(twin[field] || "").trim()) next[field] = twin[field];
+  }
   return next;
 }
 
-/**
- * Remove only an exact legacy Builder twin of a unique canonical Frame BOM row.
- * Scope is deliberately strict: same rack id + material id + normalized name.
- * Explicit manual rows and rows with a separate purpose are never candidates.
- */
-export function stripSameNameFrameBomBuilderTwins(items = []) {
+function exactTwinOwnerConflict(item, rackId, options = {}) {
+  const source = String(item?.source || item?.sourceType || item?.source_type || "").trim();
+  if (source && !["catalog", "builder", "stellage"].includes(source)) return true;
+  const expectedProjectId = String(options.projectId || "").trim();
+  const itemProjectId = String(item?.projectId || item?.project_id || "").trim();
+  if (expectedProjectId && itemProjectId && itemProjectId !== expectedProjectId) return true;
+  const obj = parseSourceObjectIds(item?.sourceObjectIds ?? item?.source_object_ids);
+  const explicitRackId = String(obj.stellageId || obj.stellage_id || item?.stellageId || "").trim();
+  return Boolean(explicitRackId && rackId && explicitRackId !== rackId);
+}
+
+function exactTwinBlockedResult(items, key, canonicalItems, twinItems, reason) {
+  return {
+    blocked: true,
+    cleanedItems: [...items],
+    duplicateGroupKey: key,
+    canonicalIds: canonicalItems.map((item) => item.id).filter(Boolean),
+    twinIds: twinItems.map((item) => item.id).filter(Boolean),
+    reason,
+  };
+}
+
+/** Build an atomic, fail-closed exact Builder twin cleanup plan. */
+export function buildExactFrameBomBuilderTwinPlan(items = [], options = {}) {
   const source = Array.isArray(items) ? items : [];
-  const canonicalByKey = new Map();
-  for (let index = 0; index < source.length; index += 1) {
-    const item = source[index];
+  const scopeRackId = String(options.stellageId || "").trim();
+  const moduleRackKey = String(options.moduleRackKey || "").trim();
+  const groups = new Map();
+  const canonicalRackIds = new Set();
+
+  const groupFor = (key) => {
+    if (!groups.has(key)) groups.set(key, { canonical: [], twins: [], conflicts: [] });
+    return groups.get(key);
+  };
+
+  for (const item of source) {
     if (!isCanonicalFrameBomLine(item) || isExplicitManualProjectItem(item)) continue;
-    const key = frameBomNameTwinKey(item, resolveFrameBomStellageId(item));
-    if (!key) continue;
-    const entries = canonicalByKey.get(key) || [];
-    entries.push(index);
-    canonicalByKey.set(key, entries);
+    let rackId = resolveFrameBomStellageId(item);
+    const inScope = moduleRackKey
+      ? itemBelongsToRackMergeScope(item, moduleRackKey, options)
+      : true;
+
+    if (scopeRackId) {
+      if (rackId && rackId !== scopeRackId) {
+        // Explicit conflicting stellage on a row that still matches merge scope → ambiguous.
+        if (inScope) {
+          return exactTwinBlockedResult(
+            source,
+            `${scopeRackId}::canonical-rack`,
+            [item],
+            [],
+            "EXACT_TWIN_RACK_AMBIGUOUS",
+          );
+        }
+        continue;
+      }
+      if (!rackId && !inScope) continue;
+      // In-scope canonical without stellageId inherits the refresh scope rack for twin identity.
+      if (!rackId && inScope) rackId = scopeRackId;
+    } else if (!rackId) {
+      // No refresh scope and no proven rack → skip twin cleanup for this row (do not block merge).
+      continue;
+    }
+
+    const key = frameBomNameTwinKey(item, rackId);
+    if (!key) {
+      // Exact-twin matching needs rack+materialId+name. Incomplete canons skip twin
+      // grouping; merge/residual paths still own lineage-based replace.
+      continue;
+    }
+    if (rackId) canonicalRackIds.add(rackId);
+    groupFor(key).canonical.push(item);
+  }
+
+  for (const item of source) {
+    const id = String(item?.id || "");
+    if (!/^st_.+__ln_.+/.test(id) || isCanonicalFrameBomLine(item)) continue;
+    if (isExplicitManualProjectItem(item) || hasDifferentFrameBomPurpose(item)) continue;
+    const rackId = resolveBuilderPrefixedStellageId(item);
+    if (scopeRackId && rackId && rackId !== scopeRackId) continue;
+    if (scopeRackId && !rackId) continue;
+    const materialId = String(item.materialId || "").trim();
+    const name = normItemName(item.name);
+    if (!rackId || !materialId || !name) {
+      // Same rack+material as a grouped canon but missing name → cannot prove exact twin.
+      if (rackId && materialId && !name) {
+        for (const [key, group] of groups) {
+          if (key.startsWith(`${rackId}::${materialId}::`) && group.canonical.length) {
+            return exactTwinBlockedResult(
+              source,
+              key,
+              group.canonical,
+              [item],
+              "EXACT_TWIN_IDENTITY_INCOMPLETE",
+            );
+          }
+        }
+      }
+      continue;
+    }
+    const key = frameBomNameTwinKey(item, rackId);
+    if (exactTwinOwnerConflict(item, rackId, options)) groupFor(key).conflicts.push(item);
+    else groupFor(key).twins.push(item);
   }
 
   const replacements = new Map();
-  const removeIndexes = new Set();
-  for (let index = 0; index < source.length; index += 1) {
-    const item = source[index];
-    const id = String(item?.id || "");
-    if (!/^st_.+__ln_.+/.test(id)) continue;
-    if (isFrameBomLine(item) || isExplicitManualProjectItem(item) || hasDifferentFrameBomPurpose(item)) continue;
-    const key = frameBomNameTwinKey(item, resolveBuilderPrefixedStellageId(item));
-    const canonicalIndexes = canonicalByKey.get(key);
-    if (!key || canonicalIndexes?.length !== 1) continue;
-    const canonicalIndex = canonicalIndexes[0];
-    const canonical = replacements.get(canonicalIndex) || source[canonicalIndex];
-    replacements.set(canonicalIndex, mergeBuilderTwinPurchaseFields(canonical, item));
-    removeIndexes.add(index);
+  const removeIds = new Set();
+  for (const [key, group] of groups) {
+    if (!group.twins.length && !group.conflicts.length) continue;
+    if (group.conflicts.length) {
+      return exactTwinBlockedResult(source, key, group.canonical, group.conflicts, "EXACT_TWIN_OWNER_CONFLICT");
+    }
+    if (group.canonical.length > 1) {
+      return exactTwinBlockedResult(source, key, group.canonical, group.twins, "EXACT_TWIN_MULTIPLE_CANONICAL");
+    }
+    if (group.twins.length > 1) {
+      return exactTwinBlockedResult(source, key, group.canonical, group.twins, "EXACT_TWIN_MULTIPLE_ORDINARY");
+    }
+    if (group.canonical.length !== 1 || group.twins.length !== 1) continue;
+    const canonical = group.canonical[0];
+    replacements.set(String(canonical.id || ""), mergeBuilderTwinPurchaseFields(canonical, group.twins[0]));
+    removeIds.add(String(group.twins[0].id || ""));
   }
 
-  if (!removeIndexes.size) return [...source];
-  return source
-    .map((item, index) => replacements.get(index) || item)
-    .filter((_item, index) => !removeIndexes.has(index));
+  return {
+    blocked: false,
+    cleanedItems: source
+      .filter((item) => !removeIds.has(String(item.id || "")))
+      .map((item) => replacements.get(String(item.id || "")) || item),
+    removeItemIds: [...removeIds],
+    duplicateGroupKey: "",
+    canonicalIds: [],
+    twinIds: [],
+    reason: "",
+  };
+}
+
+/**
+ * Defensive UI/helper wrapper around {@link buildExactFrameBomBuilderTwinPlan}.
+ * Not the source of truth for refresh: backend must use buildFrameBomRepairPlan,
+ * which surfaces blocked reasons. On ambiguity this wrapper leaves items unchanged
+ * and does not invent deletes (it also does not expose the block reason).
+ */
+export function stripSameNameFrameBomBuilderTwins(items = []) {
+  const plan = buildExactFrameBomBuilderTwinPlan(items);
+  return plan.blocked ? [...(items || [])] : plan.cleanedItems;
 }
 
 /**

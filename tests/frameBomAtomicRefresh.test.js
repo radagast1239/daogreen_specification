@@ -693,6 +693,214 @@ describe("11. procurement overlay preserved", () => {
   });
 });
 
+describe("12. exact Builder twins are repaired inside the atomic refresh", () => {
+  function exactTwin(id, overrides = {}) {
+    return {
+      id,
+      materialId: "m073",
+      name: "BOM bolt_m6x20",
+      unit: "шт.",
+      qty: 999,
+      price: 10,
+      module: "Стеллаж A",
+      section: "Стеллаж A",
+      category: "Каркас и крепёж",
+      includedInProject: true,
+      enabled: true,
+      itemType: "material",
+      itemRole: "purchase",
+      ...overrides,
+    };
+  }
+
+  it("deletes one exact twin, transfers explicit metadata, and writes once", () => {
+    const canon = canonItem({
+      drawingId: DRAWING_A,
+      moduleRackKey: RACK_A,
+      stellageId: STELLAGE_A,
+      bomKey: "bolt_m6x20",
+      materialId: "m073",
+      qty: 10,
+      rackLabel: "Стеллаж A",
+    });
+    const twin = exactTwin("st_rack_a__ln_old", {
+      status: "ordered",
+      actualPrice: 0,
+      clientComment: "legacy metadata",
+      visibleToClient: false,
+      visible: false,
+      approved: false,
+      clientSection: "Каркас",
+      clientSubsection: "Крепёж",
+    });
+    saveItemsWithin("p1", [canon, twin]);
+
+    const result = refresh("p1", {
+      expectedRevision: 0,
+      moduleRackKey: RACK_A,
+      stellageId: STELLAGE_A,
+      drawingId: DRAWING_A,
+      rackLabel: "Стеллаж A",
+      purchaseDraft: [draftLine({ key: "bolt_m6x20", materialId: "m073", qty: 34 })],
+    });
+
+    expect(result.revision).toBe(1);
+    const after = loadProjectItems("p1");
+    expect(after).toHaveLength(1);
+    expect(after[0].id).toBe(canon.id);
+    expect(after[0]).toMatchObject({
+      qty: 34,
+      status: "ordered",
+      actualPrice: 0,
+      clientComment: "legacy metadata",
+      visibleToClient: false,
+      visible: false,
+      approved: false,
+      clientSection: "Каркас",
+      clientSubsection: "Крепёж",
+    });
+  });
+
+  it("fails closed for multiple exact twins without changing rows or revision", () => {
+    const canon = canonItem({
+      drawingId: DRAWING_A,
+      moduleRackKey: RACK_A,
+      stellageId: STELLAGE_A,
+      bomKey: "bolt_m6x20",
+      materialId: "m073",
+      qty: 10,
+      rackLabel: "Стеллаж A",
+    });
+    saveItemsWithin("p1", [canon, exactTwin("st_rack_a__ln_a"), exactTwin("st_rack_a__ln_b")]);
+    const before = loadProjectItems("p1");
+
+    try {
+      refresh("p1", {
+        expectedRevision: 0,
+        moduleRackKey: RACK_A,
+        stellageId: STELLAGE_A,
+        drawingId: DRAWING_A,
+        purchaseDraft: [draftLine({ key: "bolt_m6x20", materialId: "m073", qty: 34 })],
+      });
+      expect.fail("refresh must be blocked");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FrameBomRefreshError);
+      expect(error.details).toMatchObject({
+        canonicalIds: [canon.id],
+        twinIds: ["st_rack_a__ln_a", "st_rack_a__ln_b"],
+        reason: "EXACT_TWIN_MULTIPLE_ORDINARY",
+      });
+    }
+
+    expect(revisionOf()).toBe(0);
+    expect(loadProjectItems("p1")).toEqual(before);
+  });
+
+  it("full refresh path: units → repair → txn → reload → second refresh is idempotent", async () => {
+    seedMaterial("m036", "Труба 20x20");
+    const { scaleFrameBomDraftForRackCount } = await import(
+      "../src/frameConstructor/frameBomAddToProject.js"
+    );
+    const canon = canonItem({
+      drawingId: DRAWING_A,
+      moduleRackKey: RACK_A,
+      stellageId: STELLAGE_A,
+      bomKey: "profile_tube_20x20",
+      materialId: "m036",
+      qty: 1,
+      rackLabel: "Стеллаж A",
+    });
+    const twin = exactTwin("st_rack_a__ln_tube", {
+      materialId: "m036",
+      name: "BOM profile_tube_20x20",
+      unit: "м",
+      status: "ordered",
+      actualPrice: 0,
+      clientComment: "tube twin",
+      visibleToClient: false,
+      visible: false,
+      approved: false,
+      clientSection: "Каркас",
+      clientSubsection: "Профиль",
+    });
+    const manual = {
+      ...exactTwin("st_rack_a__ln_manual", {
+        materialId: "m073",
+        name: "Ручной болт",
+        source: "manual",
+        qty: 3,
+      }),
+    };
+    const otherName = exactTwin("st_rack_a__ln_other", {
+      materialId: "m073",
+      name: "Болт для полива",
+      qty: 5,
+    });
+    const otherRack = exactTwin("st_rack_b__ln_old", {
+      materialId: "m036",
+      name: "BOM profile_tube_20x20",
+      module: "Стеллаж B",
+      section: "Стеллаж B",
+      qty: 7,
+    });
+    saveItemsWithin("p1", [canon, twin, manual, otherName, otherRack]);
+
+    const cuts = [
+      { lengthMm: 2800, qty: 2 },
+      { lengthMm: 1300, qty: 3 },
+      { lengthMm: 1315, qty: 1 },
+    ];
+    const purchaseDraft = scaleFrameBomDraftForRackCount([{
+      key: "profile_tube_20x20",
+      materialId: "m036",
+      name: "BOM profile_tube_20x20",
+      unit: "м",
+      qty: 10815,
+      pipeCuts: cuts,
+    }], 1);
+
+    const first = refresh("p1", {
+      expectedRevision: 0,
+      moduleRackKey: RACK_A,
+      stellageId: STELLAGE_A,
+      drawingId: DRAWING_A,
+      rackLabel: "Стеллаж A",
+      purchaseDraft,
+    });
+    expect(first.revision).toBe(1);
+    let after = loadProjectItems("p1");
+    const tube = after.find((item) => item.id === canon.id);
+    expect(tube).toMatchObject({
+      qty: 10.815,
+      unit: "м",
+      status: "ordered",
+      actualPrice: 0,
+      clientComment: "tube twin",
+      visibleToClient: false,
+      clientSection: "Каркас",
+      clientSubsection: "Профиль",
+    });
+    expect(after.map((item) => item.id).sort()).toEqual(
+      [canon.id, manual.id, otherName.id, otherRack.id].sort(),
+    );
+
+    const second = refresh("p1", {
+      expectedRevision: 1,
+      moduleRackKey: RACK_A,
+      stellageId: STELLAGE_A,
+      drawingId: DRAWING_A,
+      rackLabel: "Стеллаж A",
+      purchaseDraft,
+    });
+    expect(second.revision).toBe(2);
+    after = loadProjectItems("p1");
+    expect(after.find((item) => item.id === canon.id).qty).toBe(10.815);
+    expect(after.map((item) => item.id).sort()).toEqual(
+      [canon.id, manual.id, otherName.id, otherRack.id].sort(),
+    );
+  });
+});
+
 describe("extras: validation + revision column", () => {
   it("requires expectedRevision", () => {
     expect(() =>
