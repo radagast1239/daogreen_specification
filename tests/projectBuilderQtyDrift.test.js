@@ -60,7 +60,10 @@ describe("PROJECT-BUILDER-QTY-DRIFT-001", () => {
     expect(reloaded.find((st) => st.id === "b").items.find((line) => line.materialId === "m1").qty).toBe(7);
   });
 
-  it("does not divide Frame BOM quantities or mix them with manual rows", () => {
+  it("converts a canonical Frame BOM total to per-rack and does not mix it with manual rows", () => {
+    // Canonical frame_bom project rows are TOTALS (per-rack × stellageConfigs.count).
+    // Reopening the rack editor must divide by the proven rack count — handing the
+    // editor the total is what let the next save multiply by the count a second time.
     const st = rack("st1", 20);
     const frame = {
       id: "fb1", materialId: "m1", name: "Труба", qty: 88.32,
@@ -71,7 +74,22 @@ describe("PROJECT-BUILDER-QTY-DRIFT-001", () => {
     };
     const reopened = mergeStellageBuilderLines(st, catalogs, materials, [frame]);
     const frameLine = reopened.find((line) => line.source === FRAME_BOM_SOURCE);
-    expect(frameLine?.qty).toBe(88.32);
+    expect(frameLine?.qty).toBe(29.44);
+    expect(frameLine?.frameBomBasisResolved).toBe(true);
+    expect(frameLine?.frameBomRackCount).toBe(3);
     expect(reopened.filter((line) => line.materialId === "m1")).toHaveLength(1);
+  });
+
+  it("keeps a count=1 rack Frame BOM quantity unchanged", () => {
+    const st = rack("st1", 20, 1);
+    const frame = {
+      id: "fb1", materialId: "m1", name: "Труба", qty: 88.32,
+      source: FRAME_BOM_SOURCE, sourceType: FRAME_BOM_SOURCE,
+      sourceKey: "frame_bom:d1:mod1:st1:profile_tube_20x20",
+      sourceObjectIds: { moduleRackKey: "mod1:st1" },
+      includedInProject: true,
+    };
+    const reopened = mergeStellageBuilderLines(st, catalogs, materials, [frame]);
+    expect(reopened.find((line) => line.source === FRAME_BOM_SOURCE)?.qty).toBe(88.32);
   });
 });

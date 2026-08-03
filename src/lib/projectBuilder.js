@@ -32,6 +32,11 @@ import { buildAcLineFromRoom, AC_ITEM_SECTION } from "../../shared/roomAcSpec.js
 import {
   FRAME_BOM_SOURCE,
 } from "../../shared/frameBomProjectItems.js";
+import {
+  isFrameBomBuilderLine,
+  resolveProvenRackCount,
+} from "../../shared/frameBomRackBasis.js";
+import { parseFrameBomDecimal, roundFrameBomQty } from "../../shared/frameBomUnits.js";
 
 export { blankLine, lineFromMaterial, applyMaterialCatalogFields };
 
@@ -139,6 +144,17 @@ export function templateLinesForModule(materials, moduleName) {
   return materials
     .filter((m) => materialInModule(m, moduleName) && m.status === "active")
     .map((m) => lineFromMaterial(m));
+}
+
+/**
+ * stellageConfigs[].groups[].qty is a PER-RACK snapshot for every kind of line.
+ * A canonical Frame BOM project total must never land here: the next save would
+ * multiply it by the rack count again. Ordinary/manual lines keep editor qty.
+ * @param {object} line
+ */
+function stellageGroupPerRackQty(line) {
+  if (!isFrameBomBuilderLine(line)) return line?.qty;
+  return roundFrameBomQty(parseFrameBomDecimal(line?.qty, 0));
 }
 
 export function lineToProjectItem(line, section, sortOrder, opts = {}) {
@@ -257,7 +273,7 @@ export function buildProjectFromBuilder({
 
   for (const st of stellages) {
     const section = st.name?.trim() || st.moduleName;
-    const stCount = Math.max(1, Number(st.count) || 1);
+    const stCount = resolveProvenRackCount(st.count).count;
     stellageConfigs.push({
       id: st.id,
       name: section,
@@ -271,7 +287,7 @@ export function buildProjectFromBuilder({
       extraImages: st.extraImages || [],
       groups: activeLines(st.items).map((ln) => ({
         name: ln.name,
-        qty: ln.qty,
+        qty: stellageGroupPerRackQty(ln),
         subcategory: ln.subcategory,
         group: groupLabel(ln.subcategory),
       })),

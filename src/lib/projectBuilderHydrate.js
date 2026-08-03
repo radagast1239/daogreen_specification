@@ -22,6 +22,11 @@ import {
   resolveFrameBomDedupeKey,
 } from "../../shared/frameBomProjectItems.js";
 import { itemBelongsToActiveStellage } from "../../shared/projectItemOwnership.js";
+import {
+  frameBomBuilderLineDedupeKey,
+  isFrameBomBuilderLine,
+  resolveProvenRackCount,
+} from "../../shared/frameBomRackBasis.js";
 import { buildModuleRackKey } from "../../shared/moduleRackIds.js";
 import { builderWizardFromManualParams } from "../../shared/projectLifecycle.js";
 
@@ -40,18 +45,23 @@ function materialExistsInCatalog(materialId, materials = []) {
   return materials.some((m) => (m.id || m.materialId) === materialId);
 }
 
-export function frameBomProjectItemToBuilderLine(item, { materials = null, stCount = 1 } = {}) {
+export function frameBomProjectItemToBuilderLine(item, {
+  materials = null,
+  stCount = 1,
+  basisProven = true,
+} = {}) {
   const enriched = materials?.length
     ? enrichProjectItemFromMaterial(item, materials)
     : item;
-  // Frame BOM rows store totals (per-rack × stellage count). The stellageCount
-  // marker lives only in memory — it is never written to project_items, so after
-  // a DB round-trip the divisor must come from stellageConfigs[].count (stCount).
-  const embedded = parseFrameBomDecimal(item?.stellageCount ?? item?.rackCount, NaN);
-  const configCount = parseFrameBomDecimal(stCount, NaN);
-  const divideBy = Number.isFinite(embedded) && embedded >= 1
-    ? Math.max(1, embedded)
-    : (Number.isFinite(configCount) && configCount >= 1 ? Math.max(1, configCount) : 1);
+  // Frame BOM rows store totals (per-rack × stellage count). item.stellageCount /
+  // item.rackCount live only in memory — they are never written to project_items,
+  // so the divisor must always come from stellageConfigs[].count (stCount) for the
+  // proven rack. Depending on the transient marker would silently skip the divide
+  // after a DB round-trip and hand the editor a total as if it were per-rack.
+  const { proven, count } = resolveProvenRackCount(stCount);
+  const basisResolved = proven && basisProven !== false;
+  // Fail closed: an unproven rack count must not be guessed as 1 and rescaled.
+  const divideBy = basisResolved ? count : 1;
   const line = projectItemToBuilderLine(enriched, { stCount: divideBy });
   const bomQty = parseFrameBomDecimal(line.qty, 0);
   const rawCuts = enriched.pipeCuts?.length ? enriched.pipeCuts : line.pipeCuts;
@@ -60,6 +70,10 @@ export function frameBomProjectItemToBuilderLine(item, { materials = null, stCou
     ...line,
     qty: bomQty,
     defaultQty: bomQty,
+    frameBomBasisResolved: basisResolved,
+    frameBomRackCount: divideBy,
+    frameBomPerRackQty: bomQty,
+    frameBomSourceTotalQty: parseFrameBomDecimal(enriched.qty, 0),
     included: true,
     source: FRAME_BOM_SOURCE,
     sourceType: FRAME_BOM_SOURCE,
@@ -109,7 +123,11 @@ function takeBomMultiMap(map, key) {
   return list.shift();
 }
 
-function overlayFrameBomOnLines(lines, frameBomItems, { stCount = 1, materials = null } = {}) {
+function overlayFrameBomOnLines(lines, frameBomItems, {
+  stCount = 1,
+  materials = null,
+  basisProven = true,
+} = {}) {
   if (!frameBomItems?.length) return lines || [];
   const bomByMaterial = new Map();
   const bomByName = new Map();
@@ -135,7 +153,7 @@ function overlayFrameBomOnLines(lines, frameBomItems, { stCount = 1, materials =
     }
     if (!bom) return ln;
     usedBomIds.add(bom.id);
-    const bomLine = frameBomProjectItemToBuilderLine(bom, { materials, stCount });
+    const bomLine = frameBomProjectItemToBuilderLine(bom, { materials, stCount, basisProven });
     const overlaid = applyFrameBomOverlayToCatalogLine(ln, bomLine);
     return materials?.length
       ? applyMaterialCatalogFields(overlaid, materials)
@@ -154,23 +172,36 @@ function overlayFrameBomOnLines(lines, frameBomItems, { stCount = 1, materials =
         .every((ln) => String(ln.source || ln.sourceType || "").trim() === "manual");
       if (!onlyManual) continue;
     }
-    merged.push(frameBomProjectItemToBuilderLine(bom, { materials, stCount }));
+    merged.push(frameBomProjectItemToBuilderLine(bom, { materials, stCount, basisProven }));
     if (bom.materialId) usedMaterialIds.add(bom.materialId);
   }
   return merged;
 }
 
+/**
+ * @param {{
+ *   stCount?: number,       divisor for saved *project* rows (total → per-rack)
+ *   frameStCount?: number,  divisor for canonical frame_bom rows; defaults to stCount
+ *   frameBasisProven?: boolean,
+ * }} params
+ */
 export function mergeStellageEditorLines({
   catalogLines = [],
   manualItems = [],
   frameBomItems = [],
   stCount = 1,
+  frameStCount = null,
+  frameBasisProven = true,
   materials = null,
 } = {}) {
   const lines = catalogLines.length
     ? applySavedItemsToCatalogLines(catalogLines, manualItems, { stCount, materials })
     : manualItems.map((it) => projectItemToBuilderLine(it, { stCount, materials }));
-  const merged = overlayFrameBomOnLines(lines, frameBomItems, { stCount, materials });
+  const merged = overlayFrameBomOnLines(lines, frameBomItems, {
+    stCount: frameStCount == null ? stCount : frameStCount,
+    materials,
+    basisProven: frameBasisProven,
+  });
   if (!materials?.length) return merged;
   return merged.map((ln) => fillEmptyCatalogFieldsFromMaterial(ln, materials));
 }
@@ -256,9 +287,12 @@ function applyStellageGroupsToLines(lines = [], groups = []) {
   }
   if (!byName.size) return lines;
   return (lines || []).map((ln) => {
-    // Frame BOM qty is owned by the BOM snapshot; the name-keyed groups[] restore
-    // must not overwrite it, otherwise the per-rack division above is undone.
-    if ((ln.source || ln.sourceType) === FRAME_BOM_SOURCE) return ln;
+    // groups[].qty is a per-rack snapshot of ordinary catalog lines only. Frame
+    // BOM qty is owned by the calculator/BOM snapshot: restoring it from a
+    // name-keyed group would undo the per-rack division above and, when the group
+    // holds a corrupted total, would push that total straight back into the editor.
+    // Lineage decides, not materialId or name.
+    if (isFrameBomBuilderLine(ln)) return ln;
     const g = byName.get(String(ln.name || "").trim());
     if (!g) return ln;
     const qty = Number(g.qty);
@@ -274,7 +308,7 @@ function applyStellageGroupsToLines(lines = [], groups = []) {
 export function stellagesFromProject(project, { stellageCatalogs = {}, materials = [] } = {}) {
   const configs = project?.stellageConfigs || [];
   return configs.map((cfg) => {
-    const stCount = Math.max(1, Number(cfg.count) || 1);
+    const { proven, count: stCount } = resolveProvenRackCount(cfg.count);
     const catalogLines = projectStellageLinesFromCatalog(
       stellageCatalogs,
       cfg.moduleId,
@@ -288,6 +322,8 @@ export function stellagesFromProject(project, { stellageCatalogs = {}, materials
       manualItems: savedProjectItems,
       frameBomItems,
       stCount,
+      frameStCount: stCount,
+      frameBasisProven: proven,
       materials,
     });
     // Recovery: if frame BOM refresh wiped ordinary st_*__ln_* rows, restore
@@ -467,13 +503,19 @@ export function mergeStellageBuilderLines(
     projectItems,
     buildModuleRackKey({ moduleId: stellage.moduleId, rackId: stellage.id }),
   );
+  // stellage.items are already editor/per-rack quantities, so saved rows need no
+  // division here. frameBomItems, however, come straight from project.items and
+  // are canonical TOTALS — they must be divided by the proven stellageConfigs
+  // count for this rack, or opening the rack editor hands the editor a total and
+  // the next save multiplies by the rack count a second time.
+  const { proven, count } = resolveProvenRackCount(stellage?.count);
   return mergeStellageEditorLines({
     catalogLines,
     manualItems,
     frameBomItems,
-    // stellage.items are already editor/per-rack quantities. Only project items
-    // loaded by stellagesFromProject need total -> per-rack division.
     stCount: 1,
+    frameStCount: count,
+    frameBasisProven: proven,
     materials,
   });
 }
@@ -673,35 +715,16 @@ export function restoreMissingNonFrameRackItems(existingItems = [], builderItems
 }
 
 /**
- * Composite rack+BOM identity for frame_bom qty merge (never materialId-only).
- * @param {object} line
- * @param {object} [stellage]
- */
-function frameBomBuilderLineDedupeKey(line, stellage) {
-  const moduleRackKey = String(
-    line?.moduleRackKey
-      || buildModuleRackKey({ moduleId: stellage?.moduleId, rackId: stellage?.id })
-      || (stellage?.id ? `stellage:${stellage.id}` : ""),
-  ).trim();
-  if (!moduleRackKey) return "";
-  return resolveFrameBomDedupeKey({
-    ...line,
-    moduleRackKey,
-    source: FRAME_BOM_SOURCE,
-    sourceType: FRAME_BOM_SOURCE,
-  });
-}
-
-/**
  * Apply editor qty/pipeCuts from frame_bom builder lines back onto preserved project items.
  * Editor stores per-rack amounts; project items store totals × stellage.count.
+ * This is the single place the rack count is applied (contract E).
  * @param {object[]} projectItems
  * @param {object[]} stellages
  */
 export function mergeFrameBomQtyFromBuilderLines(projectItems = [], stellages = []) {
   const editorByKey = new Map();
   for (const st of stellages || []) {
-    const stCount = Math.max(1, Number(st.count) || 1);
+    const stCount = resolveProvenRackCount(st.count).count;
     for (const ln of st.items || []) {
       if ((ln.source || ln.sourceType) !== FRAME_BOM_SOURCE) continue;
       const key = frameBomBuilderLineDedupeKey(ln, st);

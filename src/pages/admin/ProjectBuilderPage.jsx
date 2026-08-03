@@ -18,6 +18,10 @@ import {
 } from "../../../shared/frameDrawingContext.js";
 import { frameBomItemsForModuleRack, stripResidualFrameBomTwins, stripSameNameFrameBomBuilderTwins, syncProjectItemStellageLabels } from "../../../shared/frameBomProjectItems.js";
 import { buildProjectItemsAfterBuilderSave } from "../../../shared/buildProjectItemsAfterBuilderSave.js";
+import {
+  checkFrameBomGroupQtyBasis,
+  formatFrameBomGroupQtyBasisError,
+} from "../../../shared/frameBomRackBasis.js";
 import { buildModuleRackKey } from "../../../shared/moduleRackIds.js";
 import {
   PROJECT_STATUS_ACTIVE,
@@ -723,6 +727,22 @@ export default function ProjectBuilderPage() {
       built.items = stripSameNameFrameBomBuilderTwins(built.items);
       built.items = syncProjectItemStellageLabels(built.items, stellageList);
       built.items = mergeFrameBomQtyFromBuilderLines(built.items, stellageList);
+    }
+    // Fail closed before any write: groups[] must stay per-rack and the canonical
+    // frame_bom row must be per-rack × count, scaled exactly once. Nothing is sent
+    // and the project revision is untouched when the basis cannot be proven.
+    const basisCheck = checkFrameBomGroupQtyBasis({
+      projectId: loadedProjectId || loadedProject?.id || "",
+      stellages: stellagesForProjectSave(stellagesResolved, draftResolved),
+      builtStellageConfigs: built.stellageConfigs,
+      builtItems: built.items,
+      loadedItems: loadedProject?.items || [],
+    });
+    if (!basisCheck.ok) {
+      const err = new Error(formatFrameBomGroupQtyBasisError(basisCheck.violations));
+      err.code = basisCheck.code;
+      err.violations = basisCheck.violations;
+      throw err;
     }
     return built;
   };
