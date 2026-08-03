@@ -23,6 +23,127 @@ import { projectClientLanguage } from "../../shared/projectClientLanguage.js";
 
 const pt = (project, key, params) => t(projectClientLanguage(project), key, params);
 
+/** Soft-break chunk for long unbroken tokens (URLs, SKUs) at PDF render time only. */
+export const PDF_SOFT_BREAK_CHUNK = 24;
+
+/**
+ * Normalize PDF cell text and insert zero-width break opportunities so AutoTable
+ * linebreak can wrap long domains / SKUs / URLs without clipping.
+ * Visible glyphs and semantic value are unchanged (ZWSP is render-only).
+ */
+export function pdfCellText(value) {
+  const text = safePdfText(value);
+  if (!text || text === "—") return text;
+  const chunk = PDF_SOFT_BREAK_CHUNK;
+  return String(text).replace(/[^\s\u200B]{25,}/g, (token) => {
+    // Prefer break opportunities at existing punctuation, then hard-chunk leftovers.
+    const withSoft = token.replace(/([-/_.])/g, "$1\u200B");
+    return withSoft.replace(/[^\s\u200B]{25,}/g, (seg) => {
+      let out = "";
+      for (let i = 0; i < seg.length; i += chunk) {
+        if (i) out += "\u200B";
+        out += seg.slice(i, i + chunk);
+      }
+      return out;
+    });
+  });
+}
+
+/** Strip render-only soft breaks — for assertions comparing full user text. */
+export function pdfCellTextPlain(value) {
+  return String(pdfCellText(value) || "").replace(/\u200B/g, "");
+}
+
+/** Shared AutoTable cell styles: wrap text, grow row height, keep top alignment. */
+function clientPdfTableCellStyles(extra = {}) {
+  return {
+    fontSize: 8,
+    cellPadding: { top: 1.6, right: 1.2, bottom: 1.6, left: 1.2 },
+    overflow: "linebreak",
+    valign: "top",
+    lineWidth: 0.1,
+    lineColor: [220, 220, 220],
+    ...pdfTableFontStyles(),
+    ...extra,
+  };
+}
+
+function clientPdfTableLayoutOpts() {
+  return {
+    rowPageBreak: "avoid",
+    showHead: "everyPage",
+    pageBreak: "auto",
+    margin: { left: 14, right: 14, top: 16, bottom: 18 },
+  };
+}
+
+/** Short table body (no photo / source) — exported for regression tests. */
+export function buildShortPdfTableBody(rows, project, language = projectClientLanguage(project)) {
+  return (rows || []).map((r, i) => [
+    i + 1,
+    pdfCellText(clientPdfNameCol(r, language)),
+    formatQty(r.qty, r.unit),
+    tUnit(language, r.unit || "шт."),
+    clientPdfMoneyOrTbd(r, project?.currency, language),
+    pdfCellText(r.supplier),
+  ]);
+}
+
+/** Merged/full table body — exported for regression tests. */
+export function buildMergedPdfTableBody(rows, project, { compact = false, language } = {}) {
+  const lang = language || projectClientLanguage(project);
+  return (rows || []).map((r, i) => {
+    const base = [
+      i + 1,
+      safePdfPhotoCell(),
+      pdfCellText(clientPdfNameCol(r, lang)),
+      formatQty(r.qty, r.unit),
+      tUnit(lang, r.unit || "шт."),
+      clientPdfMoneyOrTbd(r, project?.currency, lang),
+      pdfCellText(r.supplier),
+    ];
+    if (!compact) base.push(pdfCellText(r.sourceText));
+    return base;
+  });
+}
+
+function shortPdfColumnStyles(nameCol) {
+  // Portrait usable ~182 mm. Priority: name → supplier → compact numeric cols.
+  return {
+    0: { cellWidth: 8, halign: "center" },
+    [nameCol]: { cellWidth: 78 },
+    2: { cellWidth: 14, halign: "right" },
+    3: { cellWidth: 12, halign: "center" },
+    4: { cellWidth: 24, halign: "right" },
+    5: { cellWidth: 46 },
+  };
+}
+
+function mergedPdfColumnStyles(photoCol, nameCol, compact) {
+  if (compact) {
+    return {
+      0: { cellWidth: 8, halign: "center" },
+      [photoCol]: { cellWidth: PDF_PHOTO_COL_WIDTH_MM },
+      [nameCol]: { cellWidth: 70 },
+      3: { cellWidth: 14, halign: "right" },
+      4: { cellWidth: 12, halign: "center" },
+      5: { cellWidth: 22, halign: "right" },
+      6: { cellWidth: 42 },
+    };
+  }
+  // Full: name / supplier / source get the remaining width after compact numerics.
+  return {
+    0: { cellWidth: 7, halign: "center" },
+    [photoCol]: { cellWidth: PDF_PHOTO_COL_WIDTH_MM },
+    [nameCol]: { cellWidth: 48 },
+    3: { cellWidth: 12, halign: "right" },
+    4: { cellWidth: 11, halign: "center" },
+    5: { cellWidth: 20, halign: "right" },
+    6: { cellWidth: 35 },
+    7: { cellWidth: 35 },
+  };
+}
+
 function pdfMoney(amount, projectOrCurrency) {
   if (projectOrCurrency && typeof projectOrCurrency === "object" && !Array.isArray(projectOrCurrency)) {
     return formatMoneyForPdf(amount, normalizeProjectCurrency(projectOrCurrency));
@@ -241,23 +362,15 @@ async function tableForShort(doc, rows, project, startY, brandRgb) {
   const language = projectClientLanguage(project);
   const nameCol = 1;
   const head = [getShortPdfTableHead(language)];
-  const body = rows.map((r, i) => [
-    i + 1,
-    clientPdfNameCol(r, language),
-    formatQty(r.qty, r.unit),
-    tUnit(language, r.unit || "шт."),
-    clientPdfMoneyOrTbd(r, project.currency, language),
-    (r.supplier || "—").slice(0, 28),
-  ]);
+  const body = buildShortPdfTableBody(rows, project, language);
   autoTable(doc, {
     startY,
     head,
     body,
-    styles: { fontSize: 8, cellPadding: 2, ...pdfTableFontStyles() },
-    headStyles: { fillColor: brandRgb, ...pdfTableHeadFontStyles() },
-    columnStyles: {
-      [nameCol]: { cellWidth: 72 },
-    },
+    styles: clientPdfTableCellStyles(),
+    headStyles: { fillColor: brandRgb, valign: "middle", ...pdfTableHeadFontStyles() },
+    columnStyles: shortPdfColumnStyles(nameCol),
+    ...clientPdfTableLayoutOpts(),
   });
   return doc.lastAutoTable.finalY + 8;
 }
@@ -384,29 +497,15 @@ async function tableForMerged(doc, rows, project, startY, brandRgb, purchaseStat
     t(language, "client.pdf.header.supplier"),
     ...(!compact ? [t(language, "client.pdf.header.source")] : []),
   ]];
-  const body = rows.map((r, i) => {
-    const base = [
-      i + 1,
-      safePdfPhotoCell(),
-      clientPdfNameCol(r, language),
-      formatQty(r.qty, r.unit),
-      tUnit(language, r.unit || "шт."),
-      clientPdfMoneyOrTbd(r, project.currency, language),
-      (r.supplier || "—").slice(0, 28),
-    ];
-    if (!compact) base.push((r.sourceText || "").slice(0, 48));
-    return base;
-  });
+  const body = buildMergedPdfTableBody(rows, project, { compact, language });
   autoTable(doc, {
     startY,
     head,
     body,
-    styles: { fontSize: 7.5, cellPadding: 1.8, ...pdfTableFontStyles() },
-    headStyles: { fillColor: brandRgb, ...pdfTableHeadFontStyles() },
-    columnStyles: {
-      [photoCol]: { cellWidth: PDF_PHOTO_COL_WIDTH_MM },
-      [nameCol]: { cellWidth: compact ? 64 : 50 },
-    },
+    styles: clientPdfTableCellStyles({ fontSize: 8 }),
+    headStyles: { fillColor: brandRgb, valign: "middle", ...pdfTableHeadFontStyles() },
+    columnStyles: mergedPdfColumnStyles(photoCol, nameCol, compact),
+    ...clientPdfTableLayoutOpts(),
     ...pdfPhotoTableHooks(photoMap, photoCol),
   });
   return doc.lastAutoTable.finalY + 8;
@@ -536,10 +635,22 @@ function categorySummaryTable(doc, merged, project, y, brandRgb) {
     body: sections.map(([title, list]) => {
       const sum = list.reduce((s, r) => s + (r.sumVat || 0), 0);
       const done = list.filter((r) => (r.sourceItems || []).every((i) => isBoughtStatus(i.status))).length;
-      return [title, list.length, pdfMoney(sum, project), list.length ? `${Math.round((done / list.length) * 100)}%` : "0%"];
+      return [
+        pdfCellText(title),
+        list.length,
+        pdfMoney(sum, project),
+        list.length ? `${Math.round((done / list.length) * 100)}%` : "0%",
+      ];
     }),
-    styles: { fontSize: 8, ...pdfTableFontStyles() },
-    headStyles: { fillColor: brandRgb, ...pdfTableHeadFontStyles() },
+    styles: clientPdfTableCellStyles(),
+    headStyles: { fillColor: brandRgb, valign: "middle", ...pdfTableHeadFontStyles() },
+    columnStyles: {
+      0: { cellWidth: 90 },
+      1: { cellWidth: 28, halign: "center" },
+      2: { cellWidth: 36, halign: "right" },
+      3: { cellWidth: 28, halign: "center" },
+    },
+    ...clientPdfTableLayoutOpts(),
   });
   return doc.lastAutoTable.finalY + 10;
 }
@@ -559,12 +670,14 @@ async function supplierBlocks(doc, rows, project, y, brandRgb, purchaseStatuses,
   for (const g of groupRowsBySupplier(rows, projectClientLanguage(project))) {
     y = ensureSpace(doc, y, 30);
     doc.setFontSize(10);
-    doc.text(pt(project, "client.pdf.supplierBlock.title", {
+    const title = pt(project, "client.pdf.supplierBlock.title", {
       supplier: g.supplier,
       count: g.count,
       sum: pdfMoney(g.sum, project),
-    }), 14, y);
-    y += 4;
+    });
+    const wrappedTitle = doc.splitTextToSize(safePdfText(title), 182);
+    doc.text(wrappedTitle, 14, y);
+    y += Math.max(4, wrappedTitle.length * 4.5);
     y = await tableForMerged(doc, g.rows, project, y, brandRgb, purchaseStatuses, true, pdfOpts);
   }
   return y;
