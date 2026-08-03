@@ -4,6 +4,7 @@ import { calculateFrameGeometry } from "./frameGeometry.js";
 import { generateCutList } from "./frameCutList.js";
 import { extractTubeCutsFromCutList, calculateTubeStockOptions } from "./frameTubeStock.js";
 import { calculateAngleStockOptions } from "./frameAngleStock.js";
+import { parseFrameBomDecimal } from "../../shared/frameBomUnits.js";
 
 export const PREVIEW_BANNER_TEXT = "Предпросмотр. В закупку ещё не добавлено.";
 export const PREVIEW_FUTURE_NOTE =
@@ -38,7 +39,7 @@ const NFT_KEYS = new Set([
 
 /** @param {Array<{ qty?: number }>} draft */
 export function visiblePurchaseDraftItems(draft) {
-  return (draft || []).filter((item) => (Number(item.qty) || 0) > 0);
+  return (draft || []).filter((item) => parseFrameBomDecimal(item.qty, 0) > 0);
 }
 
 /** @param {Array<{ materialId?: string, key?: string, name?: string }>} draft */

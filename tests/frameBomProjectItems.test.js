@@ -66,7 +66,7 @@ const catalogMaterials = [
 ];
 
 function tubeDraft(overrides = {}) {
-  return {
+  const draft = {
     key: "profile_tube_20x20",
     materialId: "m036",
     name: "Труба профильная 20/20/1,5 мм",
@@ -76,6 +76,10 @@ function tubeDraft(overrides = {}) {
     techNote: "Резы профтрубы: 3200 мм × 6 шт",
     ...overrides,
   };
+  if (Object.hasOwn(overrides, "qty") && !Object.hasOwn(overrides, "pipeCuts")) {
+    draft.pipeCuts = [{ lengthMm: 1000, qty: overrides.qty }];
+  }
+  return draft;
 }
 
 function crabGDraft(overrides = {}) {
@@ -1239,23 +1243,24 @@ describe("stripSameNameFrameBomBuilderTwins + label sync", () => {
         qty: 136,
       },
       {
-        // Legacy twin: same name AND machine-readable frame lineage.
+        // Exact legacy Builder twin; its procurement data moves to canonical.
         id: "st_ms933oqimo2vp__ln_old",
         materialId: "m073",
         name: "Болт М6×20",
         module: "Стеллаж 2",
         section: "Стеллаж 2",
-        sourceKey: "frame_bom:d1:mod:st_ms933oqimo2vp:bolt_m6x20",
         qty: 408,
+        purchaseStatus: "bought",
+        actualPrice: 1.25,
+        clientComment: "уже закуплено",
       },
       {
-        // Same name and material, but no lineage — an ordinary rack line.
-        // A shared title must never authorise deletion.
-        id: "st_ms933oqimo2vp__ln_no_lineage",
+        id: "st_ms933oqimo2vp__ln_manual",
         materialId: "m073",
         name: "Болт М6×20",
         module: "Стеллаж 2",
         section: "Стеллаж 2",
+        source: "manual",
         qty: 7,
       },
       {
@@ -1266,12 +1271,33 @@ describe("stripSameNameFrameBomBuilderTwins + label sync", () => {
         section: "Стеллаж 2",
         qty: 12,
       },
+      {
+        id: "st_ms933oqimo2vp__ln_install",
+        materialId: "m073",
+        name: "Болт М6×20",
+        itemRole: "installation",
+        qty: 3,
+      },
+      {
+        id: "st_other__ln_old",
+        materialId: "m073",
+        name: "Болт М6×20",
+        qty: 5,
+      },
     ];
-    // Name-based stripping is gone: lineage-only dedupe keeps every rack line.
-    expect(frameBomProjectItems.stripSameNameFrameBomBuilderTwins).toBeUndefined();
-    const cleaned = stripResidualFrameBomTwins(items);
-    expect(cleaned.map((i) => i.id)).toContain("st_ms933oqimo2vp__ln_no_lineage");
+    const cleaned = frameBomProjectItems.stripSameNameFrameBomBuilderTwins(items);
+    expect(cleaned.map((i) => i.id)).not.toContain("st_ms933oqimo2vp__ln_old");
+    expect(cleaned.map((i) => i.id)).toContain("st_ms933oqimo2vp__ln_manual");
     expect(cleaned.map((i) => i.id)).toContain("st_ms933oqimo2vp__ln_plumb");
+    expect(cleaned.map((i) => i.id)).toContain("st_ms933oqimo2vp__ln_install");
+    expect(cleaned.map((i) => i.id)).toContain("st_other__ln_old");
+    const canonical = cleaned.find((i) => i.id.startsWith("it_fbom_"));
+    expect(canonical).toMatchObject({
+      status: "bought",
+      purchaseStatus: "bought",
+      actualPrice: 1.25,
+      clientComment: "уже закуплено",
+    });
   });
 
   it("syncs stale Стеллаж 1/2 labels to current stellage names", () => {

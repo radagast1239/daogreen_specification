@@ -31,7 +31,7 @@ const draft = [
     qty: 10,
     unit: "м",
     name: "Труба",
-    pipeCuts: [{ lengthMm: 3200, qty: 2 }],
+    pipeCuts: [{ lengthMm: 5000, qty: 2 }],
   },
   { key: "crab_g", materialId: "m072", qty: 4, unit: "шт", name: "Краб G" },
 ];
@@ -145,6 +145,32 @@ describe("Frame BOM rack count scaling", () => {
     ]);
   });
 
+  it("keeps 10.815 m exact for count 1/20 and accepts comma or dot decimals", () => {
+    const cuts = [
+      { lengthMm: 2800, qty: 2 },
+      { lengthMm: 1300, qty: 3 },
+      { lengthMm: 657.5, qty: 2 },
+    ];
+    const dot = scaleFrameBomDraftForRackCount([{
+      key: "profile_tube_20x20",
+      materialId: "m036",
+      unit: "м",
+      qty: "10.815",
+      pipeCuts: cuts,
+    }], 1)[0];
+    const comma = scaleFrameBomDraftForRackCount([{
+      key: "profile_tube_20x20",
+      materialId: "m036",
+      unit: "м",
+      qty: "10,815",
+      pipeCuts: cuts,
+    }], "20")[0];
+
+    expect(dot.qty).toBe(10.815);
+    expect(comma.qty).toBe(216.3);
+    expect(comma.pipeCuts).toEqual(cuts.map((cut) => ({ ...cut, qty: cut.qty * 20 })));
+  });
+
   it("builds project items from per-rack BOM without cumulative multiplication", () => {
     const project = {
       items: [],
@@ -156,7 +182,7 @@ describe("Frame BOM rack count scaling", () => {
     expect(once.find((item) => item.materialId === "m036").qty).toBe(120);
     expect(twice.find((item) => item.materialId === "m036").qty).toBe(120);
     expect(twice.find((item) => item.materialId === "m036").pipeCuts).toEqual([
-      { lengthMm: 3200, qty: 24 },
+      { lengthMm: 5000, qty: 24 },
     ]);
   });
 });
@@ -213,7 +239,7 @@ describe("buildFrameBomProjectMerge", () => {
     };
     const { patch: patchV2 } = buildFrameBomProjectMerge(
       project,
-      [{ ...draft[0], qty: 70 }],
+      [{ ...draft[0], qty: 70, pipeCuts: [{ lengthMm: 1000, qty: 70 }] }],
       { ...drawingContext, drawingId: "drawing_v2" },
       materials,
     );

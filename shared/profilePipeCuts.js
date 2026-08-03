@@ -1,5 +1,7 @@
 /** Отрезки профильной трубы: длина (мм) + количество (шт) */
 
+import { parseFrameBomDecimal, roundFrameBomQty } from "./frameBomUnits.js";
+
 export function isProfilePipeName(name) {
   return String(name || "")
     .toLowerCase()
@@ -25,8 +27,8 @@ export function normalizePipeCuts(raw) {
   const list = Array.isArray(raw) ? raw : [];
   return list
     .map((c) => ({
-      lengthMm: c?.lengthMm === "" || c?.lengthMm == null ? "" : Number(c.lengthMm) || 0,
-      qty: c?.qty === "" || c?.qty == null ? "" : Number(c.qty) || 0,
+      lengthMm: c?.lengthMm === "" || c?.lengthMm == null ? "" : parseFrameBomDecimal(c.lengthMm, 0),
+      qty: c?.qty === "" || c?.qty == null ? "" : parseFrameBomDecimal(c.qty, 0),
     }))
     .filter((c) => c.lengthMm > 0 || c.qty > 0);
 }
@@ -84,7 +86,7 @@ export function totalPipeCutMeters(pipeCuts) {
     (sum, c) => sum + (Number(c.lengthMm) || 0) * (Number(c.qty) || 0),
     0,
   );
-  return Math.round((totalMm / 1000) * 100) / 100;
+  return roundFrameBomQty(totalMm / 1000);
 }
 
 /** Единицы, для которых qty должен считаться из сегментов. */
@@ -111,16 +113,16 @@ export function mergePipeCutsFromItems(items, options = {}) {
   }
   return [...byLen.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([lengthMm, qty]) => ({ lengthMm, qty: Math.round(qty * 100) / 100 }));
+    .map(([lengthMm, qty]) => ({ lengthMm, qty: roundFrameBomQty(qty) }));
 }
 
 /** Умножить/разделить qty сегментов (для count стеллажей). */
 export function scalePipeCuts(cuts, factor) {
-  const f = Number(factor);
+  const f = parseFrameBomDecimal(factor, NaN);
   if (!Number.isFinite(f) || f === 1) return normalizePipeCuts(cuts);
   return normalizePipeCuts(cuts).map((c) => ({
     lengthMm: c.lengthMm,
-    qty: Math.round((Number(c.qty) || 0) * f * 100) / 100,
+    qty: roundFrameBomQty(parseFrameBomDecimal(c.qty, 0) * f),
   }));
 }
 

@@ -6,6 +6,7 @@ import { AC_ITEM_SECTION } from "../../shared/roomAcSpec.js";
 import { defaultRooms } from "./roomHelpers.js";
 import { resolveBuilderLineQty } from "../../shared/flowSpecs.js";
 import { resolvePipeCuts, scalePipeCuts, pipeCutsClientNote } from "../../shared/profilePipeCuts.js";
+import { parseFrameBomDecimal, roundFrameBomQty } from "../../shared/frameBomUnits.js";
 import { resolveBreakerSpecs } from "../../shared/breakerSpecs.js";
 import { resolveFlowSpecs } from "../../shared/flowSpecs.js";
 import { resolveSplitSpecs } from "../../shared/splitSpecs.js";
@@ -46,13 +47,13 @@ export function frameBomProjectItemToBuilderLine(item, { materials = null, stCou
   // Frame BOM rows store totals (per-rack × stellage count). The stellageCount
   // marker lives only in memory — it is never written to project_items, so after
   // a DB round-trip the divisor must come from stellageConfigs[].count (stCount).
-  const embedded = Number(item?.stellageCount ?? item?.rackCount);
-  const configCount = Number(stCount);
+  const embedded = parseFrameBomDecimal(item?.stellageCount ?? item?.rackCount, NaN);
+  const configCount = parseFrameBomDecimal(stCount, NaN);
   const divideBy = Number.isFinite(embedded) && embedded >= 1
     ? Math.max(1, embedded)
     : (Number.isFinite(configCount) && configCount >= 1 ? Math.max(1, configCount) : 1);
   const line = projectItemToBuilderLine(enriched, { stCount: divideBy });
-  const bomQty = Number(line.qty) || 0;
+  const bomQty = parseFrameBomDecimal(line.qty, 0);
   const rawCuts = enriched.pipeCuts?.length ? enriched.pipeCuts : line.pipeCuts;
   const perRackCuts = divideBy > 1 ? scalePipeCuts(rawCuts, 1 / divideBy) : rawCuts;
   return {
@@ -76,7 +77,7 @@ export function frameBomProjectItemToBuilderLine(item, { materials = null, stCou
 }
 
 function applyFrameBomOverlayToCatalogLine(catalogLine, bomLine) {
-  const bomQty = Number(bomLine.qty) || 0;
+  const bomQty = parseFrameBomDecimal(bomLine.qty, 0);
   return {
     ...catalogLine,
     ...bomLine,
@@ -184,9 +185,9 @@ export function parseBuilderLineIdFromProjectItem(itemId, instanceId = "") {
 }
 
 export function projectItemToBuilderLine(item, { stCount = 1, materials = null } = {}) {
-  const count = Math.max(1, Number(stCount) || 1);
-  const qty = Number(item.qty) || 0;
-  const baseQty = count > 1 ? Math.round((qty / count) * 100) / 100 : qty;
+  const count = Math.max(1, parseFrameBomDecimal(stCount, 1));
+  const qty = parseFrameBomDecimal(item.qty, 0);
+  const baseQty = count > 1 ? roundFrameBomQty(qty / count) : roundFrameBomQty(qty);
   const material = item.materialId && materials?.length
     ? materials.find((m) => (m.id || m.materialId) === item.materialId)
     : null;
@@ -716,10 +717,10 @@ export function mergeFrameBomQtyFromBuilderLines(projectItems = [], stellages = 
     const hit = editorByKey.get(key);
     if (!hit) return it;
     const { line: editor, stCount } = hit;
-    const perRackQty = Number(editor.qty);
+    const perRackQty = parseFrameBomDecimal(editor.qty, NaN);
     const next = { ...it, stellageCount: stCount };
     if (Number.isFinite(perRackQty) && perRackQty > 0) {
-      next.qty = Math.round(perRackQty * stCount * 100) / 100;
+      next.qty = roundFrameBomQty(perRackQty * stCount);
     }
     if (editor.pipeCuts?.length) {
       next.pipeCuts = stCount > 1

@@ -1,6 +1,7 @@
 import { FRAME_BOM_MATERIALS } from "./frameBomMaterialMap.js";
 import { normalizePipeCuts, pipeCutsClientNote } from "./profilePipeCuts.js";
 import { normalizePurchaseStatus } from "./purchaseStatusRules.js";
+import { parseFrameBomDecimal, roundFrameBomQty } from "./frameBomUnits.js";
 
 export const FRAME_BOM_SOURCE = "frame_bom";
 export const FRAME_BOM_ADMIN_SOURCE_LABEL = "Из схемы стеллажа";
@@ -493,6 +494,8 @@ function mergePreservedEntry(map, key, item) {
     purchaseStatus: status,
     actualPrice: item.actualPrice,
     clientComment: item.clientComment,
+    comment: item.comment,
+    clientNote: item.clientNote,
     visibleToClient: item.visibleToClient,
     visible: item.visible,
     approved: item.approved,
@@ -576,7 +579,7 @@ export function findMissingFrameBomMaterials(purchaseDraft, materials = []) {
   const index = materialCatalogIndex(materials);
   const missing = new Set();
   for (const line of purchaseDraft || []) {
-    const qty = Number(line?.qty) || 0;
+    const qty = parseFrameBomDecimal(line?.qty, 0);
     if (qty <= 0) continue;
     const materialId = String(line?.materialId || "").trim();
     if (!materialId) {
@@ -625,7 +628,7 @@ export function enrichFrameBomDraftWithMaterials(draftItem, materials = []) {
       ...draftItem,
       ...base,
       name: base.name,
-      qty: Number(draftItem.qty) || 0,
+      qty: roundFrameBomQty(parseFrameBomDecimal(draftItem.qty, 0)),
       unit: draftItem.unit || base.unit,
       pipeCuts,
       techNote: bomTechNote || base.techNote,
@@ -654,7 +657,7 @@ export function enrichProjectItemFromMaterial(item, materials = []) {
     ...item,
     ...base,
     name: item.name || base.name,
-    qty: Number(item.qty) || 0,
+    qty: roundFrameBomQty(parseFrameBomDecimal(item.qty, 0)),
     unit: item.unit || base.unit || "шт.",
     pipeCuts: pipeCuts.length ? pipeCuts : item.pipeCuts,
     techNote: item.techNote || base.techNote,
@@ -683,6 +686,9 @@ export function frameBomDraftToProjectItem(draft, options, rackPrefix, sortOrder
   const bomKey = draft.key || draft.materialId;
   const sourceKey = `${rackPrefix}:${bomKey}`;
   const pipeCuts = resolvePipeCutsForDraft(draft);
+  // Unit conversion is completed in the per-rack draft/scaling boundary.
+  // Project mapping only parses and persists the already converted total.
+  const projectQty = roundFrameBomQty(parseFrameBomDecimal(draft.qty, 0));
   const techNote = draft.techNote ? String(draft.techNote) : "";
   const clientNote = pipeCuts.length ? pipeCutsClientNote(pipeCuts) || techNote : (draft.clientNote || techNote);
   const section = String(options.rackLabel || options.moduleRackKey || "").trim();
@@ -699,7 +705,7 @@ export function frameBomDraftToProjectItem(draft, options, rackPrefix, sortOrder
     materialId: draft.materialId,
     name: draft.name || FRAME_BOM_MATERIALS[bomKey]?.name || "",
     unit: draft.unit || FRAME_BOM_MATERIALS[bomKey]?.unit || "шт.",
-    qty: Number(draft.qty) || 0,
+    qty: projectQty,
     module: section,
     section,
     category: draft.category || "Прочее",
@@ -860,7 +866,7 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
   let sortOrder = kept.length;
 
   for (const line of draft) {
-    const qty = Number(line.qty) || 0;
+    const qty = parseFrameBomDecimal(line.qty, 0);
     if (qty <= 0) continue;
 
     if (!line.materialId) {
@@ -892,6 +898,8 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
       item.purchaseStatus = preserved.purchaseStatus;
       if (preserved.actualPrice != null) item.actualPrice = preserved.actualPrice;
       if (preserved.clientComment) item.clientComment = preserved.clientComment;
+      if (preserved.comment) item.comment = preserved.comment;
+      if (preserved.clientNote) item.clientNote = preserved.clientNote;
       if (preserved.visibleToClient != null) {
         item.visibleToClient = preserved.visibleToClient;
         item.visible = preserved.visible ?? preserved.visibleToClient;
@@ -928,6 +936,8 @@ export function mergeFrameBomIntoProjectItems(existingItems, purchaseDraft, opti
     item.purchaseStatus = preserved.purchaseStatus;
     if (preserved.actualPrice != null) item.actualPrice = preserved.actualPrice;
     if (preserved.clientComment) item.clientComment = preserved.clientComment;
+    if (preserved.comment) item.comment = preserved.comment;
+    if (preserved.clientNote) item.clientNote = preserved.clientNote;
     if (preserved.visibleToClient != null) {
       item.visibleToClient = preserved.visibleToClient;
       item.visible = preserved.visible ?? preserved.visibleToClient;
@@ -1394,17 +1404,82 @@ function normItemName(value) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-/*
- * There is deliberately no same-name twin stripper.
- *
- * Removing an st_*__ln_* row because it shares stellage + materialId + display
- * name with a canonical frame_bom line deleted legitimate rack lines (a rack
- * may carry the same material twice under one title). Any row that really does
- * come from a frame BOM carries machine-readable lineage (source, sourceKey,
- * sourceObjectIds.bomKey, sourceLabel, __it_fbom_ id) and is already deduped by
- * stripResidualFrameBomTwins / mergeFrameBomIntoProjectItems on that lineage.
- * A row without lineage is legacy/unknown ownership and must be preserved.
+function frameBomNameTwinKey(item, rackId) {
+  const materialId = String(item?.materialId || "").trim();
+  const name = normItemName(item?.name);
+  return rackId && materialId && name ? `${rackId}::${materialId}::${name}` : "";
+}
+
+function hasDifferentFrameBomPurpose(item) {
+  const role = String(item?.itemRole || item?.item_role || "").trim();
+  if (role && role !== "purchase") return true;
+  return [item?.purpose, item?.itemPurpose, item?.usage]
+    .some((value) => String(value || "").trim());
+}
+
+function mergeBuilderTwinPurchaseFields(canonical, twin) {
+  const next = { ...canonical };
+  const twinStatus = normalizePurchaseStatus(twin);
+  const canonicalStatus = normalizePurchaseStatus(canonical);
+  if (twinStatus !== "not_bought" || canonicalStatus === "not_bought") {
+    next.status = twinStatus;
+    next.purchaseStatus = twinStatus;
+  }
+  if (twin.actualPrice !== null && twin.actualPrice !== undefined && twin.actualPrice !== "") {
+    next.actualPrice = twin.actualPrice;
+  }
+  if (String(twin.clientComment || "").trim()) next.clientComment = twin.clientComment;
+  if (!String(next.clientComment || "").trim() && String(twin.comment || "").trim()) {
+    next.clientComment = twin.comment;
+  }
+  if (!String(next.comment || "").trim() && String(twin.comment || "").trim()) {
+    next.comment = twin.comment;
+  }
+  if (!String(next.clientNote || "").trim() && String(twin.clientNote || "").trim()) {
+    next.clientNote = twin.clientNote;
+  }
+  return next;
+}
+
+/**
+ * Remove only an exact legacy Builder twin of a unique canonical Frame BOM row.
+ * Scope is deliberately strict: same rack id + material id + normalized name.
+ * Explicit manual rows and rows with a separate purpose are never candidates.
  */
+export function stripSameNameFrameBomBuilderTwins(items = []) {
+  const source = Array.isArray(items) ? items : [];
+  const canonicalByKey = new Map();
+  for (let index = 0; index < source.length; index += 1) {
+    const item = source[index];
+    if (!isCanonicalFrameBomLine(item) || isExplicitManualProjectItem(item)) continue;
+    const key = frameBomNameTwinKey(item, resolveFrameBomStellageId(item));
+    if (!key) continue;
+    const entries = canonicalByKey.get(key) || [];
+    entries.push(index);
+    canonicalByKey.set(key, entries);
+  }
+
+  const replacements = new Map();
+  const removeIndexes = new Set();
+  for (let index = 0; index < source.length; index += 1) {
+    const item = source[index];
+    const id = String(item?.id || "");
+    if (!/^st_.+__ln_.+/.test(id)) continue;
+    if (isFrameBomLine(item) || isExplicitManualProjectItem(item) || hasDifferentFrameBomPurpose(item)) continue;
+    const key = frameBomNameTwinKey(item, resolveBuilderPrefixedStellageId(item));
+    const canonicalIndexes = canonicalByKey.get(key);
+    if (!key || canonicalIndexes?.length !== 1) continue;
+    const canonicalIndex = canonicalIndexes[0];
+    const canonical = replacements.get(canonicalIndex) || source[canonicalIndex];
+    replacements.set(canonicalIndex, mergeBuilderTwinPurchaseFields(canonical, item));
+    removeIndexes.add(index);
+  }
+
+  if (!removeIndexes.size) return [...source];
+  return source
+    .map((item, index) => replacements.get(index) || item)
+    .filter((_item, index) => !removeIndexes.has(index));
+}
 
 /**
  * Rewrite module/section labels on stellage-scoped rows to the current stellage name.

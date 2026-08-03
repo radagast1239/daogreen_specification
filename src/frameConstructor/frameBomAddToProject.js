@@ -16,6 +16,8 @@ import {
   FRAME_DRAWING_EDIT_SCHEME_LABEL,
   FRAME_DRAWING_OPEN_SCHEME_LABEL,
 } from "../../shared/frameDrawingActionsModel.js";
+import { parseFrameBomDecimal, roundFrameBomQty } from "../../shared/frameBomUnits.js";
+import { normalizePipeCuts, totalPipeCutMeters } from "../../shared/profilePipeCuts.js";
 
 export {
   FRAME_BOM_REFRESH_BUTTON_LABEL,
@@ -202,17 +204,26 @@ export function resolveFrameBomRackCount(project, drawingContext = {}) {
 }
 
 export function scaleFrameBomDraftForRackCount(purchaseDraft = [], rackCount = 1) {
-  const count = Math.max(1, Number(rackCount) || 1);
-  return (purchaseDraft || []).map((line) => ({
-    ...line,
-    qty: Math.round((Number(line.qty) || 0) * count * 100) / 100,
-    pipeCuts: Array.isArray(line.pipeCuts)
-      ? line.pipeCuts.map((cut) => ({
-          ...cut,
-          qty: Math.round((Number(cut.qty) || 0) * count * 100) / 100,
-        }))
-      : line.pipeCuts,
-  }));
+  const count = Math.max(1, parseFrameBomDecimal(rackCount, 1));
+  return (purchaseDraft || []).map((line) => {
+    const perRackCuts = normalizePipeCuts(line.pipeCuts);
+    const isTube = line.key === "profile_tube_20x20" || line.materialId === "m036";
+    // Pipe cuts are the authoritative mm source. This prevents a formatted metre
+    // value from being reinterpreted as a piece count before rack scaling.
+    const perRackQty = isTube && perRackCuts.length
+      ? totalPipeCutMeters(perRackCuts)
+      : parseFrameBomDecimal(line.qty, 0);
+    return {
+      ...line,
+      qty: roundFrameBomQty(perRackQty * count),
+      pipeCuts: perRackCuts.length
+        ? perRackCuts.map((cut) => ({
+            ...cut,
+            qty: roundFrameBomQty(parseFrameBomDecimal(cut.qty, 0) * count),
+          }))
+        : line.pipeCuts,
+    };
+  });
 }
 
 export function formatFrameBomAddSuccessSummary(mergeResult) {

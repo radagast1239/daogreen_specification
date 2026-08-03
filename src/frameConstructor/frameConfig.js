@@ -1,23 +1,19 @@
 import { crossBayLengthMm, normalizeEndCapBeamLevelMask, normalizeEndCapBeamDropByLevel } from './frameCrabRules.js';
 import { migrateCrabPostOverrides } from './frameCrabOverrides.js';
+import { parseFrameBomDecimal } from '../../shared/frameBomUnits.js';
 
 export function normalizeFrameConfig(config) {
   const safeNum = (val, min, def, max = Infinity) => {
-    let num;
-    if (typeof val === 'string') {
-      num = parseFloat(val);
-    } else {
-      num = Number(val);
-    }
-    if (isNaN(num) || num < min) return def;
+    const num = parseFrameBomDecimal(val, NaN);
+    if (!Number.isFinite(num) || num < min) return def;
     if (num > max) return max;
     return num;
   };
 
   const safeOptNum = (val) => {
     if (val === '' || val === null || val === undefined) return '';
-    const num = parseFloat(val);
-    return isNaN(num) ? '' : Math.max(0, num);
+    const num = parseFrameBomDecimal(val, NaN);
+    return Number.isFinite(num) ? Math.max(0, num) : '';
   };
 
   const lengthMm = safeNum(config.lengthMm, 500, 3000);

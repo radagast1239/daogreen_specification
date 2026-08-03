@@ -1,6 +1,7 @@
 /** Frame BOM → purchase draft mapping (pure functions, no DB writes). */
 
 import { CRAB_FASTENER_PER_UNIT } from "./fastenerRules.js";
+import { parseFrameBomDecimal, roundFrameBomQty } from "./frameBomUnits.js";
 
 export const FRAME_BOM_MATERIALS = {
   profile_tube_20x20: {
@@ -172,8 +173,8 @@ export function normalizeFrameCutSegments(cutList) {
   const byLen = new Map();
   for (const item of cutList || []) {
     if (!TUBE_CUT_IDS.has(item.id)) continue;
-    const lengthMm = Math.round(Number(item.length));
-    const qty = Number(item.qty) || 0;
+    const lengthMm = Math.round(parseFrameBomDecimal(item.length, 0));
+    const qty = parseFrameBomDecimal(item.qty, 0);
     if (!lengthMm || qty <= 0) continue;
     byLen.set(lengthMm, (byLen.get(lengthMm) || 0) + qty);
   }
@@ -184,7 +185,7 @@ export function normalizeFrameCutSegments(cutList) {
 
 export function totalPipeCutMeters(pipeCuts) {
   const totalMm = (pipeCuts || []).reduce((sum, c) => sum + c.lengthMm * c.qty, 0);
-  return round2(totalMm / 1000);
+  return roundFrameBomQty(totalMm / 1000);
 }
 
 export function tubeCrabFastenerQtyFromCutList(cutList = []) {
@@ -192,7 +193,7 @@ export function tubeCrabFastenerQtyFromCutList(cutList = []) {
   for (const row of cutList) {
     const kind = CONNECTOR_TO_CRAB_KIND[row.id];
     if (!kind) continue;
-    const qty = Number(row.qty) || 0;
+    const qty = parseFrameBomDecimal(row.qty, 0);
     if (qty <= 0) continue;
     total += qty * (CRAB_FASTENER_PER_UNIT[kind] || 0);
   }
@@ -218,7 +219,7 @@ function appendNftChannelItems(items, frameData) {
   for (const row of frameData.cutList || []) {
     const key = NFT_CHANNEL_TO_KEY[row.id];
     if (!key) continue;
-    const qty = Number(row.qty) || 0;
+    const qty = parseFrameBomDecimal(row.qty, 0);
     if (qty <= 0) continue;
     const note = row.note ? String(row.note) : "";
     items.push(
@@ -268,7 +269,7 @@ export function buildTubeCrabBomPurchaseDraft(frameData = {}) {
   for (const row of frameData.cutList || []) {
     const key = CONNECTOR_TO_KEY[row.id];
     if (!key) continue;
-    const qty = Number(row.qty) || 0;
+    const qty = parseFrameBomDecimal(row.qty, 0);
     if (qty <= 0) continue;
     items.push(
       baseDraft(
