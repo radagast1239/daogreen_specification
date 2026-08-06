@@ -207,7 +207,7 @@ describe("dashboard UX polish", () => {
     expect(card.headline).not.toContain("куплено / 10");
   });
 
-  it("closed purchase count = bought + delivered + have", () => {
+  it("closed purchase count = ordered + bought + delivered + have", () => {
     const items = [
       baseItem({ id: "b", purchaseStatus: PURCHASE_STATUS.BOUGHT }),
       baseItem({ id: "d", purchaseStatus: PURCHASE_STATUS.DELIVERED }),
@@ -216,10 +216,11 @@ describe("dashboard UX polish", () => {
       baseItem({ id: "n", purchaseStatus: PURCHASE_STATUS.NOT_BOUGHT }),
     ];
     const card = buildAdminPurchaseProgress(items);
-    expect(card.closedCount).toBe(3);
-    expect(card.headline).toBe("3 из 5 закрыто");
+    expect(card.closedCount).toBe(4);
+    expect(card.headline).toBe("4 из 5 закрыто");
     expect(card.orderedCount).toBe(1);
     expect(card.boughtDeliveredCount).toBe(2);
+    expect(card.haveCount).toBe(1);
   });
 
   it("pre-send message maps to correct filter", () => {

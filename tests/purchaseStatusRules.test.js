@@ -38,11 +38,14 @@ describe("purchaseStatusRules", () => {
     }
   });
 
-  it("shouldCountInPurchaseBudget excludes have and not_fit", () => {
+  it("shouldCountInPurchaseBudget is OPEN_PURCHASE only", () => {
+    expect(shouldCountInPurchaseBudget({ status: "not_bought" })).toBe(true);
+    expect(shouldCountInPurchaseBudget({ status: "searching" })).toBe(true);
+    expect(shouldCountInPurchaseBudget({ status: "need_help" })).toBe(true);
     expect(shouldCountInPurchaseBudget({ status: "have" })).toBe(false);
     expect(shouldCountInPurchaseBudget({ status: "not_fit" })).toBe(false);
-    expect(shouldCountInPurchaseBudget({ status: "bought" })).toBe(true);
-    expect(shouldCountInPurchaseBudget({ status: "not_bought" })).toBe(true);
+    expect(shouldCountInPurchaseBudget({ status: "bought" })).toBe(false);
+    expect(shouldCountInPurchaseBudget({ status: "ordered" })).toBe(false);
   });
 
   it("shouldWarnBeforePublish for attention statuses", () => {
@@ -54,11 +57,12 @@ describe("purchaseStatusRules", () => {
     expect(shouldWarnBeforePublish("have")).toBe(false);
   });
 
-  it("isPurchaseStatusCompleted for bought/delivered/have", () => {
+  it("isPurchaseStatusCompleted for ordered/bought/delivered/have", () => {
+    expect(isPurchaseStatusCompleted("ordered")).toBe(true);
     expect(isPurchaseStatusCompleted("bought")).toBe(true);
     expect(isPurchaseStatusCompleted("delivered")).toBe(true);
     expect(isPurchaseStatusCompleted("have")).toBe(true);
-    expect(isPurchaseStatusCompleted("ordered")).toBe(false);
+    expect(isPurchaseStatusCompleted("not_bought")).toBe(false);
   });
 
   it("buildPurchaseStatusSummary handles mixed merged rows", () => {

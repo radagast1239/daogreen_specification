@@ -11,11 +11,11 @@
 import { lineContributesToSum, lineVisibleToClient, isPurchasableLineType, resolveItemType } from "./itemTypes.js";
 import {
   normalizePurchaseStatus,
-  shouldCountInPurchaseBudget,
-  isPurchaseStatusCompleted,
+  isOpenPurchaseStatus,
+  isPurchaseSpendCommitted,
+  isPurchaseProgressCompleted,
+  PURCHASE_STATUS,
 } from "./purchaseStatusRules.js";
-
-const DONE_SPENT = new Set(["bought", "delivered"]);
 
 /**
  * Parse a numeric value; never returns NaN/Infinity.
@@ -169,11 +169,144 @@ export function lineActualGross(it) {
 }
 
 /**
+ * Whether an item belongs to the purchase accounting pool.
+ * Client-visible + purchasable + qty > 0; not_fit always excluded.
+ */
+export function isPurchasePoolItem(item, options = {}) {
+  const contributeCheck = options.contributeCheck === true;
+  if (contributeCheck && !lineContributesToSum(item)) return false;
+  if (!lineVisibleToClient(item)) return false;
+  if (!isPurchasableLineType(resolveItemType(item))) return false;
+  if (normalizePurchaseStatus(item) === PURCHASE_STATUS.NOT_FIT) return false;
+  const qty = safeFiniteNumber(item?.qty, 0) ?? 0;
+  if (!(qty > 0)) return false;
+  return true;
+}
+
+/**
+ * Canonical purchase summary — single source for client UI, admin list, API.
+ *
+ * spent = Σ committedGross for ordered/bought/delivered
+ * remaining = Σ plannedGross for OPEN_PURCHASE only (never open − spent)
+ * progress = count(PROGRESS_COMPLETED) / purchasePoolCount
+ * have: progress completed, excluded from spent and remaining
+ *
+ * @param {object[]} items
+ * @param {{ contributeCheck?: boolean }} [options]
+ */
+export function calculatePurchaseSummary(items, options = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const pool = list.filter((it) => isPurchasePoolItem(it, options));
+
+  let completedCount = 0;
+  let openCount = 0;
+  let plannedGross = 0;
+  let spentGross = 0;
+  let remainingGross = 0;
+  let orderedGross = 0;
+  let boughtGross = 0;
+  let deliveredGross = 0;
+  let haveGross = 0;
+  let orderedCount = 0;
+  let boughtCount = 0;
+  let deliveredCount = 0;
+  let haveCount = 0;
+
+  for (const item of pool) {
+    const status = normalizePurchaseStatus(item);
+    const planned = computeLineMoney(item, { priceMode: "planned", contributeCheck: false }).gross;
+    const committed = computeLineMoney(item, { priceMode: "actual", contributeCheck: false }).gross;
+    plannedGross += planned;
+
+    if (isPurchaseProgressCompleted(status)) completedCount += 1;
+    if (isOpenPurchaseStatus(status)) {
+      openCount += 1;
+      remainingGross += planned;
+    }
+    if (isPurchaseSpendCommitted(status)) {
+      spentGross += committed;
+    }
+
+    if (status === PURCHASE_STATUS.ORDERED) {
+      orderedCount += 1;
+      orderedGross += committed;
+    } else if (status === PURCHASE_STATUS.BOUGHT) {
+      boughtCount += 1;
+      boughtGross += committed;
+    } else if (status === PURCHASE_STATUS.DELIVERED) {
+      deliveredCount += 1;
+      deliveredGross += committed;
+    } else if (status === PURCHASE_STATUS.HAVE) {
+      haveCount += 1;
+      haveGross += planned;
+    }
+  }
+
+  const purchasePoolCount = pool.length;
+  const progressPercent = purchasePoolCount
+    ? Math.round((completedCount / purchasePoolCount) * 100)
+    : 0;
+
+  return {
+    purchasePoolCount,
+    completedCount,
+    openCount,
+    progressPercent,
+    plannedGross,
+    spentGross,
+    remainingGross,
+    orderedGross,
+    boughtGross,
+    deliveredGross,
+    haveGross,
+    orderedCount,
+    boughtCount,
+    deliveredCount,
+    haveCount,
+  };
+}
+
+/**
+ * Aggregate purchase summaries across projects without mixing currencies.
+ * @param {{ currency?: string, currencyCode?: string, items?: object[] }[]} projects
+ */
+export function aggregatePurchaseSummariesByCurrency(projects, options = {}) {
+  const buckets = new Map();
+  for (const project of projects || []) {
+    const code = String(project?.currencyCode || project?.currency || "₽").trim() || "₽";
+    const summary = calculatePurchaseSummary(project?.items || [], options);
+    if (!buckets.has(code)) {
+      buckets.set(code, {
+        currency: code,
+        purchasePoolCount: 0,
+        completedCount: 0,
+        spentGross: 0,
+        remainingGross: 0,
+        plannedGross: 0,
+        projectCount: 0,
+      });
+    }
+    const b = buckets.get(code);
+    b.projectCount += 1;
+    b.purchasePoolCount += summary.purchasePoolCount;
+    b.completedCount += summary.completedCount;
+    b.spentGross += summary.spentGross;
+    b.remainingGross += summary.remainingGross;
+    b.plannedGross += summary.plannedGross;
+  }
+  const list = [...buckets.values()];
+  return {
+    currencies: list,
+    /** Single total only when every project shares one currency; otherwise null (fail-closed). */
+    unified: list.length === 1 ? list[0] : null,
+  };
+}
+
+/**
  * Aggregate money for a list of items.
- * purchasedTotal / remainingTotal follow projectTotals purchase-status semantics:
- * - purchased (spent): bought/delivered via actual gross
- * - remaining: max(openObligationPlannedGross - spent, 0)
- *   where open obligation uses shouldCountInPurchaseBudget and planned gross
+ * purchasedTotal / remainingTotal follow calculatePurchaseSummary:
+ * - purchased (spent): ordered/bought/delivered via actual gross
+ * - remaining: planned gross of OPEN_PURCHASE only (not open − spent)
  *
  * @param {object[]} items
  * @param {{ priceMode?: "planned"|"actual", contributeCheck?: boolean }} [options]
@@ -198,43 +331,19 @@ export function computeItemsMoney(items, options = {}) {
     grossTotal += line.gross;
   }
 
-  // Purchase pools mirror projectTotals / clientPurchaseItems filters lightly:
-  // visible + purchasable + contributing when contributeCheck is on.
-  const purchasePool = list.filter((it) => {
-    if (contributeCheck && !lineContributesToSum(it)) return false;
-    if (!lineVisibleToClient(it)) return false;
-    if (!isPurchasableLineType(resolveItemType(it))) return false;
-    return true;
+  const purchase = calculatePurchaseSummary(list, {
+    contributeCheck: options.contributeCheck === true,
   });
-
-  const obligationPool = purchasePool.filter((i) => shouldCountInPurchaseBudget(i));
-
-  let purchasedTotal = 0;
-  for (const i of purchasePool) {
-    const s = normalizePurchaseStatus(i);
-    if (!DONE_SPENT.has(s)) continue;
-    purchasedTotal += computeLineMoney(i, { priceMode: "actual", contributeCheck: false }).gross;
-  }
-
-  let openObligationGross = 0;
-  for (const i of obligationPool) {
-    const s = normalizePurchaseStatus(i);
-    if (s === "bought" || s === "delivered") continue;
-    openObligationGross += computeLineMoney(i, { priceMode: "planned", contributeCheck: false }).gross;
-  }
-
-  const remainingTotal = Math.max(openObligationGross - purchasedTotal, 0);
 
   return {
     lines,
     netTotal,
     vatTotal,
     grossTotal,
-    purchasedTotal,
-    remainingTotal,
-    // extras useful for UI parity with projectTotals
-    openObligationGross,
-    doneCount: purchasePool.filter((i) => isPurchaseStatusCompleted(i)).length,
-    purchaseCount: purchasePool.length,
+    purchasedTotal: purchase.spentGross,
+    remainingTotal: purchase.remainingGross,
+    openObligationGross: purchase.remainingGross,
+    doneCount: purchase.completedCount,
+    purchaseCount: purchase.purchasePoolCount,
   };
 }

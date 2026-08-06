@@ -251,8 +251,18 @@ function OverviewTab({ overview }) {
     { id: "needsAttention", label: "Требуют внимания", value: c.needsAttention, tone: c.needsAttention > 0 ? "warn" : "ok", keepZero: true },
     { id: "unpublished", label: "Не опубликованы", value: c.unpublished, tone: c.unpublished > 0 ? "amber" : undefined, keepZero: true },
     { id: "withChanges", label: "Изменения после публикации", value: c.withChanges, tone: c.withChanges > 0 ? "warn" : undefined, keepZero: true },
-    { id: "activeTotal", label: "Общая сумма", value: money(c.activeTotal), important: true },
-    { id: "unpurchasedTotal", label: "Ещё не закуплено", value: money(c.unpurchasedTotal), important: true },
+    {
+      id: "activeTotal",
+      label: "Общая сумма",
+      value: c.mixedCurrency || c.activeTotal == null ? "разные валюты" : money(c.activeTotal),
+      important: true,
+    },
+    {
+      id: "unpurchasedTotal",
+      label: "Ещё не закуплено",
+      value: c.mixedCurrency || c.unpurchasedTotal == null ? "разные валюты" : money(c.unpurchasedTotal),
+      important: true,
+    },
   ];
 
   return (

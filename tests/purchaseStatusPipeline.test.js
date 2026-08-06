@@ -212,7 +212,7 @@ describe("purchase status pipeline", () => {
     expect(bought.warnings.filter((w) => w.issue.startsWith("purchase_"))).toHaveLength(0);
   });
 
-  it("projectTotals excludes have from obligation remaining", () => {
+  it("projectTotals remaining is open planned only (never open − spent)", () => {
     const project = {
       currency: "₽",
       items: [
@@ -222,7 +222,10 @@ describe("purchase status pipeline", () => {
       ],
     };
     const t = projectTotals(project);
-    expect(t.remaining).toBe(800);
+    // Open line 1000 only; have/bought excluded from remaining (not open−spent=800).
+    expect(t.remaining).toBe(1000);
+    expect(t.spent).toBe(200);
+    expect(t.progress).toBe(Math.round((2 / 3) * 100));
   });
 });
 

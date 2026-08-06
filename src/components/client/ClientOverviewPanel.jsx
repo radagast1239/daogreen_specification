@@ -2,7 +2,7 @@ import React from "react";
 import { money } from "../../store/helpers.js";
 import { lineGross } from "../../lib/itemHelpers.js";
 import { groupByClientSection, resolveClientSection } from "../../../shared/clientSections.js";
-import { isBoughtStatus } from "./ClientItemCard.jsx";
+import { isClosedPurchaseStatus } from "../../lib/itemHelpers.js";
 import ActivityFeed from "../ActivityFeed.jsx";
 import { Progress } from "../ui.jsx";
 import ClientCoolingCalculations from "./ClientCoolingCalculations.jsx";
@@ -20,7 +20,7 @@ export default function ClientOverviewPanel({
   language = "ru",
 }) {
   const sections = groupByClientSection(items);
-  const boughtCount = items.filter((i) => isBoughtStatus(i.status)).length;
+  const boughtCount = items.filter((i) => isClosedPurchaseStatus(i)).length;
 
   return (
     <div className="client-overview" style={{ marginTop: 16 }}>
@@ -73,7 +73,7 @@ export default function ClientOverviewPanel({
       </p>
       {sections.map(([title, list]) => {
         const sum = list.reduce((s, i) => s + lineGross(i), 0);
-        const done = list.filter((i) => isBoughtStatus(i.status)).length;
+        const done = list.filter((i) => isClosedPurchaseStatus(i)).length;
         const pct = list.length ? Math.round((done / list.length) * 100) : 0;
         const sectionId = resolveClientSection(list[0] || {}).section || null;
         const sectionTitle = tSection(language, sectionId, title);

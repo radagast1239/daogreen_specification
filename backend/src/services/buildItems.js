@@ -3,6 +3,10 @@ import crypto from "crypto";
 import { materialIncludedInSelection } from "../../../shared/stellageComposition.js";
 import { materialInModule } from "../../../shared/materialModules.js";
 import { lineContributesToSum, lineVisibleToClient, resolveItemType } from "../../../shared/itemTypes.js";
+import {
+  calculatePurchaseSummary,
+  computeItemsMoney,
+} from "../../../shared/moneyCalc.js";
 
 export const uid = (prefix = "id") => `${prefix}_${nanoid(10)}`;
 
@@ -85,8 +89,6 @@ export function buildItemsFromModules(materials, modules, selected) {
   return items;
 }
 
-const DONE = ["bought", "delivered", "have"];
-
 export function lineNet(it) {
   return (Number(it.qty) || 0) * (Number(it.price) || 0);
 }
@@ -99,22 +101,29 @@ export function lineGross(it) {
   return lineNet(it) + lineVat(it);
 }
 
-const factSum = (it) =>
-  (Number(it.qty) || 0) * (it.actualPrice != null ? Number(it.actualPrice) : Number(it.price) || 0);
-
-export function projectTotals(items) {
-  const budgetItems = items.filter(lineContributesToSum);
-  const budgetNet = budgetItems.reduce((s, i) => s + lineNet(i), 0);
-  const vatAmount = budgetItems.reduce((s, i) => s + lineVat(i), 0);
-  const budget = budgetNet + vatAmount;
-  const clientItems = items.filter(lineVisibleToClient);
-  const spent = clientItems
-    .filter((i) => DONE.includes(i.status) && lineContributesToSum(i))
-    .reduce((s, i) => s + factSum(i), 0);
-  const doneCount = clientItems.filter((i) => DONE.includes(i.status) && lineContributesToSum(i)).length;
-  const total = clientItems.filter(lineContributesToSum).length;
-  const progress = total ? Math.round((doneCount / total) * 100) : 0;
-  return { budgetNet, vatAmount, budget, spent, remaining: Math.max(budget - spent, 0), progress, total, doneCount };
+/**
+ * Admin/API project totals — same purchase contract as frontend helpers.projectTotals.
+ * Accepts an items array (legacy) or a project-like `{ items }`.
+ */
+export function projectTotals(itemsOrProject) {
+  const items = Array.isArray(itemsOrProject)
+    ? itemsOrProject
+    : itemsOrProject?.items || [];
+  const budgetAgg = computeItemsMoney(
+    items.filter((i) => lineContributesToSum(i)),
+    { priceMode: "planned", contributeCheck: false },
+  );
+  const purchase = calculatePurchaseSummary(items);
+  return {
+    budgetNet: budgetAgg.netTotal,
+    vatAmount: budgetAgg.vatTotal,
+    budget: budgetAgg.grossTotal,
+    spent: purchase.spentGross,
+    remaining: purchase.remainingGross,
+    progress: purchase.progressPercent,
+    total: purchase.purchasePoolCount,
+    doneCount: purchase.completedCount,
+  };
 }
 
 export function compareVersions(oldItems, newItems) {

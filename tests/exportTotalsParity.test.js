@@ -95,7 +95,8 @@ describe("moneyCalc base (scenarios 1–8)", () => {
       baseItem({ id: "c", status: "bought", price: 200, qty: 1, actualPrice: 200, vatRate: 0 }),
     ];
     const t = projectTotals({ currency: "₽", items });
-    expect(t.remaining).toBe(800);
+    // remaining = open planned only (never open − spent)
+    expect(t.remaining).toBe(1000);
     expect(t.spent).toBe(200);
   });
 });

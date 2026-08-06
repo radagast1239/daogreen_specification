@@ -5,9 +5,10 @@ import {
 import { lineVisibleToClient } from "../../shared/itemTypes.js";
 import {
   normalizePurchaseStatus,
-  isPurchaseStatusCompleted,
+  isPurchaseSpendCommitted,
 } from "../../shared/purchaseStatusRules.js";
 import {
+  calculatePurchaseSummary,
   computeItemsMoney,
   computeLineMoney,
   formatMoneyAmount,
@@ -40,25 +41,22 @@ export const formatQty = (qty, unit) => {
 };
 
 export function projectTotals(project) {
-  const budgetAgg = computeItemsMoney(projectBudgetItems(project), { priceMode: "planned" });
+  const items = project?.items || (Array.isArray(project) ? project : []);
+  const asProject = Array.isArray(project) ? { items } : project || { items };
+  const budgetAgg = computeItemsMoney(projectBudgetItems(asProject), { priceMode: "planned" });
   const budgetNet = budgetAgg.netTotal;
   const vatAmount = budgetAgg.vatTotal;
   const budget = budgetAgg.grossTotal;
-  const purchasePool = clientPurchaseItems(project);
-  const purchaseAgg = computeItemsMoney(purchasePool, {
-    priceMode: "planned",
-    contributeCheck: false,
-  });
-  const spent = purchaseAgg.purchasedTotal;
-  const remaining = purchaseAgg.remainingTotal;
-  const doneCount = purchasePool.filter((i) => isPurchaseStatusCompleted(i)).length;
-  const total = purchasePool.length;
-  const progress = total ? Math.round((doneCount / total) * 100) : 0;
+  const purchase = calculatePurchaseSummary(items);
+  const spent = purchase.spentGross;
+  const remaining = purchase.remainingGross;
+  const doneCount = purchase.completedCount;
+  const total = purchase.purchasePoolCount;
+  const progress = purchase.progressPercent;
   const overrun = Math.max(spent - budget, 0);
   let economy = 0;
-  for (const i of purchasePool) {
-    const s = normalizePurchaseStatus(i);
-    if (s !== "bought" && s !== "delivered" && s !== "have") continue;
+  for (const i of clientPurchaseItems(asProject)) {
+    if (!isPurchaseSpendCommitted(i)) continue;
     const planned = computeLineMoney(i, { priceMode: "planned", contributeCheck: false }).gross;
     const actual = lineActualGross(i);
     if (actual < planned) economy += planned - actual;

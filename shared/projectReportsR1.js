@@ -12,8 +12,6 @@ import {
   normalizePurchaseStatus,
   PURCHASE_STATUS,
   PURCHASE_STATUS_LABELS,
-  isClosedPurchaseStatusId,
-  shouldCountInPurchaseBudget,
 } from "./purchaseStatusRules.js";
 import { getProjectStatusLabel, normalizeProjectStatus, PROJECT_STATUS, isProjectStatusActiveLifecycle } from "./projectStatus.js";
 import { publishedPlannedTotal } from "./publishedPurchaseTotals.js";
@@ -22,6 +20,7 @@ import { buildClientImageManifest } from "./clientImageManifest.js";
 import { buildClientPurchaseSummary } from "./clientPurchaseSummary.js";
 import { matchSpecLineFilter } from "./specLineFilters.js";
 import { resolveClientSection, getClientSectionLabelMap } from "./clientSections.js";
+import { aggregatePurchaseSummariesByCurrency } from "./moneyCalc.js";
 
 export const REPORT_TABS = Object.freeze([
   { id: "overview", label: "Сводка" },
@@ -244,22 +243,22 @@ export function buildReportsOverview(projects = [], materials = []) {
   const needsAttention = rows.filter((r) => r.needsAttention).length;
   const unpublished = rows.filter((r) => r.publishedTotal == null && r.publishedLabel === "Не опубликован").length;
   const withChanges = rows.filter((r) => r.hasUnpublishedChanges).length;
-  const workingSum = rows.reduce((s, r) => s + (Number(r.workingTotal) || 0), 0);
 
-  let unpurchasedSum = 0;
+  // Cross-project money: never arithmetic-mix currencies; fail-closed when mixed.
+  const workingBuckets = new Map();
   for (const p of active) {
-    const materialsIndex = materialById(materials);
-    for (const raw of p.items || []) {
-      if (!purchasableIncluded(raw)) continue;
-      if (!shouldCountInPurchaseBudget(raw)) continue;
-      const status = normalizePurchaseStatus(raw);
-      if (isClosedPurchaseStatusId(status)) continue;
-      if (status === PURCHASE_STATUS.ORDERED || status === PURCHASE_STATUS.SEARCHING) continue;
-      const mat = raw.materialId ? materialsIndex.get(raw.materialId) : null;
-      const it = { ...raw, supplier: resolveEffectiveSupplier(raw, mat) };
-      unpurchasedSum += lineGross(it);
-    }
+    const code = String(p.currencyCode || p.currency || "₽").trim() || "₽";
+    workingBuckets.set(code, (workingBuckets.get(code) || 0) + workingBudget(p));
   }
+  const activeTotal =
+    workingBuckets.size === 1
+      ? Math.round([...workingBuckets.values()][0] * 100) / 100
+      : null;
+
+  const purchaseAgg = aggregatePurchaseSummariesByCurrency(active);
+  const unpurchasedTotal = purchaseAgg.unified
+    ? Math.round(purchaseAgg.unified.remainingGross * 100) / 100
+    : null;
 
   return {
     cards: {
@@ -267,8 +266,10 @@ export function buildReportsOverview(projects = [], materials = []) {
       needsAttention,
       unpublished,
       withChanges,
-      activeTotal: Math.round(workingSum * 100) / 100,
-      unpurchasedTotal: Math.round(unpurchasedSum * 100) / 100,
+      activeTotal,
+      unpurchasedTotal,
+      currencyBuckets: purchaseAgg.currencies,
+      mixedCurrency: purchaseAgg.unified == null && active.length > 0,
     },
     projects: rows,
   };

@@ -52,11 +52,37 @@ const ALIASES = {
   replacement_check: PURCHASE_STATUS.REPLACEMENT_CHECK,
 };
 
-const COMPLETED = new Set([
+/**
+ * Canonical purchase-accounting groups.
+ * Do not invent statuses outside PURCHASE_STATUS.
+ */
+
+/** Progress completed: ordered / bought / delivered / have. */
+export const PROGRESS_COMPLETED_STATUSES = Object.freeze([
+  PURCHASE_STATUS.ORDERED,
   PURCHASE_STATUS.BOUGHT,
   PURCHASE_STATUS.DELIVERED,
   PURCHASE_STATUS.HAVE,
 ]);
+
+/** Money spent/committed («Потрачено»): ordered + bought + delivered. have excluded. */
+export const SPEND_COMMITTED_STATUSES = Object.freeze([
+  PURCHASE_STATUS.ORDERED,
+  PURCHASE_STATUS.BOUGHT,
+  PURCHASE_STATUS.DELIVERED,
+]);
+
+/** Still open for purchase (remaining budget). */
+export const OPEN_PURCHASE_STATUSES = Object.freeze([
+  PURCHASE_STATUS.NOT_BOUGHT,
+  PURCHASE_STATUS.SEARCHING,
+  PURCHASE_STATUS.NEED_HELP,
+  PURCHASE_STATUS.REPLACEMENT_CHECK,
+]);
+
+const PROGRESS_COMPLETED = new Set(PROGRESS_COMPLETED_STATUSES);
+const SPEND_COMMITTED = new Set(SPEND_COMMITTED_STATUSES);
+const OPEN_PURCHASE = new Set(OPEN_PURCHASE_STATUSES);
 
 const ATTENTION = new Set([
   PURCHASE_STATUS.SEARCHING,
@@ -74,26 +100,27 @@ const WARN_PUBLISH = new Set([
 
 const BLOCK_PUBLISH = new Set([PURCHASE_STATUS.NOT_FIT]);
 
-const CLOSED_LIST = new Set([
-  PURCHASE_STATUS.ORDERED,
-  PURCHASE_STATUS.BOUGHT,
-  PURCHASE_STATUS.DELIVERED,
-  PURCHASE_STATUS.HAVE,
-]);
+/** Closed UI list = progress-completed (includes ordered + have). */
+const CLOSED_LIST = PROGRESS_COMPLETED;
 
 /** Канонический id статуса из item (purchaseStatus или legacy status). */
 export function normalizePurchaseStatus(itemOrStatus) {
-  const raw =
-    typeof itemOrStatus === "string"
-      ? itemOrStatus
-      : itemOrStatus?.purchaseStatus ??
-        itemOrStatus?.purchase_status ??
-        itemOrStatus?.procurementStatus ??
-        itemOrStatus?.clientStatus ??
-        itemOrStatus?.status ??
-        "";
-  const key = String(raw || "").trim().toLowerCase();
-  return ALIASES[key] || PURCHASE_STATUS.NOT_BOUGHT;
+  if (typeof itemOrStatus === "string") {
+    const key = String(itemOrStatus || "").trim().toLowerCase();
+    return ALIASES[key] || PURCHASE_STATUS.NOT_BOUGHT;
+  }
+  const purchaseRaw =
+    itemOrStatus?.purchaseStatus ??
+    itemOrStatus?.purchase_status ??
+    itemOrStatus?.procurementStatus ??
+    itemOrStatus?.clientStatus ??
+    "";
+  const statusRaw = itemOrStatus?.status ?? "";
+  const fromPurchase = ALIASES[String(purchaseRaw || "").trim().toLowerCase()];
+  const fromStatus = ALIASES[String(statusRaw || "").trim().toLowerCase()];
+  // Prefer live status when it conflicts with a stale purchaseStatus copy.
+  if (fromPurchase && fromStatus && fromPurchase !== fromStatus) return fromStatus;
+  return fromPurchase || fromStatus || PURCHASE_STATUS.NOT_BOUGHT;
 }
 
 export function getPurchaseStatusLabel(status) {
@@ -106,7 +133,7 @@ export function getPurchaseStatusTone(status) {
   if (id === PURCHASE_STATUS.NOT_FIT) return "danger";
   if (id === PURCHASE_STATUS.NEED_HELP || id === PURCHASE_STATUS.REPLACEMENT_CHECK) return "amber";
   if (id === PURCHASE_STATUS.SEARCHING) return "brand";
-  if (COMPLETED.has(id) || id === PURCHASE_STATUS.ORDERED) return "ok";
+  if (PROGRESS_COMPLETED.has(id)) return "ok";
   return "neutral";
 }
 
@@ -114,12 +141,21 @@ export function shouldShowInClientPurchase() {
   return true;
 }
 
-/** Участвует в «осталось купить» / активной закупке. */
+export function isOpenPurchaseStatus(status) {
+  return OPEN_PURCHASE.has(normalizePurchaseStatus(status));
+}
+
+export function isPurchaseSpendCommitted(status) {
+  return SPEND_COMMITTED.has(normalizePurchaseStatus(status));
+}
+
+export function isPurchaseProgressCompleted(status) {
+  return PROGRESS_COMPLETED.has(normalizePurchaseStatus(status));
+}
+
+/** Remaining / open purchase budget — only OPEN_PURCHASE statuses. */
 export function shouldCountInPurchaseBudget(item) {
-  const id = normalizePurchaseStatus(item);
-  if (id === PURCHASE_STATUS.NOT_FIT) return false;
-  if (id === PURCHASE_STATUS.HAVE) return false;
-  return true;
+  return isOpenPurchaseStatus(item);
 }
 
 export function shouldWarnBeforePublish(item) {
@@ -130,8 +166,9 @@ export function shouldBlockBeforePublish(item) {
   return BLOCK_PUBLISH.has(normalizePurchaseStatus(item));
 }
 
+/** Progress completed (ordered/bought/delivered/have). */
 export function isPurchaseStatusCompleted(status) {
-  return COMPLETED.has(normalizePurchaseStatus(status));
+  return isPurchaseProgressCompleted(status);
 }
 
 export function isPurchaseStatusNeedsAttention(status) {

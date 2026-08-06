@@ -1,26 +1,18 @@
 /** Статистика закупки для клиентского dashboard */
 
-import { lineContributesToSum, lineVisibleToClient } from "./itemTypes.js";
 import {
   normalizePurchaseStatus,
   PURCHASE_STATUS,
   isClosedPurchaseStatusId,
+  isPurchaseProgressCompleted,
+  isPurchaseSpendCommitted,
+  isOpenPurchaseStatus,
 } from "./purchaseStatusRules.js";
-import { computeLineMoney, lineGross } from "./moneyCalc.js";
-
-const CLOSED_PURCHASE = new Set([
-  PURCHASE_STATUS.BOUGHT,
-  PURCHASE_STATUS.DELIVERED,
-  PURCHASE_STATUS.HAVE,
-]);
-
-const ORDERED_PURCHASE = new Set([PURCHASE_STATUS.ORDERED, PURCHASE_STATUS.SEARCHING]);
-
-function factGross(it) {
-  return computeLineMoney(it, { priceMode: "actual", contributeCheck: false }).gross;
-}
+import { calculatePurchaseSummary, isPurchasePoolItem } from "./moneyCalc.js";
+import { lineVisibleToClient, lineContributesToSum } from "./itemTypes.js";
 
 function pool(items) {
+  // Attention chips historically used contribute+visible; money/progress use purchase pool.
   return (items || []).filter((it) => lineVisibleToClient(it) && lineContributesToSum(it));
 }
 
@@ -29,67 +21,45 @@ function purchaseStatus(it) {
 }
 
 export function clientPurchaseDashboard(items) {
+  const summary = calculatePurchaseSummary(items || []);
   const list = pool(items);
-  let boughtCount = 0;
-  let orderedCount = 0;
   let needHelpCount = 0;
   let replacementCount = 0;
-  let boughtSum = 0;
-  let totalSum = 0;
-
+  let searchingCount = 0;
   for (const it of list) {
     const ps = purchaseStatus(it);
-    totalSum += lineGross(it);
-    if (CLOSED_PURCHASE.has(ps)) {
-      boughtCount++;
-      boughtSum += factGross(it);
-    } else if (ORDERED_PURCHASE.has(ps)) {
-      orderedCount++;
-    }
     if (ps === PURCHASE_STATUS.NEED_HELP) needHelpCount++;
     if (ps === PURCHASE_STATUS.REPLACEMENT_CHECK) replacementCount++;
+    if (ps === PURCHASE_STATUS.SEARCHING) searchingCount++;
   }
 
-  const remainingCount = list.length - boughtCount;
-  const remainingSum = Math.max(0, totalSum - boughtSum);
-
+  // boughtCount/boughtSum = progress-completed / spent (includes ordered; excludes have from spent)
   return {
-    totalCount: list.length,
-    boughtCount,
-    orderedCount,
+    totalCount: summary.purchasePoolCount,
+    boughtCount: summary.completedCount,
+    orderedCount: summary.orderedCount + searchingCount,
     needHelpCount,
     replacementCount,
-    remainingCount,
-    totalSum,
-    boughtSum,
-    remainingSum,
-    progress: list.length ? Math.round((boughtCount / list.length) * 100) : 0,
+    remainingCount: summary.openCount,
+    totalSum: summary.plannedGross,
+    boughtSum: summary.spentGross,
+    remainingSum: summary.remainingGross,
+    progress: summary.progressPercent,
+    orderedGross: summary.orderedGross,
+    boughtGross: summary.boughtGross,
+    deliveredGross: summary.deliveredGross,
+    haveCount: summary.haveCount,
   };
 }
 
 /** Карточка закупки для админского штаба проекта. */
 export function buildAdminPurchaseProgress(items) {
-  const list = pool(items);
-  let orderedCount = 0;
-  let boughtDeliveredCount = 0;
-  let haveCount = 0;
-  let closedCount = 0;
-
-  for (const it of list) {
-    const ps = purchaseStatus(it);
-    if (ps === PURCHASE_STATUS.ORDERED || ps === PURCHASE_STATUS.SEARCHING) {
-      orderedCount += 1;
-    }
-    if (ps === PURCHASE_STATUS.BOUGHT || ps === PURCHASE_STATUS.DELIVERED) {
-      boughtDeliveredCount += 1;
-      closedCount += 1;
-    } else if (ps === PURCHASE_STATUS.HAVE) {
-      haveCount += 1;
-      closedCount += 1;
-    }
-  }
-
-  const totalCount = list.length;
+  const summary = calculatePurchaseSummary(items || []);
+  const orderedCount = summary.orderedCount;
+  const boughtDeliveredCount = summary.boughtCount + summary.deliveredCount;
+  const haveCount = summary.haveCount;
+  const closedCount = summary.completedCount;
+  const totalCount = summary.purchasePoolCount;
   const detail = `заказано: ${orderedCount} · куплено/доставлено: ${boughtDeliveredCount}`;
 
   return {
@@ -109,7 +79,7 @@ export function buildAdminPurchaseProgress(items) {
 
 export function supplierPurchaseProgress(items) {
   const map = new Map();
-  for (const it of pool(items)) {
+  for (const it of (items || []).filter((i) => isPurchasePoolItem(i))) {
     const supplier = (it.supplier || "").trim() || "— без поставщика —";
     if (!map.has(supplier)) {
       map.set(supplier, {
@@ -126,21 +96,24 @@ export function supplierPurchaseProgress(items) {
     }
     const row = map.get(supplier);
     const ps = purchaseStatus(it);
+    const lineSummary = calculatePurchaseSummary([it]);
+    const planned = lineSummary.plannedGross;
     row.totalCount++;
-    row.totalSum += lineGross(it);
-    if (CLOSED_PURCHASE.has(ps)) {
+    row.totalSum += planned;
+    if (isPurchaseProgressCompleted(ps)) {
       row.boughtCount++;
-      row.boughtSum += factGross(it);
-    } else if (ORDERED_PURCHASE.has(ps)) {
+    }
+    if (isPurchaseSpendCommitted(ps)) {
+      row.boughtSum += lineSummary.spentGross;
+    }
+    if (ps === PURCHASE_STATUS.ORDERED || ps === PURCHASE_STATUS.SEARCHING) {
       row.orderedCount++;
+    }
+    if (isOpenPurchaseStatus(ps)) {
       row.remainingCount++;
-    } else {
-      row.remainingCount++;
+      row.remainingSum += lineSummary.remainingGross;
     }
     if (ps === PURCHASE_STATUS.NEED_HELP) row.needHelpCount++;
-  }
-  for (const row of map.values()) {
-    row.remainingSum = Math.max(0, row.totalSum - row.boughtSum);
   }
   return [...map.values()].sort((a, b) => b.totalSum - a.totalSum);
 }

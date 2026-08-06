@@ -174,6 +174,8 @@ export function projectBudgetItems(project) {
 }
 
 export function clientPurchaseItems(project) {
+  // UI/export pool (visibility + purchasable). Purchase money/progress use
+  // calculatePurchaseSummary / isPurchasePoolItem (also excludes not_fit, qty<=0).
   return clientVisibleItems(project).filter((i) => isPurchasableLineType(resolveItemType(i)));
 }
 

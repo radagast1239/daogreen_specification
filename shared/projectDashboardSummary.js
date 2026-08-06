@@ -7,7 +7,7 @@ import {
   isPurchasableLineType,
   isCoolingSpecItem,
 } from "./itemTypes.js";
-import { lineGross } from "./moneyCalc.js";
+import { calculatePurchaseSummary } from "./moneyCalc.js";
 import {
   computeReadinessStats,
   runPrePublishCheck,
@@ -18,8 +18,6 @@ import { matchSpecLineFilter } from "./specLineFilters.js";
 import {
   normalizePurchaseStatus,
   PURCHASE_STATUS,
-  shouldCountInPurchaseBudget,
-  isPurchaseStatusCompleted,
 } from "./purchaseStatusRules.js";
 import { isFrameBomLine } from "./frameBomProjectItems.js";
 
@@ -160,28 +158,11 @@ export function buildProjectDashboardSummary(items, options = {}) {
     options.publishCheck ||
     runPrePublishCheck(items, options.publishConfig || {});
 
-  let totalKnown = 0;
-  let remainingToBuyKnown = 0;
-  let alreadyBoughtKnown = 0;
-  let alreadyHaveKnown = 0;
-
-  for (const it of pool) {
-    const price = Number(it.price);
-    if (price > 0) {
-      const gross = lineGross(it);
-      totalKnown += gross;
-      if (shouldCountInPurchaseBudget(it)) {
-        remainingToBuyKnown += gross;
-      }
-      const ps = normalizePurchaseStatus(it);
-      if (ps === PURCHASE_STATUS.BOUGHT || ps === PURCHASE_STATUS.DELIVERED) {
-        alreadyBoughtKnown += gross;
-      }
-      if (ps === PURCHASE_STATUS.HAVE) {
-        alreadyHaveKnown += gross;
-      }
-    }
-  }
+  const purchase = calculatePurchaseSummary(pool);
+  const totalKnown = purchase.plannedGross;
+  const remainingToBuyKnown = purchase.remainingGross;
+  const alreadyBoughtKnown = purchase.spentGross;
+  const alreadyHaveKnown = purchase.haveGross;
 
   const summary = {
     totalItems: pool.length,
