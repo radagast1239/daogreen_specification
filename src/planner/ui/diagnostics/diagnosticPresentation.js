@@ -135,36 +135,6 @@ export function computeDrawerAnchor(workspaceRect, viewportHeight, pad = 8) {
   };
 }
 
-/**
- * PHASE 0G — объединяет result validatePlanIntegrity с доп. session-only
- * diagnostics (напр. room detection failure) в тот же result-shape, который
- * ожидает панель. Не создаёт вторую панель — переиспользует существующую.
- * Чистая функция, не мутирует входы.
- * @param {{valid,summary,diagnostics}|null} result
- * @param {object[]} extraDiagnostics — уже готовые diagnostic-объекты
- */
-export function mergeDiagnosticsResult(result, extraDiagnostics = []) {
-  if (!extraDiagnostics.length) return result;
-  const base = result || { valid: true, summary: { errors: 0, warnings: 0, info: 0, total: 0 }, diagnostics: [] };
-  const summary = {
-    errors: base.summary?.errors || 0,
-    warnings: base.summary?.warnings || 0,
-    info: base.summary?.info || 0,
-    total: base.summary?.total || 0,
-  };
-  for (const d of extraDiagnostics) {
-    if (d.severity === "error") summary.errors += 1;
-    else if (d.severity === "warning") summary.warnings += 1;
-    else if (d.severity === "info") summary.info += 1;
-    summary.total += 1;
-  }
-  return {
-    valid: summary.errors === 0,
-    summary,
-    diagnostics: [...extraDiagnostics, ...(base.diagnostics || [])],
-  };
-}
-
 /** Заголовок кнопки/результата по summary. */
 export function resultHeadline(summary) {
   if (!summary) return "";

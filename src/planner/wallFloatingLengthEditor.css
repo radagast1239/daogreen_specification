@@ -1,0 +1,164 @@
+.dg-wall-float-editor {
+  position: fixed;
+  z-index: 40;
+  box-sizing: border-box;
+  min-width: 168px;
+  max-width: 230px;
+  padding: 8px 10px 7px;
+  background: #ffffff;
+  border: 1px solid #d5ddd8;
+  border-radius: 6px;
+  box-shadow: 0 2px 10px rgba(20, 32, 27, 0.12);
+  font-family: var(--font, "Segoe UI", sans-serif);
+  color: #14201b;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.dg-wall-float-editor__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dg-wall-float-editor__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #3a4540;
+  flex: 0 0 auto;
+}
+
+.dg-wall-float-editor__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 72px;
+  height: 26px;
+  padding: 2px 6px;
+  border: 1px solid #c5d0ca;
+  border-radius: 4px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 13px;
+  font-weight: 600;
+  color: #14201b;
+  background: #fbfcfb;
+  outline: none;
+}
+
+.dg-wall-float-editor__input:focus {
+  border-color: #116355;
+  box-shadow: 0 0 0 2px rgba(17, 99, 85, 0.15);
+}
+
+.dg-wall-float-editor__input:disabled {
+  opacity: 0.65;
+  background: #f0f2f1;
+}
+
+.dg-wall-float-editor__unit {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: #5a6660;
+  min-width: 1.4em;
+}
+
+.dg-wall-float-editor__gear,
+.dg-wall-float-editor__close {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #5a6660;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.dg-wall-float-editor__gear:hover,
+.dg-wall-float-editor__close:hover {
+  background: #eef2f0;
+  color: #14201b;
+}
+
+.dg-wall-float-editor__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: #5a6660;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+
+.dg-wall-float-editor__hint {
+  color: #3a4540;
+}
+
+.dg-wall-float-editor__error {
+  margin-top: 5px;
+  font-size: 11px;
+  color: #b42318;
+  line-height: 1.25;
+}
+
+.dg-wall-float-editor__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.dg-wall-float-editor__field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #3a4540;
+}
+
+.dg-wall-float-editor__field > span:first-child {
+  flex: 0 0 42px;
+  font-weight: 600;
+}
+
+.dg-wall-float-editor__field input[type="number"],
+.dg-wall-float-editor__field select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  border: 1px solid #c5d0ca;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 12px;
+  font-family: var(--mono, ui-monospace, monospace);
+  background: #fbfcfb;
+  color: #14201b;
+}
+
+.dg-wall-float-editor__field--wide select {
+  font-family: var(--font, "Segoe UI", sans-serif);
+  font-size: 11px;
+}
+
+.dg-wall-float-editor__all {
+  margin-top: 6px;
+  width: 100%;
+  height: 24px;
+  border: 1px solid #d5ddd8;
+  border-radius: 4px;
+  background: #f5f7f6;
+  color: #3a4540;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dg-wall-float-editor__all:hover {
+  background: #eef2f0;
+}
+
+.dg-wall-float-editor__lock {
+  color: #b42318;
+}

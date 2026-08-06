@@ -1,0 +1,56 @@
+/**
+ * Sanitized copy of the live 24-wall topology that exposed the Phase 2C3A
+ * wall-drag defect (ids anonymised, coordinates preserved). Used as a real-world
+ * regression fixture: the original classifier could move only 1 of these 24 walls.
+ */
+export const LIVE_NODES = {
+  n1: { x: 2000, y: 2000 },
+  n2: { x: 1951, y: 3976 },
+  n3: { x: 2000, y: 7000 },
+  n4: { x: 6000, y: 2000 },
+  n5: { x: 6000, y: 3950 },
+  n6: { x: 6000, y: 7000 },
+  n7: { x: 4249, y: 2000 },
+  n8: { x: 3950, y: 4000 },
+  n9: { x: 4145, y: 3950 },
+  n10: { x: 4257, y: 7000 },
+  n11: { x: 5264, y: 3950 },
+  n12: { x: 5250, y: 3100 },
+  n13: { x: 4166, y: 4543 },
+  n14: { x: 5650, y: 4570 },
+  n15: { x: 2782, y: 3986 },
+  n16: { x: 3250, y: 4850 },
+  n17: { x: 3250, y: 2950 },
+  n18: { x: 3108, y: 3901 },
+  n19: { x: 4213, y: 5807 },
+  n20: { x: 2600, y: 5850 },
+  n21: { x: 4199, y: 5137 },
+  n22: { x: 5050, y: 5900 },
+};
+
+export const LIVE_WALLS = [
+  { id: "w1", a: "n1", b: "n2", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w2", a: "n2", b: "n3", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w3", a: "n4", b: "n5", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w4", a: "n5", b: "n6", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w5", a: "n7", b: "n8", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w6", a: "n1", b: "n7", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w7", a: "n7", b: "n4", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w8", a: "n9", b: "n8", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w9", a: "n3", b: "n10", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w10", a: "n10", b: "n6", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w11", a: "n5", b: "n11", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w12", a: "n11", b: "n9", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w13", a: "n12", b: "n11", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w14", a: "n9", b: "n13", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w15", a: "n14", b: "n13", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w16", a: "n2", b: "n15", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w17", a: "n15", b: "n8", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w18", a: "n16", b: "n15", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w19", a: "n17", b: "n18", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w20", a: "n19", b: "n10", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w21", a: "n20", b: "n19", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w22", a: "n13", b: "n21", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w23", a: "n21", b: "n19", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+  { id: "w24", a: "n22", b: "n21", thk: 100, role: "outer", kind: "new", thicknessSide: "center", height: 3000, material: "" },
+];

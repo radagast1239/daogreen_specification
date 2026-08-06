@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { berryCalculatorUrl, economicCalculatorUrl, saladEconomicsUrl } from "../lib/calcUrls.js";
 import { api } from "../lib/api.js";
@@ -7,6 +7,7 @@ import { getCompactMode, setCompactMode } from "../lib/compactMode.js";
 import { getSidebarCollapsed, setSidebarCollapsed } from "../lib/sidebarPrefs.js";
 import { NavIcon } from "./NavIcons.jsx";
 import { useStore } from "../store/StoreContext.jsx";
+import { isPlannerWorkspacePath } from "../planner/plannerWorkspaceShell.js";
 
 const NAV_GROUPS = [
   {
@@ -49,6 +50,17 @@ const CALC_LINKS = [
   { href: berryCalculatorUrl, label: "Калькулятор ягод", icon: "berry" },
 ];
 
+const AppShellChromeContext = createContext({
+  plannerWorkspace: false,
+  openAppNav: () => {},
+  closeAppNav: () => {},
+  appNavOpen: false,
+});
+
+export function useAppShellChrome() {
+  return useContext(AppShellChromeContext);
+}
+
 function NavItem({ to, end, label, icon, onNavigate, collapsed, secondary, cta }) {
   const extra = [secondary ? "navlink--secondary" : "", cta ? "navlink--cta" : ""]
     .filter(Boolean)
@@ -84,7 +96,7 @@ function ExtNavItem({ href, label, icon, onNavigate, collapsed }) {
   );
 }
 
-function SidebarNav({ compact, collapsed, onToggleCompact, onToggleCollapse, onNavigate, onLogout }) {
+function SidebarNav({ compact, collapsed, onToggleCompact, onToggleCollapse, onNavigate, onLogout, plannerWorkspace }) {
   return (
     <>
       <div className="sidebar__head">
@@ -92,15 +104,28 @@ function SidebarNav({ compact, collapsed, onToggleCompact, onToggleCollapse, onN
           <span className="sidebar__brand-mark" aria-hidden>DG</span>
           <span className="sidebar__brand-text eyebrow">Daogreen · Spec</span>
         </div>
-        <button
-          type="button"
-          className="sidebar__toggle no-print"
-          onClick={onToggleCollapse}
-          title={collapsed ? "Развернуть меню" : "Свернуть меню"}
-          aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"}
-        >
-          <NavIcon name={collapsed ? "panel-open" : "panel-close"} />
-        </button>
+        {!plannerWorkspace && (
+          <button
+            type="button"
+            className="sidebar__toggle no-print"
+            onClick={onToggleCollapse}
+            title={collapsed ? "Развернуть меню" : "Свернуть меню"}
+            aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"}
+          >
+            <NavIcon name={collapsed ? "panel-open" : "panel-close"} />
+          </button>
+        )}
+        {plannerWorkspace && (
+          <button
+            type="button"
+            className="sidebar__toggle no-print"
+            onClick={onNavigate}
+            title="Закрыть меню"
+            aria-label="Закрыть меню"
+          >
+            <NavIcon name="close" />
+          </button>
+        )}
       </div>
 
       {NAV_GROUPS.map((group) => (
@@ -162,7 +187,7 @@ export default function Layout() {
   const builderWide =
     pathname === "/new" && (builderStep === "stellages" || builderStep === "general");
   const wideLayout = builderWide || /^\/(materials|project\/|modules|reports|planner)/.test(pathname);
-  const plannerFocus = /\/project\/[^/]+\/plan$/.test(pathname);
+  const plannerWorkspace = isPlannerWorkspacePath(pathname);
 
   useEffect(() => {
     const needMats = /^\/(materials|modules|new|project\/|planner)/.test(pathname);
@@ -170,6 +195,11 @@ export default function Layout() {
     if (needMats) actions.ensureMaterials();
     if (needMods) actions.ensureModules();
   }, [pathname, actions]);
+
+  // Leaving a planner CAD route closes the overlay so other pages stay normal.
+  useEffect(() => {
+    if (!plannerWorkspace) setMenuOpen(false);
+  }, [plannerWorkspace, pathname]);
 
   const toggleCompact = () => {
     const next = !compact;
@@ -183,15 +213,36 @@ export default function Layout() {
     setCollapsed(next);
   };
 
-  useEffect(() => {
-    document.body.classList.toggle("nav-open", menuOpen);
-    return () => document.body.classList.remove("nav-open");
-  }, [menuOpen]);
+  const openAppNav = useCallback(() => setMenuOpen(true), []);
+  const closeAppNav = useCallback(() => setMenuOpen(false), []);
 
   useEffect(() => {
+    document.body.classList.toggle("nav-open", menuOpen);
+    document.body.classList.toggle("planner-workspace-route", plannerWorkspace);
+    return () => {
+      document.body.classList.remove("nav-open");
+      document.body.classList.remove("planner-workspace-route");
+    };
+  }, [menuOpen, plannerWorkspace]);
+
+  useEffect(() => {
+    // Planner fullscreen uses overlay nav — do not apply permanent collapsed body class.
+    if (plannerWorkspace) {
+      document.body.classList.remove("sidebar-collapsed");
+      return undefined;
+    }
     document.body.classList.toggle("sidebar-collapsed", collapsed && !menuOpen);
     return () => document.body.classList.remove("sidebar-collapsed");
-  }, [collapsed, menuOpen]);
+  }, [collapsed, menuOpen, plannerWorkspace]);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   const closeMenu = () => setMenuOpen(false);
 
@@ -205,34 +256,92 @@ export default function Layout() {
     window.location.assign(`${base}login`);
   };
 
+  const chromeValue = useMemo(
+    () => ({
+      plannerWorkspace,
+      openAppNav,
+      closeAppNav,
+      appNavOpen: menuOpen,
+    }),
+    [plannerWorkspace, openAppNav, closeAppNav, menuOpen],
+  );
+
+  const shellClass = [
+    "shell",
+    collapsed && !plannerWorkspace ? "shell--sidebar-collapsed" : "",
+    plannerWorkspace ? "shell--planner-workspace" : "",
+    plannerWorkspace && menuOpen ? "shell--planner-nav-open" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  // Overlay drawer always shows full labels (never icon-rail) on planner routes.
+  const sidebarCollapsedVisual = plannerWorkspace ? false : collapsed;
+
   return (
-    <div className={"shell" + (collapsed ? " shell--sidebar-collapsed" : "")}>
-      <button
-        type="button"
-        className="mobile-menu-btn no-print"
-        aria-label={menuOpen ? "Закрыть меню" : "Открыть меню"}
-        onClick={() => setMenuOpen((o) => !o)}
-      >
-        <NavIcon name={menuOpen ? "close" : "menu"} />
-      </button>
-      {menuOpen && <button type="button" className="sidebar-backdrop" aria-label="Закрыть" onClick={closeMenu} />}
-      <aside className={"sidebar" + (menuOpen ? " sidebar--open" : "") + (collapsed ? " sidebar--collapsed" : "")}>
-        <SidebarNav
-          compact={compact}
-          collapsed={collapsed}
-          onToggleCompact={toggleCompact}
-          onToggleCollapse={toggleCollapse}
-          onNavigate={closeMenu}
-          onLogout={handleLogout}
-        />
-      </aside>
-      <div className="main">
-        {!plannerFocus && <GlobalSearch />}
-        <div className={"main-inner" + (wideLayout ? " main-inner--wide" : "") + (plannerFocus ? " main-inner--planner" : "")}>
-          <Outlet />
+    <AppShellChromeContext.Provider value={chromeValue}>
+      <div className={shellClass}>
+        {!plannerWorkspace && (
+          <button
+            type="button"
+            className="mobile-menu-btn no-print"
+            aria-label={menuOpen ? "Закрыть меню" : "Открыть меню"}
+            onClick={() => setMenuOpen((o) => !o)}
+          >
+            <NavIcon name={menuOpen ? "close" : "menu"} />
+          </button>
+        )}
+        {plannerWorkspace && (
+          <div className="planner-app-chrome no-print">
+            <button
+              type="button"
+              className="planner-app-chrome__menu"
+              aria-label="Открыть меню"
+              title="Меню"
+              onClick={openAppNav}
+            >
+              <NavIcon name="menu" />
+            </button>
+            <Link to="/" className="planner-app-chrome__back" title="Назад к проектам">
+              Назад к проектам
+            </Link>
+          </div>
+        )}
+        {menuOpen && (
+          <button type="button" className="sidebar-backdrop" aria-label="Закрыть" onClick={closeMenu} />
+        )}
+        <aside
+          className={
+            "sidebar" +
+            (menuOpen ? " sidebar--open" : "") +
+            (sidebarCollapsedVisual ? " sidebar--collapsed" : "") +
+            (plannerWorkspace ? " sidebar--planner-overlay" : "")
+          }
+        >
+          <SidebarNav
+            compact={compact}
+            collapsed={sidebarCollapsedVisual}
+            onToggleCompact={toggleCompact}
+            onToggleCollapse={toggleCollapse}
+            onNavigate={closeMenu}
+            onLogout={handleLogout}
+            plannerWorkspace={plannerWorkspace}
+          />
+        </aside>
+        <div className="main">
+          {!plannerWorkspace && <GlobalSearch />}
+          <div
+            className={
+              "main-inner" +
+              (wideLayout ? " main-inner--wide" : "") +
+              (plannerWorkspace ? " main-inner--planner" : "")
+            }
+          >
+            <Outlet />
+          </div>
         </div>
       </div>
-    </div>
+    </AppShellChromeContext.Provider>
   );
 }
 

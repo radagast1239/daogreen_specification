@@ -1,6 +1,12 @@
 import { useCallback, useRef, useState } from "react";
-import { HistoryModel } from "./core/history/historyModel.js";
+import { HistoryModel, MUTATION_ORIGIN } from "./core/history/historyModel.js";
 
+/**
+ * PHASE 2E.1 (A) — mutation origin is declared here, per call, and nowhere
+ * retained. `setPlan` is the user-command path and always checkpoints a real
+ * change; `syncDerivedPlan`/`replacePlan` are the derived-sync path and never
+ * do. Nothing a load leaves behind can therefore reach a later user edit.
+ */
 export function usePlanHistory(initialPlan) {
   const stackRef = useRef(null);
   if (!stackRef.current) {
@@ -12,12 +18,18 @@ export function usePlanHistory(initialPlan) {
   const bump = () => tick((n) => n + 1);
 
   const setPlan = useCallback((updater) => {
-    stackRef.current.setPlan(updater);
+    stackRef.current.mutate(updater, { origin: MUTATION_ORIGIN.USER });
     bump();
   }, []);
 
   const replacePlan = useCallback((updater) => {
     stackRef.current.replace(updater);
+    bump();
+  }, []);
+
+  /** Named derived-state path: deterministic reconciliation, never an undo step. */
+  const syncDerivedPlan = useCallback((updater) => {
+    stackRef.current.mutate(updater, { origin: MUTATION_ORIGIN.DERIVED_SYNC });
     bump();
   }, []);
 
@@ -46,26 +58,23 @@ export function usePlanHistory(initialPlan) {
     bump();
   }, []);
 
-  /**
-   * Stable getter that always returns the *live* HistoryModel.current plan,
-   * even before the next React render. Used by command dispatchers so that
-   * rapid successive commands never read a stale render-captured plan.
-   */
-  const getCurrentPlan = useCallback(() => stackRef.current.current, []);
-
   const stack = stackRef.current;
 
   return {
     plan: stack.current,
-    getCurrentPlan,
     setPlan,
     replacePlan,
+    syncDerivedPlan,
     commitPlan,
     commitFrom,
     undo,
     redo,
     canUndo: stack.canUndo,
     canRedo: stack.canRedo,
+    // Read-only depths — the acceptance run has to count history steps, not just
+    // ask whether Undo is enabled.
+    undoDepth: stack.past.length,
+    redoDepth: stack.future.length,
     resetHistory,
   };
 }

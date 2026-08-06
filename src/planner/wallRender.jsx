@@ -12,6 +12,7 @@ import {
   combineOpeningAndTeeGaps,
 } from "./wallJoins.js";
 import { slabFromMiterQuad, wallGeometryMap, contourSegment } from "./buildWallGeometry.js";
+import { buildWallMassGeometry } from "./core/walls/wallMass.js";
 
 export const WALL_STROKE = "#14201b";
 export const WALL_INNER_STROKE = "#2f3431";
@@ -280,15 +281,19 @@ export function WallBodyHitAreas({
 }
 
 /** Заливка стены штриховкой + перемычки проёмов. */
-export function WallSlabFill({ wall, openings, room, k = 1, isDemolish = false, allWalls = null }) {
+export function WallSlabFill({ wall, openings, room, k = 1, isDemolish = false, allWalls = null, display = {} }) {
   const { slabs, jambs, bridges } = collectWallParts(wall, openings, room, allWalls);
   const stroke = resolveWallStrokeColor(wall, isDemolish);
   const fill = resolveWallFill(wall, k, isDemolish);
   const capW = Math.max(1.5 * k, 1.15);
   const bridgeW = Math.max(1.2 * k, 0.95);
+  // When the unified wall-mass layer is active it draws the seamless hatch;
+  // the per-wall slab hatch is suppressed (it is what creates the visible
+  // internal seams). Door/window jambs + bridges still render here on top.
+  const unified = display?.unifiedWallMass !== false;
   return (
     <g pointerEvents="none" data-ui="wall-fill">
-      {slabs.map(({ key, poly }) => (
+      {!unified && slabs.map(({ key, poly }) => (
         <path key={key} d={polyD(poly)} fill={fill} stroke="none" />
       ))}
       {jambs.map(({ key, a, b }) => (
@@ -400,6 +405,58 @@ export function WallFaceOutlines({
           {...lineProps}
         />
       ))}
+    </g>
+  );
+}
+
+/**
+ * Unified wall-mass render: connected walls draw as one continuous mass —
+ * a single seamless hatch fill (every wall quad + node-core fill polygon,
+ * same pattern, no per-quad stroke) plus one boundary outline (only the
+ * union's surviving edges; internal seams between adjacent walls and at
+ * multiway/T nodes are cancelled and never drawn). Individual wall identity
+ * (selection, hit-testing, dimensions) is untouched — those still use the
+ * per-wall quads elsewhere; this layer only replaces the VISIBLE fill/stroke.
+ */
+export function WallMassLayer({ walls, room, k = 1, display = {}, isDemolish = false }) {
+  if (!walls?.length) return null;
+  const geom = wallGeometryMap(walls, room);
+  const masses = buildWallMassGeometry(geom.polygons, geom.expandedWalls || walls);
+  if (!masses.length) return null;
+  const { strokeMul } = wallVisualFromDisplay(display);
+  const byId = new Map(walls.map((w) => [w.id, w]));
+  const outerW = 1.78 * (k || 1) * strokeMul;
+  return (
+    <g data-ui="wall-mass" pointerEvents="none">
+      {masses.map((mass, mi) => {
+        const firstWall = byId.get(mass.sourceWallIds[0]) || walls[0];
+        const fill = resolveWallFill(firstWall, k, isDemolish);
+        const stroke = resolveWallStrokeColor(firstWall, isDemolish);
+        return (
+          <g key={`mass-${mi}`}>
+            <path d={mass.fillPath} fill={fill} stroke="none" fillRule="nonzero" />
+            {mass.boundaryEdges.map((e, ei) => (
+              <line
+                key={`b-${mi}-${ei}`}
+                x1={e.a.x}
+                y1={e.a.y}
+                x2={e.b.x}
+                y2={e.b.y}
+                stroke={stroke}
+                strokeWidth={outerW}
+                // PHASE 2E — butt, not round. The mass boundary is a set of
+                // independent segments, so a round cap puts half a stroke
+                // width of ink BEYOND every corner point: at high zoom that
+                // reads as a rounded, bulging corner, and where two caps
+                // overlap at an outside corner the joint looks bevelled or
+                // clipped. Butt ends stop exactly on the shared corner point,
+                // and the fill underneath (same geometry) closes the joint.
+                strokeLinecap="butt"
+              />
+            ))}
+          </g>
+        );
+      })}
     </g>
   );
 }

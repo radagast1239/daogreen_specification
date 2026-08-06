@@ -26,6 +26,10 @@ import { OpeningIcon } from "./icons.jsx";
 import { doorSwingPolygon } from "./doorGeometry.js";
 import { WallSlabFill, WallFaceOutlines, WALL_STROKE, WALL_ACTIVE_STROKE, resolveWallFill, resolveWallStrokeColor, collectWallParts, polyD } from "./wallRender.jsx";
 import { resolveGrid, gridLineLevel, buildScreenGridLines, buildScreenAxes, fmtCoordMm, GRID_COLORS, GRID_STROKE } from "./gridSettings.js";
+import {
+  resolveAdaptiveGrid,
+  adaptiveGridCssBackground,
+} from "./core/grid/adaptiveGrid.js";
 import { resolveGridLineStyle, wallVisualFromDisplay } from "./plannerVisualSettings.js";
 import {
   SegDim,
@@ -83,28 +87,30 @@ export function PlanLayerGroup({ layerId, activeLayer, vis, display, children })
   );
 }
 
-/** Сетка на весь холст (экранные координаты, привязка к мировой сетке). */
+/**
+ * LIVE4 adaptive hierarchical grid — O(1) DOM via CSS repeating gradients.
+ * World-anchored; no one-line-per-cell SVG nodes.
+ */
 export function PlanGridScreen({ view, width, height, display }) {
-  const lines = buildScreenGridLines(view, width, height, display);
-  if (!lines.length) return null;
+  const grid = resolveAdaptiveGrid(view, display);
+  if (!grid.visible || width < 2 || height < 2) return null;
+  const css = adaptiveGridCssBackground(grid);
   return (
-    <g data-ui="grid" pointerEvents="none">
-      {lines.map((ln) => {
-        const { stroke, strokeWidth } = resolveGridLineStyle(ln.level, GRID_COLORS[ln.level], GRID_STROKE[ln.level], display);
-        return (
-          <line
-            key={ln.key}
-            x1={ln.x1}
-            y1={ln.y1}
-            x2={ln.x2}
-            y2={ln.y2}
-            stroke={stroke}
-            strokeWidth={strokeWidth}
-            shapeRendering="crispEdges"
-            data-grid-level={ln.level}
-          />
-        );
-      })}
+    <g data-ui="grid" data-grid-impl="adaptive-css" pointerEvents="none">
+      <foreignObject x={0} y={0} width={width} height={height}>
+        <div
+          xmlns="http://www.w3.org/1999/xhtml"
+          data-ui="adaptive-grid-layer"
+          data-minor-mm={grid.minorMm}
+          data-major-mm={grid.majorMm}
+          style={{
+            width: "100%",
+            height: "100%",
+            pointerEvents: "none",
+            ...css,
+          }}
+        />
+      </foreignObject>
     </g>
   );
 }
@@ -296,6 +302,12 @@ export function RoomDims({ room, k, fmtU, display }) {
 export function WallEl({
   wall, k, editable, eraseMode = false, selected, hovered = false, fmtU, showDims, chainDims = false, display = {}, onSel, onNode, onDel, onMidNode,
   hoverNodeIdx = null, hasError = false, openings = [], room = null, allWalls = null, onHover, onNodeHover,
+  movable = null, endpointGrips = null,
+  // PHASE 2F1 — every segment of a T-split logical wall is `selected`, but the
+  // per-wall affordances (role caption, delete cross) belong to the WALL, not to
+  // each half. The caller marks one anchor segment; absent, behaviour is as
+  // before, so nothing changes for a wall that was never split.
+  selectionAnchor = true,
 }) {
   if (!wall?.pts || wall.pts.length < 2) return null;
   // PHASE 0E: невидимая hit-область = тело стены + постоянный экранный допуск
@@ -304,11 +316,38 @@ export function WallEl({
   // то есть расходился с JS-резолвером. Теперь SVG и резолвер согласованы.
   const hitW = Math.max(wall.thk || 100, 80);
   const isDemolish = wall.kind === "demolish";
-  const outerColor = hasError ? DG_THEME.dimError : (selected ? DG_THEME.brand : hovered ? "#5a9d8f" : (isDemolish ? DG_THEME.demolish : DG_THEME.wall));
+  const outerColor = hasError ? DG_THEME.dimError : (selected ? DG_THEME.select || DG_THEME.brand : hovered ? (DG_THEME.hover || "#2a9d8f") : (isDemolish ? DG_THEME.demolish : DG_THEME.wall));
   const cx = wall.pts.reduce((s, p) => s + p.x, 0) / wall.pts.length;
   const cy = wall.pts.reduce((s, p) => s + p.y, 0) / wall.pts.length;
   const roleLabel = wall.role === "outer" ? "Наружная" : "Перегородка";
-  const showNodes = (editable || eraseMode) && (selected || hovered || hoverNodeIdx != null);
+  const nodesArmed = selected || hovered || hoverNodeIdx != null;
+  // PHASE 2E FOLLOW-UP (M3) — the movement handle has its own gate.
+  //
+  // `editable` also carries the ACTIVE LAYER (PlanPage passes
+  // `active === "room"` / `active === "partitions"`), while the selection hit
+  // area beside this component is gated only on the tool. A wall on a
+  // non-active layer could therefore be selected but had no handle and could
+  // not be dragged. `movable` is decided by wallMoveHandleEligibility, which
+  // asks the same classifier moveWallSegment uses; when it is not supplied the
+  // old `editable` behaviour is kept so nothing else changes.
+  const canMove = movable == null ? editable : movable;
+  const showMoveHandle = canMove && (selected || hovered || hoverNodeIdx != null) && wall.pts.length === 2;
+  // PHASE 2E.1 REWORK — endpoint grips have MOVED OUT of this component.
+  //
+  // They used to be emitted here, inside the wall layer group, while PlanPage
+  // paints WallMassLayer and WallsTopOverlay afterwards — so the wall fill and
+  // the exterior outline covered every marker (a topology node always lies on
+  // the centreline). The hit target still worked, which is why the control could
+  // only be found by guessing. They are now rendered by WallEndpointGripLayer,
+  // a dedicated interaction layer painted after the mass, the outlines and the
+  // dimensions. See src/planner/wallEndpointGrips.jsx.
+  //
+  // `endpointGrips` therefore means "the top layer owns this wall's grips".
+  // Only the legacy fallback (prop absent — pts-only walls, other callers) still
+  // draws them here, exactly as before, so nothing else changes.
+  const legacyGrips = endpointGrips == null;
+  const gripVisible = () => legacyGrips && editable;
+  const anyGripVisible = gripVisible();
   const wallPath = wall.pts.map((p, i) => (i ? "L" : "M") + p.x + " " + p.y).join(" ");
   const onWallDown = (e) => {
     if (editable || eraseMode) {
@@ -328,8 +367,8 @@ export function WallEl({
         onPointerLeave={onHover ? () => onHover(null) : undefined}
         style={{ cursor: editable ? "pointer" : "default" }}
       />
-      <WallSlabFill wall={wall} openings={openings} room={room} k={k} isDemolish={isDemolish} allWalls={allWalls} />
-      {selected && editable && (
+      <WallSlabFill wall={wall} openings={openings} room={room} k={k} isDemolish={isDemolish} allWalls={allWalls} display={display} />
+      {selected && editable && selectionAnchor && (
         <text x={cx} y={cy - (wall.thk || 100) * 0.35} fontSize={9 * k} textAnchor="middle" fill="#6b7d74" pointerEvents="none">
           {WALL_KINDS[wall.kind || "new"]?.label || roleLabel}
         </text>
@@ -345,9 +384,7 @@ export function WallEl({
         });
         return segs;
       })()}
-      {editable &&
-        showNodes &&
-        wall.pts.length === 2 && (
+      {showMoveHandle && (
           <>
             <line
               x1={wall.pts[0].x}
@@ -359,40 +396,76 @@ export function WallEl({
               onPointerDown={(e) => onMidNode?.(e, wall)}
               style={{ cursor: "move" }}
             />
+            {/* PHASE 2 GAP1: invisible hit target (18-24 screen px, constant
+               * across zoom since k = 1/z) sits behind the compact 8-12px
+               * visual handle so tapping stays easy without the handle
+               * itself growing large enough to cover nearby dimension
+               * labels. */}
             <circle
               cx={(wall.pts[0].x + wall.pts[1].x) / 2}
               cy={(wall.pts[0].y + wall.pts[1].y) / 2}
-              r={(hoverNodeIdx === -1 ? 10 : 7) * k}
-              fill="#fff"
-              stroke={outerColor}
-              strokeWidth={1.8 * k}
-              strokeDasharray={`${4 * k} ${3 * k}`}
+              r={11 * k}
+              fill="transparent"
+              stroke="none"
               onPointerDown={(e) => onMidNode?.(e, wall)}
               onPointerEnter={() => onNodeHover?.(-1)}
               onPointerLeave={() => onNodeHover?.(null)}
               style={{ cursor: "move" }}
             />
+            <circle
+              data-ui="wall-move-handle"
+              data-wall-move-handle=""
+              data-wall-id={wall.id}
+              cx={(wall.pts[0].x + wall.pts[1].x) / 2}
+              cy={(wall.pts[0].y + wall.pts[1].y) / 2}
+              r={(hoverNodeIdx === -1 ? 6 : 5) * k}
+              fill="#fff"
+              stroke={outerColor}
+              strokeWidth={1.6 * k}
+              strokeDasharray={`${4 * k} ${3 * k}`}
+              pointerEvents="none"
+              style={{ cursor: "move" }}
+            />
           </>
         )}
-      {editable &&
-        showNodes &&
-        wall.pts.map((p, i) => (
-          <circle
-            key={i}
-            cx={p.x}
-            cy={p.y}
-            r={(hoverNodeIdx === i ? 8 : 6) * k}
-            fill={hoverNodeIdx === i ? "#e8f4ef" : "#fff"}
-            stroke={hoverNodeIdx === i ? "#116355" : outerColor}
-            strokeWidth={(hoverNodeIdx === i ? 2.2 : 1.5) * k}
-            onPointerDown={(e) => onNode(e, "walls", wall.id, i)}
-            onPointerEnter={() => onNodeHover?.(i)}
-            onPointerLeave={() => onNodeHover?.(null)}
-            style={{ cursor: "move" }}
-          />
-        ))}
-      {editable && selected && (
-        <text x={wall.pts[0].x + 12 * k} y={wall.pts[0].y - 12 * k} fontSize={13 * k} fill="#a5371f" style={{ cursor: "pointer" }} onClick={onDel}>
+      {nodesArmed &&
+        anyGripVisible &&
+        wall.pts.map((p, i) => (!gripVisible(i) ? null : (
+          <g key={i} data-ui="wall-endpoint-grip-legacy" data-wall-id={wall.id} data-endpoint={i}>
+            <circle
+              cx={p.x}
+              cy={p.y}
+              r={11 * k}
+              fill="transparent"
+              stroke="none"
+              onPointerDown={(e) => onNode(e, "walls", wall.id, i)}
+              onPointerEnter={() => onNodeHover?.(i)}
+              onPointerLeave={() => onNodeHover?.(null)}
+              style={{ cursor: "move" }}
+            />
+            <circle
+              cx={p.x}
+              cy={p.y}
+              r={(hoverNodeIdx === i ? 6 : 5) * k}
+              fill={hoverNodeIdx === i ? "#e8f4ef" : "#fff"}
+              stroke={hoverNodeIdx === i ? "#116355" : outerColor}
+              strokeWidth={(hoverNodeIdx === i ? 2 : 1.6) * k}
+              pointerEvents="none"
+              style={{ cursor: "move" }}
+            />
+          </g>
+        )))}
+      {editable && selected && selectionAnchor && (
+        <text
+          data-ui="wall-delete-cross"
+          data-wall-id={wall.id}
+          x={wall.pts[0].x + 12 * k}
+          y={wall.pts[0].y - 12 * k}
+          fontSize={13 * k}
+          fill="#a5371f"
+          style={{ cursor: "pointer" }}
+          onClick={onDel}
+        >
           ✕
         </text>
       )}
@@ -404,31 +477,50 @@ export function WallEl({
 export function WallsTopOverlay({
   walls, k, warnWallIds = new Set(), openings = [], room = null,
   selectedWallId = null, hoveredWallId = null, display = {},
+  // PHASE 2F1 — a logical wall split by T junctions highlights as ONE wall:
+  // the orange selection outline spans every segment of the chain, not the
+  // half that happened to be under the cursor. Falls back to the single id.
+  selectedWallIds = null, hoveredWallIds = null,
 }) {
   const { strokeMul } = wallVisualFromDisplay(display);
+  // With the unified wall-mass layer active, that layer draws the shared
+  // boundary outline. Per-wall outlines are then only drawn for a wall that
+  // is highlighted (selected/hovered) or in error — a coloured emphasis over
+  // the mass, never a second black contour that would reintroduce seams.
+  const unified = display?.unifiedWallMass !== false;
   return (
     <g data-ui="walls-top" pointerEvents="none">
       {walls.map((wall) => {
         if (!wall?.pts || wall.pts.length < 2) return null;
         const vs = wallVisualStyle(wall);
         const err = warnWallIds.has(wall.id);
-        const highlight = wall.id === selectedWallId || wall.id === hoveredWallId;
+        const highlight = (selectedWallIds ? selectedWallIds.has(wall.id) : wall.id === selectedWallId)
+          || (hoveredWallIds ? hoveredWallIds.has(wall.id) : wall.id === hoveredWallId);
+        if (unified && !highlight && !err) return null;
         const isDemolish = wall.kind === "demolish";
         const strokeBase = err ? "#c44" : vs.color;
         return (
-          <WallFaceOutlines
+          // PHASE 2F1 — tagged so the highlight span of a LOGICAL wall is
+          // provable from the DOM (a T-split host must light up whole).
+          <g
             key={`top-${wall.id}`}
-            wall={wall}
-            openings={openings}
-            room={room}
-            k={k}
-            strokeOuter={strokeBase}
-            strokeInner={strokeBase}
-            strokeW={wallFaceStrokeWidth(k, wall) * (wall.role === "outer" ? 1.1 : 1) * strokeMul}
-            dash={isDemolish ? vs.dash : (vs.dash || null)}
-            highlight={highlight && !err}
-            allWalls={walls}
-          />
+            data-wall-outline=""
+            data-wall-id={wall.id}
+            data-highlighted={highlight && !err ? "1" : "0"}
+          >
+            <WallFaceOutlines
+              wall={wall}
+              openings={openings}
+              room={room}
+              k={k}
+              strokeOuter={strokeBase}
+              strokeInner={strokeBase}
+              strokeW={wallFaceStrokeWidth(k, wall) * (wall.role === "outer" ? 1.1 : 1) * strokeMul}
+              dash={isDemolish ? vs.dash : (vs.dash || null)}
+              highlight={highlight && !err}
+              allWalls={walls}
+            />
+          </g>
         );
       })}
     </g>
@@ -1013,7 +1105,7 @@ export function ZoneEl({
           style={{ cursor: hitCursor }}
         />
       )}
-      {detail && zoneLabels && labelLines.length > 0 && (
+      {detail && zoneLabels && showRoomLabels && labelLines.length > 0 && (
         <>
           {(small || zn.labelPosition?.external) && (
             <line x1={cx} y1={cy} x2={labelX} y2={labelY} stroke={DG_THEME.labelLeader} strokeWidth={1 * k} opacity={0.6} pointerEvents="none" />
@@ -1347,6 +1439,7 @@ function LineArrow({ x, y, ang, k, color }) {
 export function DraftLine({
   pts, cursor, k, wall, thk, color, fmtU, snapPt, room, angleSnap, ventDuct, lineDraft,
   allWalls = null, draftWallKind = null, draftWallMaterial = null, fmtDraftLen = null,
+  hideHud = false,
 }) {
   const all = cursor ? [...pts, cursor] : pts;
   const lenColor = wall ? "#2f3431" : color;
@@ -1490,6 +1583,9 @@ export function DraftLine({
       {cursor && pts.length > 0 && (() => {
         const a = pts[pts.length - 1];
         const len = Math.hypot(cursor.x - a.x, cursor.y - a.y);
+        // PHASE 2F1-LIVE3: wall length is owned by ONE of floating editor /
+        // live overlay — DraftLine must not paint a second SegDim.
+        if (wall && hideHud) return null;
         let ang = Math.round(angleSnap?.snappedAngle ?? (Math.atan2(cursor.y - a.y, cursor.x - a.x) * 180) / Math.PI);
         if (ang < 0) ang += 360;
         const midX = (a.x + cursor.x) / 2;
@@ -1499,6 +1595,7 @@ export function DraftLine({
         const hudX = cursor.x + 16 * k;
         const hudY = cursor.y - 12 * k;
         const angleColor = wall ? "#e0312a" : "#116355";
+        if (wall && !(len > 0.5)) return null;
         return (
           <>
             {angleSnap?.isSnapped && (
@@ -1514,19 +1611,21 @@ export function DraftLine({
               />
             )}
             <SegDim a={a} b={cursor} label={fmtLen(len)} k={k} offset={120} offsetSide={-1} active />
-            <g transform={`translate(${hudX},${hudY})`} pointerEvents="none">
-              <rect x={-4 * k} y={-12 * k} width={Math.max(72 * k, hint.length * 5.2 * k)} height={18 * k} rx={4 * k} fill="#fff" stroke="#d9e0dc" strokeWidth={1 * k} />
-              <text
-                x={4 * k}
-                y={0}
-                fontSize={11 * k}
-                fill="#2f3431"
-                style={{ fontFamily: "var(--mono)" }}
-              >
-                {hint}
-              </text>
-            </g>
-            {wall && (
+            {!hideHud && (
+              <g transform={`translate(${hudX},${hudY})`} pointerEvents="none">
+                <rect x={-4 * k} y={-12 * k} width={Math.max(72 * k, hint.length * 5.2 * k)} height={18 * k} rx={4 * k} fill="#fff" stroke="#d9e0dc" strokeWidth={1 * k} />
+                <text
+                  x={4 * k}
+                  y={0}
+                  fontSize={11 * k}
+                  fill="#2f3431"
+                  style={{ fontFamily: "var(--mono)" }}
+                >
+                  {hint}
+                </text>
+              </g>
+            )}
+            {wall && !hideHud && Number.isFinite(ang) && (
               <text x={midX} y={midY - 18 * k} fontSize={10 * k} textAnchor="middle" fill={angleColor} fontWeight="600">
                 {ang.toFixed(1)}°
               </text>
@@ -1615,11 +1714,14 @@ export function LinkEl({ link, items, room, k, selected, hovered = false, showLa
 
 export function TypedLengthHint({ value, k }) {
   if (!value) return null;
+  const hasUnit = /(?:мм|mm|м|m)\s*$/i.test(String(value).trim());
+  const unitHint = hasUnit ? "" : " (мм, или N м)";
+  const w = Math.max(240, 28 + String(value).length * 9 + unitHint.length * 6);
   return (
     <g data-ui="typed-length">
-      <rect x={12} y={12} width={220 * k} height={30 * k} rx={6 * k} fill="#fff" stroke="#116355" strokeWidth={1.2 * k} />
+      <rect x={12} y={12} width={w * k} height={30 * k} rx={6 * k} fill="#fff" stroke="#116355" strokeWidth={1.2 * k} />
       <text x={20 * k} y={32 * k} fontSize={12 * k} fill="#116355" fontWeight="600" style={{ fontFamily: "var(--mono)" }}>
-        Длина {value} мм · Enter
+        Длина {value}{unitHint} · Enter
       </text>
     </g>
   );

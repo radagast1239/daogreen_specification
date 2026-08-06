@@ -14,6 +14,7 @@ import { pickBestSnap } from "./snapPriority.js";
 import {
   snapWallPoint, refineWallDraftSnap, wallSegments, alignmentGuides,
 } from "../walls/wallOps.js";
+import { clipWallDraftEnd } from "../walls/wallDrawGeometry.js";
 import { resolvePlanWalls } from "../../wallNetwork.js";
 import { nearestItemAttach } from "../../lineProperties.js";
 import { snapLineDraftPoint } from "../../plannerSnap.js";
@@ -21,6 +22,11 @@ import { snapRulerPoint } from "../../snapContour.js";
 
 const BASE_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315];
 const SNAP_VERTEX_RADIUS_MM = 120;
+// Vertex-capture radius used only when starting a brand-new, unconnected wall
+// chain (no draft continuation context yet) — see the comment at its use
+// site for why this path needs a much tighter, non-zoom-scaled radius than
+// the generous screen-invariant one used while actively continuing a draft.
+const FRESH_CHAIN_ORIGIN_VERTEX_RADIUS_MM = 150;
 const MIN_WALL_LENGTH_MM = 50;
 
 function snapThr(zoom, px = 10) {
@@ -214,6 +220,130 @@ function collectMeasureToolCandidates(pt, plan, walls, {
   return out;
 }
 
+/**
+ * Collect the legacy snap candidates before priority selection, wall-draft
+ * refinement and first-hit clipping. Candidate order and object shape are the
+ * same ones historically assembled inside runSnapEngine.
+ */
+export function collectSnapCandidates(input) {
+  const {
+    point: raw,
+    mode = "wall",
+    plan = {},
+    view = {},
+    modifiers = {},
+    options = {},
+  } = input;
+  const { shift = false } = modifiers;
+  const {
+    snapOn = true,
+    snapStep = GRID_DEFAULT_SNAP_STEP,
+    snapGrid = true,
+    snapWalls = true,
+    angleSnapOn = true,
+    toleranceDeg = 5,
+    snapDistancePx = 10,
+    prevSegAngleDeg = null,
+    chainStart = null,
+    from = null,
+  } = options;
+
+  const zoom = view.zoom || 0.08;
+  const thresholdMm = snapThr(zoom, snapDistancePx);
+  // SNAP_VERTEX_RADIUS_MM/zoom keeps vertex-snap reach screen-invariant while
+  // actively continuing a draft — deliberate, see plannerBaselineRegressions
+  // "wall snap screen distance is invariant across zoom". But that same
+  // generous, screen-invariant reach is wrong the moment a user starts a
+  // brand-new, unconnected chain (options.freshChainOrigin, no draft
+  // continuation context yet): at a whole-plan zoom (~0.08-0.11, the natural
+  // zoom for drawing several rooms in sequence) it grows past 700-1000mm in
+  // world space, so a deliberately non-touching new rectangle's first corner
+  // gets pulled onto an unrelated already-closed rectangle's node — fusing
+  // two independent contours into a false diagonal (see
+  // tests/plannerSequentialRectangles for the reproduction). A fresh chain
+  // origin has no in-progress line to assist, so it gets a much tighter,
+  // fixed real-world radius instead of the zoom-scaled one.
+  const vertexThresholdMm = options.freshChainOrigin
+    ? Math.max(thresholdMm, FRESH_CHAIN_ORIGIN_VERTEX_RADIUS_MM)
+    : Math.max(thresholdMm, SNAP_VERTEX_RADIUS_MM / Math.max(zoom, 0.05));
+  const walls = resolvePlanWalls(plan);
+  const point = { x: raw.x, y: raw.y };
+  const candidates = [];
+
+  if (snapOn && snapWalls && mode === "wall") {
+    candidates.push(...collectVertexSnaps(point, walls, vertexThresholdMm));
+    candidates.push(...collectWallLineSnaps(point, walls, thresholdMm));
+    candidates.push(...collectExtensionSnaps(point, from, walls, prevSegAngleDeg, thresholdMm));
+    const close = collectCloseSnap(point, chainStart, from, thresholdMm);
+    if (close) candidates.push(close);
+  }
+  if (mode === "line") {
+    candidates.push(...collectLineToolCandidates(point, plan, walls, {
+      zoom,
+      snapOn,
+      snapGrid,
+      snapWalls,
+      snapObjects: options.snapObjects !== false,
+      snapStep,
+    }));
+  }
+  if (mode === "measure") {
+    candidates.push(...collectMeasureToolCandidates(point, plan, walls, {
+      zoom,
+      snapOn,
+      snapGrid,
+      snapStep,
+    }));
+  }
+
+  const angleResult = from
+    ? snapAngle(from, point, {
+      shiftHard: shift,
+      snapOn,
+      angleSnapOn,
+      toleranceDeg,
+      snapStep,
+      gridSnap: false,
+      walls,
+      prevSegAngleDeg,
+    })
+    : null;
+
+  if (angleResult?.isSnapped) {
+    candidates.push({
+      point: angleResult.snappedEnd,
+      type: angleResult.guideType?.includes("perp") ? SNAP_TYPES.PERPENDICULAR
+        : angleResult.guideType?.includes("parallel") ? SNAP_TYPES.PARALLEL
+          : SNAP_TYPES.ANGLE,
+      distance: dist(point, angleResult.snappedEnd),
+      label: angleResult.guideLabel,
+      guideAngle: angleResult.snappedAngle,
+    });
+  }
+
+  if (snapOn && snapGrid) {
+    const grid = gridSnapCandidate(point, snapStep, true);
+    if (grid) {
+      candidates.push({
+        point: grid.point,
+        type: SNAP_TYPES.GRID,
+        distance: grid.distance,
+        label: "сетка",
+      });
+    }
+  }
+
+  return {
+    point,
+    candidates,
+    angleResult,
+    walls,
+    zoom,
+    thresholdMm,
+    vertexThresholdMm,
+  };
+}
+
 export function runSnapEngine(input) {
   const {
     point: raw,
@@ -245,10 +375,6 @@ export function runSnapEngine(input) {
   } = options;
 
   const zoom = view.zoom || 0.08;
-  const thr = snapThr(zoom, snapDistancePx);
-  const vertexThr = Math.max(thr, SNAP_VERTEX_RADIUS_MM / Math.max(zoom, 0.05));
-  const walls = resolvePlanWalls(plan);
-
   if (alt) {
     const pt = snapAltRound(raw, 1);
     return {
@@ -264,71 +390,14 @@ export function runSnapEngine(input) {
     };
   }
 
-  let pt = { x: raw.x, y: raw.y };
-  const candidates = [];
-
-  if (snapOn && snapWalls && mode === "wall") {
-    candidates.push(...collectVertexSnaps(pt, walls, vertexThr));
-    candidates.push(...collectWallLineSnaps(pt, walls, thr));
-    candidates.push(...collectExtensionSnaps(pt, from, walls, prevSegAngleDeg, thr));
-    const close = collectCloseSnap(pt, chainStart, from, thr);
-    if (close) candidates.push(close);
-  }
-  if (mode === "line") {
-    candidates.push(...collectLineToolCandidates(pt, plan, walls, {
-      zoom,
-      snapOn,
-      snapGrid,
-      snapWalls,
-      snapObjects: options.snapObjects !== false,
-      snapStep,
-    }));
-  }
-  if (mode === "measure") {
-    candidates.push(...collectMeasureToolCandidates(pt, plan, walls, {
-      zoom,
-      snapOn,
-      snapGrid,
-      snapStep,
-    }));
-  }
-
-  const angleResult = from
-    ? snapAngle(from, pt, {
-      shiftHard: shift,
-      snapOn,
-      angleSnapOn,
-      toleranceDeg,
-      snapStep,
-      gridSnap: false,
-      walls,
-      prevSegAngleDeg,
-    })
-    : null;
-
-  if (angleResult?.isSnapped) {
-    candidates.push({
-      point: angleResult.snappedEnd,
-      type: angleResult.guideType?.includes("perp") ? SNAP_TYPES.PERPENDICULAR
-        : angleResult.guideType?.includes("parallel") ? SNAP_TYPES.PARALLEL
-          : SNAP_TYPES.ANGLE,
-      distance: dist(pt, angleResult.snappedEnd),
-      label: angleResult.guideLabel,
-      guideAngle: angleResult.snappedAngle,
-    });
-  }
-
-  if (snapOn && snapGrid) {
-    const g = gridSnapCandidate(pt, snapStep, true);
-    if (g) {
-      candidates.push({
-        point: g.point,
-        type: SNAP_TYPES.GRID,
-        distance: g.distance,
-        label: "сетка",
-      });
-    }
-  }
+  const collected = collectSnapCandidates(input);
+  let pt = collected.point;
+  const {
+    candidates,
+    angleResult,
+    walls,
+    thresholdMm: thr,
+  } = collected;
 
   let best = pickBestSnap(candidates);
   let fromAdjust = null;
@@ -352,12 +421,36 @@ export function runSnapEngine(input) {
     if (refined.fromAdjust) fromAdjust = refined.fromAdjust;
     if (refined.snap) {
       refinedSnap = refined.snap;
+      const isT = refined.snap.kind === "wall-t" || refined.snap.kind === "wall-t-end";
       best = {
         point: pt,
-        type: SNAP_TYPES.PERPENDICULAR,
+        type: isT ? SNAP_TYPES.PERPENDICULAR : SNAP_TYPES.WALL_LINE,
         targetId: refined.snap.wallId,
         distance: 0,
-        label: "T-стык",
+        label: isT ? "T-стык" : (refined.snap.kind === "wall-start" ? "на стене" : "на стене"),
+      };
+    }
+
+    // Stop preview at the first intersected wall (CAD first-hit).
+    const origin = fromAdjust || from;
+    const clipped = clipWallDraftEnd(origin, pt, walls, {
+      bodyThrMm: Math.max(thr, (wallThk || 100) * 1.15),
+    });
+    if (clipped.clipped) {
+      pt = clipped.point;
+      best = {
+        point: pt,
+        type: clipped.hit?.kind === "endpoint" ? SNAP_TYPES.WALL_END : SNAP_TYPES.WALL_LINE,
+        targetId: clipped.hit?.wallId || best?.targetId || null,
+        distance: 0,
+        label: clipped.hit?.kind === "intersection" ? "стык" : (best?.label || "на стене"),
+        firstIntersection: clipped.hit,
+      };
+      refinedSnap = {
+        snapped: true,
+        kind: clipped.hit?.kind === "intersection" ? "wall-first-hit" : (refinedSnap?.kind || "wall-end"),
+        wallId: clipped.hit?.wallId,
+        ignored: clipped.hit?.ignored || [],
       };
     }
   }

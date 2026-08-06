@@ -10,7 +10,7 @@ export const DEFAULT_VISUAL = {
   dimOpacity: 1,
   wallHatchSpacing: 48,
   wallHatchOpacity: 0.52,
-  wallStrokeMul: 1.18,
+  wallStrokeMul: 1.28,
   labelScale: 1.12,
 };
 

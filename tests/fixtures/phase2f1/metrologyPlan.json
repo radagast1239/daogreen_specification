@@ -1,0 +1,2529 @@
+{
+  "unit": "mm",
+  "room": {
+    "w": 12000,
+    "h": 8000,
+    "wallThk": 120,
+    "height": 3000,
+    "defaultRoomHeightMm": 3000,
+    "showBoundary": false
+  },
+  "nodes": {
+    "n_msg8e1clthrln": {
+      "x": 0,
+      "y": 0
+    },
+    "n_msg8e1clyk0f4": {
+      "x": 3999.9998426900834,
+      "y": 0
+    },
+    "n_msg8e34c82ca6": {
+      "x": 3999.9998426900834,
+      "y": 2999.9999500175613
+    },
+    "n_msg8e4xb3r6jy": {
+      "x": -0.00028571287612066953,
+      "y": 2999.999950017562
+    },
+    "n_msg8eaygkqwqw": {
+      "x": 14000,
+      "y": 0
+    },
+    "n_msg8eaygqkwea": {
+      "x": 17999.999800851423,
+      "y": 0
+    },
+    "n_msg8ecs6yukdo": {
+      "x": 17999.999800851423,
+      "y": 2999.9998587313094
+    },
+    "n_msg8eemt91tea": {
+      "x": 14000.000286215707,
+      "y": 2999.99985873131
+    },
+    "n_msg8el0aere21": {
+      "x": 28000,
+      "y": 0
+    },
+    "n_msg8el0aj0sui": {
+      "x": 33999.99984565502,
+      "y": 0
+    },
+    "n_msg8emt96iwzv": {
+      "x": 33999.99984565502,
+      "y": 2999.9999189635473
+    },
+    "n_msg8eonbglkis": {
+      "x": 31000.000215837223,
+      "y": 2999.9999189635478
+    },
+    "n_msg8eqkr0m1bk": {
+      "x": 31000.000215837223,
+      "y": 5999.999893830272
+    },
+    "n_msg8eshbaengg": {
+      "x": 27999.999895921566,
+      "y": 5999.999893830272
+    },
+    "n_msg8ez0qmtpo8": {
+      "x": 49989.99952879626,
+      "y": -1580
+    },
+    "n_msg8f109rmxfw": {
+      "x": 47900,
+      "y": 3200
+    },
+    "n_msg8f2xq71reu": {
+      "x": 42000.000043192216,
+      "y": 4000.000040467354
+    },
+    "n_msg8ez0q47l33": {
+      "x": 41990,
+      "y": -1580
+    },
+    "n_msg9w3rwa5bwo": {
+      "x": 44112,
+      "y": -1580
+    },
+    "n_msg9w3rwbj2lj": {
+      "x": 44122,
+      "y": 4000.0000404673538
+    },
+    "n_msg8fcsp0vqzb": {
+      "x": 0,
+      "y": 12000
+    },
+    "n_msg8fcspigu1q": {
+      "x": 4049,
+      "y": 12000
+    },
+    "n_msg8feu15353t": {
+      "x": 4049,
+      "y": 12900.000039073948
+    },
+    "n_msg8fgvjko17q": {
+      "x": -0.00012300304570089793,
+      "y": 12900.000039073948
+    },
+    "n_msg8fnznbyar4": {
+      "x": 14400,
+      "y": 12000
+    },
+    "n_msg8fnznpbreu": {
+      "x": 17450,
+      "y": 12050
+    },
+    "n_msg8fqaw0ij1x": {
+      "x": 17456,
+      "y": 14979
+    },
+    "n_msg8fsh2d9j1h": {
+      "x": 14000,
+      "y": 15000
+    },
+    "n_msg8fzvl8b5ae": {
+      "x": 28000,
+      "y": 12000
+    },
+    "n_msg8fzvldazf2": {
+      "x": 32000.000054231932,
+      "y": 12000.000069385625
+    },
+    "n_msg8g24m11svf": {
+      "x": 32000.000054231932,
+      "y": 15000.00001679067
+    },
+    "n_msg8g4cuysylg": {
+      "x": 28000.000176647,
+      "y": 15000.00001679067
+    },
+    "n_msg8gbw5spjyl": {
+      "x": 42000,
+      "y": 12000
+    },
+    "n_msg8ge5s61jxl": {
+      "x": 45000.00022587789,
+      "y": 12000.000052039222
+    },
+    "n_msg8gbw5fhrf6": {
+      "x": 47999.999568263156,
+      "y": 12000.00010407843
+    },
+    "n_msg8ge5tfi5ph": {
+      "x": 45000.00022587789,
+      "y": 15500.000208604586
+    },
+    "n_msg9whp0pygeu": {
+      "x": 6976,
+      "y": 24000
+    },
+    "n_msg9whp0qfcqy": {
+      "x": 6976,
+      "y": 28000.000069385624
+    },
+    "n_msg8gxefj7lvv": {
+      "x": 17370,
+      "y": 24000.00000641817
+    },
+    "n_msg8vu9ruor31": {
+      "x": 17370.000176647005,
+      "y": 27000.000058457394
+    },
+    "n_msg8h373xppph": {
+      "x": 28000,
+      "y": 27000
+    },
+    "n_msg8h373r7333": {
+      "x": 34000.00026879492,
+      "y": 26999.999935211672
+    },
+    "n_msg8h5oiwuk4h": {
+      "x": 34000.00026879492,
+      "y": 24000.000029513256
+    },
+    "n_msg8h84xv39yt": {
+      "x": 37000.0003029419,
+      "y": 29999.99996935865
+    },
+    "n_msg8hdse5ajba": {
+      "x": 42000,
+      "y": 24000
+    },
+    "n_msg8hgb0sqwtr": {
+      "x": 44999.99995001545,
+      "y": 23999.999967605836
+    },
+    "n_msg8hdsen620o": {
+      "x": 47999.99980921561,
+      "y": 23999.999935211676
+    },
+    "n_msg8hgb0ccte3": {
+      "x": 44999.99995001545,
+      "y": 27500.000089663226
+    },
+    "n_msg8hna5fndxo": {
+      "x": 0,
+      "y": 36000
+    },
+    "n_msg8hna56ypyq": {
+      "x": 2999.99987000365,
+      "y": 36000.00005203922
+    },
+    "n_msg8hpvqcy0c3": {
+      "x": 6000.000063762176,
+      "y": 36000.00010407845
+    },
+    "n_msg8hvt9ngi5o": {
+      "x": 14000,
+      "y": 36000
+    },
+    "n_msg8hydy7hw0p": {
+      "x": 16499.999996548446,
+      "y": 36000
+    },
+    "n_msg8hydye12qm": {
+      "x": 16499.999996548446,
+      "y": 39500.0002460753
+    },
+    "n_msg8i13ps8tbh": {
+      "x": 19499.99988603054,
+      "y": 36000
+    },
+    "n_msg8hvt91l4en": {
+      "x": 22000.000262672274,
+      "y": 36000
+    },
+    "n_msg8i13q7dljb": {
+      "x": 19499.99988603054,
+      "y": 39500.0002460753
+    },
+    "n_msg8guyv67fzc": {
+      "x": 14000,
+      "y": 27000
+    },
+    "n_msg8guyvncl05": {
+      "x": 20000.000135764367,
+      "y": 27000.00010407844
+    },
+    "n_msg9vyz0cjt1w": {
+      "x": 46482,
+      "y": 4000.0000404673538
+    },
+    "n_msg8gkr57t7hq": {
+      "x": 0,
+      "y": 24000
+    },
+    "n_msg8gkr50v22y": {
+      "x": 7999.999819149986,
+      "y": 24000
+    },
+    "n_msg8gn1azz383": {
+      "x": 0,
+      "y": 28000
+    },
+    "n_msg8gn1aiir0l": {
+      "x": 7999.999819149987,
+      "y": 28000.000138771247
+    },
+    "n_msg9y6ebdm8wq": {
+      "x": 16122.270042983731,
+      "y": 12028.23393513088
+    },
+    "n_msg9y6ec6tb9z": {
+      "x": 16140.24862594666,
+      "y": 14986.995017029838
+    }
+  },
+  "walls": [
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8e1clhy9dz",
+      "a": "n_msg8e1clthrln",
+      "b": "n_msg8e1clyk0f4",
+      "thk": 100,
+      "chainId": "ch_msg8e1ckipsm9",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8e34c6xukj",
+      "a": "n_msg8e1clyk0f4",
+      "b": "n_msg8e34c82ca6",
+      "thk": 100,
+      "chainId": "ch_msg8e34bo15ns",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8e4xb0lh99",
+      "a": "n_msg8e34c82ca6",
+      "b": "n_msg8e4xb3r6jy",
+      "thk": 100,
+      "chainId": "ch_msg8e4xbd5m4r",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8e6ox1l7za",
+      "a": "n_msg8e4xb3r6jy",
+      "b": "n_msg8e1clthrln",
+      "thk": 100,
+      "chainId": "ch_msg8e6oxujlap",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8eaygo9o3y",
+      "a": "n_msg8eaygkqwqw",
+      "b": "n_msg8eaygqkwea",
+      "thk": 100,
+      "chainId": "ch_msg8eayf08pvt",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8ecs6hkzff",
+      "a": "n_msg8eaygqkwea",
+      "b": "n_msg8ecs6yukdo",
+      "thk": 100,
+      "chainId": "ch_msg8ecs6d9yj2",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8eemt89wmn",
+      "a": "n_msg8ecs6yukdo",
+      "b": "n_msg8eemt91tea",
+      "thk": 100,
+      "chainId": "ch_msg8eemtkw6p3",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8egg7eo6gb",
+      "a": "n_msg8eemt91tea",
+      "b": "n_msg8eaygkqwqw",
+      "thk": 100,
+      "chainId": "ch_msg8egg7z4e4z",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8el0axndrr",
+      "a": "n_msg8el0aere21",
+      "b": "n_msg8el0aj0sui",
+      "thk": 100,
+      "chainId": "ch_msg8el0aeptlv",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8emt97wlmr",
+      "a": "n_msg8el0aj0sui",
+      "b": "n_msg8emt96iwzv",
+      "thk": 100,
+      "chainId": "ch_msg8emt9oom21",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8eonbpw933",
+      "a": "n_msg8emt96iwzv",
+      "b": "n_msg8eonbglkis",
+      "thk": 100,
+      "chainId": "ch_msg8eonbw05pl",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8eqkr6pd63",
+      "a": "n_msg8eonbglkis",
+      "b": "n_msg8eqkr0m1bk",
+      "thk": 100,
+      "chainId": "ch_msg8eqkrcji8n",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8eshbj1snx",
+      "a": "n_msg8eqkr0m1bk",
+      "b": "n_msg8eshbaengg",
+      "thk": 100,
+      "chainId": "ch_msg8eshbf67qk",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8euhqk8r3e",
+      "a": "n_msg8eshbaengg",
+      "b": "n_msg8el0aere21",
+      "thk": 100,
+      "chainId": "ch_msg8euhqyr471",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8f109gd1sr",
+      "a": "n_msg8ez0qmtpo8",
+      "b": "n_msg8f109rmxfw",
+      "thk": 100,
+      "chainId": "ch_msg8f109ogu2b",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8f4xqmp83m",
+      "a": "n_msg8f2xq71reu",
+      "b": "n_msg8ez0q47l33",
+      "thk": 100,
+      "chainId": "ch_msg8f4xqbzi1j",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8f6xhtb98w",
+      "a": "n_msg9w3rwa5bwo",
+      "b": "n_msg9w3rwbj2lj",
+      "thk": 100,
+      "chainId": "ch_msg8f6xfgh9fw",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8fcsp73hsp",
+      "a": "n_msg8fcsp0vqzb",
+      "b": "n_msg8fcspigu1q",
+      "thk": 100,
+      "chainId": "ch_msg8fcspecwab",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8feu1l9ama",
+      "a": "n_msg8fcspigu1q",
+      "b": "n_msg8feu15353t",
+      "thk": 100,
+      "chainId": "ch_msg8feu1o7nwx",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8fgvj2865c",
+      "a": "n_msg8feu15353t",
+      "b": "n_msg8fgvjko17q",
+      "thk": 100,
+      "chainId": "ch_msg8fgvjczuug",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8fix2xn9ik",
+      "a": "n_msg8fgvjko17q",
+      "b": "n_msg8fcsp0vqzb",
+      "thk": 100,
+      "chainId": "ch_msg8fix2cvyw5",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8fqawsiggg",
+      "a": "n_msg8fnznpbreu",
+      "b": "n_msg8fqaw0ij1x",
+      "thk": 100,
+      "chainId": "ch_msg8fqawy18bc",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8fuqec8jmt",
+      "a": "n_msg8fsh2d9j1h",
+      "b": "n_msg8fnznbyar4",
+      "thk": 100,
+      "chainId": "ch_msg8fuqeiace4",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8fzvlwnl24",
+      "a": "n_msg8fzvl8b5ae",
+      "b": "n_msg8fzvldazf2",
+      "thk": 100,
+      "chainId": "ch_msg8fzvkskh9r",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8g24m0vfbs",
+      "a": "n_msg8fzvldazf2",
+      "b": "n_msg8g24m11svf",
+      "thk": 100,
+      "chainId": "ch_msg8g24mr81be",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8g4cufbm5e",
+      "a": "n_msg8g24m11svf",
+      "b": "n_msg8g4cuysylg",
+      "thk": 100,
+      "chainId": "ch_msg8g4cu51jqy",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8g6ozznbt4",
+      "a": "n_msg8g4cuysylg",
+      "b": "n_msg8fzvl8b5ae",
+      "thk": 100,
+      "chainId": "ch_msg8g6oy7y3jg",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8gbw54ejkn",
+      "a": "n_msg8gbw5spjyl",
+      "b": "n_msg8ge5s61jxl",
+      "thk": 100,
+      "chainId": "ch_msg8gbw5ubeuj",
+      "locked": false,
+      "createdAt": 1785943176112,
+      "updatedAt": 1785943346662,
+      "type": "wall",
+      "pts": []
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8ge5sdfbal",
+      "a": "n_msg8ge5s61jxl",
+      "b": "n_msg8gbw5fhrf6",
+      "thk": 100,
+      "chainId": "ch_msg8gbw5ubeuj",
+      "locked": false,
+      "createdAt": 1785943176112,
+      "updatedAt": 1785943346662,
+      "type": "wall",
+      "pts": []
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8ge5tf5nro",
+      "a": "n_msg8ge5s61jxl",
+      "b": "n_msg8ge5tfi5ph",
+      "thk": 100,
+      "chainId": "ch_msg8ge5rg1gtr",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8gpbmzg2wf",
+      "a": "n_msg9whp0pygeu",
+      "b": "n_msg9whp0qfcqy",
+      "thk": 100,
+      "chainId": "ch_msg8gpbmtqwr5",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8gxef5q928",
+      "a": "n_msg8gxefj7lvv",
+      "b": "n_msg8vu9ruor31",
+      "thk": 100,
+      "chainId": "ch_msg8gxefo8vt8",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8h3734w76x",
+      "a": "n_msg8h373xppph",
+      "b": "n_msg8h373r7333",
+      "thk": 100,
+      "chainId": "ch_msg8h373f87re",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8h5oif6wl9",
+      "a": "n_msg8h373r7333",
+      "b": "n_msg8h5oiwuk4h",
+      "thk": 100,
+      "chainId": "ch_msg8h5oilv9g7",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8h84xwuhch",
+      "a": "n_msg8h373r7333",
+      "b": "n_msg8h84xv39yt",
+      "thk": 100,
+      "chainId": "ch_msg8h84x34lph",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8hdsec45v0",
+      "a": "n_msg8hdse5ajba",
+      "b": "n_msg8hgb0sqwtr",
+      "thk": 100,
+      "chainId": "ch_msg8hdse3scwj",
+      "locked": false,
+      "createdAt": 1785943225548,
+      "updatedAt": 1785943346662,
+      "type": "wall",
+      "pts": []
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8hgb0pne3f",
+      "a": "n_msg8hgb0sqwtr",
+      "b": "n_msg8hdsen620o",
+      "thk": 100,
+      "chainId": "ch_msg8hdse3scwj",
+      "locked": false,
+      "createdAt": 1785943225548,
+      "updatedAt": 1785943346662,
+      "type": "wall",
+      "pts": []
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8hgb0rn43d",
+      "a": "n_msg8hgb0sqwtr",
+      "b": "n_msg8hgb0ccte3",
+      "thk": 100,
+      "chainId": "ch_msg8hgazpqgil",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8hna5pm2cl",
+      "a": "n_msg8hna5fndxo",
+      "b": "n_msg8hna56ypyq",
+      "thk": 100,
+      "chainId": "ch_msg8hna50u7f8",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8hpvqezvfq",
+      "a": "n_msg8hna56ypyq",
+      "b": "n_msg8hpvqcy0c3",
+      "thk": 100,
+      "chainId": "ch_msg8hpvpwhyh8",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8hvt91jfew",
+      "a": "n_msg8hvt9ngi5o",
+      "b": "n_msg8hydy7hw0p",
+      "thk": 100,
+      "chainId": "ch_msg8hvt9ep1q0",
+      "locked": false,
+      "createdAt": 1785943248982,
+      "updatedAt": 1785943346662,
+      "type": "wall",
+      "pts": []
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8hydytnrtu",
+      "a": "n_msg8hydy7hw0p",
+      "b": "n_msg8hydye12qm",
+      "thk": 100,
+      "chainId": "ch_msg8hydy8gn8g",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8hydycf80f",
+      "a": "n_msg8hydy7hw0p",
+      "b": "n_msg8i13ps8tbh",
+      "thk": 100,
+      "chainId": "ch_msg8hvt9ep1q0",
+      "locked": false,
+      "createdAt": 1785943248982,
+      "updatedAt": 1785943346662,
+      "type": "wall",
+      "pts": []
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8i13pgdckw",
+      "a": "n_msg8i13ps8tbh",
+      "b": "n_msg8hvt91l4en",
+      "thk": 100,
+      "chainId": "ch_msg8hvt9ep1q0",
+      "locked": false,
+      "createdAt": 1785943248982,
+      "updatedAt": 1785943346662,
+      "type": "wall",
+      "pts": []
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8i13qzbg2q",
+      "a": "n_msg8i13ps8tbh",
+      "b": "n_msg8i13q7dljb",
+      "thk": 100,
+      "chainId": "ch_msg8i13oohj40",
+      "type": "wall",
+      "pts": [],
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8guyvxctld",
+      "a": "n_msg8guyv67fzc",
+      "b": "n_msg8vu9ruor31",
+      "thk": 100,
+      "chainId": "ch_msg8guyus1wj2",
+      "locked": false,
+      "createdAt": 1785943201047,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "id": "wl_msg8vu9rotnh6",
+      "a": "n_msg8vu9ruor31",
+      "b": "n_msg8guyvncl05",
+      "thk": 100,
+      "chainId": "ch_msg8guyus1wj2",
+      "locked": false,
+      "createdAt": 1785943201047,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg8f2xqbn6v2",
+      "a": "n_msg8f109rmxfw",
+      "b": "n_msg9vyz0cjt1w",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg8f2xp3jjal",
+      "locked": false,
+      "createdAt": 1785943120085,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg9vyz1cu5ga",
+      "a": "n_msg9vyz0cjt1w",
+      "b": "n_msg8f2xq71reu",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg8f2xp3jjal",
+      "locked": false,
+      "createdAt": 1785943120085,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg8ez0ql2f21",
+      "a": "n_msg8ez0q47l33",
+      "b": "n_msg9w3rwa5bwo",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg8ez0q4alzh",
+      "locked": false,
+      "createdAt": 1785943120084,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg9w3rxnlrgn",
+      "a": "n_msg9w3rwa5bwo",
+      "b": "n_msg8ez0qmtpo8",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg8ez0q4alzh",
+      "locked": false,
+      "createdAt": 1785943120084,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg8gkr5wr1es",
+      "a": "n_msg8gkr57t7hq",
+      "b": "n_msg9whp0pygeu",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg8gkr5xyujo",
+      "locked": false,
+      "createdAt": 1785943190578,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg9whp1bk9fs",
+      "a": "n_msg9whp0pygeu",
+      "b": "n_msg8gkr50v22y",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg8gkr5xyujo",
+      "locked": false,
+      "createdAt": 1785943190578,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg8gn1a6g1j9",
+      "a": "n_msg8gn1azz383",
+      "b": "n_msg9whp0qfcqy",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg8gn1alih9b",
+      "locked": false,
+      "createdAt": 1785943190578,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg9whp1yzf5p",
+      "a": "n_msg9whp0qfcqy",
+      "b": "n_msg8gn1aiir0l",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg8gn1alih9b",
+      "locked": false,
+      "createdAt": 1785943190578,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg8fnznowuqk",
+      "a": "n_msg8fnznbyar4",
+      "b": "n_msg9y6ebdm8wq",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg8fnzn16ulb",
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg9y6ebmji85",
+      "a": "n_msg9y6ebdm8wq",
+      "b": "n_msg8fnznpbreu",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg8fnzn16ulb",
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg8fsh2vyu1e",
+      "a": "n_msg8fqaw0ij1x",
+      "b": "n_msg9y6ec6tb9z",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg8fsh2foaaz",
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg9y6ecdmh0w",
+      "a": "n_msg9y6ec6tb9z",
+      "b": "n_msg8fsh2d9j1h",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg8fsh2foaaz",
+      "locked": false,
+      "createdAt": 1785943346662,
+      "updatedAt": 1785943346662,
+      "type": "wall"
+    },
+    {
+      "id": "wl_msg9y6ecn3fh1",
+      "a": "n_msg9y6ebdm8wq",
+      "b": "n_msg9y6ec6tb9z",
+      "thk": 100,
+      "role": "outer",
+      "kind": "drywall",
+      "thicknessSide": "center",
+      "height": 3000,
+      "material": "drywall",
+      "chainId": "ch_msg9y6e9xivw8"
+    }
+  ],
+  "items": [],
+  "lines": [],
+  "links": [],
+  "zones": [
+    {
+      "id": "rm-3095-302-26700-3809857484",
+      "x": 27949.999896788886,
+      "y": 50,
+      "w": 5999.999948866131,
+      "h": 5899.999893830272,
+      "name": "Помещение 2",
+      "category": "other",
+      "polygon": [
+        {
+          "x": 27949.99999913268,
+          "y": 50
+        },
+        {
+          "x": 33949.99984565502,
+          "y": 50
+        },
+        {
+          "x": 33949.99984565502,
+          "y": 3049.9999189635473
+        },
+        {
+          "x": 30950.000215837223,
+          "y": 3049.9999189635478
+        },
+        {
+          "x": 30950.000215837223,
+          "y": 5949.999893830272
+        },
+        {
+          "x": 27949.999896788886,
+          "y": 5949.999893830272
+        }
+      ],
+      "auto": true,
+      "height": 3000,
+      "heightMm": 3000,
+      "areaMm2": 26699999.908305824,
+      "areaM2": 26.7,
+      "fillColor": "#edf1ee",
+      "zoneColor": "#edf1ee",
+      "labelPosition": {
+        "x": 30828.756446621188,
+        "y": 3086.6666042646066,
+        "external": false
+      },
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": "",
+      "showName": true,
+      "showArea": true,
+      "showHeight": true
+    },
+    {
+      "id": "rm-4395-200-15600-531473244",
+      "x": 44062.08952544231,
+      "y": -1530,
+      "w": 5851.477546349226,
+      "h": 5470.000040467354,
+      "name": "Помещение 3",
+      "category": "other",
+      "polygon": [
+        {
+          "x": 49913.567071791535,
+          "y": -1530
+        },
+        {
+          "x": 47860.88076135029,
+          "y": 3164.6616153355553
+        },
+        {
+          "x": 46486.59347232139,
+          "y": 3940.0000404673538
+        },
+        {
+          "x": 44071.89239282725,
+          "y": 3940.0000404673538
+        },
+        {
+          "x": 44062.08952544231,
+          "y": -1529.9999999999995
+        }
+      ],
+      "auto": true,
+      "height": 3000,
+      "heightMm": 3000,
+      "areaMm2": 25038142.315447018,
+      "areaM2": 25.04,
+      "fillColor": "#edf1ee",
+      "zoneColor": "#edf1ee",
+      "labelPosition": {
+        "x": 46480.566716447225,
+        "y": 2228.483538848358,
+        "external": false
+      },
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": "",
+      "showName": true,
+      "showArea": true,
+      "showHeight": true
+    },
+    {
+      "id": "rm-2995-1345-12000-362566480",
+      "x": 27949.999997055882,
+      "y": 11949.99999913268,
+      "w": 4000.00005717605,
+      "h": 3000.000017657989,
+      "name": "Помещение 6",
+      "category": "other",
+      "polygon": [
+        {
+          "x": 27949.999997055882,
+          "y": 11949.99999913268
+        },
+        {
+          "x": 31950.000054231932,
+          "y": 11950.000068518306
+        },
+        {
+          "x": 31950.000054231932,
+          "y": 14950.00001679067
+        },
+        {
+          "x": 27950.000173702883,
+          "y": 14950.00001679067
+        }
+      ],
+      "auto": true,
+      "height": 3000,
+      "heightMm": 3000,
+      "areaMm2": 11999999.838418335,
+      "areaM2": 12,
+      "fillColor": "#edf1ee",
+      "zoneColor": "#edf1ee",
+      "labelPosition": {
+        "x": 29950.000069805657,
+        "y": 13450.000025308082,
+        "external": false
+      },
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": "",
+      "showName": true,
+      "showArea": true,
+      "showHeight": true
+    },
+    {
+      "id": "rm-205-155-12000-2195040",
+      "x": 49.999709525242906,
+      "y": 50,
+      "w": 4000.0001331648405,
+      "h": 2999.999950017562,
+      "name": "Помещение 7",
+      "category": "other",
+      "polygon": [
+        {
+          "x": 49.999995238118885,
+          "y": 50
+        },
+        {
+          "x": 4049.9998426900834,
+          "y": 50
+        },
+        {
+          "x": 4049.9998426900834,
+          "y": 3049.9999500175613
+        },
+        {
+          "x": 49.999709525242906,
+          "y": 3049.999950017562
+        }
+      ],
+      "auto": true,
+      "height": 3000,
+      "heightMm": 3000,
+      "areaMm2": 11999999.770995455,
+      "areaM2": 12,
+      "fillColor": "#edf1ee",
+      "zoneColor": "#edf1ee",
+      "labelPosition": {
+        "x": 2049.9998475358825,
+        "y": 1549.999975008781,
+        "external": false
+      },
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": "",
+      "showName": true,
+      "showArea": true,
+      "showHeight": true
+    },
+    {
+      "id": "rm-1595-155-12000-177340600",
+      "x": 13950.000004770262,
+      "y": 50,
+      "w": 3999.9997960811615,
+      "h": 2999.99985873131,
+      "name": "Помещение 8",
+      "category": "other",
+      "polygon": [
+        {
+          "x": 13950.000004770262,
+          "y": 50
+        },
+        {
+          "x": 17949.999800851423,
+          "y": 50
+        },
+        {
+          "x": 17949.999800851423,
+          "y": 3049.9998587313094
+        },
+        {
+          "x": 13950.000290985969,
+          "y": 3049.99985873131
+        }
+      ],
+      "auto": true,
+      "height": 3000,
+      "heightMm": 3000,
+      "areaMm2": 11999998.393845208,
+      "areaM2": 12,
+      "fillColor": "#edf1ee",
+      "zoneColor": "#edf1ee",
+      "labelPosition": {
+        "x": 15949.99997436477,
+        "y": 1549.9999293656547,
+        "external": false
+      },
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": "",
+      "showName": true,
+      "showArea": true,
+      "showHeight": true
+    },
+    {
+      "id": "rm-4301-200-8255-531451280",
+      "x": 41940.08952582864,
+      "y": -1530.0000000000005,
+      "w": 2131.802866998609,
+      "h": 5470.000040467355,
+      "name": "Помещение 9",
+      "category": "other",
+      "polygon": [
+        {
+          "x": 41949.892435554335,
+          "y": 3940.000040467354
+        },
+        {
+          "x": 41940.08952582864,
+          "y": -1530.0000000000005
+        },
+        {
+          "x": 44062.08952544231,
+          "y": -1530
+        },
+        {
+          "x": 44071.89239282725,
+          "y": 3940.000040467354
+        }
+      ],
+      "auto": true,
+      "height": 3000,
+      "heightMm": 3000,
+      "areaMm2": 11607339.967956528,
+      "areaM2": 11.61,
+      "fillColor": "#edf1ee",
+      "zoneColor": "#edf1ee",
+      "labelPosition": {
+        "x": 43011.00001077106,
+        "y": 1995.0000202336769,
+        "external": false
+      },
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": "",
+      "showName": true,
+      "showArea": true,
+      "showHeight": true
+    },
+    {
+      "id": "rm-1578-1346-9631-190839587",
+      "x": 13956.188808060477,
+      "y": 11949.27722527205,
+      "w": 2133.7569270874574,
+      "h": 3000.9880655138313,
+      "name": "Помещение 10",
+      "category": "other",
+      "polygon": [
+        {
+          "x": 13956.188808060477,
+          "y": 14950.265290785881
+        },
+        {
+          "x": 14356.320550128989,
+          "y": 11949.27722527205
+        },
+        {
+          "x": 16071.960248156829,
+          "y": 11977.402466223326
+        },
+        {
+          "x": 16089.945735147934,
+          "y": 14937.299753902538
+        }
+      ],
+      "auto": true,
+      "height": 3000,
+      "heightMm": 3000,
+      "areaMm2": 5737901.296354532,
+      "areaM2": 5.74,
+      "fillColor": "#edf1ee",
+      "zoneColor": "#edf1ee",
+      "labelPosition": {
+        "x": 15779.575806426561,
+        "y": 13457.00448319025,
+        "external": false
+      },
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": "",
+      "showName": true,
+      "showArea": true,
+      "showHeight": true
+    },
+    {
+      "id": "rm-1674-1346-3893-228192513",
+      "x": 16071.960248156829,
+      "y": 11977.402466223328,
+      "w": 1333.9378446468327,
+      "h": 2959.8972876792104,
+      "name": "Помещение 11",
+      "category": "other",
+      "polygon": [
+        {
+          "x": 17399.895774713117,
+          "y": 11999.171901084905
+        },
+        {
+          "x": 17405.89809280366,
+          "y": 14929.303515618172
+        },
+        {
+          "x": 16089.945735147934,
+          "y": 14937.299753902538
+        },
+        {
+          "x": 16071.960248156829,
+          "y": 11977.402466223328
+        }
+      ],
+      "auto": true,
+      "height": 3000,
+      "heightMm": 3000,
+      "areaMm2": 3893061.4158658087,
+      "areaM2": 3.89,
+      "fillColor": "#edf1ee",
+      "zoneColor": "#edf1ee",
+      "labelPosition": {
+        "x": 16741.924962705387,
+        "y": 13460.794409207236,
+        "external": false
+      },
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": "",
+      "showName": true,
+      "showArea": true,
+      "showHeight": true
+    },
+    {
+      "id": "rm-205-1240-3600-11013892",
+      "x": 49.99988383045684,
+      "y": 11950,
+      "w": 4049.000116169543,
+      "h": 900.0000390739478,
+      "name": "Помещение 12",
+      "category": "other",
+      "polygon": [
+        {
+          "x": 50.00000683350271,
+          "y": 11950
+        },
+        {
+          "x": 4099,
+          "y": 11950
+        },
+        {
+          "x": 4099,
+          "y": 12850.000039073948
+        },
+        {
+          "x": 49.99988383045684,
+          "y": 12850.000039073948
+        }
+      ],
+      "auto": true,
+      "height": 3000,
+      "heightMm": 3000,
+      "areaMm2": 3644100.207411635,
+      "areaM2": 3.64,
+      "fillColor": "#edf1ee",
+      "zoneColor": "#edf1ee",
+      "labelPosition": {
+        "x": 2050.000022677585,
+        "y": 12400.000019536972,
+        "external": false
+      },
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": "",
+      "showName": true,
+      "showArea": true,
+      "showHeight": true
+    }
+  ],
+  "labels": [],
+  "measurements": [],
+  "rulers": [],
+  "structurals": [],
+  "rooms": [
+    {
+      "id": "rm-3095-302-26700-3809857484",
+      "type": "room",
+      "name": "Помещение 2",
+      "category": "other",
+      "contourId": "contour-1",
+      "polygon": [
+        {
+          "x": 27949.99999913268,
+          "y": 50
+        },
+        {
+          "x": 33949.99984565502,
+          "y": 50
+        },
+        {
+          "x": 33949.99984565502,
+          "y": 3049.9999189635473
+        },
+        {
+          "x": 30950.000215837223,
+          "y": 3049.9999189635478
+        },
+        {
+          "x": 30950.000215837223,
+          "y": 5949.999893830272
+        },
+        {
+          "x": 27949.999896788886,
+          "y": 5949.999893830272
+        }
+      ],
+      "areaMm2": 26699999.908305824,
+      "areaM2": 26.7,
+      "heightMm": 3000,
+      "labelPosition": {
+        "x": 30828.756446621188,
+        "y": 3086.6666042646066,
+        "external": false
+      },
+      "fillColor": "#edf1ee",
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": ""
+    },
+    {
+      "id": "rm-4395-200-15600-531473244",
+      "type": "room",
+      "name": "Помещение 3",
+      "category": "other",
+      "contourId": "contour-2",
+      "polygon": [
+        {
+          "x": 49913.567071791535,
+          "y": -1530
+        },
+        {
+          "x": 47860.88076135029,
+          "y": 3164.6616153355553
+        },
+        {
+          "x": 46486.59347232139,
+          "y": 3940.0000404673538
+        },
+        {
+          "x": 44071.89239282725,
+          "y": 3940.0000404673538
+        },
+        {
+          "x": 44062.08952544231,
+          "y": -1529.9999999999995
+        }
+      ],
+      "areaMm2": 25038142.315447018,
+      "areaM2": 25.04,
+      "heightMm": 3000,
+      "labelPosition": {
+        "x": 46480.566716447225,
+        "y": 2228.483538848358,
+        "external": false
+      },
+      "fillColor": "#edf1ee",
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": ""
+    },
+    {
+      "id": "rm-2995-1345-12000-362566480",
+      "type": "room",
+      "name": "Помещение 6",
+      "category": "other",
+      "contourId": "contour-3",
+      "polygon": [
+        {
+          "x": 27949.999997055882,
+          "y": 11949.99999913268
+        },
+        {
+          "x": 31950.000054231932,
+          "y": 11950.000068518306
+        },
+        {
+          "x": 31950.000054231932,
+          "y": 14950.00001679067
+        },
+        {
+          "x": 27950.000173702883,
+          "y": 14950.00001679067
+        }
+      ],
+      "areaMm2": 11999999.838418335,
+      "areaM2": 12,
+      "heightMm": 3000,
+      "labelPosition": {
+        "x": 29950.000069805657,
+        "y": 13450.000025308082,
+        "external": false
+      },
+      "fillColor": "#edf1ee",
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": ""
+    },
+    {
+      "id": "rm-205-155-12000-2195040",
+      "type": "room",
+      "name": "Помещение 7",
+      "category": "other",
+      "contourId": "contour-4",
+      "polygon": [
+        {
+          "x": 49.999995238118885,
+          "y": 50
+        },
+        {
+          "x": 4049.9998426900834,
+          "y": 50
+        },
+        {
+          "x": 4049.9998426900834,
+          "y": 3049.9999500175613
+        },
+        {
+          "x": 49.999709525242906,
+          "y": 3049.999950017562
+        }
+      ],
+      "areaMm2": 11999999.770995455,
+      "areaM2": 12,
+      "heightMm": 3000,
+      "labelPosition": {
+        "x": 2049.9998475358825,
+        "y": 1549.999975008781,
+        "external": false
+      },
+      "fillColor": "#edf1ee",
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": ""
+    },
+    {
+      "id": "rm-1595-155-12000-177340600",
+      "type": "room",
+      "name": "Помещение 8",
+      "category": "other",
+      "contourId": "contour-5",
+      "polygon": [
+        {
+          "x": 13950.000004770262,
+          "y": 50
+        },
+        {
+          "x": 17949.999800851423,
+          "y": 50
+        },
+        {
+          "x": 17949.999800851423,
+          "y": 3049.9998587313094
+        },
+        {
+          "x": 13950.000290985969,
+          "y": 3049.99985873131
+        }
+      ],
+      "areaMm2": 11999998.393845208,
+      "areaM2": 12,
+      "heightMm": 3000,
+      "labelPosition": {
+        "x": 15949.99997436477,
+        "y": 1549.9999293656547,
+        "external": false
+      },
+      "fillColor": "#edf1ee",
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": ""
+    },
+    {
+      "id": "rm-4301-200-8255-531451280",
+      "type": "room",
+      "name": "Помещение 9",
+      "category": "other",
+      "contourId": "contour-6",
+      "polygon": [
+        {
+          "x": 41949.892435554335,
+          "y": 3940.000040467354
+        },
+        {
+          "x": 41940.08952582864,
+          "y": -1530.0000000000005
+        },
+        {
+          "x": 44062.08952544231,
+          "y": -1530
+        },
+        {
+          "x": 44071.89239282725,
+          "y": 3940.000040467354
+        }
+      ],
+      "areaMm2": 11607339.967956528,
+      "areaM2": 11.61,
+      "heightMm": 3000,
+      "labelPosition": {
+        "x": 43011.00001077106,
+        "y": 1995.0000202336769,
+        "external": false
+      },
+      "fillColor": "#edf1ee",
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": ""
+    },
+    {
+      "id": "rm-1578-1346-9631-190839587",
+      "type": "room",
+      "name": "Помещение 10",
+      "category": "other",
+      "contourId": "contour-7",
+      "polygon": [
+        {
+          "x": 13956.188808060477,
+          "y": 14950.265290785881
+        },
+        {
+          "x": 14356.320550128989,
+          "y": 11949.27722527205
+        },
+        {
+          "x": 16071.960248156829,
+          "y": 11977.402466223326
+        },
+        {
+          "x": 16089.945735147934,
+          "y": 14937.299753902538
+        }
+      ],
+      "areaMm2": 5737901.296354532,
+      "areaM2": 5.74,
+      "heightMm": 3000,
+      "labelPosition": {
+        "x": 15779.575806426561,
+        "y": 13457.00448319025,
+        "external": false
+      },
+      "fillColor": "#edf1ee",
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": ""
+    },
+    {
+      "id": "rm-1674-1346-3893-228192513",
+      "type": "room",
+      "name": "Помещение 11",
+      "category": "other",
+      "contourId": "contour-8",
+      "polygon": [
+        {
+          "x": 17399.895774713117,
+          "y": 11999.171901084905
+        },
+        {
+          "x": 17405.89809280366,
+          "y": 14929.303515618172
+        },
+        {
+          "x": 16089.945735147934,
+          "y": 14937.299753902538
+        },
+        {
+          "x": 16071.960248156829,
+          "y": 11977.402466223328
+        }
+      ],
+      "areaMm2": 3893061.4158658087,
+      "areaM2": 3.89,
+      "heightMm": 3000,
+      "labelPosition": {
+        "x": 16741.924962705387,
+        "y": 13460.794409207236,
+        "external": false
+      },
+      "fillColor": "#edf1ee",
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": ""
+    },
+    {
+      "id": "rm-205-1240-3600-11013892",
+      "type": "room",
+      "name": "Помещение 12",
+      "category": "other",
+      "contourId": "contour-9",
+      "polygon": [
+        {
+          "x": 50.00000683350271,
+          "y": 11950
+        },
+        {
+          "x": 4099,
+          "y": 11950
+        },
+        {
+          "x": 4099,
+          "y": 12850.000039073948
+        },
+        {
+          "x": 49.99988383045684,
+          "y": 12850.000039073948
+        }
+      ],
+      "areaMm2": 3644100.207411635,
+      "areaM2": 3.64,
+      "heightMm": 3000,
+      "labelPosition": {
+        "x": 2050.000022677585,
+        "y": 12400.000019536972,
+        "external": false
+      },
+      "fillColor": "#edf1ee",
+      "visible": true,
+      "locked": false,
+      "climateZone": null,
+      "sanitationZone": null,
+      "productionZone": null,
+      "targetTemperatureC": null,
+      "targetRh": null,
+      "targetCo2Ppm": null,
+      "targetAirChanges": null,
+      "targetAirVelocityMs": null,
+      "notes": ""
+    }
+  ],
+  "farmObjectGroups": [],
+  "electricalGroups": [
+    {
+      "id": "eg-A",
+      "name": "A",
+      "voltage": 220,
+      "phases": 1,
+      "maxPowerW": 12000,
+      "breakerType": "C25",
+      "rcd": true,
+      "cableType": "ВВГнг-LS 3x4",
+      "color": "#a5371f",
+      "objectIds": [],
+      "currentPowerW": 0
+    },
+    {
+      "id": "eg-B",
+      "name": "B",
+      "voltage": 220,
+      "phases": 1,
+      "maxPowerW": 8000,
+      "breakerType": "C20",
+      "rcd": true,
+      "cableType": "ВВГнг-LS 3x2.5",
+      "color": "#8b4a2b",
+      "objectIds": [],
+      "currentPowerW": 0
+    },
+    {
+      "id": "eg-C",
+      "name": "C",
+      "voltage": 380,
+      "phases": 3,
+      "maxPowerW": 18000,
+      "breakerType": "C32",
+      "rcd": true,
+      "cableType": "ВВГнг-LS 5x4",
+      "color": "#7a5c3e",
+      "objectIds": [],
+      "currentPowerW": 0
+    },
+    {
+      "id": "eg-D",
+      "name": "D",
+      "voltage": 220,
+      "phases": 1,
+      "maxPowerW": 10000,
+      "breakerType": "C16",
+      "rcd": true,
+      "cableType": "ВВГнг-LS 3x2.5",
+      "color": "#d4a017",
+      "objectIds": [],
+      "currentPowerW": 0
+    },
+    {
+      "id": "eg-E",
+      "name": "E",
+      "voltage": 220,
+      "phases": 1,
+      "maxPowerW": 6000,
+      "breakerType": "C16",
+      "rcd": true,
+      "cableType": "ВВГнг-LS 3x2.5",
+      "color": "#5a5f5c",
+      "objectIds": [],
+      "currentPowerW": 0
+    }
+  ],
+  "electricalLoads": {
+    "objectLoads": [],
+    "groups": [
+      {
+        "id": "eg-A",
+        "name": "A",
+        "voltage": 220,
+        "phases": 1,
+        "maxPowerW": 12000,
+        "breakerType": "C25",
+        "rcd": true,
+        "cableType": "ВВГнг-LS 3x4",
+        "color": "#a5371f",
+        "objectIds": [],
+        "currentPowerW": 0
+      },
+      {
+        "id": "eg-B",
+        "name": "B",
+        "voltage": 220,
+        "phases": 1,
+        "maxPowerW": 8000,
+        "breakerType": "C20",
+        "rcd": true,
+        "cableType": "ВВГнг-LS 3x2.5",
+        "color": "#8b4a2b",
+        "objectIds": [],
+        "currentPowerW": 0
+      },
+      {
+        "id": "eg-C",
+        "name": "C",
+        "voltage": 380,
+        "phases": 3,
+        "maxPowerW": 18000,
+        "breakerType": "C32",
+        "rcd": true,
+        "cableType": "ВВГнг-LS 5x4",
+        "color": "#7a5c3e",
+        "objectIds": [],
+        "currentPowerW": 0
+      },
+      {
+        "id": "eg-D",
+        "name": "D",
+        "voltage": 220,
+        "phases": 1,
+        "maxPowerW": 10000,
+        "breakerType": "C16",
+        "rcd": true,
+        "cableType": "ВВГнг-LS 3x2.5",
+        "color": "#d4a017",
+        "objectIds": [],
+        "currentPowerW": 0
+      },
+      {
+        "id": "eg-E",
+        "name": "E",
+        "voltage": 220,
+        "phases": 1,
+        "maxPowerW": 6000,
+        "breakerType": "C16",
+        "rcd": true,
+        "cableType": "ВВГнг-LS 3x2.5",
+        "color": "#5a5f5c",
+        "objectIds": [],
+        "currentPowerW": 0
+      }
+    ],
+    "totals": {
+      "totalPowerW": 0,
+      "lightingPowerW": 0,
+      "pumpPowerW": 0,
+      "climatePowerW": 0,
+      "automationPowerW": 0,
+      "otherPowerW": 0,
+      "objectCount": 0,
+      "totalPowerKw": 0
+    },
+    "lineLoads": []
+  },
+  "climateSettings": {
+    "forbidIndoorOverPassage": true,
+    "maxRackFanDistanceMm": 4500
+  },
+  "climateLoads": {
+    "rooms": [
+      {
+        "roomId": "rm-3095-302-26700-3809857484",
+        "roomName": "Помещение 2",
+        "category": "other",
+        "volumeM3": 80.1,
+        "airChanges": 4,
+        "requiredAirflowM3h": 320.4,
+        "recommendedFanM3h": 500,
+        "installedAirflowM3h": 0,
+        "airflowDeficitM3h": 320.4,
+        "hasVentilation": false,
+        "hasAc": false,
+        "hasDehumidifier": false,
+        "hasHumidifier": false,
+        "sensorTypes": [],
+        "targetTemperatureC": null,
+        "targetRh": null,
+        "targetCo2Ppm": null,
+        "targetAirVelocityMs": null,
+        "roomDuctCount": 0
+      },
+      {
+        "roomId": "rm-4395-200-15600-531473244",
+        "roomName": "Помещение 3",
+        "category": "other",
+        "volumeM3": 46.8,
+        "airChanges": 4,
+        "requiredAirflowM3h": 187.2,
+        "recommendedFanM3h": 500,
+        "installedAirflowM3h": 0,
+        "airflowDeficitM3h": 187.2,
+        "hasVentilation": false,
+        "hasAc": false,
+        "hasDehumidifier": false,
+        "hasHumidifier": false,
+        "sensorTypes": [],
+        "targetTemperatureC": null,
+        "targetRh": null,
+        "targetCo2Ppm": null,
+        "targetAirVelocityMs": null,
+        "roomDuctCount": 0
+      },
+      {
+        "roomId": "rm-4795-200-15600-629468316",
+        "roomName": "Помещение 4",
+        "category": "other",
+        "volumeM3": 46.8,
+        "airChanges": 4,
+        "requiredAirflowM3h": 187.2,
+        "recommendedFanM3h": 500,
+        "installedAirflowM3h": 0,
+        "airflowDeficitM3h": 187.2,
+        "hasVentilation": false,
+        "hasAc": false,
+        "hasDehumidifier": false,
+        "hasHumidifier": false,
+        "sensorTypes": [],
+        "targetTemperatureC": null,
+        "targetRh": null,
+        "targetCo2Ppm": null,
+        "targetAirVelocityMs": null,
+        "roomDuctCount": 0
+      },
+      {
+        "roomId": "rm-1658-1370-15311-191583638",
+        "roomName": "Помещение 5",
+        "category": "other",
+        "volumeM3": 38.92,
+        "airChanges": 4,
+        "requiredAirflowM3h": 155.68,
+        "recommendedFanM3h": 500,
+        "installedAirflowM3h": 0,
+        "airflowDeficitM3h": 155.68,
+        "hasVentilation": false,
+        "hasAc": false,
+        "hasDehumidifier": false,
+        "hasHumidifier": false,
+        "sensorTypes": [],
+        "targetTemperatureC": null,
+        "targetRh": null,
+        "targetCo2Ppm": null,
+        "targetAirVelocityMs": null,
+        "roomDuctCount": 0
+      },
+      {
+        "roomId": "rm-2995-1345-12000-362566480",
+        "roomName": "Помещение 6",
+        "category": "other",
+        "volumeM3": 36,
+        "airChanges": 4,
+        "requiredAirflowM3h": 144,
+        "recommendedFanM3h": 500,
+        "installedAirflowM3h": 0,
+        "airflowDeficitM3h": 144,
+        "hasVentilation": false,
+        "hasAc": false,
+        "hasDehumidifier": false,
+        "hasHumidifier": false,
+        "sensorTypes": [],
+        "targetTemperatureC": null,
+        "targetRh": null,
+        "targetCo2Ppm": null,
+        "targetAirVelocityMs": null,
+        "roomDuctCount": 0
+      },
+      {
+        "roomId": "rm-205-155-12000-2195040",
+        "roomName": "Помещение 7",
+        "category": "other",
+        "volumeM3": 36,
+        "airChanges": 4,
+        "requiredAirflowM3h": 144,
+        "recommendedFanM3h": 500,
+        "installedAirflowM3h": 0,
+        "airflowDeficitM3h": 144,
+        "hasVentilation": false,
+        "hasAc": false,
+        "hasDehumidifier": false,
+        "hasHumidifier": false,
+        "sensorTypes": [],
+        "targetTemperatureC": null,
+        "targetRh": null,
+        "targetCo2Ppm": null,
+        "targetAirVelocityMs": null,
+        "roomDuctCount": 0
+      },
+      {
+        "roomId": "rm-1595-155-12000-177340600",
+        "roomName": "Помещение 8",
+        "category": "other",
+        "volumeM3": 36,
+        "airChanges": 4,
+        "requiredAirflowM3h": 144,
+        "recommendedFanM3h": 500,
+        "installedAirflowM3h": 0,
+        "airflowDeficitM3h": 144,
+        "hasVentilation": false,
+        "hasAc": false,
+        "hasDehumidifier": false,
+        "hasHumidifier": false,
+        "sensorTypes": [],
+        "targetTemperatureC": null,
+        "targetRh": null,
+        "targetCo2Ppm": null,
+        "targetAirVelocityMs": null,
+        "roomDuctCount": 0
+      },
+      {
+        "roomId": "rm-205-1240-3600-11013892",
+        "roomName": "Помещение 9",
+        "category": "other",
+        "volumeM3": 10.93,
+        "airChanges": 4,
+        "requiredAirflowM3h": 43.72,
+        "recommendedFanM3h": 500,
+        "installedAirflowM3h": 0,
+        "airflowDeficitM3h": 43.72,
+        "hasVentilation": false,
+        "hasAc": false,
+        "hasDehumidifier": false,
+        "hasHumidifier": false,
+        "sensorTypes": [],
+        "targetTemperatureC": null,
+        "targetRh": null,
+        "targetCo2Ppm": null,
+        "targetAirVelocityMs": null,
+        "roomDuctCount": 0
+      }
+    ],
+    "totals": {
+      "totalVolumeM3": 331.55,
+      "totalRequiredAirflowM3h": 1326.2,
+      "totalInstalledAirflowM3h": 0
+    }
+  },
+  "dimensions": [],
+  "validationWarnings": []
+}

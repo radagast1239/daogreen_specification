@@ -85,7 +85,9 @@ export const WALL_MATERIALS = {
     id: "drywall",
     label: "Перегородка из гипсокартона",
     hatch: "cross",
-    color: "#7a4f9c",
+    // Neutral dark stroke — matches WALL_STROKE / default hatch (#14201b).
+    // Previous #7a4f9c painted every drywall-material wall purple.
+    color: "#14201b",
     thk: 100,
     kind: "drywall",
   },
@@ -109,7 +111,7 @@ export const WALL_MATERIALS = {
     id: "box",
     label: "Гипсокартонный короб",
     hatch: "box",
-    color: "#7a4f9c",
+    color: "#14201b",
     thk: 100,
     kind: "drywall",
   },
@@ -341,7 +343,9 @@ export const DEFAULT_DISPLAY = () => ({
   showMediumGrid: true,
   showMajorGrid: true,
   dimensionDisplayMode: "remplanner_cm",
-  showZoneNames: true,
+  // PHASE 2F1 — automatic room centre labels ("Помещение / H= / S=") stay off
+  // by default; room data remains in the model/inspector. Explicit flags later.
+  showZoneNames: false,
   showZoneAreas: true,
   showZoneFill: true,
   roomWhiteFill: true,

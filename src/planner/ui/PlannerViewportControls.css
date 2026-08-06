@@ -1,0 +1,11 @@
+.planner-viewport-controls {
+  align-items: center; background: rgba(255, 255, 255, .96); border: 1px solid #d9e1dc;
+  border-radius: 10px; box-shadow: 0 4px 14px rgba(20, 45, 31, .12); display: inline-flex;
+  gap: 2px; max-width: calc(100vw - 16px); padding: 4px;
+}
+.planner-viewport-controls button { background: transparent; border: 0; border-radius: 7px; color: #26372e;
+  cursor: pointer; font: 600 12px/1 system-ui, sans-serif; min-height: 32px; min-width: 32px; padding: 0 8px; }
+.planner-viewport-controls button:hover { background: #edf4ef; }
+.planner-viewport-controls button:focus-visible { outline: 2px solid #168653; outline-offset: 1px; }
+.planner-viewport-controls output { color: #4d5d54; font: 600 12px/1 system-ui, sans-serif; min-width: 44px; text-align: center; }
+@media (max-width: 480px) { .planner-viewport-controls { gap: 0; } .planner-viewport-controls button { padding: 0 6px; } }

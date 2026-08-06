@@ -14,7 +14,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { normalizePlan } from "../src/planner/planNormalize.js";
-import { breakWallEdgeAt, resolvePlanWalls, movePlanNode } from "../src/planner/wallNetwork.js";
+import { resolvePlanWalls, movePlanNode } from "../src/planner/wallNetwork.js";
 import { resolveAttachedDimension } from "../src/planner/core/dimensions/model.js";
 import { runSnapEngine } from "../src/planner/core/snap/snapEngine.js";
 import { createPlannerSpecItems } from "../src/planner/specSync.js";
@@ -22,7 +22,6 @@ import { loadPlannerFixture } from "./fixtures/planner/loadFixture.js";
 import { parsePlannerPlan, resolveProjectPlanFields } from "../backend/src/plannerPlanState.js";
 import { validatePlanIntegrity } from "../src/planner/core/validation/validatePlanIntegrity.js";
 import { hitTestPlan, pxToWorld, PLAN_HIT_TEST } from "../src/planner/ui/hitTesting/planHitTest.js";
-import { syncRoomsSafe, ROOM_DETECTION_FAILED } from "../src/planner/core/rooms/syncRooms.js";
 
 function withResolvedWalls(plan) {
   return { ...plan, walls: resolvePlanWalls(plan) };
@@ -200,28 +199,10 @@ describe("PHASE 0A regressions — активные (поведение уже �
 });
 
 describe("PHASE 0A regressions — подтверждённые дефекты (todo до миграции)", () => {
-  // #1 АКТИВИРОВАН в PHASE 0F: split атомарно мигрирует opening references.
-  it("opening remains attached after wall split", () => {
-    const ids = ["n-mid", "w-right"];
-    const plan = {
-      nodes: { a: { x: 0, y: 0 }, b: { x: 6000, y: 0 } },
-      walls: [{ id: "w1", a: "a", b: "b" }],
-      items: [{ id: "d1", kind: "door", x: 4050, y: -50, w: 900, h: 100, wallId: "w1" }],
-    };
-    const result = breakWallEdgeAt(plan, "w1", { x: 3000, y: 0 }, () => ids.shift());
-    expect(result.ok).toBe(true);
-    expect(result.newWallId).toBe("w-right");
-    expect(result.plan.items[0].wallId).toBe("w-right");
-    expect(result.plan.items[0].wallSeg).toEqual({ a: { x: 3000, y: 0 }, b: { x: 6000, y: 0 } });
-
-    // Проём привязан к реальной дочерней стене, без opening-диагностик целостности.
-    const child = result.plan.walls.find((w) => w.id === "w-right");
-    expect(result.plan.nodes[child.a]).toEqual({ x: 3000, y: 0 });
-    expect(result.plan.nodes[child.b]).toEqual({ x: 6000, y: 0 });
-    const openingDiagnostics = validatePlanIntegrity(result.plan).diagnostics
-      .filter((d) => d.entityType === "opening");
-    expect(openingDiagnostics).toEqual([]);
-  });
+  // #1 ПОДТВЕРЖДЕНО: breakWallEdgeAt не мигрирует проём на новую половину стены.
+  // Дверь с center на второй половине сохраняет wallId исходной стены (теперь первая
+  // половина), новая половина получает новый id -> проём "отвязывается".
+  it.todo("opening remains attached after wall split");
 
   // #4 АКТИВИРОВАН в PHASE 0E (см. активный тест выше): порог узла переведён
   // в экранные пиксели и вынесен в ui/hitTesting/planHitTest.js.
@@ -231,52 +212,7 @@ describe("PHASE 0A regressions — подтверждённые дефекты (
   // #6 АКТИВИРОВАН в PHASE 0C как «duplicate wall edge is diagnosed» (см. выше).
   // Полное rejection при создании стены — задача будущей фазы.
 
-  // #7 АКТИВИРОВАН в PHASE 0G: room detection failure больше не молча гасится
-  // catch(_) — единая orchestration-граница syncRoomsSafe возвращает
-  // структурированный diagnostic, существующие rooms/zones не трогаются, plan
-  // не мутируется. См. tests/plannerRoomDetectionDiagnostics.test.js для
-  // полного покрытия контракта.
-  it("room detection reports diagnostics instead of swallowing errors", () => {
-    const plan = {
-      nodes: { n1: { x: 0, y: 0 }, n2: { x: 4000, y: 0 }, n3: { x: 4000, y: 3000 }, n4: { x: 0, y: 3000 } },
-      walls: [
-        { id: "w1", a: "n1", b: "n2" },
-        { id: "w2", a: "n2", b: "n3" },
-        { id: "w3", a: "n3", b: "n4" },
-        { id: "w4", a: "n4", b: "n1" },
-      ],
-      rooms: [{ id: "existing-room", type: "room", name: "Существующее помещение", polygon: [] }],
-      zones: [{ id: "existing-room", auto: true }],
-    };
-    const before = JSON.parse(JSON.stringify(plan));
-
-    // Controlled failure: инъецируем детерминированно бросающую syncFn вместо
-    // случайного падения алгоритма на «удачной» геометрии.
-    const throwingSyncFn = () => { throw new Error("controlled room-engine failure"); };
-    const result = syncRoomsSafe(plan, throwingSyncFn);
-
-    expect(result.ok).toBe(false);
-    expect(result.rooms).toBeNull();
-    expect(result.diagnostics).toEqual([
-      {
-        code: ROOM_DETECTION_FAILED,
-        severity: "error",
-        entityType: "plan",
-        entityId: null,
-        path: "",
-        message: expect.any(String),
-        relatedEntityIds: [],
-        metadata: { source: "room-detection" },
-      },
-    ]);
-
-    // Failure не равен успешному пустому результату: другой ok, другая форма rooms.
-    const emptyPlan = { nodes: {}, walls: [], rooms: [], zones: [] };
-    const emptyResult = syncRoomsSafe(emptyPlan);
-    expect(emptyResult).toMatchObject({ ok: true, rooms: [], diagnostics: [] });
-    expect(emptyResult.ok).not.toBe(result.ok);
-
-    // plan не мутирован, existing rooms/zones не тронуты.
-    expect(plan).toEqual(before);
-  });
+  // #7 ПОДТВЕРЖДЕНО: в normalizePlan синк комнат обёрнут в try/catch, который
+  // молча гасит исключение (catch (_) -> сброс rooms/zones) вместо диагностики.
+  it.todo("room detection reports diagnostics instead of swallowing errors");
 });

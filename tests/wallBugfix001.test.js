@@ -167,9 +167,14 @@ describe("WALL-BUGFIX-001 dimension dedupe", () => {
       zones: [],
     };
     const out = generateWallDimensions(plan);
-    // wall_length dims are intentionally per-wall (top+bottom can share span), exclude them
+    // wall_length dims are intentionally per-wall (top+bottom can share span), exclude them.
+    // PHASE 2F1: external_segment + external_overall intentionally share the same
+    // span at different offsets — include kind so the pair is not treated as a duplicate.
     const horiz = out.dimensions.filter((d) => d.orientation === "horizontal" && d.mode === "linear" && d.kind !== "wall_length");
-    const keys = horiz.map((d) => `${Math.round(Math.min(d.p1.x, d.p2.x))}-${Math.round(Math.max(d.p1.x, d.p2.x))}-${Math.round(Math.hypot(d.p2.x - d.p1.x, d.p2.y - d.p1.y))}`);
+    const keys = horiz.map((d) => {
+      const y = Math.round(((d.p1?.y || 0) + (d.p2?.y || 0)) / 2);
+      return `${d.kind}:y${y}:${Math.round(Math.min(d.p1.x, d.p2.x))}-${Math.round(Math.max(d.p1.x, d.p2.x))}-${Math.round(Math.hypot(d.p2.x - d.p1.x, d.p2.y - d.p1.y))}`;
+    });
     expect(keys.length).toBe(new Set(keys).size);
   });
 

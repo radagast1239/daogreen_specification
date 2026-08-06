@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "../../store/StoreContext.jsx";
 import { uid } from "../../store/helpers.js";
@@ -25,6 +25,7 @@ import {
   createWallDraftState, wallDraftStart, wallDraftContinueFrom,
   wallDraftAddSegment, wallDraftBackspace, wallDraftFinishPts, wallDraftFinishMeta,
 } from "../../planner/core/walls/wallDraft.js";
+import { commitWallChain } from "../../planner/core/walls/wallCommit.js";
 import { computeItemPlacement, placementZoneLabel } from "../../planner/placementPreview.js";
 import { PlacementGhost } from "../../planner/objectOverlays.jsx";
 import { itemOverlapsAnyWall } from "../../planner/wallCollision.js";
@@ -48,27 +49,43 @@ import {
   hitTestWallBody, pickWallBodyHit,
   planWorkingBounds, planHasDrawnWalls,
   alignmentGuides, angleAt, draftChainArea,
+  addWall, moveNode, splitWall, deleteWall, deleteNode, mergeNodes, connectWallEndpoint,
+  classifyWallSegmentAttachments, moveWallSegment, moveLogicalWallChain,
+  materializeWallCommand, connectFloatingEndpointsToWallBodies,
+  NODE_LINK_THR,
 } from "../../planner/core/walls/index.js";
+import {
+  wallMoveHandleEligibility,
+  logicalChainMoveHandleEligibility,
+} from "../../planner/core/walls/wallMoveEligibility.js";
+import {
+  resolveLogicalWallChain,
+  logicalChainEndpointGrips,
+} from "../../planner/core/walls/logicalWallChain.js";
+import { wallEndpointGrips } from "../../planner/core/walls/endpointGripEligibility.js";
+import {
+  WallEndpointGripLayer, WallChainMoveHandleLayer, dedupeGripsByNode, gripKey,
+} from "../../planner/wallEndpointGrips.jsx";
+import { commitDrawnWall, resolveWallDraftEnd } from "../../planner/core/walls/wallDrawTopology.js";
+import {
+  createWallGestureState,
+  wallGesturePointerDown,
+  wallGesturePointerMove,
+  wallGesturePointerUp,
+  wallGestureCancel,
+  wallGestureMarkCommitted,
+  shouldBlockWallGeometryDrag,
+  WALL_DRAW_MIN_LEN_MM,
+} from "../../planner/core/walls/wallDrawGestures.js";
 import { syncRoomsSafe } from "../../planner/core/rooms/index.js";
 import { validateRooms } from "../../planner/core/rooms/validateRooms.js";
 import {
-  resolvePlanWalls, commitWallEdge, movePlanNode,
-  wallNodeIdAt, ensureWallNetwork,
-  applyNetworkNodeAtWall, applyNetworkWallSegMove,
+  resolvePlanWalls, deleteWallEdge, movePlanNode,
+  wallNodeIdAt, isNetworkPlan, ensureWallNetwork,
+  applyNetworkNodeAtWall, applyNetworkWallSegMove, nudgeWallInPlan,
+  tryMergeWallEdge, breakWallEdgeAt, straightenWallEdge, alignWallEdgeToNeighbor,
+  findNodeIdAt,
 } from "../../planner/wallNetwork.js";
-import { createGeometryCommandDispatcher } from "../../planner/ui/geometryCommandDispatcher.js";
-import {
-  classifyWallLengthDimension, resolveFixedEndpointForPoint,
-  WALL_PARTIAL_DIMENSION_MESSAGE, ITEM_DIMENSION_MESSAGE,
-} from "../../planner/ui/wallLengthDimensionMapping.js";
-import { applyWallDelete } from "../../planner/ui/applyWallDelete.js";
-import { applyWallBulkDelete } from "../../planner/ui/applyWallBulkDelete.js";
-import { applyItemBulkDelete } from "../../planner/ui/applyItemBulkDelete.js";
-import { applyLineBulkDelete } from "../../planner/ui/applyLineBulkDelete.js";
-import { applyCombinedLayerClear } from "../../planner/ui/applyCombinedLayerClear.js";
-import { summarizeRoomClearItems, buildRoomClearConfirmMessage } from "../../planner/ui/roomClearSummary.js";
-import { applyWallLengthEdit, createWallLengthEditSession } from "../../planner/ui/applyWallLengthEdit.js";
-import { formatWallLengthMm } from "../../planner/ui/parseWallLengthInput.js";
 import { validateOpeningPlacement, nextDoorNumber, nextOpeningNumber } from "../../planner/doorGeometry.js";
 import { attachItemZoneFields } from "../../planner/roomZones.js";
 import {
@@ -99,23 +116,61 @@ import { isDoorItem } from "../../planner/doorTypes.js";
 import { defaultWallFields, WALL_KINDS, THICKNESS_SIDES } from "../../planner/wallTypes.js";
 import { wallFieldsFromTool, defaultWallThkForTool, wallMaterialForTool } from "../../planner/wallToolPresets.js";
 import { usePlanHistory } from "../../planner/usePlanHistory.js";
+import { usePlanInteractionSession } from "../../planner/usePlanInteractionSession.js";
+import { createWallDrawController } from "../../planner/core/session/index.js";
+import { resolveWallPoint } from "../../planner/core/snap/index.js";
+import { createPlanAutosaveBridge } from "../../planner/core/history/planAutosaveBridge.js";
 import { normalizePlan, normalizePlanResult } from "../../planner/planNormalize.js";
 import { isPlannerPlanCorrupt } from "../../planner/plannerPersistenceState.js";
 import { hitTestWallInteraction } from "../../planner/ui/hitTesting/planHitTest.js";
 import { validatePlanIntegrity } from "../../planner/core/validation/validatePlanIntegrity.js";
 import { PlanDiagnosticsPanel } from "../../planner/ui/diagnostics/PlanDiagnosticsPanel.jsx";
 import { getDiagnosticFocusTarget } from "../../planner/ui/diagnostics/diagnosticFocus.js";
-import { isDiagnosticsStale, mergeDiagnosticsResult } from "../../planner/ui/diagnostics/diagnosticPresentation.js";
+import { isDiagnosticsStale } from "../../planner/ui/diagnostics/diagnosticPresentation.js";
 import { DEFAULT_DUCT_SIZE_H_MM, DEFAULT_DUCT_SIZE_W_MM } from "../../planner/ventDuctRender.jsx";
 import {
   PlanGridScreen, PlanAxesScreen, SheetBackdrop, RoomDims, WallEl, WallsTopOverlay, PlannerWallDefs, PlannerLayerDefs, LayerMutedWrap, ItemEl, ZoneEl, LabelEl, LineEl,
-  DraftLine, SelectionDims, WallSelectionDims, WallDimChains, RulerEl, DimensionsLayer, DimensionDraftEl, TypedLengthHint, LinkEl,
+  DraftLine, SelectionDims, WallDimChains, RulerEl, DimensionsLayer, DimensionDraftEl, TypedLengthHint, LinkEl,
   SelectionMarquee, MultiSelectBounds, PlanLayerGroup, RoomFloorEl,
 } from "../../planner/canvasPrimitives.jsx";
+import { pickDimensionHit } from "../../planner/dimensionMarkers.jsx";
+import {
+  createAngleDimension,
+} from "../../planner/core/dimensions/anchorOperations.js";
 import {
   WallCursorPreview, WallSnapIndicator, WallAlignmentGuides,
-  WallAngleLabels, WallLiveChips, fmtWallDraftLen,
+  WallAngleLabels, fmtWallDraftLen,
 } from "../../planner/wallDraftOverlay.jsx";
+import { WallLiveMeasurementOverlay } from "../../planner/wallLiveMeasurementOverlay.jsx";
+import { AngleMagnetOverlay } from "../../planner/angleMagnetOverlay.jsx";
+import {
+  resolveAngleMagnet,
+  resolveEndpointMagnetContext,
+  resolveDraftMagnetContext,
+  buildAngleMagnetPreview,
+  buildDraftMovementAngles,
+  emptyAngleMagnetPreview,
+  pointAtMagnetLength,
+} from "../../planner/core/dimensions/angleMagnetSnap.js";
+import { WallFloatingLengthEditor } from "../../planner/wallFloatingLengthEditor.jsx";
+import {
+  buildLiveWallDrawMeasurements,
+  buildLiveWallEditMeasurements,
+  parseLengthInput,
+  applyExactWallLength,
+  resolveLiveDrawSegment,
+  assertLiveMeasurementModel,
+  pointAtLengthAlong,
+  resolveLengthEditAnchor,
+} from "../../planner/core/walls/liveWallMeasurements.js";
+import {
+  filterDimensionsForActiveInteraction,
+} from "../../planner/core/dimensions/activeDimensionArbitration.js";
+import {
+  resolveSelectedDimensionSemantics,
+} from "../../planner/core/dimensions/selectedDimensionSemantics.js";
+import { nearWallLaneOffsetMm } from "../../planner/core/viewport/gripScale.js";
+import { cursorCenteredZoomView, resolveViewportLod } from "../../planner/core/grid/adaptiveGrid.js";
 import { layerDisplayState } from "../../planner/canvasLayers.js";
 import { snapRackNeighbor } from "../../planner/plannerSnap.js";
 import { snapObjectPosition, constrainAxisDelta, constrainAxisPoint, snapDistanceMm } from "../../planner/objectSnap.js";
@@ -138,62 +193,37 @@ import {
   sheetById, sheetByLayerId, defaultToolForSheet, buildVisibilityFromSheet, sheetDisplayPatch, objectVisibleOnSheet,
 } from "../../planner/plannerSheets.js";
 import { categoryById } from "../../planner/plannerCategories.js";
-import { PlannerToolMenu } from "../../planner/ui/PlannerToolMenu.jsx";
-import { ObjectPalette } from "../../planner/ui/ObjectPalette.jsx";
 import { toolStateFromDef, isItemVisibleOnSheet, isLineVisibleOnSheet } from "../../planner/plannerSheetUtils.js";
 import { resolveTool } from "../../planner/plannerTools.js";
 import { sheetAllowedInViewMode, viewModeForSheet } from "../../planner/plannerViewModes.js";
-import { PropertiesPanel } from "../../planner/ui/PropertiesPanel.jsx";
+import {
+  buildPlannerToolRailTools,
+  resolveRailActiveToolId,
+} from "../../planner/plannerToolRailCatalog.js";
+import {
+  buildInspectorModel,
+  inspectorChangeToPatch,
+} from "../../planner/plannerInspectorModel.js";
+import {
+  computePlanContentBounds,
+  computeFitTransform,
+  shouldAutoFitPlan,
+  PLANNER_DEFAULT_ZOOM,
+} from "../../planner/viewport.js";
 import { PlannerErrorBoundary, PlannerOverlayBoundary } from "../../planner/ui/PlannerErrorBoundary.jsx";
 import { WallEditOverlay } from "../../planner/wallEditOverlay.jsx";
-import { WallBodyHitAreas } from "../../planner/wallRender.jsx";
+import { WallBodyHitAreas, WallMassLayer } from "../../planner/wallRender.jsx";
 import { ContextMenu, buildObjectMenu } from "../../planner/ui/ContextMenu.jsx";
 import { AttachPlanModal } from "../../planner/ui/AttachPlanModal.jsx";
 import "../../planner/planner.css";
 import { Empty } from "../../components/ui.jsx";
 
+const PLANNER_TOOL_RAIL = buildPlannerToolRailTools();
+
 const LINE_LAYER_IDS = ["drain", "irrigation", "supply", "power", "vent", "climate", "ac", "light", "staff"];
 const ITEM_LAYER_IDS = LAYERS.map((l) => l.id).filter(
   (id) => !["room", "zones", "partitions", "client", "install", "spec"].includes(id)
 );
-// PHASE 1A-2C2D3B — только эти item-слои уже сегодня реально очищают
-// items через clearSheet (не перехватываются LINE_LAYER_IDS раньше по
-// цепочке if/else-if, см. RESULT — AUDIT PHASE 1A-2C2D3A). Намеренно не
-// весь ITEM_LAYER_IDS — irrigation/power/light/vent/staff (реальные item+line
-// слои) очищаются через MIGRATED_COMBINED_CLEAR_LAYER_IDS ниже, а не через
-// этот item-only набор.
-// PHASE 1A-2C2D3E3 — climate добавлен: LAYERS.mode для climate уже "items"
-// (17 реальных catalog kinds, ни одного line tool в LAYER_TOOLS.climate), но
-// climate ошибочно состоит в LINE_LAYER_IDS, из-за чего legacy fallback
-// перехватывал его как line-layer и чистил (почти всегда 0) lines, оставляя
-// все climate items нетронутыми (см. AUDIT PHASE 1A-2C2D3E1, Risk R1). Здесь
-// исправляется только routing — climate остаётся в LINE_LAYER_IDS
-// (не тронут в этой фазе), но clearSheet теперь достигает item-путь раньше
-// по цепочке if/else, так что legacy line-fallback для climate больше не
-// достижим.
-const MIGRATED_ITEM_CLEAR_LAYER_IDS = ["racks", "water", "sockets", "sanitary", "furn", "climate"];
-// PHASE 1A-2C2D3E2 — только эти два фактически line-only слоя мигрируют на
-// line.bulkDelete в clearSheet (см. AUDIT PHASE 1A-2C2D3E1: drain и
-// irrigation — единственные LINE_LAYER_IDS-слои с нулём catalog item kinds
-// сегодня, так что line-only clear здесь ничего не оставляет позади).
-// Намеренно НЕ весь LINE_LAYER_IDS — power/light/vent/staff (реальные item+
-// line слои) очищаются через MIGRATED_COMBINED_CLEAR_LAYER_IDS ниже; climate
-// уже item-only (PHASE 1A-2C2D3E3).
-const MIGRATED_LINE_CLEAR_LAYER_IDS = ["drain", "irrigation"];
-// PHASE 1A-2C2D3E4D — power/light/vent (mode:"both") мигрируют на
-// itemLine.bulkDelete (см. AUDIT PHASE 1A-2C2D3E4A: единственные на тот
-// момент LINE_LAYER_IDS-слои с реальными catalog item kinds, у которых
-// «Очистить лист» удалял только lines, оставляя все items нетронутыми).
-// PHASE 1A-2C2D3E5B — staff добавлен: AUDIT PHASE 1A-2C2D3E5A (verdict C)
-// подтвердил, что staff (LAYERS.mode ошибочно "lines") реально хранит и
-// items (kind:"person"), и lines (любой lineTag: staff/raw/product/waste/
-// отсутствует) — тот же item+line профиль, что и power/light/vent, так что
-// staff переиспользует тот же канонический combined-путь без изменений в
-// applyCombinedLayerClear/applyItemLineBulkDelete/geometryCommands. Намеренно
-// НЕ строится динамически из LINE_LAYER_IDS/ITEM_LAYER_IDS — climate
-// (уже item-only с PHASE 1A-2C2D3E3) остаётся исключён; drain/irrigation
-// остаются line-only (PHASE 1A-2C2D3E2).
-const MIGRATED_COMBINED_CLEAR_LAYER_IDS = ["power", "light", "vent", "staff"];
 
 function draftPt(from, to, opts) {
   const { point, angleSnap } = resolveDraftPoint(from, to, opts);
@@ -208,6 +238,145 @@ function modKey(e) {
   return e.ctrlKey || e.metaKey;
 }
 
+/**
+ * Physical-key match for shortcuts.
+ *
+ * event.key carries the LAYOUT character, so on a Russian layout the physical
+ * Z key reports "я" and Ctrl+Z never matched — the toolbar button worked while
+ * the shortcut silently did nothing. event.code is the physical key, so it is
+ * the primary match; the event.key fallback only covers engines that omit code.
+ */
+function physicalKey(e, code, ...keyAliases) {
+  if (e.code) return e.code === code;
+  const key = String(e.key || "").toLowerCase();
+  return keyAliases.some((alias) => alias.toLowerCase() === key);
+}
+
+/**
+ * Which history action a keydown requests, or null.
+ * Exported so the shortcut contract is tested against the exact matcher the
+ * keydown handler uses, rather than a copy of it.
+ */
+export function matchHistoryShortcut(e) {
+  if (!e || !modKey(e)) return null;
+  if (isEditableTarget(e.target)) return null;
+  if (physicalKey(e, "KeyY", "y", "н")) return "redo";
+  if (physicalKey(e, "KeyZ", "z", "я")) return e.shiftKey ? "redo" : "undo";
+  return null;
+}
+
+/** True for real text-entry targets, where the browser's own undo must win. */
+export function isEditableTarget(target) {
+  if (!target) return false;
+  const tag = target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (target.isContentEditable) return true;
+  return typeof target.closest === "function" && !!target.closest("[contenteditable='true']");
+}
+
+/**
+ * Read-only acceptance seam, dev-only and opt-in.
+ *
+ * Requires BOTH a dev build and an explicit handshake, so no plan state, counter
+ * name or seam string can reach a production bundle: Vite substitutes
+ * import.meta.env.DEV with false in a production build, which makes this constant
+ * statically false and lets the minifier drop every guarded block.
+ *
+ * Enable locally with VITE_DG_PLANNER_E2E=1 on the dev server.
+ */
+const EXPOSE_PLANNER_E2E = !!import.meta.env.DEV
+  && import.meta.env.VITE_DG_PLANNER_E2E === "1";
+
+/**
+ * PHASE 2A — B+ single-wall drag-release drawing, opt-in.
+ *
+ * Off by default: the legacy click-click path below is untouched unless this
+ * is set. Vite substitutes the value statically, so a build without the flag
+ * drops every guarded block.
+ *
+ * Enable locally with VITE_DG_PLANNER_WALL_DRAW_V2=1.
+ */
+const WALL_DRAW_V2 = import.meta.env.VITE_DG_PLANNER_WALL_DRAW_V2 === "1";
+
+/**
+ * Translate the bounded resolver's decision into the explicit topology intent
+ * consumed by commitDrawnWall. The point is always the exact point previewed
+ * by the V2 session; resolver metadata only selects the topology operation.
+ */
+/**
+ * PHASE 2D / 2F1 — what the right mouse button means for the current planner state.
+ *
+ * First RMB while ANY non-neutral state exists cancels to Select (no menu).
+ * Second RMB may open a context menu only when already neutral.
+ */
+export const CONTEXT_MENU_ACTION = {
+  NONE: "none",
+  CANCEL_AND_SELECT: "cancel-and-select",
+  CONTEXT_MENU: "context-menu",
+};
+
+export function isPlannerNonNeutral(tool, state = {}) {
+  if (tool && tool !== "select") return true;
+  if (state.wallDrawActive) return true;
+  if (state.previewActive) return true;
+  if (state.dragActive) return true;
+  if (state.inspectorOpen) return true;
+  if (state.ctxMenuOpen) return true;
+  const sel = state.selection;
+  if (!sel) return false;
+  if (Array.isArray(sel.ids) && sel.ids.length > 0) return true;
+  if (sel.id) return true;
+  return false;
+}
+
+export function contextMenuActionFor(tool, activeLayer, state = {}) {
+  if (activeLayer === "spec") return CONTEXT_MENU_ACTION.NONE;
+  if (isPlannerNonNeutral(tool, state)) return CONTEXT_MENU_ACTION.CANCEL_AND_SELECT;
+  return CONTEXT_MENU_ACTION.CONTEXT_MENU;
+}
+
+/**
+ * PHASE 2D — may this double click open the wall properties?
+ *
+ * The decision is made from what the POINT hits, not from the DOM target: a
+ * dblclick that follows a preventDefault()ed pointerdown is retargeted to the
+ * <svg> itself, so the element under the mouse tells us nothing. Hit-testing
+ * the model point also gives the whole visible wall mass for free — outline,
+ * hatch and the transparent hit area all resolve to the same wall.
+ *
+ * Exported so the guard the handler actually uses is the guard under test.
+ */
+export function wallDoubleClickOpensInspector({ tool, hitColl }) {
+  if (tool !== "select") return false;
+  return hitColl === "walls";
+}
+
+export function wallDrawV2SnapToTopologyIntent(snap, point) {
+  const resolvedPoint = { x: point.x, y: point.y };
+  if (snap?.kind === "node") {
+    return {
+      kind: "node", point: resolvedPoint, nodeId: snap.nodeId,
+      wallId: null, hostWallId: null, connects: true,
+    };
+  }
+  if (snap?.kind === "wall-end") {
+    return {
+      kind: "wall-end", point: resolvedPoint, nodeId: snap.nodeId,
+      wallId: snap.wallId, hostWallId: null, connects: true,
+    };
+  }
+  if (snap?.kind === "wall-body") {
+    return {
+      kind: "wall-body", point: resolvedPoint, nodeId: null,
+      wallId: null, hostWallId: snap.hostWallId, connects: true,
+    };
+  }
+  return {
+    kind: "none", point: resolvedPoint, nodeId: null,
+    wallId: null, hostWallId: null, connects: false,
+  };
+}
+
 export default function PlanPage() {
   const { id, draftId } = useParams();
   const navigate = useNavigate();
@@ -219,18 +388,14 @@ export default function PlanPage() {
   // чтобы не затереть исходные данные пустым планом.
   const plannerPlanCorrupt = !standalone && isPlannerPlanCorrupt(project);
 
-  // PHASE 0G corrective: lazy-seed для usePlanHistory — выполняется синхронно
-  // до первого effect, где нельзя безопасно вызвать setRoomDetectionDiagnostic.
-  // Diagnostic от этого начального normalize не теряется: effect ниже (загрузка
-  // standalone/project) выполняет normalizePlanResult ЗАНОВО сразу после mount
-  // и surfacing diagnostic через resetHistory + setRoomDetectionDiagnostic.
   const initialPlan = () => {
     if (standalone) return normalizePlan(draftMeta?.plan || getStandalonePlan(draftId)?.plan);
     return normalizePlan(project?.plan);
   };
 
   const {
-    plan, getCurrentPlan, setPlan, replacePlan, commitPlan, undo, redo, resetHistory,
+    plan, setPlan, replacePlan, syncDerivedPlan, commitPlan, commitFrom, undo, redo, resetHistory,
+    canUndo, canRedo, undoDepth, redoDepth,
   } = usePlanHistory(initialPlan);
   const [active, setActive] = useState("room");
   const [tool, setTool] = useState("select");
@@ -260,7 +425,10 @@ export default function PlanPage() {
     ...(v.nodeIdx != null ? { nodeIdx: v.nodeIdx } : {}),
   } : null);
   const clearSelection = () => setSelection(null);
-  const [view, setView] = useState({ panX: 0, panY: 0, zoom: 0.08 });
+  const [view, setView] = useState({ panX: 0, panY: 0, zoom: PLANNER_DEFAULT_ZOOM });
+  const viewportManualRef = useRef(false);
+  const viewportFittedRef = useRef(false);
+  const viewportAutoStateRef = useRef({});
   const [display, setDisplay] = useState(() => normalizeDisplay({ ...DEFAULT_DISPLAY(), ...loadVisualPrefs() }));
   const [visualSettingsOpen, setVisualSettingsOpen] = useState(false);
   const [materialPresetsOpen, setMaterialPresetsOpen] = useState(false);
@@ -276,9 +444,16 @@ export default function PlanPage() {
   const [wallThk, setWallThk] = useState(100);
   const [structuralWidth, setStructuralWidth] = useState(STRUCTURAL_KINDS.beam.defaultWidth);
   const [hoverWallNode, setHoverWallNode] = useState(null);
+  // PHASE 2E.1 REWORK — endpoint-grip affordance state (hover / drag), so the
+  // control has a visible resting, hover and active appearance.
+  const [hoverGripKey, setHoverGripKey] = useState(null);
+  const [activeGripKey, setActiveGripKey] = useState(null);
   const [hoverHit, setHoverHit] = useState(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(true);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [saveUiStatus, setSaveUiStatus] = useState("saved"); // hydrating|dirty|saving|saved|error
+  const [hoverDimensionId, setHoverDimensionId] = useState(null);
   const [spacePan, setSpacePan] = useState(false);
   const [altSnapOff, setAltSnapOff] = useState(false);
   const [linkFrom, setLinkFrom] = useState(null);
@@ -286,26 +461,89 @@ export default function PlanPage() {
   const ctxMenuRef = useRef(null);
   ctxMenuRef.current = ctxMenu;
   const [typedLength, setTypedLength] = useState("");
+  // PHASE 2A — transient V2 rubber band (declared here so the read-only E2E
+  // snapshot effect above can list it as a dependency).
+  const [wallDrawV2Preview, setWallDrawV2Preview] = useState(null);
   const [draftSnap, setDraftSnap] = useState(null);
   const [draftAngleSnap, setDraftAngleSnap] = useState(null);
+  // PHASE 2F2.2 — MODE A magnet preview (ephemeral; never persisted / reloaded).
+  const [angleMagnetPreview, setAngleMagnetPreview] = useState(() => emptyAngleMagnetPreview());
+  const angleMagnetSnapRef = useRef(null);
   const wallChainStartRef = useRef(null);
   const wallPrevAngleRef = useRef(null);
   const wallDraftStateRef = useRef(createWallDraftState());
   const wallDrawRef = useRef(null);
+  const wallGestureRef = useRef(createWallGestureState());
+  // Observability counters for automated acceptance runs (no behaviour change).
+  // Only allocated when the dev seam is live, so not even the counter names reach
+  // a production bundle.
+  const geomProbeRef = useRef(EXPOSE_PLANNER_E2E
+    ? {
+      selectWallCalls: 0,
+      selectWallBlocked: 0,
+      moveWallCalls: 0,
+      moveWallBlocked: 0,
+      moveNodeCalls: 0,
+      moveNodeBlocked: 0,
+      wallGestureLog: [],
+    }
+    : null);
   const structuralDrawRef = useRef(null);
   const measureDrawRef = useRef(null);
+  const [measureKind, setMeasureKind] = useState("linear"); // linear | diagonal | angle
   const [dimensionEdit, setDimensionEdit] = useState(null);
-  // PHASE 1B-1B — synchronous submit guard against duplicate Enter/blur
-  // dispatch for the wall-length editor (see applyWallLengthEdit.js).
-  const dimensionEditSessionRef = useRef(createWallLengthEditSession());
   const [ctrlSnapFine, setCtrlSnapFine] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [activeSheetId, setActiveSheetId] = useState("base_plan");
   const [activeCategoryId, setActiveCategoryId] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  /**
+   * PHASE 2D — wall properties are opened by an explicit double click, never
+   * by selection. Selecting a wall and editing its parameters are two separate
+   * user intents, so they are two separate pieces of state: `selection` says
+   * WHICH wall, `wallInspectorOpen` says whether its editor is showing.
+   * The counters carry the intent down to the panel, so repeating the same
+   * intent (double click, double click) is always observed.
+   */
+  const [wallInspectorOpen, setWallInspectorOpen] = useState(false);
+  const [inspectorOpenReq, setInspectorOpenReq] = useState(0);
+  const [inspectorCloseReq, setInspectorCloseReq] = useState(0);
+  /** PHASE 2F1-LIVE2 — compact floating length editor (not the docked inspector). */
+  const [floatEditorOpen, setFloatEditorOpen] = useState(false);
+  const [floatFocusReq, setFloatFocusReq] = useState(0);
+  const [exactLengthPreview, setExactLengthPreview] = useState(null);
+  const [drawTypedSeed, setDrawTypedSeed] = useState(null);
+  const floatInputRef = useRef(null);
+  const pointerRafRef = useRef(0);
+  const pointerPendingRef = useRef(null);
+  const v2PreviewRafRef = useRef(0);
+  const wheelRafRef = useRef(0);
+  const wheelPendingRef = useRef(null);
+  const openWallInspector = () => {
+    setWallInspectorOpen(true);
+    setInspectorOpenReq((n) => n + 1);
+  };
+  const closeWallInspector = () => {
+    setWallInspectorOpen(false);
+    setInspectorCloseReq((n) => n + 1);
+  };
+  const closeFloatEditor = () => {
+    setFloatEditorOpen(false);
+    setExactLengthPreview(null);
+  };
+  // The editor belongs to a selected wall: dropping that selection (or picking
+  // a different kind of entity) ends the editing intent, so Escape and the
+  // panel stay in agreement about what is open.
+  useEffect(() => {
+    if (selection?.coll !== "walls") {
+      setWallInspectorOpen(false);
+      setFloatEditorOpen(false);
+      setExactLengthPreview(null);
+    }
+  }, [selection]);
   const [planLevel, setPlanLevel] = useState("Этаж 1");
   const [planVariant, setPlanVariant] = useState("Планировка 1");
-  const [pinnedProperties, setPinnedProperties] = useState(false);
+  const [pinnedProperties, setPinnedProperties] = useState(true);
   const [propsTab, setPropsTab] = useState("props");
   const [warningsPanelOpen, setWarningsPanelOpen] = useState(false);
   const [viewMode, setViewMode] = useState("2d");
@@ -313,10 +551,11 @@ export default function PlanPage() {
   const [planDiagnostics, setPlanDiagnostics] = useState(null); // { result, planRef }
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [diagnosticsChecking, setDiagnosticsChecking] = useState(false);
-  // PHASE 0G — последний сбой room detection (session-only, не persisted в plan).
-  // Очищается следующим успешным syncAutoZones; сливается в runPlanCheck.
-  const [roomDetectionDiagnostic, setRoomDetectionDiagnostic] = useState(null);
   const [diagnosticFilters, setDiagnosticFilters] = useState({ error: true, warning: true, info: true });
+  // Phase 2A3/2A4 — session-only room detection diagnostic (load/import/live-edit).
+  // Never persisted into plan JSON, autosave payload, or undo history.
+  const [roomDetectionDiagnostic, setRoomDetectionDiagnostic] = useState(null);
+  const [roomDiagnosticDismissed, setRoomDiagnosticDismissed] = useState(false);
 
   const structuralKind = tool === "structural" ? pending : null;
 
@@ -339,6 +578,14 @@ export default function PlanPage() {
   altSnapRef.current = altSnapOff;
   const typedLengthRef = useRef("");
   typedLengthRef.current = typedLength;
+  const draftMetaRef = useRef(draftMeta);
+  draftMetaRef.current = draftMeta;
+  const plannerPlanCorruptRef = useRef(plannerPlanCorrupt);
+  plannerPlanCorruptRef.current = plannerPlanCorrupt;
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+  const autosaveBridgeRef = useRef(null);
+  const autosaveIdentityRef = useRef(null);
 
   useEffect(() => {
     actions.ensureMaterials().catch(() => {});
@@ -356,61 +603,169 @@ export default function PlanPage() {
     return () => ro.disconnect();
   }, []);
 
-  // PHASE 0G corrective: реальный production load path — result-aware API,
-  // room detection failure на загрузке всплывает в session-only state, а не
-  // теряется молча внутри normalizePlan().
+  // Hydration-aware autosave: one controller for the PlanPage lifetime.
   useEffect(() => {
+    const bridge = createPlanAutosaveBridge({
+      debounceMs: 700,
+      getActiveIdentity: () => autosaveIdentityRef.current,
+      onStatus: ({ status, dirty, failed, identity }) => {
+        if (!identity || !autosaveIdentityRef.current) return;
+        if (`${identity.mode}:${identity.id}` !== `${autosaveIdentityRef.current.mode}:${autosaveIdentityRef.current.id}`) {
+          return;
+        }
+        setSaveFailed(!!failed);
+        if (failed) {
+          setSaveUiStatus("error");
+          setSaved(false);
+        } else if (status === "hydrating") {
+          setSaveUiStatus("hydrating");
+          setSaved(false);
+        } else if (status === "saving") {
+          setSaveUiStatus("saving");
+          setSaved(false);
+        } else if (dirty) {
+          setSaveUiStatus("dirty");
+          setSaved(false);
+        } else {
+          setSaveUiStatus("saved");
+          setSaved(true);
+        }
+      },
+      persistFn: async (identity, planToSave) => {
+        if (identity.mode === "standalone") {
+          const meta = draftMetaRef.current;
+          if (!meta?.id) throw new Error("standalone draft missing");
+          const next = saveStandalonePlan({ ...meta, plan: planToSave });
+          setDraftMeta(next);
+          return next;
+        }
+        // PHASE 0B: never overwrite a corrupt stored plan with a default/empty plan.
+        if (plannerPlanCorruptRef.current) {
+          const err = new Error("planner plan corrupt — autosave blocked");
+          err.code = "PLANNER_PLAN_CORRUPT";
+          throw err;
+        }
+        return actionsRef.current.projectUpdate(identity.id, { plan: planToSave });
+      },
+    });
+    autosaveBridgeRef.current = bridge;
+    return () => {
+      bridge.dispose();
+      autosaveBridgeRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    // Phase 2A3 — project/draft switch: previous diagnostic must never leak
+    // into the newly loaded plan while it's still being fetched/normalized.
+    setRoomDetectionDiagnostic(null);
+    setRoomDiagnosticDismissed(false);
+    setSaveFailed(false);
+    setSaved(true);
+    setSelection(null);
+    setDimensionEdit(null);
+    measureDrawRef.current = null;
+    setMeasure([]);
+    setMeasureOffsetPt(null);
+
+    const getBridge = () => autosaveBridgeRef.current;
+
     if (standalone) {
+      const identity = { mode: "standalone", id: draftId };
+      autosaveIdentityRef.current = identity;
+      getBridge()?.beginHydration(identity);
       const d = getStandalonePlan(draftId);
       if (d) {
         setDraftMeta(d);
         const { plan: normalized, diagnostics } = normalizePlanResult(d.plan);
         resetHistory(normalized);
         setRoomDetectionDiagnostic(diagnostics[0] || null);
+        getBridge()?.completeHydration(identity, normalized);
+      } else {
+        getBridge()?.failHydration(identity, new Error("standalone draft not found"));
       }
-      return;
+      return undefined;
     }
-    let cancelled = false;
-    actions.loadProject(id).then((p) => {
-      if (!cancelled && p?.plan && Object.keys(p.plan).length) {
-        const { plan: normalized, diagnostics } = normalizePlanResult(p.plan);
-        resetHistory(normalized);
-        setRoomDetectionDiagnostic(diagnostics[0] || null);
-      }
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [id, draftId, standalone, actions, resetHistory]);
 
-  // PHASE 0G corrective: чистый room-only sync — runAutoZonesSync сам решает,
-  // вызывать ли setPlan (см. определение ниже). Rejected/no-op sync не создаёт
-  // history checkpoint.
+    const identity = { mode: "project", id };
+    autosaveIdentityRef.current = identity;
+    getBridge()?.beginHydration(identity);
+    let cancelled = false;
+    actionsRef.current.loadProject(id).then((p) => {
+      if (cancelled) return;
+      const bridge = getBridge();
+      if (!bridge) return;
+      const { plan: normalized, diagnostics } = normalizePlanResult(p?.plan);
+      resetHistory(normalized);
+      setRoomDetectionDiagnostic(diagnostics[0] || null);
+      bridge.completeHydration(identity, normalized);
+    }).catch((err) => {
+      if (cancelled) return;
+      const bridge = getBridge();
+      if (!bridge) return;
+      // Keep hydrating→failed only when still waiting; never wipe a later session.
+      if (bridge.getState(identity)?.status === "hydrating") {
+        bridge.failHydration(identity, err);
+        console.error("Planner project load failed", err);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [id, draftId, standalone, resetHistory]);
+
   useEffect(() => {
     if (!planHasDrawnWalls(plan.walls)) return;
-    runAutoZonesSync();
+    // Rooms/zones are derived from walls, so this sync must not become its own
+    // undo step: syncAutoZones always returns a fresh object, and recording it
+    // buried each real wall commit under no-op checkpoints, so one Ctrl+Z looked
+    // like it did nothing. PHASE 2E.1: the exemption is now declared BY THIS CALL
+    // (origin = derived-sync) instead of by a flag armed earlier during load.
+    syncDerivedPlan((p) => syncAutoZones(p));
   }, [standalone ? draftId : id, plan.walls, plan.zones?.length, plan.rooms?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Report live plan to the hydration-aware autosave controller.
   useEffect(() => {
-    if (standalone) {
-      if (!draftMeta?.id) return;
-      setSaved(false);
-      const t = window.setTimeout(() => {
-        const saved = saveStandalonePlan({ ...draftMeta, plan });
-        setDraftMeta(saved);
-        setSaved(true);
-      }, 700);
-      return () => window.clearTimeout(t);
-    }
-    if (!project?.id) return;
-    // PHASE 0B: не автосохранять поверх повреждённого сохранённого плана.
-    if (plannerPlanCorrupt) return;
-    setSaved(false);
-    const t = window.setTimeout(() => {
-      actions.projectUpdate(project.id, { plan })
-        .then(() => setSaved(true))
-        .catch((e) => console.error("Planner autosave failed", e));
-    }, 700);
-    return () => window.clearTimeout(t);
-  }, [plan, standalone, draftMeta?.id, draftMeta?.name, project?.id, actions, plannerPlanCorrupt]);
+    const identity = autosaveIdentityRef.current;
+    const bridge = autosaveBridgeRef.current;
+    if (!identity || !bridge) return;
+    if (!standalone && plannerPlanCorrupt) return;
+    bridge.observePlan(identity, plan);
+  }, [plan, standalone, draftId, id, plannerPlanCorrupt]);
+
+  // Read-only snapshot for automated acceptance runs: lets a browser test wait on
+  // real state and map world mm -> screen px. Never written back into the plan,
+  // and dev-only + opt-in (see EXPOSE_PLANNER_E2E).
+  useEffect(() => {
+    if (!EXPOSE_PLANNER_E2E || typeof window === "undefined") return;
+    const v2Preview = WALL_DRAW_V2 ? (wallDrawV2Ref.current?.getPreview() || null) : null;
+    window.__dgPlanner = {
+      ...(window.__dgPlanner || {}),
+      plan,
+      view,
+      tool,
+      draftLen: draft.length,
+      gesturePhase: wallGestureRef.current?.phase || "idle",
+      wallDrawV2: {
+        enabled: WALL_DRAW_V2,
+        active: !!(WALL_DRAW_V2 && wallDrawV2Ref.current?.isActive()),
+        txId: WALL_DRAW_V2 ? (wallDrawV2Ref.current?.getTxId() ?? 0) : 0,
+        preview: v2Preview,
+        intents: v2Preview ? {
+          start: wallDrawV2SnapToTopologyIntent(v2Preview.startSnap, v2Preview.start),
+          end: v2Preview.end
+            ? wallDrawV2SnapToTopologyIntent(v2Preview.endSnap, v2Preview.end)
+            : null,
+        } : null,
+      },
+      svgRect: svgRef.current?.getBoundingClientRect?.() || null,
+      probe: geomProbeRef.current,
+      selection,
+      wallInspectorOpen,
+      floatEditorOpen,
+      canUndo,
+      canRedo,
+      at: Date.now(),
+    };
+  }, [plan, view, tool, draft, selection, canUndo, canRedo, wallDrawV2Preview, wallInspectorOpen, floatEditorOpen]);
 
   const snapOn = display.snapOn && !altSnapOff;
   const snapStep = (ctrlSnapFine || view.zoom >= 1.2) ? 10 : 50;
@@ -516,6 +871,8 @@ export default function PlanPage() {
     wallChainStartRef.current = null;
     wallPrevAngleRef.current = null;
     wallDraftStateRef.current = createWallDraftState();
+    wallDrawRef.current = null;
+    wallGestureRef.current = wallGestureCancel();
     setDraft([]);
     setDraftSnap(null);
     setDraftAngleSnap(null);
@@ -536,7 +893,7 @@ export default function PlanPage() {
     snapGuides: display.snapGuides !== false,
   }), [snapOn, snapStep, display, wallThk]);
 
-  const computeWallSnap = useCallback((raw, from) => {
+  const computeWallSnap = useCallback((raw, from, extraOptions) => {
     const result = runSnapEngine({
       point: raw,
       mode: "wall",
@@ -544,7 +901,7 @@ export default function PlanPage() {
       draft: { pts: draft, chainStart: wallChainStartRef.current },
       view,
       modifiers: { shift: shiftRef.current, alt: altSnapRef.current },
-      options: { ...wallSnapOptions(), from },
+      options: { ...wallSnapOptions(), from, ...extraOptions },
     });
     return {
       pt: result.point,
@@ -644,81 +1001,507 @@ export default function PlanPage() {
     return { pt, snap, guides: s?.guides || [] };
   }, [snapOn, snapStep, display.snapGrid, display.snapWalls, display.snapObjects, display.snapGuides, plan, view, measure]);
 
-  // PHASE 0G corrective: чистое вычисление room sync БЕЗ setState/setPlan —
-  // { ok, plan, diagnostics }. Единственная точка, откуда caller решает, что
-  // делать с результатом: setPlan только при ok:true и реальном изменении.
-  const computeAutoZonesSync = (p) => {
-    const synced = syncRoomsSafe({ ...p, walls: resolvePlanWalls(p) });
-    if (!synced.ok) return { ok: false, plan: p, diagnostics: synced.diagnostics };
-    const dimWarnings = (p.validationWarnings || []).filter((w) => w.source === "dimensions");
-    return {
-      ok: true,
-      diagnostics: [],
-      plan: {
+  // Phase 2A4 — safe runtime wrapper around room re-sync for live-edit paths.
+  // On success: applies new rooms/zones, clears the session diagnostic.
+  // On failure: wall geometry and previous rooms/zones are left untouched
+  // (returns `p` unchanged) and a diagnostic is surfaced instead of throwing.
+  const syncAutoZones = (p) => {
+    const safe = syncRoomsSafe({ ...p, walls: resolvePlanWalls(p) });
+    if (!safe.ok) {
+      setRoomDetectionDiagnostic(safe.diagnostics[0] || null);
+      setRoomDiagnosticDismissed(false);
+      // PHASE 2F1 ghost fix: never keep stale room floors glued to new walls.
+      // Empty zones hide floor strokes; walls remain authoritative.
+      const dimWarnings = (p.validationWarnings || []).filter((w) => w.source === "dimensions");
+      const wallCmdWarnings = (p.validationWarnings || []).filter((w) => w.source === "wall-command");
+      return {
         ...p,
-        rooms: synced.rooms,
-        zones: synced.zones,
-        validationWarnings: [...dimWarnings, ...(synced.validationWarnings || [])],
+        rooms: [],
+        zones: [],
+        validationWarnings: [...dimWarnings, ...wallCmdWarnings, ...(safe.diagnostics || [])],
+      };
+    }
+    setRoomDetectionDiagnostic(null);
+    const dimWarnings = (p.validationWarnings || []).filter((w) => w.source === "dimensions");
+    const wallCmdWarnings = (p.validationWarnings || []).filter((w) => w.source === "wall-command");
+    return {
+      ...p,
+      rooms: safe.rooms,
+      zones: safe.zones,
+      validationWarnings: [...dimWarnings, ...wallCmdWarnings, ...(safe.validationWarnings || [])],
+    };
+  };
+
+  /** Run a wallCommands result: on changed:true → materialize + safe room sync. */
+  const applyWallCmd = (p, result, opts) => {
+    const mat = materializeWallCommand(p, result, opts);
+    if (!mat.changed) return p;
+    return syncAutoZones(mat.plan);
+  };
+
+  /**
+   * PHASE 1A — transient wall/node edit transaction.
+   *
+   * A drag preview lives in this session, never in the committed plan, so
+   * history, autosave and the room engine only ever observe committed state.
+   * Derived rooms/dimensions refresh on commit, not on pointermove: the room
+   * sync is too heavy to run per pointer event and is deliberately deferred to
+   * `finalize` below, which runs exactly once per transaction.
+   */
+  const wallEdit = usePlanInteractionSession({
+    finalize: (previewPlan) => syncAutoZones(previewPlan),
+    commitFrom,
+  });
+  const wallEditPreview = wallEdit.getPreviewPlan();
+  /** Renderer-facing plan: typed-length preview, in-flight edit, else committed. */
+  const effectivePlan = exactLengthPreview || wallEditPreview || plan;
+  /**
+   * PHASE 2F1 — single authoritative geometry snapshot for all live layers.
+   * Room floors/zones must track the same walls as WallMassLayer; otherwise
+   * committed zone strokes ghost at pre-drag coordinates during/after edits.
+   */
+  const renderZones = effectivePlan.zones || [];
+  const renderRooms = effectivePlan.rooms || [];
+
+  /**
+   * Geometry-only wall-segment move. Always reduced from the transaction's base
+   * plan. Preview rooms/zones are re-synced from the preview walls so floor
+   * strokes cannot remain frozen at committed coordinates (ghost geometry).
+   * History/autosave still observe only the committed plan until finalize.
+   */
+  const wallSegMovePreviewPlan = (basePlan, wallId, newA, newB, endpointAttachments) => {
+    const netWall = (basePlan.walls || []).find((w) => w.id === wallId);
+    if (!netWall?.a || !netWall?.b) {
+      const next = applyNetworkWallSegMove(basePlan, wallId, newA, newB);
+      const resolved = resolvePlanWalls(next);
+      const withItems = {
+        ...next,
+        items: refreshWallMountedItems(basePlan.items, resolved, basePlan.room, wallId),
+      };
+      const safe = syncRoomsSafe(withItems);
+      if (!safe.ok) return { ...withItems, rooms: [], zones: [] };
+      return { ...withItems, rooms: safe.rooms, zones: safe.zones };
+    }
+    const baseA = basePlan.nodes?.[netWall.a];
+    if (!baseA) return basePlan;
+    const delta = { x: newA.x - baseA.x, y: newA.y - baseA.y };
+    // PHASE 2F1 — a host split by a T is ONE wall for the user, so its centre
+    // handle runs the chain transaction: one rigid translation of every segment
+    // and every internal T junction node, in one command (= one history entry,
+    // one write). A wall that was never split takes the unchanged path.
+    const chain = resolveLogicalWallChain(basePlan, wallId);
+    const result = chain.segmentCount > 1
+      ? moveLogicalWallChain(basePlan, {
+        wallId,
+        delta,
+        expectedChainWallIds: chain.wallIds,
+        makeId: uid,
+      })
+      : moveWallSegment(basePlan, {
+        wallId,
+        delta,
+        expectedEndpointAttachments: endpointAttachments,
+        makeId: uid,
+      });
+    if (EXPOSE_PLANNER_E2E) {
+      geomProbeRef.current.lastWallMoveResult = {
+        input: "mouse",
+        wallId,
+        changed: !!result.changed,
+        reason: result.reason || null,
+        warnings: [...(result.warnings || [])],
+        requestedDelta: { ...delta },
+        effectiveDelta: result.changed
+          ? (result.movement?.delta || null)
+          : { x: 0, y: 0 },
+      };
+    }
+    const mat = materializeWallCommand(basePlan, result);
+    if (!mat.changed) return basePlan;
+    // Keep preview rooms/zones in lockstep with preview walls so floor strokes
+    // cannot ghost at committed coordinates. On detection failure, clear zones
+    // rather than keep stale floors.
+    const safe = syncRoomsSafe(mat.plan);
+    if (!safe.ok) return { ...mat.plan, rooms: [], zones: [] };
+    return { ...mat.plan, rooms: safe.rooms, zones: safe.zones };
+  };
+
+  /** Geometry-only wall-node move (merge / T-junction preserved; rooms synced for render). */
+  const wallNodeMovePreviewPlan = (basePlan, d, snapped) => {
+    const netWall = (basePlan.walls || []).find((w) => w.id === d.id);
+    const nodeId = d.idx === 0 ? netWall?.a : netWall?.b;
+    if (!nodeId) {
+      const next = applyNetworkNodeAtWall(basePlan, d.id, d.idx, { x: snapped.x, y: snapped.y });
+      const rw = resolvePlanWalls(next);
+      const withItems = { ...next, items: refreshWallMountedItems(basePlan.items, rw, basePlan.room) };
+      const safe = syncRoomsSafe(withItems);
+      if (!safe.ok) return { ...withItems, rooms: [], zones: [] };
+      return { ...withItems, rooms: safe.rooms, zones: safe.zones };
+    }
+    let r = moveNode(basePlan, nodeId, { x: snapped.x, y: snapped.y });
+    // Merge onto another existing node when the drag lands within link tolerance.
+    const hitId = findNodeIdAt(r.plan.nodes, { x: snapped.x, y: snapped.y }, NODE_LINK_THR);
+    if (hitId && hitId !== nodeId) {
+      const merged = mergeNodes(r.plan, hitId, nodeId);
+      if (merged.changed) r = merged;
+    } else {
+      // T-junction: endpoint dragged onto another wall body
+      const host = pickWallBodyHit({ x: snapped.x, y: snapped.y }, resolvePlanWalls(r.plan), r.plan.room);
+      if (host?.wall?.id && host.wall.id !== d.id) {
+        const connected = connectWallEndpoint(r.plan, nodeId, host.wall.id, { x: snapped.x, y: snapped.y }, uid);
+        if (connected.changed) r = connected;
+      }
+    }
+    const mat = materializeWallCommand(basePlan, r);
+    if (!mat.changed) return basePlan;
+    const safe = syncRoomsSafe(mat.plan);
+    if (!safe.ok) return { ...mat.plan, rooms: [], zones: [] };
+    return { ...mat.plan, rooms: safe.rooms, zones: safe.zones };
+  };
+
+  /** Latest transient geometry a drag should read from (snapping, anchors). */
+  const wallEditDragPlan = (d) => wallEdit.getPreviewPlan() || d?.basePlan || plan;
+
+  /**
+   * PHASE 2A — B+ single-wall drag-release drawing session (opt-in, V2).
+   *
+   * pointerdown → pointermove preview → pointerup → exactly one committed wall
+   * → idle. The session never holds a plan, so a preview cannot reach history
+   * or autosave; the release runs the existing commitDrawnWall pipeline once.
+   * None of the legacy chain state (wallChainStartRef, wallDraftStateRef,
+   * wallPrevAngleRef, suppressNextClick) participates in this path.
+   */
+  const wallDrawV2CommitRef = useRef(null);
+  const wallDrawV2Ref = useRef(null);
+  // True once the gesture has previewed an endpoint, so a release never
+  // resolves a second, different endpoint over one the user already saw.
+  const wallDrawV2MovedRef = useRef(false);
+  if (WALL_DRAW_V2 && !wallDrawV2Ref.current) {
+    wallDrawV2Ref.current = createWallDrawController({
+      minLenMm: WALL_DRAW_MIN_LEN_MM,
+      commitSegment: (segment) => wallDrawV2CommitRef.current?.(segment),
+      // LIVE3/LIVE4: at most one React preview commit per animation frame.
+      // Skip setState when quantized endpoints did not change (cuts p95 spikes).
+      onChange: () => {
+        if (v2PreviewRafRef.current) return;
+        v2PreviewRafRef.current = requestAnimationFrame(() => {
+          v2PreviewRafRef.current = 0;
+          const next = wallDrawV2Ref.current?.getPreview?.() || null;
+          setWallDrawV2Preview((prev) => {
+            if (!next && !prev) return prev;
+            if (!next || !prev) return next;
+            const q = (p) => (p && Number.isFinite(p.x)
+              ? `${Math.round(p.x)}:${Math.round(p.y)}`
+              : "");
+            if (
+              q(prev.start) === q(next.start)
+              && q(prev.end) === q(next.end)
+              && !!prev.moved === !!next.moved
+              && Math.round(prev.lengthMm || 0) === Math.round(next.lengthMm || 0)
+            ) {
+              return prev;
+            }
+            return next;
+          });
+        });
+      },
+    });
+  }
+  const wallDrawV2 = wallDrawV2Ref.current;
+
+  // Kept on a ref so the controller (created once) always commits against the
+  // current plan and tool settings rather than the first render's closure.
+  wallDrawV2CommitRef.current = (segment) => {
+    const base = plan;
+    const role = active === "room" ? "outer" : "partition";
+    const toolFields = wallFieldsFromTool(activeToolId, role, base.room, wallThk);
+    const props = {
+      ...defaultWallFields(toolFields.role || role, base.room),
+      ...toolFields,
+      thk: toolFields.thk ?? (role === "outer" ? (base.room.wallThk || wallThk) : wallThk),
+      chainId: uid("ch"),
+    };
+    // Canonical single-segment pipeline: split/intersection/topology stay in
+    // commitDrawnWall, then one materialization + one room sync + one history
+    // step, which the autosave effect then observes exactly once.
+    const r = commitDrawnWall(base, segment.start, segment.end, props, uid, {
+      startIntent: wallDrawV2SnapToTopologyIntent(segment.startSnap, segment.start),
+      endIntent: wallDrawV2SnapToTopologyIntent(segment.endSnap, segment.end),
+    });
+    if (!r.changed) return;
+    const next = applyWallCmd(base, {
+      plan: r.plan,
+      changed: true,
+      affectedNodeIds: r.affectedNodeIds || [],
+      affectedWallIds: r.affectedWallIds || [],
+      warnings: r.warnings || [],
+    });
+    if (next === base) return;
+    commitFrom(base, next);
+  };
+
+  /**
+   * The wall tool owns the whole pointer sequence in V2 — claimed in the
+   * capture phase so no child affordance can take the press first.
+   *
+   * Wall/node hit areas inside the canvas (WallEl's body path, the mid-node
+   * handle) call stopPropagation on pointerdown while the plan is editable, so
+   * a drag that STARTS on top of an existing wall never reached the canvas
+   * handler. Legacy click-click never noticed: it defers every segment to
+   * finishWallChain, so no wall exists yet under the next corner. V2 commits
+   * each wall on release, so the following gesture genuinely does start over
+   * real geometry — and every closing edge of a rectangle was silently
+   * dropped. Claiming the event before the children resolves that and matches
+   * the existing contract (wallToolAllowsGeometryDrag() === false).
+   */
+  const onCanvasPointerDownCapture = (e) => {
+    if (!WALL_DRAW_V2 || tool !== "wall") return;
+    if (e.button !== 0 || !e.isPrimary) return;
+    e.stopPropagation();
+    onDown(e);
+  };
+
+  /**
+   * PHASE 2B2 — the single point authority for V2 wall drawing.
+   *
+   * Candidates come from collectSnapCandidates (the same collectors the legacy
+   * engine uses) and the final point comes from resolveWallPoint, never from
+   * runSnapEngine's post-processed result. runSnapEngine keeps ranking, then
+   * overwriting its own winner in refineWallDraftSnap and clipWallDraftEnd;
+   * on the V2 path exactly one bounded decision is made here, so the point in
+   * the preview is the point that reaches commitDrawnWall.
+   *
+   * No legacy chain state participates: chainStart and prevSegAngleDeg are
+   * cleared so close-snap and previous-segment bias cannot fire on a path
+   * where every gesture is an independent wall.
+   */
+  const resolveWallDrawPoint = (raw, { role, from = null }) => resolveWallPoint({
+    point: raw,
+    from,
+    role,
+    zoom: view.zoom,
+    plan,
+    candidateContext: { view, draft: { pts: [], chainStart: null } },
+    modifiers: {
+      shift: shiftRef.current,
+      alt: altSnapRef.current,
+      ctrl: ctrlRef.current,
+    },
+    grid: {
+      enabled: display.snapGrid !== false,
+      step: snapStep,
+      fineStep: 10,
+    },
+    options: {
+      ...wallSnapOptions(),
+      chainStart: null,
+      prevSegAngleDeg: null,
+    },
+  });
+
+  /**
+   * Adapt resolver metadata onto the existing snap-indicator shape.
+   * Display only — no new visual, no CSS: the resolved kind is mapped to the
+   * legacy snap type the overlay already knows how to draw.
+   */
+  const wallDrawV2SnapView = (resolved) => {
+    if (!resolved) return null;
+    const map = {
+      node: { type: "wall-end", label: "узел" },
+      "wall-end": { type: "wall-end", label: "узел" },
+      "wall-body": { type: "wall-line", label: "на стене" },
+      axis: { type: "wall-extension", label: "продолжение" },
+      angle: { type: "angle", label: null },
+      grid: { type: "grid", label: null },
+    };
+    const snapView = map[resolved.kind];
+    if (!snapView) return null;
+    return {
+      snapped: true,
+      type: snapView.type,
+      kind: snapView.type,
+      label: snapView.label,
+      resolvedKind: resolved.kind,
+    };
+  };
+
+  /** Metadata carried into the session next to the resolved point. */
+  const wallDrawV2Meta = (raw, resolved) => ({
+    ...resolved,
+    raw: { x: raw.x, y: raw.y },
+  });
+
+  /**
+   * PHASE 2D — the previewed endpoint is the endpoint that gets committed.
+   *
+   * resolveWallDrawPoint decides where the cursor wants to land; this then
+   * applies the very same first-intersection rule commitDrawnWall applies on
+   * release, so a rubber band can no longer run through a wall that the
+   * release would have cut it at. The clipped point also carries the topology
+   * intent of the wall it stopped on, so the commit reuses that decision
+   * instead of making a second one.
+   *
+   * Guides are dropped once the endpoint has been clipped: they were computed
+   * for the point the cursor asked for, which is no longer where the wall ends.
+   */
+  const clipWallDrawV2End = (start, resolved) => {
+    if (!WALL_DRAW_V2 || !start) return resolved;
+    const decision = resolveWallDraftEnd(plan, {
+      walls: resolvePlanWalls(plan),
+      start,
+      end: resolved.point,
+      endIntentProvided: true,
+      endIntent: wallDrawV2SnapToTopologyIntent(resolved, resolved.point),
+    });
+    if (!decision.clipped || !decision.snapPatch) return resolved;
+    return {
+      ...resolved,
+      ...decision.snapPatch,
+      point: decision.point,
+      guides: [],
+      clip: {
+        clipped: true,
+        wallId: decision.hostWallId,
+        kind: decision.kind,
+        t: decision.t,
+        reason: decision.reason,
+        requestedEnd: decision.requestedEnd,
       },
     };
   };
 
-  // PHASE 0G: используется callers, которые УЖЕ выполняют реальную правку
-  // геометрии (split/drag/delete/straighten) внутри того же setPlan updater —
-  // checkpoint там принадлежит этой правке независимо от исхода room sync.
-  // ok:false не трогает план — existing rooms/zones/metadata сохраняются как
-  // есть; сбой всплывает как session-only diagnostic в панели «Проверить план».
-  const syncAutoZones = (p) => {
-    const result = computeAutoZonesSync(p);
-    if (!result.ok) {
-      setRoomDetectionDiagnostic(result.diagnostics[0]);
-      return p;
+  /**
+   * PHASE 2D / 2F1 — first RMB cancels non-neutral state to Select.
+   * Transient only — no plan mutation, no history, no autosave.
+   */
+  const cancelWallDrawingAndSelect = () => {
+    const pointerId = WALL_DRAW_V2 ? wallDrawV2?.getPointerId?.() : null;
+    if (pointerId != null) {
+      try { svgRef.current?.releasePointerCapture(pointerId); } catch (_) {}
     }
-    if (roomDetectionDiagnostic) setRoomDetectionDiagnostic(null);
-    return result.plan;
+    cancelWallDrawV2();
+    clearWallChain();
+    wallGestureRef.current = createWallGestureState();
+    wallDrawRef.current = null;
+    if (wallEdit?.isActive?.()) {
+      try { wallEdit.cancel(); } catch (_) {}
+    }
+    dragRef.current = null;
+    setCtxMenu(null);
+    setDraftSnap(null);
+    setDraftAngleSnap(null);
+    setTypedLength("");
+    setGuides([]);
+    clearAngleMagnet();
+    setHoverWallNode(null);
+    setSel(null);
+    // Close wall inspector / rename if open.
+    try { setWallInspectorOpen?.(false); } catch (_) {}
+    try { setInspectorOpen?.(false); } catch (_) {}
+    try { setRenameTarget?.(null); } catch (_) {}
+    handleTool("select");
   };
 
-  // PHASE 0G corrective: для «чистых» room-only sync (авто-эффект после
-  // загрузки/правки, кнопка «Синхронизировать зоны») — вычисляем результат ДО
-  // setPlan. Rejected sync НЕ вызывает setPlan вовсе (нет history checkpoint,
-  // canUndo не меняется, autosave не запускается). Успешный sync без
-  // фактических изменений rooms/zones тоже не создаёт пустой checkpoint.
-  const runAutoZonesSync = () => {
-    const result = computeAutoZonesSync(plan);
-    if (!result.ok) {
-      setRoomDetectionDiagnostic(result.diagnostics[0]);
-      return;
-    }
-    if (roomDetectionDiagnostic) setRoomDetectionDiagnostic(null);
-    const changed = JSON.stringify(result.plan.rooms) !== JSON.stringify(plan.rooms)
-      || JSON.stringify(result.plan.zones) !== JSON.stringify(plan.zones);
-    if (!changed) return;
-    setPlan(() => result.plan);
-  };
-
-  // PHASE 1A-2A — единая UI orchestration граница для geometry commands
-  // (executeGeometryCommand). getPlan берёт живой HistoryModel.current через
-  // usePlanHistory.getCurrentPlan, а не замыкание `plan` этого рендера.
-  // Это гарантирует, что две быстрые команды в одном JS tick читают актуальный
-  // committed plan. commitPlan вызывается ДИСПЕТЧЕРОМ ровно один раз при
-  // changed:true — room sync уже выполнен внутри executeGeometryCommand и
-  // здесь повторно не запускается (см. src/planner/ui/geometryCommandDispatcher.js).
-  const runGeometryCommand = createGeometryCommandDispatcher({
-    getPlan: getCurrentPlan,
-    commitPlan: (nextPlan) => setPlan(() => nextPlan),
-    setSelection: setSel,
-    setRuntimeDiagnostic: setRoomDetectionDiagnostic,
-    showMessage: (text) => window.alert(text),
-    makeId: uid,
+  const plannerRmbState = () => ({
+    selection,
+    inspectorOpen: !!wallInspectorOpen,
+    ctxMenuOpen: !!ctxMenu,
+    dragActive: !!(dragRef.current || wallEdit?.isActive?.()),
+    previewActive: !!(WALL_DRAW_V2 && wallDrawV2?.isActive?.()) || !!(draft && draft.length),
+    wallDrawActive: tool === "wall" || !!(WALL_DRAW_V2 && wallDrawV2?.isActive?.()),
   });
 
+  /** PHASE 2F2.2 — clear temporary magnets/sectors; no plan/history writes. */
+  const clearAngleMagnet = () => {
+    angleMagnetSnapRef.current = null;
+    setAngleMagnetPreview((prev) => (prev?.active ? emptyAngleMagnetPreview() : prev));
+  };
+
+  /** Drop an in-flight V2 gesture (Escape, pointer abort, tool change). */
+  const cancelWallDrawV2 = () => {
+    if (!WALL_DRAW_V2 || !wallDrawV2?.isActive()) return false;
+    wallDrawV2.cancel();
+    wallDrawV2MovedRef.current = false;
+    setDraftSnap(null);
+    setDraftAngleSnap(null);
+    clearAngleMagnet();
+    return true;
+  };
+
+  const applyDrawTypedPreview = (text, { commit = false } = {}) => {
+    const parsed = parseLengthInput(text, { bareAsMm: true });
+    if (!parsed.ok || !parsed.mm) return false;
+    if (!(parsed.mm >= WALL_DRAW_MIN_LEN_MM)) return false;
+    if (!(WALL_DRAW_V2 && tool === "wall" && wallDrawV2?.isActive?.())) return false;
+    const prev = wallDrawV2.getPreview?.();
+    if (!prev?.start || !prev?.end) return false;
+    const end = pointAtLengthAlong(prev.start, prev.end, parsed.mm);
+    if (!end) return false;
+    const txId = wallDrawV2.getTxId();
+    wallDrawV2.preview(txId, {
+      point: end,
+      snap: wallDrawV2Meta(end, { point: end, kind: "typed", guides: prev.endSnap?.guides || null }),
+    });
+    setCursor(end);
+    if (commit && parsed.mm >= 100) {
+      wallDrawV2MovedRef.current = true;
+      wallDrawV2.commit(txId);
+      setTypedLength("");
+      setDrawTypedSeed(null);
+      setWallDrawV2Preview(null);
+      return true;
+    }
+    return true;
+  };
+
   const applyTypedLength = () => {
-    const len = parseInt(typedLengthRef.current, 10);
-    if (!len || draft.length < 1 || !cursor) return false;
+    // LIVE3 draw path: bare-as-mm + optional commit on Enter.
+    if (WALL_DRAW_V2 && tool === "wall" && wallDrawV2?.isActive?.()) {
+      const text = typedLengthRef.current;
+      const parsed = parseLengthInput(text, { bareAsMm: true });
+      if (!parsed.ok || !(parsed.mm >= 100)) return false;
+      // Preserve active magnet direction when length is typed during snap.
+      const prev = wallDrawV2.getPreview?.();
+      if (prev?.start && angleMagnetSnapRef.current != null && Number.isFinite(angleMagnetSnapRef.current)) {
+        const end = pointAtMagnetLength(prev.start, angleMagnetSnapRef.current, parsed.mm);
+        if (end) {
+          const txId = wallDrawV2.getTxId();
+          wallDrawV2.preview(txId, {
+            point: end,
+            snap: wallDrawV2Meta(end, { point: end, kind: "typed", guides: [] }),
+          });
+          setCursor(end);
+          wallDrawV2MovedRef.current = true;
+          wallDrawV2.commit(txId);
+          setTypedLength("");
+          setDrawTypedSeed(null);
+          setWallDrawV2Preview(null);
+          clearAngleMagnet();
+          return true;
+        }
+      }
+      applyDrawTypedPreview(text, { commit: true });
+      clearAngleMagnet();
+      return true;
+    }
+    const parsed = parseLengthInput(typedLengthRef.current);
+    if (!parsed.ok || !parsed.mm) return false;
+    if (draft.length < 1 || !cursor) return false;
     const from = draft[draft.length - 1];
     const { pt, angleSnap } = computeDraftPt(cursor, from);
     const ang = angleSnap?.snappedAngle ?? angleBetweenDeg(from, pt);
-    const end = { x: from.x + Math.cos((ang * Math.PI) / 180) * len, y: from.y + Math.sin((ang * Math.PI) / 180) * len };
+    const end = {
+      x: from.x + Math.cos((ang * Math.PI) / 180) * parsed.mm,
+      y: from.y + Math.sin((ang * Math.PI) / 180) * parsed.mm,
+    };
+    // Preview first: move cursor to exact end. Second Enter / click commits
+    // via the normal chain path. If already at that length (±0.5 mm), commit.
+    const curLen = Math.hypot(pt.x - from.x, pt.y - from.y);
+    if (Math.abs(curLen - parsed.mm) > 0.5) {
+      setCursor(end);
+      setTypedLength("");
+      return true;
+    }
     if (tool === "wall") {
       addWallDraftSegment(from, end);
       setDraft(wallDraftStateRef.current.pts);
@@ -735,11 +1518,26 @@ export default function PlanPage() {
     [],
   );
 
+  /**
+   * PHASE 2F1 — keys that identify or place ONE record. Everything else is a
+   * property of the wall the user sees, and a wall the user sees may be several
+   * collinear segments split by T junctions (see resolveLogicalWallChain): the
+   * type/thickness/height/lock of a host must never end up different on the two
+   * sides of a partition.
+   */
+  const WALL_PER_SEGMENT_KEYS = new Set(["id", "a", "b", "pts", "chainId"]);
+
   const updateObj = (coll, oid, patch) => {
     setPlan((p) => {
+      const list = Array.isArray(p[coll]) ? p[coll] : [];
+      if (coll === "dimensions" && !list.some((o) => o.id === oid)) return p;
+      const targetIds = coll === "walls"
+        && Object.keys(patch || {}).every((key) => !WALL_PER_SEGMENT_KEYS.has(key))
+        ? new Set(resolveLogicalWallChain(p, oid).wallIds)
+        : new Set([oid]);
       let next = {
         ...p,
-        [coll]: p[coll].map((o) => (o.id === oid ? { ...o, ...patch } : o)),
+        [coll]: list.map((o) => (targetIds.has(o.id) ? { ...o, ...patch } : o)),
       };
       if (coll === "walls") {
         const resolved = resolvePlanWalls(next);
@@ -797,50 +1595,38 @@ export default function PlanPage() {
       clearSelection();
       return true;
     }
-    if (coll === "walls") {
-      // PHASE 1A-2C2B: canonical command boundary — wall.delete already
-      // handles orphan-node pruning, dangling-opening removal (400mm
-      // re-place or delete), and wall-attached manual-dimension detach (see
-      // geometryCommands.js handleWallDelete) — not duplicated here.
-      const { status } = applyWallDelete({ wallId: ids[0], runGeometryCommand });
-      if (status === "success" || status === "noop" || status === "no-target") {
-        clearSelection();
-      }
-      // geometry-rejected / commit-failed: selection preserved for
-      // analysis/retry, geometry unchanged — no false-success cleanup.
-      return status === "success";
-    }
-    if (coll === "items") {
-      // PHASE 1A-2C2D3B (deleteHits): canonical command boundary —
-      // item.bulkDelete already handles links cleanup and item-attached
-      // dimension detach/delete atomically for the whole delete set (see
-      // geometryCommands.js deleteItemsFromPlan) — not duplicated here.
-      const { status } = applyItemBulkDelete({ itemIds: ids, runGeometryCommand });
-      if (status === "success" || status === "noop" || status === "no-target") {
-        clearSelection();
-      }
-      // geometry-rejected / commit-failed: selection preserved for
-      // analysis/retry, geometry unchanged — no false-success cleanup.
-      return status === "success";
-    }
-    if (coll === "lines") {
-      // PHASE 1A-2C2D3E2 (deleteHits): canonical command boundary —
-      // line.bulkDelete already runs the shared engineering-derived sync
-      // exactly once for the whole delete set (see geometryCommands.js
-      // deleteLinesFromPlan) — not duplicated here. Full ids array is
-      // forwarded (not just ids[0]) so a future multi-line selection is
-      // already handled atomically.
-      const { status } = applyLineBulkDelete({ lineIds: ids, runGeometryCommand });
-      if (status === "success" || status === "noop" || status === "no-target") {
-        clearSelection();
-      }
-      // geometry-rejected / commit-failed: selection preserved for
-      // analysis/retry, geometry unchanged — no false-success cleanup.
-      return status === "success";
-    }
-    setPlan((p) => {
+    // PHASE 2E FOLLOW-UP 1 (M4) — deleting a wall, together with the collinear
+    // host heal it triggers, is ONE explicit history checkpoint.
+    //
+    // Originally this also worked around HistoryModel.skipNext, the global
+    // suppression flag that reset()/commitFrom() left armed for the next
+    // mutation. PHASE 2E.1 removed that flag (mutation origin is now declared
+    // per call), so a plain setPlan would checkpoint here too — but the explicit
+    // commit stays: it is the single checkpoint that spans delete + host heal.
+    const applyDelete = coll === "walls" ? commitPlan : setPlan;
+    applyDelete((p) => {
       let next = { ...p };
-      if (coll === "rulers") {
+      if (coll === "items") {
+        const idSet = new Set(ids);
+        next.items = p.items.filter((o) => !idSet.has(o.id));
+        next.links = (p.links || []).filter((l) => !idSet.has(l.fromId) && !idSet.has(l.toId));
+      } else if (coll === "walls") {
+        const id = ids[0];
+        if (isNetworkPlan(p)) {
+          const wall = (p.walls || []).find((w) => w.id === id);
+          const nidx = selection?.nodeIdx;
+          if (wall && nidx != null && nidx >= 0) {
+            const nodeId = nidx === 0 ? wall.a : wall.b;
+            next = applyWallCmd(p, deleteNode(p, nodeId));
+          } else {
+            next = applyWallCmd(p, deleteWall(p, id));
+          }
+        } else {
+          next.walls = p.walls.filter((o) => o.id !== id);
+          next.items = refreshWallMountedItems(next.items, resolvePlanWalls(next), next.room, id);
+          next = syncAutoZones(next);
+        }
+      } else if (coll === "rulers") {
         const idSet = new Set(ids);
         next.rulers = (p.rulers || []).filter((r) => !idSet.has(r.id));
       } else if (coll === "measurements") {
@@ -861,14 +1647,27 @@ export default function PlanPage() {
           next[coll] = p[coll].filter((o) => o.id !== id);
         }
       }
+      if (coll === "items" || coll === "lines") {
+        next = syncEngineeringPlan(next);
+      }
       return next;
     });
     clearSelection();
     return true;
-  }, [plan.zones, runGeometryCommand]);
+  }, [plan.zones]);
 
   const delSel = () => {
     if (!selection?.ids?.length) return;
+    // PHASE 2F1 — deleting the selected wall deletes the LOGICAL wall: leaving
+    // the far half of a T-split host behind would be a silent partial delete.
+    if (selection.coll === "walls") {
+      const ids = new Set();
+      for (const id of selection.ids) {
+        for (const memberId of resolveLogicalWallChain(plan, id).wallIds) ids.add(memberId);
+      }
+      deleteHits("walls", [...ids]);
+      return;
+    }
     deleteHits(selection.coll, selection.ids);
   };
 
@@ -1100,46 +1899,60 @@ export default function PlanPage() {
   }, [labelDraft, plan.items, plan.room, sn]);
 
   const finishWallChain = () => {
-    // PHASE 1A-2B2 corrective: wallDraftStateRef.current — единственный
-    // источник истины. Раньше здесь был fallback на render-closure `draft`
-    // (React state) — ref обновляется синхронно (clearWallChain присваивает
-    // wallDraftStateRef.current = createWallDraftState() немедленно), а
-    // `draft` обновляется только на следующем render. Если бы finish
-    // вызывался дважды подряд без промежуточного render (напр. два быстрых
-    // Enter), второй вызов через fallback мог прочитать СТАРЫЕ точки из ещё
-    // не перерендеренного `draft`, хотя ref уже пуст — риск дублирующей
-    // цепочки. Без fallback второй вызов видит уже очищенный ref и корректно
-    // не создаёт команду.
-    const meta = wallDraftFinishMeta(wallDraftStateRef.current);
+    const meta = wallDraftFinishMeta(wallDraftStateRef.current) || (
+      draft.length >= 2 ? { pts: draft, closed: false } : null
+    );
     const pts = meta?.pts;
     const closed = meta?.closed === true;
     if (!pts || pts.length < 2) {
-      // Меньше 2 точек — как и раньше, тихий cancel: ни plan, ни history не
-      // трогаются, draft просто очищается (см. RESULT — PHASE 1A-2B2,
-      // "Draft state policy").
       clearWallChain();
       return;
     }
-    // PHASE 1A-2B2: через command boundary — вся цепочка одной командой
-    // (wall.create), а не commitPlan(updater) с безусловным checkpoint, как
-    // раньше. wallProps считается от живого plan.room (getCurrentPlan, не
-    // render-closure `plan`) — тот же снимок, что раньше читался как `p.room`
-    // внутри commitPlan(updater), просто взятый непосредственно перед
-    // вызовом, а не изнутри updater'а.
     const role = active === "room" ? "outer" : "partition";
-    const liveRoom = getCurrentPlan().room;
-    const toolFields = wallFieldsFromTool(activeToolId, role, liveRoom, wallThk);
-    const wallProps = {
-      ...defaultWallFields(toolFields.role || role, liveRoom),
-      ...toolFields,
-      thk: toolFields.thk ?? (role === "outer" ? (liveRoom.wallThk || wallThk) : wallThk),
-    };
-    const result = runGeometryCommand({ type: "wall.create", points: pts, wallProps, closed });
-    // success (changed:true) ИЛИ no-op (changed:false, напр. цепочка схлопнулась
-    // в <2 точек после dedup) — цепочку рисовать больше нечего, draft чистим.
-    // rejected (ok:false) — draft НЕ трогаем, чтобы пользователь мог
-    // исправить точки и повторить (см. секция 6 задания "Rejected/invalid").
-    if (result?.ok) clearWallChain();
+    commitPlan((p) => {
+      const toolFields = wallFieldsFromTool(activeToolId, role, p.room, wallThk);
+      const props = {
+        ...defaultWallFields(toolFields.role || role, p.room),
+        ...toolFields,
+        thk: toolFields.thk ?? (role === "outer" ? (p.room.wallThk || wallThk) : wallThk),
+        chainId: uid("ch"),
+      };
+      let chainPts = pts.map((pt) => ({ x: pt.x, y: pt.y }));
+      if (closed && chainPts.length >= 3) chainPts = [...chainPts, { ...chainPts[0] }];
+
+      let next = p;
+      let anyChanged = false;
+      const warnings = [];
+      const affectedWallIds = [];
+      const affectedNodeIds = [];
+      for (let i = 0; i < chainPts.length - 1; i++) {
+        const r = commitDrawnWall(next, chainPts[i], chainPts[i + 1], props, uid);
+        next = r.changed ? r.plan : next;
+        anyChanged = anyChanged || r.changed;
+        warnings.push(...(r.warnings || []));
+        if (r.changed) {
+          affectedWallIds.push(...(r.affectedWallIds || []));
+          affectedNodeIds.push(...(r.affectedNodeIds || []));
+          // Subsequent chain points: if this segment stopped at first hit, stop the chain.
+          if (r.meta?.firstIntersection && i < chainPts.length - 2) {
+            break;
+          }
+        }
+      }
+      if (!anyChanged) return p;
+
+      return applyWallCmd(p, {
+        plan: next,
+        changed: true,
+        affectedNodeIds: [...new Set(affectedNodeIds)],
+        affectedWallIds: [...new Set(affectedWallIds)],
+        warnings,
+      });
+    });
+    wallGestureRef.current = wallGestureMarkCommitted(wallGestureRef.current);
+    clearWallChain();
+    // Keep suppress flag after clearWallChain reset.
+    wallGestureRef.current = { ...createWallGestureState(), suppressNextClick: true };
   };
 
   const addWallDraftSegment = (from, to, fromOverride = null) => {
@@ -1164,11 +1977,18 @@ export default function PlanPage() {
     addWallDraftSegment(from, to, fromOverride);
   };
 
-  const commitDimension = (p1, p2, offsetPoint) => {
+  const resolveDimAnchorAt = (nodes, pt) => {
+    const nodeId = findNodeIdAt(nodes || {}, pt, NODE_LINK_THR);
+    if (nodeId) return { type: "node", nodeId };
+    return { type: "free", point: { x: pt.x, y: pt.y } };
+  };
+
+  const commitDimension = (p1, p2, offsetPoint, kind = measureKind) => {
     if (!p1 || !p2) return;
     if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 20) return;
     const orientation = Math.abs(p2.x - p1.x) >= Math.abs(p2.y - p1.y) ? "horizontal" : "vertical";
     const offset = offsetPoint ? dimensionOffsetFromPoint(p1, p2, offsetPoint) : 120;
+    const mode = kind === "diagonal" ? "diagonal" : "linear";
     setPlan((p) => ({
       ...p,
       dimensions: [
@@ -1176,7 +1996,7 @@ export default function PlanPage() {
         {
           id: uid("dim"),
           type: "dimension",
-          mode: "linear",
+          mode,
           p1: { x: p1.x, y: p1.y },
           p2: { x: p2.x, y: p2.y },
           offset,
@@ -1184,43 +2004,61 @@ export default function PlanPage() {
           attachedTo: null,
           labelOverride: null,
           locked: false,
+          auto: false,
+          visible: true,
+          anchors: [
+            resolveDimAnchorAt(p.nodes, p1),
+            resolveDimAnchorAt(p.nodes, p2),
+          ],
         },
       ],
     }));
   };
 
-  /** Manual/free dimension only — wall-attached full-wall edits go through submitWallLengthEdit below. */
+  const commitAngleDimension = (vertex, ray1, ray2) => {
+    if (!vertex || !ray1 || !ray2) return;
+    if (Math.hypot(ray1.x - vertex.x, ray1.y - vertex.y) < 20) return;
+    if (Math.hypot(ray2.x - vertex.x, ray2.y - vertex.y) < 20) return;
+    setPlan((p) => {
+      const a0 = resolveDimAnchorAt(p.nodes, vertex);
+      const a1 = resolveDimAnchorAt(p.nodes, ray1);
+      const a2 = resolveDimAnchorAt(p.nodes, ray2);
+      const dim = createAngleDimension({
+        id: uid("dim"),
+        vertexNodeId: a0.type === "node" ? a0.nodeId : null,
+        rayNodeId1: a1.type === "node" ? a1.nodeId : null,
+        rayNodeId2: a2.type === "node" ? a2.nodeId : null,
+      });
+      return {
+        ...p,
+        dimensions: [
+          ...(p.dimensions || []),
+          {
+            ...dim,
+            auto: false,
+            visible: true,
+            vertex: { ...vertex },
+            rayPoint1: { ...ray1 },
+            rayPoint2: { ...ray2 },
+            anchors: [a0, a1, a2],
+          },
+        ],
+      };
+    });
+  };
+
   const applyDimensionEdit = (dimId, value) => {
+    const dim = (plan.dimensions || []).find((d) => d.id === dimId);
+    if (!dim) return;
+    if (dim.attachedTo?.type === "wall" || dim.attachedTo?.type === "item") {
+      // TODO: change attached geometry/object by typed dimension value.
+      window.alert("Изменение геометрии по связанному размеру будет добавлено следующим шагом.");
+      return;
+    }
     setPlan((p) => ({
       ...p,
       dimensions: (p.dimensions || []).map((d) => (d.id === dimId ? { ...d, labelOverride: value } : d)),
     }));
-  };
-
-  // PHASE 1B-1B — canonical apply path for the full-wall-length editor. The
-  // session guard makes a trailing native blur (fired when the input unmounts
-  // after a successful Enter) a safe no-op, regardless of React render timing.
-  const submitWallLengthEdit = (entry) => {
-    if (!entry || !dimensionEditSessionRef.current.tryConsume(entry.token)) return;
-    const result = applyWallLengthEdit({
-      rawValue: entry.value,
-      wallId: entry.wallId,
-      fixedEndpoint: entry.fixedEndpoint,
-      runGeometryCommand,
-    });
-    if (result.status === "parse-rejected") {
-      dimensionEditSessionRef.current.reopen(entry.token);
-      setDimensionEdit((d) => (d && d.id === entry.id ? { ...d, error: result.message } : d));
-      return;
-    }
-    if (result.status === "geometry-rejected" || result.status === "commit-failed") {
-      // result.result?.error?.message (if any) is already surfaced via
-      // showMessage by the dispatcher itself — nothing further to show here.
-      dimensionEditSessionRef.current.reopen(entry.token);
-      setDimensionEdit((d) => (d && d.id === entry.id ? { ...d, error: null } : d));
-      return;
-    }
-    setDimensionEdit(null); // success or no-op
   };
 
   /** @deprecated старый инструмент линейки. */
@@ -1280,11 +2118,56 @@ export default function PlanPage() {
     if (selection?.coll !== "walls" || selection.ids?.length !== 1) return;
     const wid = selection.ids[0];
     const nidx = selection.nodeIdx;
-    // PHASE 1A-2B1: через command boundary — node.nudge уже воспроизводит
-    // nudgeWallInPlan (включая whole-wall translate при nodeIdx == null) и
-    // сам гарантирует ноль checkpoint на zero-delta/no-op (см.
-    // geometryCommands.js handleNodeNudge).
-    runGeometryCommand({ type: "node.nudge", wallId: wid, nodeIdx: nidx, dx, dy, round: fineMm });
+    setPlan((p) => {
+      const wall = (p.walls || []).find((w) => w.id === wid);
+      if (!wall?.a || !isNetworkPlan(p)) {
+        const plan = nudgeWallInPlan(p, wid, nidx, dx, dy, fineMm);
+        const resolved = resolvePlanWalls(plan);
+        return syncAutoZones({
+          ...plan,
+          items: refreshWallMountedItems(p.items, resolved, p.room, wid),
+        });
+      }
+      const rw = resolvePlanWalls(p).find((w) => w.id === wid);
+      if (!rw?.pts?.length) return p;
+      if (nidx != null && nidx >= 0) {
+        const nodeId = nidx === 0 ? wall.a : wall.b;
+        const pt = rw.pts[nidx];
+        if (!nodeId || !pt) return p;
+        return applyWallCmd(p, moveNode(p, nodeId, { x: fineMm(pt.x + dx), y: fineMm(pt.y + dy) }));
+      }
+      // PHASE 2C3A — arrows use the SAME topology-safe command as the mouse.
+      // The previous per-node loop translated shared T-junction nodes directly,
+      // so keyboard movement could still bend hosts after the mouse path had
+      // been made safe. A fail-closed result leaves the plan (and therefore
+      // history and autosave) untouched.
+      const nudgeChain = resolveLogicalWallChain(p, wid);
+      const moved = nudgeChain.segmentCount > 1
+        ? moveLogicalWallChain(p, {
+          wallId: wid,
+          delta: { x: fineMm(dx), y: fineMm(dy) },
+          expectedChainWallIds: nudgeChain.wallIds,
+          makeId: uid,
+        })
+        : moveWallSegment(p, {
+          wallId: wid,
+          delta: { x: fineMm(dx), y: fineMm(dy) },
+          expectedEndpointAttachments: classifyWallSegmentAttachments(p, wid),
+          makeId: uid,
+        });
+      if (EXPOSE_PLANNER_E2E) {
+        geomProbeRef.current.lastWallMoveResult = {
+          input: "arrow",
+          wallId: wid,
+          changed: !!moved.changed,
+          reason: moved.reason || null,
+          warnings: [...(moved.warnings || [])],
+          effectiveDelta: moved.movement?.delta || null,
+        };
+      }
+      if (!moved.changed) return p;
+      return applyWallCmd(p, moved);
+    });
   };
 
   const finishDraft = (ptsOverride = null) => {
@@ -1403,6 +2286,87 @@ export default function PlanPage() {
     const sheet = sheetById(cat.sheetId);
     applySheet(sheet, cat.id);
     setDrawerOpen(true);
+  };
+
+  const railActiveToolId = resolveRailActiveToolId({
+    tool,
+    activeToolId,
+    measureKind,
+    activeCategoryId,
+    activeSheetId,
+  });
+
+  const handleRailToolSelect = (toolKey) => {
+    if (toolKey === "select") {
+      handleTool("select");
+      setDrawerOpen(false);
+      return;
+    }
+    if (toolKey === "pan") {
+      handleTool("pan");
+      setDrawerOpen(false);
+      return;
+    }
+    if (toolKey === "measure" || toolKey === "measure_linear") {
+      setMeasureKind("linear");
+      handleToolPick(resolveTool("measure"));
+      setDrawerOpen(false);
+      return;
+    }
+    if (toolKey === "measure_diagonal") {
+      setMeasureKind("diagonal");
+      handleToolPick(resolveTool("measure"));
+      setDrawerOpen(false);
+      return;
+    }
+    if (toolKey === "measure_angular") {
+      setMeasureKind("angle");
+      handleToolPick(resolveTool("measure"));
+      setDrawerOpen(false);
+      return;
+    }
+    if (toolKey === "wall") {
+      applySheet(sheetById("base_plan"), "walls");
+      handleToolPick(resolveTool("wall_draw"));
+      setDrawerOpen(false);
+      return;
+    }
+    if (toolKey === "door") {
+      applySheet(sheetById("base_plan"), "openings");
+      handleToolPick(resolveTool("door_std"));
+      setDrawerOpen(false);
+      return;
+    }
+    if (toolKey === "window") {
+      applySheet(sheetById("base_plan"), "openings");
+      handleToolPick(resolveTool("window_std"));
+      setDrawerOpen(false);
+      return;
+    }
+    if (toolKey === "zones") {
+      applySheet(sheetById("farm_zones"), "zones");
+      setDrawerOpen(false);
+      return;
+    }
+    if (toolKey === "objects" || toolKey === "engineering") {
+      // Group parent click only opens popover in rail — no tool change.
+      return;
+    }
+    const def = resolveTool(toolKey);
+    if (def) {
+      if (def.categories?.includes("racks") || def.kind === "rack" || def.kind === "seed_rack") {
+        applySheet(sheetById("racks"), "racks");
+      } else if (["power", "water", "drain", "light", "vent", "climate", "ac"].some((c) => def.categories?.includes(c))) {
+        applySheet(sheetById("electrical"), "power");
+      }
+      handleToolPick(def);
+      setDrawerOpen(false);
+    }
+  };
+
+  const handleRailEscape = () => {
+    handleTool("select");
+    setDrawerOpen(false);
   };
 
   const handleFilterPick = (filterId) => {
@@ -1589,6 +2553,7 @@ export default function PlanPage() {
     });
     setLinkFrom(null);
     if (st.tool === "wall" || st.tool === "line") clearWallChain();
+    if (st.tool === "wall") clearSelection();
     if (st.tool !== "measure") {
       measureDrawRef.current = null;
       setMeasure([]);
@@ -1623,7 +2588,16 @@ export default function PlanPage() {
   const handleTool = (t) => {
     setTool(t);
     setLinkFrom(null);
+    clearAngleMagnet();
+    if (t === "select") setActiveToolId("select");
+    else if (t === "measure") setActiveToolId("measure");
+    else if (t === "pan") setActiveToolId("pan");
+    else if (t === "wall") setActiveToolId((id) => (String(id || "").startsWith("wall") ? id : "wall_draw"));
+    else if (t === "erase") setActiveToolId("erase");
+    else if (t === "label") setActiveToolId("label");
     if (t === "wall" || t === "line") clearWallChain();
+    // Wall drawing owns the pointer — drop any leftover select highlight/drag target.
+    if (t === "wall") clearSelection();
     if (t !== "measure") {
       measureDrawRef.current = null;
       setMeasure([]);
@@ -1655,15 +2629,67 @@ export default function PlanPage() {
     });
   };
 
-  const fitView = () => {
+  const markViewportManual = () => {
+    viewportManualRef.current = true;
+  };
+
+  const fitView = (reason = "fit-button") => {
     const r = svgRef.current?.getBoundingClientRect();
-    if (!r) return;
-    const b = planWorkingBounds(plan);
-    const bw = b.r - b.l;
-    const bh = b.b - b.t;
-    const m = 160;
-    const z = clamp(Math.min((r.width - m) / bw, (r.height - m) / bh), 0.015, 3);
-    setView({ zoom: z, panX: (r.width - bw * z) / 2 - b.l * z, panY: (r.height - bh * z) / 2 - b.t * z });
+    if (!r || r.width < 40 || r.height < 40) return null;
+    // SVG is already inset by topbar/rail/inspector on the left/top/right,
+    // but the bottom toolbar (.planner-bottom-bar) and floating zoom
+    // controls (.planner-viewport-controls-wrap) are positioned OVER the
+    // canvas rather than shrinking it, so the SVG's own bounding rect still
+    // reports the full height underneath them. Measure their actual overlap
+    // with the SVG's bottom edge and inset Fit by that amount (plus a small
+    // safety margin) so wall geometry and promoted dimensions never land
+    // under the bottom panel.
+    const root = svgRef.current?.closest(".planner-app");
+    let bottomInset = 0;
+    if (root) {
+      const overlays = root.querySelectorAll(".planner-bottom-bar, .planner-viewport-controls-wrap");
+      overlays.forEach((el) => {
+        const er = el.getBoundingClientRect();
+        if (er.height <= 0) return;
+        const overlap = r.bottom - er.top;
+        if (overlap > bottomInset) bottomInset = overlap;
+      });
+      if (bottomInset > 0) bottomInset += 12;
+    }
+    // Include the auto-generated runtime dimensions (external_overall,
+    // wall_length, internal_clear, ...) in the framed bounds so their
+    // labels -- offset outside the raw wall geometry -- land inside the
+    // viewport on Fit instead of rendering off-canvas.
+    let bounds = computePlanContentBounds(plan, { extraDimensions: runtimeDimensions });
+    // An empty plan has no content, and computePlanContentBounds answers with a
+    // 1000x1000mm placeholder. Fitting THAT to the viewport lands on zoom ~0.76,
+    // where the whole canvas spans about 1.5m: the user then draws a rectangle
+    // that looks room-sized but is really ~400mm, and its dimensions correctly
+    // read "389 мм" instead of "3.89 м". Frame the sheet instead, which is the
+    // scale PLANNER_DEFAULT_ZOOM already assumes.
+    if (!bounds || bounds.empty || !bounds.count) {
+      const rw = Number(plan?.room?.w) || 12000;
+      const rh = Number(plan?.room?.h) || 8000;
+      bounds = {
+        minX: 0, minY: 0, x: 0, y: 0, maxX: rw, maxY: rh,
+        width: rw, height: rh, count: 1, empty: false,
+      };
+    }
+    const next = computeFitTransform({
+      plan,
+      bounds,
+      width: r.width,
+      height: r.height,
+      insets: { top: 0, right: 0, bottom: bottomInset, left: 0 },
+      padding: Math.min(48, Math.min(r.width, r.height) * 0.05),
+      reason,
+    });
+    setView({ zoom: next.zoom, panX: next.panX, panY: next.panY });
+    if (reason === "fit-button" || reason === "reset" || reason === "import" || reason === "open") {
+      viewportManualRef.current = false;
+      viewportFittedRef.current = true;
+    }
+    return next;
   };
 
   const fitActiveLayer = () => {
@@ -1671,7 +2697,7 @@ export default function PlanPage() {
     const r = svgRef.current?.getBoundingClientRect();
     if (!r) return;
     if (!b) {
-      fitView();
+      fitView("fit-button");
       return;
     }
     const m = 120;
@@ -1681,6 +2707,7 @@ export default function PlanPage() {
       panX: (r.width - b.w * z) / 2 - b.x * z,
       panY: (r.height - b.h * z) / 2 - b.y * z,
     });
+    viewportManualRef.current = false;
   };
 
   const centerView = () => {
@@ -1691,12 +2718,49 @@ export default function PlanPage() {
       panX: (r.width - plan.room.w * v.zoom) / 2,
       panY: (r.height - plan.room.h * v.zoom) / 2,
     }));
+    markViewportManual();
   };
 
+  const plannerIdentity = useMemo(
+    () => ({ mode: standalone ? "standalone" : "project", id: standalone ? draftId : id }),
+    [standalone, draftId, id],
+  );
+  const planHasGeometry = useMemo(() => !computePlanContentBounds(plan).empty, [plan]);
+
   useEffect(() => {
-    const id = requestAnimationFrame(() => fitView());
-    return () => cancelAnimationFrame(id);
-  }, [standalone ? draftId : id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (saveUiStatus === "hydrating") return;
+    const previous = viewportAutoStateRef.current;
+    const nextState = {
+      identity: plannerIdentity,
+      hasGeometry: planHasGeometry,
+      manual: viewportManualRef.current,
+      fitted: viewportFittedRef.current,
+    };
+    if (!shouldAutoFitPlan(previous, nextState, "open")) {
+      viewportAutoStateRef.current = nextState;
+      return undefined;
+    }
+    let cancelled = false;
+    const run = () => {
+      if (cancelled || viewportManualRef.current) return;
+      fitView("open");
+      viewportAutoStateRef.current = {
+        identity: plannerIdentity,
+        hasGeometry: planHasGeometry,
+        manual: false,
+        fitted: true,
+      };
+    };
+    const id1 = requestAnimationFrame(() => requestAnimationFrame(run));
+    const t1 = setTimeout(run, 80);
+    const t2 = setTimeout(run, 240);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(id1);
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [plannerIdentity, saveUiStatus, planHasGeometry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setZoomTo = (nz) => {
     const r = svgRef.current?.getBoundingClientRect();
@@ -1707,124 +2771,17 @@ export default function PlanPage() {
     const mmy = (cy - view.panY) / view.zoom;
     const z = clamp(nz, 0.015, 3);
     setView({ zoom: z, panX: cx - mmx * z, panY: cy - mmy * z });
+    markViewportManual();
   };
 
   const clearSheet = () => {
-    if (active === "room") {
-      // PHASE 1A-2C2D3D2: canonical command boundary — item.bulkDelete
-      // already handles links cleanup and item-attached dimension detach/
-      // delete atomically for the whole delete set (see geometryCommands.js
-      // deleteItemsFromPlan) — not duplicated here. This clear is
-      // intentionally project-wide: layer:"room" items (doors/windows/
-      // openings/legacy-import) exist independently of which room the user
-      // is currently viewing, so a generic per-sheet confirm text would be
-      // misleading — see RESULT — PHASE 1A-2C2D3D2, "Product policy".
-      const roomItemsBeforeConfirm = getCurrentPlan().items.filter((it) => it.layer === "room");
-      if (roomItemsBeforeConfirm.length === 0) {
-        setSel(null);
-        return;
-      }
-      const counts = summarizeRoomClearItems(roomItemsBeforeConfirm);
-      if (!window.confirm(buildRoomClearConfirmMessage(counts))) return;
-      // Live-plan race: itemIds are recomputed from a fresh getCurrentPlan()
-      // read taken AFTER the confirm dialog closes, never from the
-      // pre-confirm snapshot used only for the displayed counts.
-      const itemIds = getCurrentPlan().items.filter((it) => it.layer === "room").map((it) => it.id);
-      const { status } = applyItemBulkDelete({ itemIds, runGeometryCommand });
-      if (status === "success" || status === "noop" || status === "no-target") {
-        setSel(null);
-      }
-      // geometry-rejected / commit-failed: selection preserved, no
-      // false-success cleanup.
-      return;
-    }
-    if (MIGRATED_COMBINED_CLEAR_LAYER_IDS.includes(active)) {
-      // PHASE 1A-2C2D3E4D (clearSheet): canonical command boundary —
-      // itemLine.bulkDelete already runs one merged item+line structural
-      // cleanup and one engineering sync for the whole delete set (see
-      // geometryCommands.js deleteItemsAndLinesFromPlan) — not duplicated
-      // here. power/light/vent/staff (real item+line layers) get their own
-      // honest equipment+lines count confirm instead of the generic
-      // per-sheet text below, since a bare "Очистить объекты листа X?"
-      // historically only cleared lines while implying everything (see
-      // AUDIT PHASE 1A-2C2D3E4A, Risk R2). Orchestration (pre-confirm
-      // summary/empty check/confirm/live-plan-race re-read/dispatch) is
-      // factored out into applyCombinedLayerClear so it's directly
-      // unit-testable without rendering this component.
-      // PHASE 1A-2C2D3E5B — staff gets its own confirm terminology
-      // ("Персонал"/"Маршруты" instead of "Оборудование"/"Линии и трассы")
-      // since calling a person "equipment" is misleading (see AUDIT PHASE
-      // 1A-2C2D3E5A, "Confirmation terminology"). Computed here in PlanPage,
-      // not inside applyCombinedLayerClear/combinedLayerClearSummary, which
-      // stay layer-agnostic — power/light/vent pass no override and keep
-      // the existing default text byte-for-byte.
-      const status = applyCombinedLayerClear({
-        getCurrentPlan,
-        layerId: active,
-        layerLabel: layerById(active).name,
-        ...(active === "staff" ? { itemLabel: "Персонал", lineLabel: "Маршруты" } : {}),
-        confirmFn: (message) => window.confirm(message),
-        runGeometryCommand,
-      });
-      if (status === "success" || status === "noop" || status === "no-target" || status === "empty") {
-        setSel(null);
-      }
-      // "cancelled" / geometry-rejected / commit-failed: selection
-      // preserved, no false-success cleanup.
-      return;
-    }
     const name = layerById(active).name;
     if (!window.confirm(`Очистить объекты листа «${name}»?`)) return;
-    if (active === "partitions") {
-      // PHASE 1A-2C2D2: canonical command boundary — wall.bulkDelete already
-      // handles orphan-node pruning, dangling-opening removal, link cleanup,
-      // and wall-attached dimension detach/delete atomically for the whole
-      // delete set (see geometryCommands.js deleteWallsFromPlan) — not
-      // duplicated here. Outer walls are excluded from the delete set below
-      // and never sent to the command at all, so they and their nodes/
-      // openings are untouched.
-      const wallIds = getCurrentPlan().walls.filter((w) => w.role !== "outer").map((w) => w.id);
-      const { status } = applyWallBulkDelete({ wallIds, runGeometryCommand });
-      if (status === "success" || status === "noop" || status === "no-target") {
-        setSel(null);
-      }
-      // geometry-rejected / commit-failed: selection preserved, no
-      // false-success cleanup.
-      return;
-    }
-    if (MIGRATED_ITEM_CLEAR_LAYER_IDS.includes(active)) {
-      // PHASE 1A-2C2D3B (clearSheet): canonical command boundary —
-      // item.bulkDelete already handles links cleanup and item-attached
-      // dimension detach/delete atomically for the whole delete set (see
-      // geometryCommands.js deleteItemsFromPlan) — not duplicated here.
-      const itemIds = getCurrentPlan().items.filter((it) => it.layer === active).map((it) => it.id);
-      const { status } = applyItemBulkDelete({ itemIds, runGeometryCommand });
-      if (status === "success" || status === "noop" || status === "no-target") {
-        setSel(null);
-      }
-      // geometry-rejected / commit-failed: selection preserved, no
-      // false-success cleanup.
-      return;
-    }
-    if (MIGRATED_LINE_CLEAR_LAYER_IDS.includes(active)) {
-      // PHASE 1A-2C2D3E2 (clearSheet): canonical command boundary —
-      // line.bulkDelete already runs the shared engineering-derived sync
-      // exactly once for the whole delete set (see geometryCommands.js
-      // deleteLinesFromPlan) — not duplicated here.
-      const lineIds = getCurrentPlan().lines
-        .filter((line) => line.layer === active || migrateLayerId(line.layer) === active)
-        .map((line) => line.id);
-      const { status } = applyLineBulkDelete({ lineIds, runGeometryCommand });
-      if (status === "success" || status === "noop" || status === "no-target") {
-        setSel(null);
-      }
-      // geometry-rejected / commit-failed: selection preserved, no
-      // false-success cleanup.
-      return;
-    }
     setPlan((p) => {
       const next = { ...p };
-      if (LINE_LAYER_IDS.includes(active)) next.lines = p.lines.filter((l) => l.layer !== active && migrateLayerId(l.layer) !== active);
+      if (active === "partitions") next.walls = p.walls.filter((w) => w.role === "outer");
+      else if (active === "room") next.items = p.items.filter((i) => i.layer !== "room");
+      else if (LINE_LAYER_IDS.includes(active)) next.lines = p.lines.filter((l) => l.layer !== active && migrateLayerId(l.layer) !== active);
       else if (ITEM_LAYER_IDS.includes(active)) next.items = p.items.filter((i) => i.layer !== active);
       return next;
     });
@@ -2224,12 +3181,14 @@ export default function PlanPage() {
       if (len) {
         const nw = setWallSegmentLengthAt(obj, segIdx, Math.max(100, +len || 0));
         setPlan((p) => {
-          let next = movePlanNode(p, obj.a, nw.pts[0]);
-          next = movePlanNode(next, obj.b, nw.pts[1]);
-          const resolved = resolvePlanWalls(next);
-          return syncAutoZones({
-            ...next,
-            items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
+          let r1 = moveNode(p, obj.a, nw.pts[0]);
+          let r2 = moveNode(r1.plan, obj.b, nw.pts[1]);
+          return applyWallCmd(p, {
+            plan: r2.plan,
+            changed: r1.changed || r2.changed,
+            affectedNodeIds: [...r1.affectedNodeIds, ...r2.affectedNodeIds],
+            affectedWallIds: [...new Set([...r1.affectedWallIds, ...r2.affectedWallIds])],
+            warnings: [...r1.warnings, ...r2.warnings],
           });
         });
       }
@@ -2249,12 +3208,14 @@ export default function PlanPage() {
         const lastLen = Math.max(100, (+len || 0) - sumOther);
         const nw = setWallSegmentLength(obj, lastLen);
         setPlan((p) => {
-          let next = movePlanNode(p, obj.a, nw.pts[0]);
-          next = movePlanNode(next, obj.b, nw.pts[1]);
-          const resolved = resolvePlanWalls(next);
-          return syncAutoZones({
-            ...next,
-            items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
+          const r1 = moveNode(p, obj.a, nw.pts[0]);
+          const r2 = moveNode(r1.plan, obj.b, nw.pts[1]);
+          return applyWallCmd(p, {
+            plan: r2.plan,
+            changed: r1.changed || r2.changed,
+            affectedNodeIds: [...r1.affectedNodeIds, ...r2.affectedNodeIds],
+            affectedWallIds: [...new Set([...r1.affectedWallIds, ...r2.affectedWallIds])],
+            warnings: [...r1.warnings, ...r2.warnings],
           });
         });
       }
@@ -2266,41 +3227,67 @@ export default function PlanPage() {
       updateObj("walls", obj.id, { role: "partition", kind: obj.kind || "new" });
     }
     else if (actionId === "wall-straight-h" && sel.coll === "walls") {
-      // PHASE 1A-2A: через command boundary — selection исходной стены
-      // сохраняется (selectAfter не передан), как и в старом коде.
-      runGeometryCommand({ type: "wall.straightenHorizontal", wallId: obj.id });
+      setPlan((p) => {
+        const next = straightenWallEdge(p, obj.id, "h");
+        const resolved = resolvePlanWalls(next);
+        return syncAutoZones({
+          ...next,
+          items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
+        });
+      });
     }
     else if (actionId === "wall-straight-v" && sel.coll === "walls") {
-      runGeometryCommand({ type: "wall.straightenVertical", wallId: obj.id });
+      setPlan((p) => {
+        const next = straightenWallEdge(p, obj.id, "v");
+        const resolved = resolvePlanWalls(next);
+        return syncAutoZones({
+          ...next,
+          items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
+        });
+      });
     }
     else if (actionId === "wall-align" && sel.coll === "walls") {
-      runGeometryCommand({ type: "wall.alignToNeighbor", wallId: obj.id });
+      setPlan((p) => {
+        const next = alignWallEdgeToNeighbor(p, obj.id);
+        if (!next) {
+          window.alert("Нет соседней стены с общим узлом для выравнивания.");
+          return p;
+        }
+        const resolved = resolvePlanWalls(next);
+        return syncAutoZones({
+          ...next,
+          items: refreshWallMountedItems(p.items, resolved, p.room, obj.id),
+        });
+      });
     }
     else if (actionId === "wall-merge" && sel.coll === "walls") {
-      // Surviving wall id берётся из typed entityRemap, а не угадывается —
-      // для этого способа вызова (merge всегда стартует от obj.id) он и так
-      // всегда совпадает с obj.id, но контракт остаётся явным и корректным
-      // на случай будущих caller'ов с другой семантикой выбора.
-      runGeometryCommand(
-        { type: "wall.merge", wallId: obj.id },
-        { selectAfter: (result) => ({ coll: "walls", id: result.entityRemap.walls.survivingWallId }) },
-      );
+      setPlan((p) => {
+        const res = tryMergeWallEdge(p, obj.id);
+        if (!res) {
+          window.alert("Не найдена соседняя стена с общим узлом для объединения.");
+          return p;
+        }
+        const resolved = resolvePlanWalls(res.plan);
+        return syncAutoZones({
+          ...res.plan,
+          items: refreshWallMountedItems(p.items, resolved, p.room),
+        });
+      });
+      setSel({ coll: "walls", id: obj.id });
     }
     else if (actionId === "wall-break" && sel.coll === "walls") {
       const mm = ctxMenuRef.current?.mm;
       if (!mm) return;
-      // PHASE 1A-2A: через command boundary — dispatcher сам гарантирует, что
-      // rejected/no-op split не вызывает commitPlan (см. PHASE 0F/1A-1: ранее
-      // это обеспечивалось вручную здесь же, теперь — структурно в
-      // geometryCommandDispatcher.js). newWallId выбирается через typed
-      // operationResult.childWallIds[1] (тот же PHASE 0F newWallId).
-      runGeometryCommand(
-        { type: "wall.split", wallId: obj.id, point: mm },
-        {
-          selectAfter: (result) => ({ coll: "walls", id: result.operationResult.childWallIds[1] }),
-          warningMessage: () => "Стена разделена. Часть размеров пересекала линию разрыва и была откреплена.",
-        },
-      );
+      setPlan((p) => {
+        const r = splitWall(p, obj.id, mm, uid);
+        if (!r.changed) {
+          window.alert(r.warnings?.[0]?.message || "Не удалось разорвать стену — кликните ближе к сегменту.");
+          return p;
+        }
+        const newId = r.affectedWallIds.find((id) => id !== obj.id) || r.affectedWallIds[0];
+        if (newId) setSel({ coll: "walls", id: newId });
+        return applyWallCmd(p, r, { refreshMounted: false });
+      });
     }
     else if (actionId === "rename" && sel.coll === "zones") {
       const name = prompt("Название помещения:", obj.name || "Помещение");
@@ -2332,19 +3319,12 @@ export default function PlanPage() {
   };
 
   const onContextMenu = (e) => {
-    if (active === "spec") return;
-    if (tool === "wall" && draft.length > 0) {
+    // PHASE 2F1 — first RMB cancels any non-neutral state; no menu opens.
+    const contextAction = contextMenuActionFor(tool, active, plannerRmbState());
+    if (contextAction === CONTEXT_MENU_ACTION.NONE) return;
+    if (contextAction === CONTEXT_MENU_ACTION.CANCEL_AND_SELECT) {
       e.preventDefault();
-      const mm = toMM(e.clientX, e.clientY);
-      setCtxMenu({
-        x: e.clientX,
-        y: e.clientY,
-        mm,
-        items: [
-          { id: "wall-draft-finish", label: "Завершить цепочку (Enter)" },
-          { id: "wall-draft-cancel", label: "Отменить цепочку (Esc)", danger: true },
-        ],
-      });
+      cancelWallDrawingAndSelect();
       return;
     }
     const mm = toMM(e.clientX, e.clientY);
@@ -2419,13 +3399,55 @@ export default function PlanPage() {
 
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      if (isEditableTarget(e.target)) return;
       if (e.key === "Shift") shiftRef.current = true;
       if (e.key === "Control") { ctrlRef.current = true; setCtrlSnapFine(true); }
       if (e.key === "Alt") { altSnapRef.current = true; setAltSnapOff(true); }
       if (e.key === " " && document.activeElement === document.body) { e.preventDefault(); setSpacePan(true); }
       if (e.key === "Escape") {
+        // V2 drawing: drop the rubber band, keep the wall tool active and the
+        // committed plan/history/autosave untouched.
+        if (WALL_DRAW_V2 && wallDrawV2.isActive()) {
+          e.preventDefault();
+          // LIVE3: first Escape cancels numeric entry; second cancels the draft.
+          if (typedLengthRef.current) {
+            setTypedLength("");
+            setDrawTypedSeed(null);
+            return;
+          }
+          cancelWallDrawV2();
+          return;
+        }
+        // An in-flight wall/node drag is the most immediate modal state: drop
+        // the transient preview, committed plan/history/autosave untouched.
+        if (wallEdit.isActive()) {
+          e.preventDefault();
+          wallEdit.cancel();
+          dragRef.current = null;
+          setHoverWallNode(null);
+          setGuides([]);
+          clearAngleMagnet();
+          return;
+        }
         if (labelDraft) { cancelLabelDraft(); return; }
+        // PHASE 2D: Escape closes the wall editor first and keeps the wall
+        // selected. Transient UI only — no plan, history or autosave change.
+        if (floatEditorOpen) {
+          e.preventDefault();
+          closeFloatEditor();
+          return;
+        }
+        if (wallInspectorOpen) {
+          e.preventDefault();
+          closeWallInspector();
+          return;
+        }
+        // Drawer first: Esc closes inspector without cancelling canvas tool.
+        if (drawerOpen) {
+          e.preventDefault();
+          setDrawerOpen(false);
+          return;
+        }
         if (tool === "wall" && draft.length > 0) {
           e.preventDefault();
           clearWallChain();
@@ -2445,13 +3467,35 @@ export default function PlanPage() {
           setMeasure([]);
           setMeasureOffsetPt(null);
           setRulerSnap(null);
+          setTool("select");
+          setActiveToolId("select");
           return;
         }
         clearWallChain(); setMeasure([]); clearSelection(); setGuides([]);
-        setTool("select"); setPending(null); setTypedLength(""); setDraftSnap(null);
+        setTool("select"); setActiveToolId("select"); setPending(null); setTypedLength(""); setDraftSnap(null);
         setMarquee(null);
       }
       if (e.key === "Enter") {
+        // Floating length editor focus when a wall is selected (not while typing in an input).
+        if (
+          tool === "select"
+          && selection?.coll === "walls"
+          && selection.ids?.[0]
+          && document.activeElement === document.body
+        ) {
+          e.preventDefault();
+          setFloatEditorOpen(true);
+          setFloatFocusReq((n) => n + 1);
+          return;
+        }
+        // V2: Enter applies typed preview length; release still commits the wall.
+        if (WALL_DRAW_V2 && tool === "wall") {
+          if (typedLengthRef.current) {
+            e.preventDefault();
+            applyTypedLength();
+          }
+          return;
+        }
         if (typedLengthRef.current && (tool === "wall" || tool === "line") && draft.length >= 1) {
           e.preventDefault();
           applyTypedLength();
@@ -2464,7 +3508,7 @@ export default function PlanPage() {
         }
         if (tool === "measure" && measureDrawRef.current?.stage === 2 && measure.length === 2 && measureOffsetPt) {
           e.preventDefault();
-          commitDimension(measure[0], measure[1], measureOffsetPt);
+          commitDimension(measure[0], measure[1], measureOffsetPt, measureKind);
           measureDrawRef.current = null;
           setMeasure([]);
           setMeasureOffsetPt(null);
@@ -2494,13 +3538,58 @@ export default function PlanPage() {
         e.preventDefault();
         handleDeleteAction();
       }
-      if (/^\d$/.test(e.key) && (tool === "wall" || tool === "line") && draft.length >= 1) {
+      if (
+        (/^\d$/.test(e.key) || e.key === "." || e.key === ",")
+        && tool === "select"
+        && selection?.coll === "walls"
+        && selection.ids?.[0]
+        && document.activeElement === document.body
+      ) {
         e.preventDefault();
-        setTypedLength((s) => s + e.key);
+        setFloatEditorOpen(true);
+        setFloatFocusReq((n) => n + 1);
+        return;
+      }
+      if (
+        (/^\d$/.test(e.key) || e.key === "." || e.key === ",")
+        && (tool === "wall" || tool === "line")
+        && (draft.length >= 1 || (WALL_DRAW_V2 && tool === "wall" && wallDrawV2?.isActive?.()))
+      ) {
+        e.preventDefault();
+        const ch = e.key === "," ? "." : e.key;
+        setTypedLength((s) => {
+          const next = s + ch;
+          setDrawTypedSeed(next);
+          if (WALL_DRAW_V2 && tool === "wall" && wallDrawV2?.isActive?.()) {
+            // Immediate preview along current direction (bare mm).
+            queueMicrotask(() => applyDrawTypedPreview(next, { commit: false }));
+          }
+          return next;
+        });
+      }
+      // Allow typing unit suffix letters for metres while drafting.
+      if ((e.key === "m" || e.key === "M" || e.key === "м" || e.key === "М")
+        && (tool === "wall" || tool === "line") && typedLengthRef.current) {
+        e.preventDefault();
+        setTypedLength((s) => {
+          const next = `${s} м`;
+          setDrawTypedSeed(next);
+          if (WALL_DRAW_V2 && tool === "wall" && wallDrawV2?.isActive?.()) {
+            queueMicrotask(() => applyDrawTypedPreview(next, { commit: false }));
+          }
+          return next;
+        });
       }
       if (e.key === "Backspace" && typedLengthRef.current && (tool === "wall" || tool === "line")) {
         e.preventDefault();
-        setTypedLength((s) => s.slice(0, -1));
+        setTypedLength((s) => {
+          const next = s.slice(0, -1);
+          setDrawTypedSeed(next || null);
+          if (next && WALL_DRAW_V2 && tool === "wall" && wallDrawV2?.isActive?.()) {
+            queueMicrotask(() => applyDrawTypedPreview(next, { commit: false }));
+          }
+          return next;
+        });
       }
       if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && tool === "line") {
         e.preventDefault();
@@ -2539,8 +3628,14 @@ export default function PlanPage() {
         return;
       }
       if (e.key === "f" || e.key === "F") fitView();
-      if (e.ctrlKey && e.key === "z") { e.preventDefault(); undo(); }
-      if (e.ctrlKey && (e.key === "y" || (e.shiftKey && e.key === "z"))) { e.preventDefault(); redo(); }
+      // Undo/Redo match the PHYSICAL key, so the shortcuts work on any layout.
+      // Both branches call the same actions the toolbar buttons use, and each
+      // keydown performs exactly one history operation.
+      const historyAction = matchHistoryShortcut(e);
+      if (historyAction) {
+        e.preventDefault();
+        if (historyAction === "undo") undo(); else redo();
+      }
       if (modKey(e) && (e.code === "KeyC" || e.key === "c" || e.key === "с")) { e.preventDefault(); copySel(); }
       if (modKey(e) && (e.code === "KeyV" || e.key === "v" || e.key === "м")) { e.preventDefault(); pasteSel(); }
       if (e.ctrlKey && !e.shiftKey && (e.key === "g" || e.key === "G")) { e.preventDefault(); groupSelection(); }
@@ -2562,9 +3657,18 @@ export default function PlanPage() {
       if (e.key === "Alt") { altSnapRef.current = false; setAltSnapOff(false); }
       if (e.key === " ") setSpacePan(false);
     };
+    const onWindowBlur = () => {
+      // PHASE 2F2.2 — magnets/sectors are interaction-only; never survive blur.
+      clearAngleMagnet();
+    };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
-    return () => { window.removeEventListener("keydown", onKeyDown); window.removeEventListener("keyup", onKeyUp); };
+    window.addEventListener("blur", onWindowBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onWindowBlur);
+    };
   });
 
   if (standalone && !draftMeta) {
@@ -2621,10 +3725,10 @@ export default function PlanPage() {
   const handleImportJson = async (file) => {
     try {
       const { plan: imported } = await readPlanFile(file);
-      // PHASE 0G corrective: импорт — production load path, доступен UI.
       const { plan: normalized, diagnostics } = normalizePlanResult(imported);
       resetHistory(normalized);
       setRoomDetectionDiagnostic(diagnostics[0] || null);
+      setRoomDiagnosticDismissed(false);
       setSaved(false);
     } catch (e) {
       alert("Не удалось импортировать: " + (e?.message || e));
@@ -2661,6 +3765,22 @@ export default function PlanPage() {
   const specSummary = plannerSpecSummary(plan);
 
   const onDblClick = (e) => {
+    // PHASE 2D — double click is the ONLY way to open wall properties.
+    //
+    // Handled here, at the canvas level, rather than inside the wall element:
+    // once a wall is selected its move hit-area covers the whole body, so the
+    // second press of a double click is delivered there and never reaches
+    // selectWall's e.detail check. The dblclick event still bubbles to the
+    // svg from whichever child received it, which is also why this works
+    // uniformly over the outline, the hatch and the transparent hit area.
+    const dblHit = tool === "select" ? pickPlanHit(toMM(e.clientX, e.clientY)) : null;
+    if (wallDoubleClickOpensInspector({ tool, hitColl: dblHit?.coll })) {
+      setSel({ coll: "walls", id: dblHit.id });
+      openWallInspector();
+      return;
+    }
+    // V2 has no chain to complete: a double click must never add a wall.
+    if (WALL_DRAW_V2 && tool === "wall") return;
     if (tool === "wall" && draft.length >= 1) {
       finishWallChain();
       return;
@@ -2693,21 +3813,174 @@ export default function PlanPage() {
     if (tool === "label") return beginLabelAnchor(mm);
     if (tool === "wall") {
       if (e.button !== 0) return;
-      const chainFrom = draft.length >= 1 ? draft[draft.length - 1] : null;
+      e.stopPropagation();
+      e.preventDefault();
+      try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+      if (WALL_DRAW_V2) {
+        // Primary button only; a new press always starts a brand-new wall.
+        if (!e.isPrimary) return;
+        const resolved = resolveWallDrawPoint(mm, { role: "start" });
+        wallDrawV2MovedRef.current = false;
+        wallDrawV2.begin({
+          point: resolved.point,
+          snap: wallDrawV2Meta(mm, resolved),
+          pointerId: e.pointerId,
+          now: Date.now(),
+        });
+        setDraftSnap(wallDrawV2SnapView(resolved));
+        setDraftAngleSnap(null);
+        setCursor(resolved.point);
+        return;
+      }
+      if (EXPOSE_PLANNER_E2E) {
+        geomProbeRef.current.wallGestureLog.push({
+          tag: "ENTER", t: Date.now(),
+          ptsLen: wallDraftStateRef.current?.pts?.length ?? -1,
+          gesturePhase: wallGestureRef.current?.phase,
+          pointerId: e.pointerId,
+        });
+      }
+
+      const wallsNow = resolvePlanWalls(plan);
+      const bodyHit = pickWallBodyHit(mm, wallsNow, plan.room);
+      const hostWallId = bodyHit?.wall?.id || null;
+
+      // Read the chain tip from the ref, not the `draft` React state array.
+      // wallDraftStateRef.current is updated synchronously by
+      // addWallDraftSegment/clearWallChain; `draft` is only updated by the
+      // matching setDraft call, which React may not have committed yet by the
+      // time the NEXT pointerdown fires under rapid clicking. Reading the
+      // stale state array then made this click look like the very first of a
+      // brand new chain (chainFrom wrongly null) even mid-rectangle, dropping
+      // segments and — worse — leaving the previous, unfinished draft to be
+      // silently picked up again by a LATER click, producing a false diagonal
+      // between two otherwise-unrelated rectangles.
+      const draftPts = wallDraftStateRef.current?.pts || [];
+      const chainFrom = draftPts.length >= 1 ? draftPts[draftPts.length - 1] : null;
+      // Seed gesture from existing chain tip so second click can commit.
+      if (chainFrom && wallGestureRef.current.phase === "idle") {
+        wallGestureRef.current = {
+          ...createWallGestureState(),
+          phase: "pending",
+          start: chainFrom,
+          end: chainFrom,
+          hostWallId: null,
+          screenX: e.clientX,
+          screenY: e.clientY,
+          startedAt: Date.now(),
+          buttonDown: false,
+        };
+      }
+
+      const gesture = wallGesturePointerDown(wallGestureRef.current, {
+        point: mm,
+        screenX: e.clientX,
+        screenY: e.clientY,
+        now: Date.now(),
+        hostWallId,
+      });
+      wallGestureRef.current = gesture.state;
+      if (EXPOSE_PLANNER_E2E) {
+        geomProbeRef.current.wallGestureLog.push({
+          t: Date.now(), action: gesture.action, point: mm, hostWallId, chainFrom,
+        });
+      }
+
+      if (gesture.action === "suppress") {
+        return;
+      }
+
+      if (gesture.action === "open-properties" && gesture.wallId) {
+        clearWallChain();
+        setSel({ coll: "walls", id: gesture.wallId });
+        setPropsTab("props");
+        return;
+      }
+
+      if (gesture.action === "commit" && gesture.start && gesture.end) {
+        // Every corner placed by a discrete click (not a real-time drag
+        // preview) shares the freshChainOrigin tight vertex radius: a
+        // rectangle's later corners can land just as close (~700mm at a
+        // whole-plan zoom) to an unrelated, already-closed shape's node as
+        // its first corner can — see the freshChainOrigin comment in
+        // snapEngine.js.
+        const { pt, snap, fromAdjust } = computeWallSnap(gesture.end, gesture.start, { freshChainOrigin: true });
+        const start = fromAdjust || gesture.start;
+        // Closing a chain by clicking back on its own start point (no drag —
+        // this is the pure click-click-click drawing flow) must close the
+        // chain exactly like the drag-release path below already does. This
+        // check was missing here: computeWallSnap correctly recognised the
+        // click as snap.kind === "close", but this branch only ever tested
+        // endsOnWall/!chainFrom, neither of which is true for a closing click
+        // on a chain's own start point (no host wall exists yet on a plan's
+        // first chain, and chainFrom is always truthy at that point). The
+        // chain therefore never closed: draft kept accumulating forever,
+        // walls were never committed, and the next rectangle's first click
+        // was silently absorbed as a continuation of the still-open chain —
+        // producing the false diagonal between consecutive shapes.
+        if (snap?.kind === "close" && wallChainStartRef.current) {
+          const closeEnd = { x: wallChainStartRef.current.x, y: wallChainStartRef.current.y };
+          addWallDraftSegment(start, closeEnd, fromAdjust);
+          wallDraftStateRef.current = { ...wallDraftStateRef.current, closedLoop: true };
+          finishWallChain();
+          return;
+        }
+        if (Math.hypot(pt.x - start.x, pt.y - start.y) >= WALL_DRAW_MIN_LEN_MM) {
+          addWallDraftSegment(start, pt, fromAdjust);
+          setDraftSnap(snap);
+          const hitKind = snap?.kind || snap?.type;
+          const endsOnWall = hitKind === "wall-first-hit"
+            || hitKind === "wall-t-end"
+            || hitKind === "wall-end"
+            || hitKind === "WALL_LINE"
+            || hitKind === "WALL_MID"
+            || hitKind === "WALL_END"
+            || snap?.firstIntersection
+            || snap?.kind === "wall-first-hit"
+            || !!hostWallId;
+          if (endsOnWall || !chainFrom) {
+            finishWallChain();
+          } else {
+            wallDrawRef.current = null;
+            wallGestureRef.current = {
+              ...createWallGestureState(),
+              phase: "pending",
+              start: pt,
+              end: pt,
+              screenX: e.clientX,
+              screenY: e.clientY,
+              startedAt: Date.now(),
+            };
+            setDraft((d) => (d.length ? d : [pt, pt]));
+          }
+        }
+        return;
+      }
+
+      // start-pending / restart-pending
       let from;
-      if (chainFrom) {
+      if (chainFrom && gesture.action !== "restart-pending") {
         from = chainFrom;
         wallDraftStateRef.current = wallDraftContinueFrom(wallDraftStateRef.current, from);
       } else {
-        const computed = computeWallSnap(mm, null);
+        // A brand-new, unconnected chain origin (no draft continuation
+        // context yet) must not use the generous, screen-invariant vertex
+        // magnet meant for actively continuing a draft — see the
+        // freshChainOrigin comment in snapEngine.js.
+        const computed = computeWallSnap(mm, null, { freshChainOrigin: true });
         from = computed.pt;
         wallChainStartRef.current = from;
         wallDraftStateRef.current = wallDraftStart(createWallDraftState(), from);
         setDraftSnap(computed.snap);
+        wallGestureRef.current = {
+          ...wallGestureRef.current,
+          start: from,
+          end: from,
+          hostWallId,
+        };
       }
       wallDrawRef.current = { from };
-      setDraft((d) => (chainFrom ? d : [from, from]));
-      try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+      setDraft((d) => (chainFrom && gesture.action !== "restart-pending" ? d : [from, from]));
       return;
     }
     if (tool === "line") {
@@ -2722,6 +3995,37 @@ export default function PlanPage() {
     if (tool === "measure") {
       if (e.button !== 0) return;
       const st = measureDrawRef.current;
+      if (measureKind === "angle") {
+        if (!st) {
+          const { pt, snap, guides: snapGuides = [] } = computeRulerPt(mm);
+          measureDrawRef.current = { stage: 1, vertex: pt };
+          setMeasure([pt]);
+          setMeasureOffsetPt(null);
+          setRulerSnap(snap);
+          setGuides(snapGuides);
+          return;
+        }
+        if (st.stage === 1) {
+          const { pt, snap, guides: snapGuides = [] } = computeRulerPt(mm, st.vertex);
+          if (Math.hypot(pt.x - st.vertex.x, pt.y - st.vertex.y) < 20) return;
+          measureDrawRef.current = { stage: 2, vertex: st.vertex, ray1: pt };
+          setMeasure([st.vertex, pt]);
+          setRulerSnap(snap);
+          setGuides(snapGuides);
+          return;
+        }
+        if (st.stage === 2) {
+          const { pt, snap, guides: snapGuides = [] } = computeRulerPt(mm, st.vertex);
+          if (Math.hypot(pt.x - st.vertex.x, pt.y - st.vertex.y) < 20) return;
+          commitAngleDimension(st.vertex, st.ray1, pt);
+          measureDrawRef.current = null;
+          setMeasure([]);
+          setMeasureOffsetPt(null);
+          setRulerSnap(snap);
+          setGuides(snapGuides);
+        }
+        return;
+      }
       if (!st) {
         const { pt, snap, guides: snapGuides = [] } = computeRulerPt(mm);
         measureDrawRef.current = { stage: 1, p1: pt };
@@ -2743,7 +4047,7 @@ export default function PlanPage() {
       }
       if (st.stage === 2) {
         const { pt, snap, guides: snapGuides = [] } = computeRulerPt(mm);
-        commitDimension(st.p1, st.p2, pt);
+        commitDimension(st.p1, st.p2, pt, measureKind);
         measureDrawRef.current = null;
         setMeasure([]);
         setMeasureOffsetPt(null);
@@ -2772,10 +4076,20 @@ export default function PlanPage() {
       return;
     }
     if (tool === "select" && e.button === 0) {
+      const dims = resolvePlanDimensions(plan, { dimensionDisplayMode }).dimensions;
+      const dimHit = pickDimensionHit(dims, mm, { zoom: view.zoom });
       const wallHit = pickWallBodyHit(mm, resolvePlanWalls(plan), plan.room);
+      if (dimHit && (!wallHit || dimHit.screenDistancePx <= 12)) {
+        setSelection({ coll: "dimensions", ids: [dimHit.id] });
+        return;
+      }
       if (wallHit) { selectWall(e, wallHit.wall); return; }
     }
     if (tool === "select" && bgClick && e.button === 0) {
+      // Outside click closes the floating length editor but keeps wall selection.
+      if (floatEditorOpen) {
+        closeFloatEditor();
+      }
       if (e.shiftKey) {
         dragRef.current = {
           mode: "marquee",
@@ -2799,11 +4113,72 @@ export default function PlanPage() {
     }
     const raw = toMM(e.clientX, e.clientY);
     let mm = raw;
-    if (wallDrawRef.current && tool === "wall") {
-      const { from } = wallDrawRef.current;
+    if (WALL_DRAW_V2 && tool === "wall" && wallDrawV2.isActive()) {
+      // Transient preview only: no setPlan/replacePlan/commitPlan/commitFrom,
+      // no room sync, no autosave. Derived rooms and automatic dimensions
+      // refresh on release, not on pointermove.
+      const txId = wallDrawV2.getTxId();
+      // The end is resolved against the session's own resolved start, with the
+      // same bounded eligibility the start used — start/end parity by
+      // construction. Modifiers are re-read every move, so Alt/Ctrl/Shift take
+      // effect on the next preview.
+      const start = wallDrawV2.getPreview()?.start || raw;
+      // PHASE 2D: clip before previewing, so the band the user sees is the
+      // wall the release will build.
+      let resolved = clipWallDrawV2End(start, resolveWallDrawPoint(raw, { role: "end", from: start }));
+      // PHASE 2F2.2 MODE A — relative magnets while drawing from a real node.
+      const magnetCtx = resolveDraftMagnetContext(plan, start);
+      if (magnetCtx && !altSnapRef.current && !resolved.clip?.clipped) {
+        const magnet = resolveAngleMagnet({
+          pivot: magnetCtx.pivot,
+          rawPoint: resolved.point,
+          referenceAngleDeg: magnetCtx.referenceAngleDeg,
+          previousSnapAngleDeg: angleMagnetSnapRef.current,
+        });
+        angleMagnetSnapRef.current = magnet.previousSnapAngleDeg;
+        resolved = {
+          ...resolved,
+          point: magnet.point,
+          kind: magnet.snapped ? "angle" : resolved.kind,
+          guides: [],
+        };
+        setAngleMagnetPreview({
+          ...buildAngleMagnetPreview({ context: magnetCtx, magnet, plan: null }),
+          angles: buildDraftMovementAngles(plan, magnetCtx.pivotNodeId, magnet.point),
+        });
+      } else {
+        clearAngleMagnet();
+      }
+      wallDrawV2MovedRef.current = true;
+      wallDrawV2.preview(txId, {
+        point: resolved.point,
+        snap: wallDrawV2Meta(raw, resolved),
+        pointerId: e.pointerId,
+      });
+      setDraftSnap(wallDrawV2SnapView(resolved));
+      setDraftAngleSnap(
+        resolved.kind === "angle" || angleMagnetSnapRef.current != null
+          ? { isSnapped: true, snappedAngle: angleMagnetSnapRef.current }
+          : null,
+      );
+      setCursor(resolved.point);
+      return;
+    }
+    if ((wallDrawRef.current || (tool === "wall" && wallGestureRef.current.phase !== "idle")) && tool === "wall") {
+      const from = wallDrawRef.current?.from
+        || wallGestureRef.current.start
+        || (draft.length ? draft[draft.length - 1] : null);
+      if (!from) {
+        // fall through
+      } else {
       const { pt, snap, angleSnap, fromAdjust } = computeWallSnap(raw, from);
       const start = fromAdjust || from;
-      if (fromAdjust) wallDrawRef.current = { from: start };
+      if (fromAdjust) {
+        if (wallDrawRef.current) wallDrawRef.current = { from: start };
+        wallGestureRef.current = { ...wallGestureRef.current, start };
+      }
+      const moved = wallGesturePointerMove(wallGestureRef.current, pt);
+      wallGestureRef.current = moved.state;
       setDraftSnap(snap);
       setDraftAngleSnap(angleSnap);
       const base = wallDraftStateRef.current.pts.length
@@ -2811,6 +4186,7 @@ export default function PlanPage() {
         : [start];
       setDraft([...base.slice(0, -1), base[base.length - 1] || start, pt]);
       mm = pt;
+      }
     } else if (structuralDrawRef.current && tool === "structural") {
       const { from } = structuralDrawRef.current;
       const { pt, snap, angleSnap } = computeDraftPt(raw, from);
@@ -2819,14 +4195,29 @@ export default function PlanPage() {
       setDraft([from, pt]);
       mm = pt;
     } else if (measureDrawRef.current && tool === "measure") {
-      if (measureDrawRef.current.stage === 1) {
-        const { p1 } = measureDrawRef.current;
+      const st = measureDrawRef.current;
+      if (measureKind === "angle") {
+        if (st.stage === 1 && st.vertex) {
+          const { pt, snap, guides: snapGuides = [] } = computeRulerPt(raw, st.vertex);
+          setMeasure([st.vertex, pt]);
+          setRulerSnap(snap);
+          setGuides(snapGuides);
+          mm = pt;
+        } else if (st.stage === 2 && st.vertex && st.ray1) {
+          const { pt, snap, guides: snapGuides = [] } = computeRulerPt(raw, st.vertex);
+          setMeasure([st.vertex, st.ray1, pt]);
+          setRulerSnap(snap);
+          setGuides(snapGuides);
+          mm = pt;
+        }
+      } else if (st.stage === 1) {
+        const { p1 } = st;
         const { pt, snap, guides: snapGuides = [] } = computeRulerPt(raw, p1);
         setMeasure([p1, pt]);
         setRulerSnap(snap);
         setGuides(snapGuides);
         mm = pt;
-      } else if (measureDrawRef.current.stage === 2) {
+      } else if (st.stage === 2) {
         const { pt, snap, guides: snapGuides = [] } = computeRulerPt(raw);
         setMeasureOffsetPt(pt);
         setRulerSnap(snap);
@@ -2847,7 +4238,21 @@ export default function PlanPage() {
     setCursor(mm);
     const d = dragRef.current;
     if (!d) return;
-    if (d.mode === "pan") setView((v) => ({ ...v, panX: d.px + (e.clientX - d.sx), panY: d.py + (e.clientY - d.sy) }));
+    if (
+      shouldBlockWallGeometryDrag(tool)
+      && (
+        d.mode === "move-wall-seg"
+        || d.mode === "move-wall-seg-pending"
+        || (d.mode === "node" && d.coll === "walls")
+      )
+    ) {
+      dragRef.current = null;
+      return;
+    }
+    if (d.mode === "pan") {
+      markViewportManual();
+      setView((v) => ({ ...v, panX: d.px + (e.clientX - d.sx), panY: d.py + (e.clientY - d.sy) }));
+    }
     else if (d.mode === "rotate") {
       const ang = (Math.atan2(mm.y - d.cy, mm.x - d.cx) * 180) / Math.PI;
       let next = Math.round(d.baseAngle + (ang - d.startAngle));
@@ -3064,8 +4469,11 @@ export default function PlanPage() {
         dragRef.current = { ...d, mode: "move-wall-seg" };
       }
     } else if (d.mode === "move-wall-seg") {
-      const wall = resolvePlanWalls(plan).find((w) => w.id === d.id);
-      if (!wall || wall.pts.length !== 2 || !d.origPts?.length) return;
+      // PHASE 1A: preview only — committed plan, history and autosave are
+      // untouched until pointerup commits the transaction.
+      const dragPlan = wallEditDragPlan(d);
+      const wall = resolvePlanWalls(dragPlan).find((w) => w.id === d.id);
+      if (!wall || wall.pts.length !== 2 || !d.origPts?.length || !d.txId) return;
       let dx = mm.x - d.dx;
       let dy = mm.y - d.dy;
       if (dragShiftOn(shiftRef.current, altSnapRef.current)) {
@@ -3079,41 +4487,60 @@ export default function PlanPage() {
       const move = dx * nx + dy * ny;
       const newA = { x: fineMm(a0.x + nx * move), y: fineMm(a0.y + ny * move) };
       const newB = { x: fineMm(b0.x + nx * move), y: fineMm(b0.y + ny * move) };
-      // PHASE 1A-2B1: финальный target (для commit на pointer up) считается
-      // от origPts + delta каждый кадр, а не накапливается — тот же newA/newB,
-      // что уже применяется в preview ниже, просто сохраняем последнее
-      // значение в dragRef для onUp.
-      dragRef.current = { ...d, finalA: newA, finalB: newB };
-      replacePlan((p) => {
-        const next = applyNetworkWallSegMove(p, d.id, newA, newB);
-        const resolved = resolvePlanWalls(next);
-        return syncAutoZones({
-          ...next,
-          items: refreshWallMountedItems(p.items, resolved, p.room, d.id),
-        });
-      });
+      wallEdit.preview(d.txId, wallSegMovePreviewPlan(
+        d.basePlan,
+        d.id,
+        newA,
+        newB,
+        d.endpointAttachments,
+      ));
     } else if (d.mode === "node") {
       if (d.coll === "walls") {
-        const wall = resolvePlanWalls(plan).find((w) => w.id === d.id);
+        // PHASE 1A: preview only — see move-wall-seg above.
+        const dragPlan = wallEditDragPlan(d);
+        const wall = resolvePlanWalls(dragPlan).find((w) => w.id === d.id);
         let pt = { x: mm.x, y: mm.y };
         if (wall?.pts?.length >= 2) {
           const anchorIdx = d.idx > 0 ? d.idx - 1 : 1;
           const anchor = wall.pts[anchorIdx];
           pt = constrainAxisPoint(anchor, pt, dragShiftOn(shiftRef.current, altSnapRef.current));
         }
-        const resolved = resolvePlanWalls(plan);
-        const snapped = snapWallPoint(pt, resolved, plan.room, view.zoom, snapOn && display.snapWalls !== false && !altSnapRef.current, snapStep);
-        // PHASE 1A-2B1: последняя абсолютная target-точка — для commit на
-        // pointer up (см. onUp), preview ниже не меняется.
-        dragRef.current = { ...d, finalPoint: { x: snapped.x, y: snapped.y } };
-        replacePlan((p) => {
-          const next = applyNetworkNodeAtWall(p, d.id, d.idx, { x: snapped.x, y: snapped.y });
-          const rw = resolvePlanWalls(next);
-          return syncAutoZones({
-            ...next,
-            items: refreshWallMountedItems(p.items, rw, p.room),
+        const resolved = resolvePlanWalls(dragPlan);
+        let snapped = snapWallPoint(pt, resolved, dragPlan.room, view.zoom, snapOn && display.snapWalls !== false && !altSnapRef.current, snapStep);
+        // PHASE 2F2.2 MODE A — relative 45°/90° magnets about the fixed pivot.
+        const magnetCtx = resolveEndpointMagnetContext(dragPlan, d.id, d.idx);
+        if (magnetCtx && !altSnapRef.current) {
+          const magnet = resolveAngleMagnet({
+            pivot: magnetCtx.pivot,
+            rawPoint: snapped,
+            referenceAngleDeg: magnetCtx.referenceAngleDeg,
+            previousSnapAngleDeg: angleMagnetSnapRef.current,
           });
-        });
+          angleMagnetSnapRef.current = magnet.previousSnapAngleDeg;
+          snapped = magnet.point;
+          if (!d.txId) return;
+          const previewPlan = wallNodeMovePreviewPlan(d.basePlan, d, snapped);
+          wallEdit.preview(d.txId, previewPlan);
+          const angles = buildAngleMagnetPreview({
+            context: magnetCtx,
+            magnet,
+            plan: previewPlan,
+            movingWallId: d.id,
+          });
+          // Prefer live sectors from the snapped preview geometry.
+          if (!angles.angles?.length) {
+            angles.angles = buildDraftMovementAngles(
+              previewPlan,
+              magnetCtx.pivotNodeId,
+              snapped,
+            );
+          }
+          setAngleMagnetPreview(angles);
+          return;
+        }
+        clearAngleMagnet();
+        if (!d.txId) return;
+        wallEdit.preview(d.txId, wallNodeMovePreviewPlan(d.basePlan, d, snapped));
       } else {
         const snapped = snapLinePoint(
           { x: mm.x, y: mm.y },
@@ -3142,25 +4569,120 @@ export default function PlanPage() {
   };
 
   const onUp = (e) => {
-    if (wallDrawRef.current && tool === "wall") {
-      const { from } = wallDrawRef.current;
+    if (WALL_DRAW_V2 && tool === "wall" && wallDrawV2.isActive()) {
+      // One release → at most one wall → idle. The wall tool stays active and
+      // nothing is left pending, so the next pointerdown starts a fresh wall.
+      const txId = wallDrawV2.getTxId();
+      // A press released without any pointermove never previewed an endpoint.
+      // Resolve the release point once, through the same resolver — an endpoint
+      // the user already saw is never re-resolved here.
+      if (!wallDrawV2MovedRef.current) {
+        const raw = toMM(e.clientX, e.clientY);
+        const start = wallDrawV2.getPreview()?.start || null;
+        const resolved = clipWallDrawV2End(start, resolveWallDrawPoint(raw, { role: "end", from: start }));
+        wallDrawV2.preview(txId, {
+          point: resolved.point,
+          snap: wallDrawV2Meta(raw, resolved),
+          pointerId: e.pointerId,
+        });
+        wallDrawV2MovedRef.current = true;
+      }
+      wallDrawV2.commit(txId);
+      wallDrawV2MovedRef.current = false;
+      setDraftSnap(null);
+      setDraftAngleSnap(null);
+      clearAngleMagnet();
+      try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
+    if (EXPOSE_PLANNER_E2E && tool === "wall") {
+      geomProbeRef.current.wallGestureLog.push({
+        tag: "UP-ENTER", t: Date.now(),
+        ptsLen: wallDraftStateRef.current?.pts?.length ?? -1,
+        gesturePhase: wallGestureRef.current?.phase,
+        buttonDown: wallGestureRef.current?.buttonDown,
+        hasWallDrawRef: !!wallDrawRef.current,
+        pointerId: e.pointerId,
+      });
+    }
+    if (tool === "wall" && (wallDrawRef.current || wallGestureRef.current.phase !== "idle")) {
+      const from = wallDrawRef.current?.from || wallGestureRef.current.start;
       wallDrawRef.current = null;
-      const raw = toMM(e.clientX, e.clientY);
-      const { pt, snap, fromAdjust } = computeWallSnap(raw, from);
-      const start = fromAdjust || from;
-      if (snap?.kind === "close" && wallChainStartRef.current) {
-        const end = { x: wallChainStartRef.current.x, y: wallChainStartRef.current.y };
-        addWallDraftSegment(start, end, fromAdjust);
-        wallDraftStateRef.current = { ...wallDraftStateRef.current, closedLoop: true };
-        finishWallChain();
-      } else if (Math.hypot(pt.x - start.x, pt.y - start.y) >= 50) {
-        addWallDraftSegment(start, pt, fromAdjust);
-        setDraftSnap(snap);
-      } else if (
-        wallChainStartRef.current &&
-        Math.hypot(from.x - wallChainStartRef.current.x, from.y - wallChainStartRef.current.y) < 5
-      ) {
-        clearWallChain();
+      if (from) {
+        const raw = toMM(e.clientX, e.clientY);
+        const { pt, snap, fromAdjust } = computeWallSnap(raw, from);
+        const start = fromAdjust || from;
+        const len = Math.hypot(pt.x - start.x, pt.y - start.y);
+        const endsOnWall = (() => {
+          const hitKind = snap?.kind || snap?.type;
+          return hitKind === "wall-first-hit"
+            || hitKind === "wall-t-end"
+            || hitKind === "wall-end"
+            || hitKind === "WALL_LINE"
+            || hitKind === "WALL_MID"
+            || hitKind === "WALL_END"
+            || !!snap?.firstIntersection
+            || snap?.kind === "wall-first-hit";
+        })();
+        // Whether the user actually dragged must be measured from the RAW
+        // (unsnapped) pointer movement, never from `len` (the post-snap
+        // distance). The snap engine can project a near-zero release onto a
+        // "wall-end"/minimum-length candidate — e.g. a plain click, no real
+        // movement at all, still snapped to len === WALL_DRAW_MIN_LEN_MM — so
+        // gating on the snapped length turned every ordinary click starting a
+        // NEW chain into a false drag-release: onUp fired a premature
+        // finishWallChain() with only that single point, which silently reset
+        // the chain via clearWallChain(), swallowing the click the user meant
+        // to register.
+        const rawLen = Math.hypot(raw.x - from.x, raw.y - from.y);
+        const wasDragging = !!wallGestureRef.current.buttonDown && rawLen >= WALL_DRAW_MIN_LEN_MM;
+        const up = wallGesturePointerUp(wallGestureRef.current, {
+          point: pt,
+          commitOnRelease: wasDragging,
+        });
+        wallGestureRef.current = up.state;
+        if (EXPOSE_PLANNER_E2E) {
+          geomProbeRef.current.wallGestureLog.push({
+            tag: "UP-RESULT", t: Date.now(), action: up.action,
+            wasDragging, len, rawLen, endsOnWall, snapKind: snap?.kind || snap?.type || null,
+            resultPhase: up.state?.phase, raw, from, buttonDown: wallGestureRef.current?.buttonDown,
+          });
+        }
+
+        if (up.action === "commit" && up.start && up.end) {
+          const endPt = up.end;
+          if (snap?.kind === "close" && wallChainStartRef.current) {
+            const end = { x: wallChainStartRef.current.x, y: wallChainStartRef.current.y };
+            addWallDraftSegment(start, end, fromAdjust);
+            wallDraftStateRef.current = { ...wallDraftStateRef.current, closedLoop: true };
+            finishWallChain();
+          } else if (Math.hypot(endPt.x - start.x, endPt.y - start.y) >= WALL_DRAW_MIN_LEN_MM) {
+            addWallDraftSegment(start, endPt, fromAdjust);
+            setDraftSnap(snap);
+            if (endsOnWall) {
+              finishWallChain();
+            } else {
+              wallGestureRef.current = {
+                ...createWallGestureState(),
+                phase: "pending",
+                start: endPt,
+                end: endPt,
+                screenX: e.clientX,
+                screenY: e.clientY,
+                startedAt: Date.now(),
+              };
+              setDraft(wallDraftStateRef.current.pts.length
+                ? wallDraftStateRef.current.pts
+                : [endPt, endPt]);
+            }
+          }
+        } else if (up.action === "keep-pending") {
+          setDraftSnap(snap);
+          const base = wallDraftStateRef.current.pts.length
+            ? wallDraftStateRef.current.pts
+            : [start];
+          setDraft([...base.slice(0, -1), base[base.length - 1] || start, pt]);
+        }
       }
     }
     if (structuralDrawRef.current && tool === "structural") {
@@ -3188,64 +4710,136 @@ export default function PlanPage() {
     } else if (d?.mode === "move" && d.coll === "labels") {
       const obj = plan.labels.find((o) => o.id === d.id);
       if (obj && !obj.pinned) updateObj("labels", obj.id, { pinned: true });
-    } else if (d?.mode === "move-wall-seg" && d.basePlan && d.finalA && d.finalB) {
-      // PHASE 1A-2B1: финальный commit — не commitFrom(preview-plan), а
-      // geometry command, пересчитанный от committed d.basePlan + final
-      // target. Preview мог накопить промежуточные side-effects
-      // (refreshWallMountedItems/syncAutoZones на каждый кадр) — commit
-      // должен считать заново, а не наследовать их. Restore синхронный:
-      // getCurrentPlan() внутри dispatcher сразу увидит basePlan.
-      //
-      // ВАЖНО: restore здесь делается через setPlan, а не replacePlan.
-      // HistoryModel.replace() выставляет skipNext=true и не сбрасывает его;
-      // preview (см. onMove) уже вызвал replace() как минимум один раз, так
-      // что skipNext уже true к этому моменту. Если восстановить basePlan
-      // ЕЩЁ одним replace(), skipNext останется true, и следующий
-      // commitPlan()->HistoryModel.mutate() решит, что чекпоинт уже сделан,
-      // и молча пропустит его — ноль checkpoint вместо одного (проверено
-      // тестом, см. tests/plannerGeometryDragDispatcher.test.js). setPlan
-      // (mutate) для restore, наоборот, УЖЕ checkpoint-free при skipNext=true
-      // (унаследованном от preview) и корректно сбрасывает флаг, так что
-      // последующий commitPlan честно создаёт один checkpoint.
-      if (getCurrentPlan() !== d.basePlan) setPlan(() => d.basePlan);
-      runGeometryCommand({ type: "wall.moveSegment", wallId: d.id, a: d.finalA, b: d.finalB });
-    } else if (d?.mode === "node" && d.coll === "walls" && d.basePlan && d.finalPoint) {
-      if (getCurrentPlan() !== d.basePlan) setPlan(() => d.basePlan);
-      runGeometryCommand({ type: "node.move", wallId: d.id, nodeIdx: d.idx, point: d.finalPoint });
+    } else if (
+      d?.mode === "move-wall-seg"
+      || d?.mode === "move-wall-seg-pending"
+      || (d?.mode === "node" && d.coll === "walls")
+    ) {
+      // One transaction → one room sync → one history step → one autosave.
+      // A press that never moved has no preview and commits nothing.
+      if (d.txId) wallEdit.commit(d.txId);
     }
+    // Safety net: never leave a transaction open behind a released pointer.
+    if (wallEdit.isActive()) wallEdit.cancel();
     dragRef.current = null;
     rackSnapStickyRef.current = { x: null, y: null, atX: null, atY: null };
     objectSnapStickyRef.current = { x: null, y: null, atX: null, atY: null };
     setMarquee(null);
     setGuides([]);
+    clearAngleMagnet();
     setHoverWallNode(null);
+    setActiveGripKey(null);
     try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
+
+  /**
+   * PHASE 1A — a drag that dies without pointerup (browser cancel, capture
+   * stolen by another element) must drop its preview, never half-commit it.
+   * Fires after onUp's releasePointerCapture too, where the transaction is
+   * already closed and this is a no-op.
+   */
+  const onPointerAbort = () => {
+    // A V2 gesture aborted before release must drop its preview. After a
+    // commit the session is already idle, so the trailing lostpointercapture
+    // that follows every pointerup cannot undo the wall just created.
+    cancelWallDrawV2();
+    clearAngleMagnet();
+    if (!wallEdit.isActive()) return;
+    wallEdit.cancel();
+    dragRef.current = null;
+    setHoverWallNode(null);
+    setActiveGripKey(null);
+    setGuides([]);
   };
 
   const onWheel = (e) => {
     e.preventDefault();
-    const r = svgRef.current.getBoundingClientRect();
-    const mx = e.clientX - r.left;
-    const my = e.clientY - r.top;
-    const mmx = (mx - view.panX) / view.zoom;
-    const mmy = (my - view.panY) / view.zoom;
-    const nz = clamp(view.zoom * (e.deltaY < 0 ? 1.12 : 0.89), 0.015, 3);
-    setView({ zoom: nz, panX: mx - mmx * nz, panY: my - mmy * nz });
+    markViewportManual();
+    const r = svgRef.current?.getBoundingClientRect();
+    if (!r) return;
+    // LIVE4 camera fast path: coalesce wheel bursts to one setView per frame.
+    // Latest cursor wins; factors multiply within the same animation frame.
+    const prev = wheelPendingRef.current;
+    const factor = (e.deltaY < 0 ? 1.12 : 0.89) * (prev?.factor || 1);
+    wheelPendingRef.current = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      left: r.left,
+      top: r.top,
+      factor,
+    };
+    if (wheelRafRef.current) return;
+    wheelRafRef.current = requestAnimationFrame(() => {
+      wheelRafRef.current = 0;
+      const p = wheelPendingRef.current;
+      wheelPendingRef.current = null;
+      if (!p) return;
+      setView((v) => {
+        const mx = p.clientX - p.left;
+        const my = p.clientY - p.top;
+        const next = cursorCenteredZoomView(v, {
+          screenX: mx,
+          screenY: my,
+          nextZoom: v.zoom * p.factor,
+        });
+        return { zoom: next.zoom, panX: next.panX, panY: next.panY };
+      });
+    });
   };
 
   const z = view.zoom;
   const k = 1 / z;
-  const resolvedWalls = useMemo(() => resolvePlanWalls(plan), [plan.walls, plan.nodes]);
+  // Wall geometry and room validation follow the effective plan so a drag
+  // preview is visible and the hatch never lags behind moved walls.
+  // Finalized auto-dimensions deliberately stay on the committed plan (LIVE3) —
+  // see runtimeDimensionData below. Auto dims are never written into
+  // plan.dimensions; committed plan + history stay unchanged until release.
+  const resolvedWalls = useMemo(
+    () => resolvePlanWalls(effectivePlan),
+    [effectivePlan.walls, effectivePlan.nodes],
+  );
   const weldedWalls = useMemo(() => weldWallNodes(resolvedWalls), [resolvedWalls]);
+  // LIVE3: finalized dimensions from committed plan only — never rebuild the
+  // full inventory from wallEditPreview / length-preview each pointer frame.
   const runtimeDimensionData = useMemo(
     () => resolvePlanDimensions(plan, { dimensionDisplayMode }),
-    [plan.walls, plan.nodes, plan.items, plan.zones, plan.room, plan.dimensions, dimensionDisplayMode],
+    [
+      plan.walls,
+      plan.nodes,
+      plan.items,
+      plan.zones,
+      plan.room,
+      plan.dimensions,
+      plan.rooms,
+      dimensionDisplayMode,
+    ],
   );
   const runtimeRoomWarnings = useMemo(
-    () => validateRooms(plan, plan.rooms || []),
-    [plan.rooms, plan.items, plan.links, plan.walls],
+    () => validateRooms(effectivePlan, renderRooms),
+    [renderRooms, effectivePlan.items, effectivePlan.links, effectivePlan.walls],
   );
   const runtimeDimensions = runtimeDimensionData.dimensions;
+  // Read-only: auto dimensions are runtime-derived, never stored in plan, so the
+  // acceptance run needs them published alongside the plan snapshot.
+  useEffect(() => {
+    if (!EXPOSE_PLANNER_E2E || typeof window === "undefined" || !window.__dgPlanner) return;
+    window.__dgPlanner.runtimeDimensions = runtimeDimensions;
+    window.__dgPlanner.runtimeDimensionWarnings = runtimeDimensionData.validationWarnings || [];
+    // Room polygons the dimension pipeline actually measured — lets the
+    // acceptance run assert inside/outside lane placement without re-deriving.
+    window.__dgPlanner.runtimeRoomContours = (runtimeDimensionData.contours?.roomContours || [])
+      .map((rc) => ({
+        roomId: rc.roomId || null,
+        polygon: (rc.roomPolygon || []).map((p) => ({ x: p.x, y: p.y })),
+        segmentAxes: (rc.segments || []).map((s) => s.axis),
+      }));
+    // During a wall transaction `plan` remains the committed snapshot while
+    // `effectivePlan` is the topology actually rendered by the preview.
+    window.__dgPlanner.effectivePlan = effectivePlan;
+    // plan.walls[].pts is legacy/derived and absent on a freshly loaded plan;
+    // publish the resolved walls the canvas actually renders.
+    window.__dgPlanner.resolvedWalls = resolvedWalls;
+  }, [runtimeDimensions, runtimeDimensionData, effectivePlan, resolvedWalls]);
   const useWallChainDims = planHasDrawnWalls(weldedWalls);
   const sel = selection?.ids?.length === 1 ? { coll: selection.coll, id: selection.ids[0] } : null;
   const findSelObject = (coll, id) => {
@@ -3371,8 +4965,19 @@ export default function PlanPage() {
     };
   };
   const startWallMidNode = (e, wall) => {
+    if (shouldBlockWallGeometryDrag(tool)) {
+      if (EXPOSE_PLANNER_E2E) geomProbeRef.current.moveWallBlocked += 1;
+      return;
+    }
+    if (EXPOSE_PLANNER_E2E) geomProbeRef.current.moveWallCalls += 1;
     if (!wall?.pts || wall.pts.length !== 2) return;
     e.stopPropagation();
+    // NB (PHASE 2D): the second press of a double click lands here, not on the
+    // wall body — once a wall is selected its move hit-area covers it — and it
+    // arrives with detail 0, so the double click cannot be recognised from
+    // this press. It is recognised in onDblClick, which still fires on the
+    // <svg>. Starting a pending drag here is harmless: without pointer motion
+    // it never becomes a move.
     e.preventDefault();
     if (tool === "erase") {
       deleteHit({ coll: "walls", id: wall.id });
@@ -3385,6 +4990,8 @@ export default function PlanPage() {
       id: wall.id,
       origPts: wall.pts.map((p) => ({ x: p.x, y: p.y })),
       basePlan: plan,
+      endpointAttachments: classifyWallSegmentAttachments(plan, wall.id),
+      txId: wallEdit.begin(plan, "wall-seg", { wallId: wall.id }),
       sx: e.clientX,
       sy: e.clientY,
       dx: mm.x,
@@ -3424,6 +5031,12 @@ export default function PlanPage() {
   };
 
   const selectWall = (e, wall) => {
+    if (shouldBlockWallGeometryDrag(tool)) {
+      // Wall tool owns pointer sequence — do not select/drag host geometry.
+      if (EXPOSE_PLANNER_E2E) geomProbeRef.current.selectWallBlocked += 1;
+      return;
+    }
+    if (EXPOSE_PLANNER_E2E) geomProbeRef.current.selectWallCalls += 1;
     if (tool === "erase") {
       deleteHit({ coll: "walls", id: wall.id });
       return;
@@ -3435,21 +5048,40 @@ export default function PlanPage() {
     // прежних 320px/zoom с безусловным приоритетом узла.
     const hit = hitTestWallInteraction({ wall, worldPoint: mm, zoom: view.zoom, allWalls: walls, room: plan.room });
     if (e.detail >= 2) {
-      setSelection({ coll: "walls", ids: wallContourIdsFor(wall, walls) });
+      // LIVE4: double-click opens the compact editor (not the large inspector).
+      closeWallInspector();
+      setSelection({
+        coll: "walls",
+        ids: wallContourIdsFor(wall, walls),
+        nodeIdx: hit.kind === "node" ? hit.idx : -1,
+      });
+      setFloatEditorOpen(true);
+      setFloatFocusReq((n) => n + 1);
+      setExactLengthPreview(null);
       return;
     }
     if (e.ctrlKey || e.metaKey) {
       setSelection({ coll: "walls", ids: wallChainIdsFor(wall, walls) });
       return;
     }
+    // LIVE4: single click selects the wall and shows faces/grips/arrows.
+    // Compact editor opens via Enter / double-click / explicit action only.
+    closeWallInspector();
+    setFloatEditorOpen(false);
     setSel({
       coll: "walls",
       id: wall.id,
       nodeIdx: hit.kind === "node" ? hit.idx : (hit.kind === "segment" ? -1 : undefined),
     });
+    setExactLengthPreview(null);
   };
 
   const startNode = (e, coll, oid, idx) => {
+    if (shouldBlockWallGeometryDrag(tool)) {
+      if (EXPOSE_PLANNER_E2E) geomProbeRef.current.moveNodeBlocked += 1;
+      return;
+    }
+    if (EXPOSE_PLANNER_E2E) geomProbeRef.current.moveNodeCalls += 1;
     e.stopPropagation();
     if (tool === "erase") {
       deleteHit({ coll, id: oid });
@@ -3457,8 +5089,18 @@ export default function PlanPage() {
     }
     svgRef.current.setPointerCapture(e.pointerId);
     setSelection({ coll, ids: [oid], nodeIdx: idx });
-    dragRef.current = { mode: "node", coll, id: oid, idx, basePlan: plan };
-    if (coll === "walls") setHoverWallNode({ wallId: oid, idx });
+    dragRef.current = {
+      mode: "node",
+      coll,
+      id: oid,
+      idx,
+      basePlan: plan,
+      txId: coll === "walls" ? wallEdit.begin(plan, "wall-node", { wallId: oid, idx }) : null,
+    };
+    if (coll === "walls") {
+      setHoverWallNode({ wallId: oid, idx });
+      setActiveGripKey(gripKey(oid, idx));
+    }
   };
 
   const onItemDown = (e, it) => {
@@ -3595,7 +5237,16 @@ export default function PlanPage() {
 
   const activeSheet = sheetById(activeSheetId);
   const activeFilterId = sheetFilters[activeSheetId] || activeSheet.filters?.[0]?.id || "all";
-  const canvasDisplay = useMemo(() => ({ ...display, sheet: activeSheet }), [display, activeSheet]);
+  const viewportLod = resolveViewportLod(view.zoom);
+  const canvasDisplay = useMemo(() => ({
+    ...display,
+    sheet: activeSheet,
+    wallsForEmphasis: weldedWalls,
+    // LIVE4 hatch LOD: coarser pattern at overview (same shared defs).
+    hatchSpacing: viewportLod === "overview"
+      ? Math.max(display.hatchSpacing || 14, 28)
+      : (display.hatchSpacing || 14),
+  }), [display, activeSheet, weldedWalls, viewportLod]);
   const layerState = useCallback(
     (lid) => layerDisplayState(lid, active, vis, canvasDisplay, activeSheet),
     [active, vis, canvasDisplay, activeSheet],
@@ -3623,7 +5274,8 @@ export default function PlanPage() {
 
   useEffect(() => {
     const nextWarn = runtimeDimensionData.validationWarnings || [];
-    setPlan((p) => {
+    // Derived diagnostics — never a user-undoable step.
+    replacePlan((p) => {
       const prevAll = p.validationWarnings || [];
       const prevDims = prevAll.filter((w) => w.source === "dimensions");
       const same = prevDims.length === nextWarn.length
@@ -3632,11 +5284,12 @@ export default function PlanPage() {
       const withoutDims = prevAll.filter((w) => w.source !== "dimensions");
       return { ...p, validationWarnings: [...withoutDims, ...nextWarn] };
     });
-  }, [runtimeDimensionData.validationWarnings, setPlan]);
+  }, [runtimeDimensionData.validationWarnings, replacePlan]);
 
   useEffect(() => {
     const nextWarn = runtimeRoomWarnings || [];
-    setPlan((p) => {
+    // Derived diagnostics — never a user-undoable step.
+    replacePlan((p) => {
       const prevAll = p.validationWarnings || [];
       const prevRooms = prevAll.filter((w) => w.source === "rooms");
       const same = prevRooms.length === nextWarn.length
@@ -3645,7 +5298,7 @@ export default function PlanPage() {
       const withoutRooms = prevAll.filter((w) => w.source !== "rooms");
       return { ...p, validationWarnings: [...withoutRooms, ...nextWarn] };
     });
-  }, [runtimeRoomWarnings, setPlan]);
+  }, [runtimeRoomWarnings, replacePlan]);
 
   const warnList = collectPlannerWarnings(plan, sel, display);
   const { critical: criticalWarnIds, warning: warningWarnIds } = useMemo(
@@ -3673,17 +5326,660 @@ export default function PlanPage() {
   const partitionWalls = wallsForLayer(weldedWalls, "partitions");
   const roomWalls = wallsForLayer(weldedWalls, "room");
 
-  const draftCursor = orthoTools && draft.length > 0 ? cursor : null;
+  // PHASE 2E FOLLOW-UP (M3) — movement-handle eligibility.
+  //
+  // The handle used to be gated on the wall's layer being the ACTIVE one,
+  // while the selection hit area was not. Any wall could therefore be selected
+  // from any layer but only same-layer walls got a handle, so the rest looked
+  // broken. Eligibility now comes from wallMoveHandleEligibility, which asks
+  // the same classifier moveWallSegment uses. Only the wall under the cursor
+  // or under the selection can show a handle, so this stays O(1) per render
+  // rather than classifying every wall in the plan.
+  const moveHandleWallIds = useMemo(() => {
+    const ids = new Set();
+    if (tool !== "select") return ids;
+    for (const id of [selection?.coll === "walls" ? selection.ids[0] : null, hoverHit?.coll === "walls" ? hoverHit.id : null]) {
+      if (!id) continue;
+      // PHASE 2F1 — a T-split host must show ONE handle at the midpoint of the
+      // complete logical wall, not one per half. Per-segment handles are
+      // withheld for such a wall; WallChainMoveHandleLayer draws the single one.
+      if (resolveLogicalWallChain(plan, id).segmentCount > 1) continue;
+      if (wallMoveHandleEligibility(plan, id, { tool }).eligible) ids.add(id);
+    }
+    return ids;
+  }, [plan, tool, selection, hoverHit]);
+
+  /**
+   * PHASE 2F1 — the LOGICAL wall behind the current selection / hover.
+   *
+   * Derived from the plan rather than stored in `selection`, so it stays
+   * correct across Undo/Redo, reload and any command that re-splits or heals
+   * the host: the identity is always recomputed from current topology.
+   */
+  const selectedWallChain = useMemo(() => {
+    const id = selection?.coll === "walls" ? selection.ids[0] : null;
+    if (!id) return null;
+    const chain = resolveLogicalWallChain(plan, id);
+    return chain.ok ? chain : null;
+  }, [plan, selection]);
+
+  const hoveredWallChain = useMemo(() => {
+    const id = hoverHit?.coll === "walls" ? hoverHit.id : null;
+    if (!id) return null;
+    const chain = resolveLogicalWallChain(plan, id);
+    return chain.ok ? chain : null;
+  }, [plan, hoverHit]);
+
+  const selectedChainWallIds = useMemo(
+    () => new Set(selectedWallChain?.wallIds || []),
+    [selectedWallChain],
+  );
+  const hoveredChainWallIds = useMemo(
+    () => new Set(hoveredWallChain?.wallIds || []),
+    [hoveredWallChain],
+  );
+
+  /**
+   * The single central handle of a multi-segment logical wall, if any.
+   * Read from the EFFECTIVE plan so the handle follows its chain during a
+   * drag preview instead of staying at the committed midpoint.
+   */
+  const chainMoveHandle = useMemo(() => {
+    if (tool !== "select") return null;
+    const id = (selection?.coll === "walls" ? selection.ids[0] : null)
+      || (hoverHit?.coll === "walls" ? hoverHit.id : null);
+    if (!id) return null;
+    const decision = logicalChainMoveHandleEligibility(effectivePlan, id, { tool });
+    if (!decision.eligible || decision.segmentCount < 2 || !decision.point) return null;
+    return { ...decision, anchorWallId: id };
+  }, [effectivePlan, tool, selection, hoverHit]);
+
+  // PHASE 2E.1 (B) — the same treatment for the ENDPOINT grips, which M3 left
+  // behind on the active-layer gate: WallEl rendered them behind `editable`
+  // (= `active === "<layer>" && tool === "select"`), so a selected partition
+  // could be dragged as a whole from the room layer but had no endpoint grips.
+  // Decided by endpointGripEligibility, which asks the same moveNode command
+  // the drag runs, and — like the handle above — computed only for the wall
+  // under the cursor or under the selection, so this stays O(1) per render.
+  // A wall this decision does not cover (legacy pts-only) yields null and keeps
+  // WallEl's previous behaviour.
+  const endpointGripsByWallId = useMemo(() => {
+    const map = new Map();
+    if (tool !== "select") return map;
+    for (const id of [selection?.coll === "walls" ? selection.ids[0] : null, hoverHit?.coll === "walls" ? hoverHit.id : null]) {
+      if (!id || map.has(id)) continue;
+      const grips = wallEndpointGrips(plan, id, { tool });
+      if (grips) map.set(id, grips);
+    }
+    return map;
+  }, [plan, tool, selection, hoverHit]);
+
+  /**
+   * PHASE 2F1 — endpoint grips belong to the LOGICAL wall.
+   *
+   * A T junction inside a host is a topology node the branch needs, never an
+   * end of the wall the user selected: offering a red grip there is what made a
+   * split host read as two walls. Only the two OUTER ends get a grip; each
+   * entry keeps the terminal segment id + endpoint the existing moveNode drag
+   * starts from, so the drag path itself is unchanged.
+   */
+  const logicalGripsByWallId = useMemo(() => {
+    const map = new Map();
+    if (tool !== "select") return map;
+    for (const id of [selection?.coll === "walls" ? selection.ids[0] : null, hoverHit?.coll === "walls" ? hoverHit.id : null]) {
+      if (!id || map.has(id)) continue;
+      const entries = logicalChainEndpointGrips(plan, id, { tool });
+      if (entries) map.set(id, entries);
+    }
+    return map;
+  }, [plan, tool, selection, hoverHit]);
+
+  /**
+   * PHASE 2E.1 REWORK — the controls the dedicated top layer draws.
+   *
+   * Positions come from the EFFECTIVE plan so the grip follows its node during a
+   * drag preview. One control per topology node: two selected/hovered endpoints
+   * can resolve to the same node (a shared corner, a T), and stacking identical
+   * circles there is exactly the "several overlapping duplicates" the contract
+   * forbids. No node coordinate is touched — the control is drawn AT the node.
+   */
+  const endpointGripEntries = useMemo(() => {
+    if (!logicalGripsByWallId.size) return [];
+    const selectedId = selection?.coll === "walls" ? selection.ids[0] : null;
+    const entries = [];
+    for (const [anchorId, chainEntries] of logicalGripsByWallId) {
+      for (const { wallId, endpoint, grip } of chainEntries) {
+        if (!grip?.visible) continue;
+        const wall = resolvedWalls.find((w) => w.id === wallId);
+        if (!wall?.pts || wall.pts.length !== 2) continue;
+        entries.push({
+          wallId,
+          endpoint,
+          grip,
+          point: wall.pts[endpoint],
+          selected: anchorId === selectedId,
+        });
+      }
+    }
+    return dedupeGripsByNode(entries);
+  }, [logicalGripsByWallId, resolvedWalls, selection]);
+
+  // Read-only snapshot for automated acceptance runs (dev-only + opt-in, see
+  // EXPOSE_PLANNER_E2E). Never written back into the plan.
+  useEffect(() => {
+    if (!EXPOSE_PLANNER_E2E || typeof window === "undefined" || !window.__dgPlanner) return;
+    window.__dgPlanner.activeLayer = active;
+    window.__dgPlanner.undoDepth = undoDepth;
+    window.__dgPlanner.redoDepth = redoDepth;
+    window.__dgPlanner.moveHandleWallIds = [...moveHandleWallIds];
+    window.__dgPlanner.endpointGrips = Object.fromEntries(endpointGripsByWallId);
+    window.__dgPlanner.endpointGripEntries = endpointGripEntries.map((entry) => ({
+      wallId: entry.wallId,
+      endpoint: entry.endpoint,
+      nodeId: entry.grip.nodeId,
+      topology: entry.grip.topology?.kind || null,
+      point: { ...entry.point },
+    }));
+    // PHASE 2F1 — logical host wall, for browser acceptance evidence.
+    window.__dgPlanner.selectedWallChain = selectedWallChain
+      ? {
+        logicalId: selectedWallChain.logicalId,
+        chainId: selectedWallChain.chainId,
+        wallIds: [...selectedWallChain.wallIds],
+        nodeIds: [...selectedWallChain.nodeIds],
+        outerNodeIds: [...selectedWallChain.outerNodeIds],
+        internalNodeIds: [...selectedWallChain.internalNodeIds],
+        segmentCount: selectedWallChain.segmentCount,
+        totalLengthMm: selectedWallChain.totalLengthMm,
+        midpoint: selectedWallChain.midpoint ? { ...selectedWallChain.midpoint } : null,
+        branchWallIdsByNode: { ...selectedWallChain.branchWallIdsByNode },
+      }
+      : null;
+    window.__dgPlanner.chainMoveHandle = chainMoveHandle
+      ? {
+        anchorWallId: chainMoveHandle.anchorWallId,
+        logicalId: chainMoveHandle.logicalId,
+        segmentCount: chainMoveHandle.segmentCount,
+        point: { ...chainMoveHandle.point },
+      }
+      : null;
+    window.__dgPlanner.resolveLogicalChain = (wallId) => {
+      const chain = resolveLogicalWallChain(plan, wallId);
+      return {
+        ok: chain.ok,
+        logicalId: chain.logicalId,
+        wallIds: [...chain.wallIds],
+        outerNodeIds: [...chain.outerNodeIds],
+        internalNodeIds: [...chain.internalNodeIds],
+        segmentCount: chain.segmentCount,
+        totalLengthMm: chain.totalLengthMm,
+        midpoint: chain.midpoint ? { ...chain.midpoint } : null,
+      };
+    };
+    window.__dgPlanner.e2eMoveLogicalWallChain = (wallId, delta) => {
+      let outcome = { changed: false, reason: "E2E_NO_PLAN" };
+      setPlan((p) => {
+        const chain = resolveLogicalWallChain(p, wallId);
+        const moved = moveLogicalWallChain(p, {
+          wallId,
+          delta: { x: Number(delta?.x) || 0, y: Number(delta?.y) || 0 },
+          expectedChainWallIds: chain.wallIds,
+          makeId: uid,
+        });
+        outcome = {
+          changed: !!moved.changed,
+          reason: moved.reason || null,
+          chainWallIds: moved.movement?.chainWallIds || chain.wallIds,
+          effectiveDelta: moved.movement?.delta || null,
+        };
+        if (geomProbeRef.current) {
+          geomProbeRef.current.lastWallMoveResult = {
+            input: "e2e-chain",
+            wallId,
+            ...outcome,
+            warnings: [...(moved.warnings || [])],
+          };
+        }
+        if (!moved.changed) return p;
+        return applyWallCmd(p, moved);
+      });
+      return outcome;
+    };
+    // PHASE 2F1 — deterministic host-branch move for browser acceptance.
+    // Uses the same moveWallSegment + applyWallCmd path as mouse/arrows.
+    window.__dgPlanner.e2eMoveWallSegment = (wallId, delta) => {
+      let outcome = { changed: false, reason: "E2E_NO_PLAN" };
+      setPlan((p) => {
+        const attachments = classifyWallSegmentAttachments(p, wallId);
+        const moved = moveWallSegment(p, {
+          wallId,
+          delta: { x: Number(delta?.x) || 0, y: Number(delta?.y) || 0 },
+          expectedEndpointAttachments: attachments,
+          makeId: uid,
+        });
+        outcome = {
+          changed: !!moved.changed,
+          reason: moved.reason || null,
+          healedHosts: moved.movement?.healedHosts || [],
+          createdSplitNodes: moved.movement?.createdSplitNodes || [],
+        };
+        if (geomProbeRef.current) {
+          geomProbeRef.current.lastWallMoveResult = {
+            input: "e2e",
+            wallId,
+            ...outcome,
+            warnings: [...(moved.warnings || [])],
+            effectiveDelta: moved.movement?.delta || null,
+          };
+        }
+        if (!moved.changed) return p;
+        return applyWallCmd(p, moved);
+      });
+      return outcome;
+    };
+    // PHASE 2F1 — deterministic endpoint (node) move for the multi-move gate.
+    // Same moveNode + applyWallCmd path the grip drag commits.
+    window.__dgPlanner.e2eMoveWallNode = (wallId, endpoint, delta) => {
+      let outcome = { changed: false, reason: "E2E_NO_PLAN" };
+      setPlan((p) => {
+        const wall = (p.walls || []).find((w) => w.id === wallId);
+        const nodeId = endpoint === "b" ? wall?.b : wall?.a;
+        const node = nodeId ? p.nodes?.[nodeId] : null;
+        if (!node) {
+          outcome = { changed: false, reason: "NODE_NOT_FOUND" };
+          return p;
+        }
+        const moved = moveNode(p, nodeId, {
+          x: node.x + (Number(delta?.x) || 0),
+          y: node.y + (Number(delta?.y) || 0),
+        });
+        outcome = { changed: !!moved.changed, reason: moved.reason || null, nodeId };
+        if (!moved.changed) return p;
+        return applyWallCmd(p, moved);
+      });
+      return outcome;
+    };
+    // PHASE 2F1 rebuilt fixtures — delete via the same deleteWall + applyWallCmd
+    // path the Delete key uses (required for host-heal acceptance).
+    window.__dgPlanner.e2eDeleteWall = (wallId) => {
+      let outcome = { changed: false, reason: "E2E_NO_PLAN" };
+      setPlan((p) => {
+        if (!(p.walls || []).some((w) => w.id === wallId)) {
+          outcome = { changed: false, reason: "WALL_NOT_FOUND" };
+          return p;
+        }
+        const deleted = deleteWall(p, wallId);
+        outcome = {
+          changed: !!deleted.changed,
+          reason: deleted.reason || null,
+          healedHosts: deleted.movement?.healedHosts || deleted.healedHosts || [],
+        };
+        if (!deleted.changed) return p;
+        return applyWallCmd(p, deleted);
+      });
+      return outcome;
+    };
+    window.__dgPlanner.e2eSelectWall = (wallId, opts = {}) => {
+      // LIVE4: single-select shows faces/grips; float only when opts.openFloat.
+      closeWallInspector();
+      if (tool === "wall" && wallDrawV2?.isActive?.()) {
+        try { wallDrawV2.cancel?.(); } catch { /* ignore */ }
+      }
+      setSel({ coll: "walls", id: wallId, nodeIdx: -1 });
+      setFloatEditorOpen(!!opts.openFloat);
+      if (opts.openFloat) setFloatFocusReq((n) => n + 1);
+      setExactLengthPreview(null);
+      setTypedLength("");
+      setDrawTypedSeed(null);
+      return { ok: true, wallId, float: !!opts.openFloat };
+    };
+    window.__dgPlanner.e2eSetTool = (toolName) => {
+      handleTool(String(toolName || "select"));
+      return { ok: true, tool: String(toolName || "select") };
+    };
+    window.__dgPlanner.e2eSetActiveLayer = (layerId) => {
+      setActive(String(layerId || "room"));
+      return { ok: true, active: String(layerId || "room") };
+    };
+    window.__dgPlanner.e2ePatchDisplay = (patch) => {
+      patchDisplay(patch && typeof patch === "object" ? patch : {});
+      return { ok: true };
+    };
+    window.__dgPlanner.e2eUndo = () => {
+      const before = { undo: undoDepth, redo: redoDepth };
+      undo();
+      return { ok: true, before };
+    };
+    window.__dgPlanner.e2eRedo = () => {
+      const before = { undo: undoDepth, redo: redoDepth };
+      redo();
+      return { ok: true, before };
+    };
+    // PHASE 2F1 — centre the viewport on a plan-mm point for mouse acceptance.
+    window.__dgPlanner.e2eCenterOn = (x, y, zoom = 0.15) => {
+      const r = svgRef.current?.getBoundingClientRect();
+      if (!r) return { ok: false, reason: "NO_SVG" };
+      const z = Math.max(0.02, Number(zoom) || 0.15);
+      const cx = Number(x) || 0;
+      const cy = Number(y) || 0;
+      // Prevent delayed autofit from overwriting E2E / handoff camera.
+      markViewportManual();
+      setView({
+        zoom: z,
+        panX: r.width / 2 - cx * z,
+        panY: r.height / 2 - cy * z,
+      });
+      return { ok: true, x: cx, y: cy, zoom: z };
+    };
+  }, [
+    active, undoDepth, redoDepth, moveHandleWallIds, endpointGripsByWallId, endpointGripEntries,
+    plan, selectedWallChain, chainMoveHandle, undo, redo, handleTool, setActive, patchDisplay,
+  ]);
+
+  // V2 draws its rubber band from the session, not from the legacy `draft`
+  // chain array — which stays empty, so no legacy chain/Enter/double-click
+  // path can see a pending draft while V2 is active.
+  const wallDrawV2Band = WALL_DRAW_V2 ? wallDrawV2Preview : null;
+  // PHASE 2F1-LIVE2 — paint DraftLine as start→end. Never [start,end]+cursor
+  // (that made last≈end and cursor≈end → "0 мм · 0.0°").
+  const draftRenderPts = wallDrawV2Band?.start
+    ? [wallDrawV2Band.start]
+    : draft;
+  const draftCursor = wallDrawV2Band?.end
+    ? wallDrawV2Band.end
+    : (orthoTools && draft.length > 0 ? cursor : null);
+
+  /**
+   * PHASE 2F1-LIVE2 — transient measurements from the authoritative interaction
+   * geometry (V2 preview / draft→cursor / effectivePlan). Never plan.dimensions.
+   *
+   * LIVE4.4: cursor/draftCursor are draw-path inputs only. Selected / edit-hold
+   * semantic models must not recompute when the pointer moves.
+   */
+  const liveWallMeasurements = useMemo(() => {
+    const room = effectivePlan?.room || plan.room;
+    const drawSeg = tool === "wall"
+      ? resolveLiveDrawSegment({
+        v2Preview: wallDrawV2Band,
+        draft,
+        cursor: draftCursor || cursor,
+      })
+      : null;
+    if (drawSeg?.valid) {
+      const hostWallId = drawSeg.hostWallId
+        || wallGestureRef.current?.hostWallId
+        || null;
+      const model = buildLiveWallDrawMeasurements({
+        start: drawSeg.start,
+        end: drawSeg.end,
+        thk: wallThk,
+        thicknessSide: "center",
+        room,
+        prevPoint: drawSeg.prevPoint,
+        hostWallId,
+        plan: effectivePlan,
+        snap: draftSnap || drawSeg.endSnap,
+        angleSnap: draftAngleSnap,
+      });
+      if (import.meta.env.DEV) {
+        const check = assertLiveMeasurementModel(model);
+        if (!check.ok) console.warn("[liveWall]", check.bad, drawSeg);
+      }
+      return model;
+    }
+    // In-flight wall edit (endpoint / segment / chain move) — effectivePlan only
+    if (wallEditPreview && selection?.coll === "walls" && selection.ids?.[0]) {
+      const kind = wallEdit?.getKind?.() || "endpoint";
+      const editKind = kind === "wall-seg" || kind === "chain-move"
+        ? "wall_move"
+        : (kind === "wall-node" ? "rotate" : "t_slide");
+      return buildLiveWallEditMeasurements({
+        previewPlan: wallEditPreview,
+        basePlan: plan,
+        wallId: selection.ids[0],
+        editKind,
+        selectedEndpoint: selection.nodeIdx,
+        room,
+      });
+    }
+    // Selected committed wall — interactive face lengths / angles (LIVE4).
+    if (
+      selection?.coll === "walls"
+      && selection.ids?.[0]
+      && !(tool === "wall" && (wallDrawV2Band?.moved || wallDrawV2?.isActive?.()))
+    ) {
+      return buildLiveWallEditMeasurements({
+        previewPlan: exactLengthPreview || plan,
+        wallId: selection.ids[0],
+        editKind: "endpoint",
+        selectedEndpoint: selection.nodeIdx,
+        room,
+      });
+    }
+    return null;
+  }, [
+    tool, wallDrawV2Band, draft, draftCursor, cursor, wallThk, draftSnap, draftAngleSnap,
+    wallEditPreview, selection, plan, effectivePlan, exactLengthPreview,
+  ]);
+
+  const liveWallActive = !!(liveWallMeasurements?.labels?.length && liveWallMeasurements?.valid !== false);
 
   const activeWallMaterial = useMemo(
     () => wallMaterialForTool(activeToolId).id,
     [activeToolId],
   );
 
-  const wallDraftFrom = draft.length > 0 ? draft[draft.length - 1] : null;
+  const wallDraftFrom = wallDrawV2Band
+    ? wallDrawV2Band.start
+    : (draft.length > 0 ? draft[draft.length - 1] : null);
+
+  const selectedWallId = selection?.coll === "walls" ? selection.ids?.[0] : null;
+  const selectedWallEntity = useMemo(() => {
+    if (!selectedWallId) return null;
+    return resolvePlanWalls(effectivePlan).find((w) => w.id === selectedWallId) || null;
+  }, [selectedWallId, effectivePlan]);
+  const selectedWallLengthMm = useMemo(() => {
+    const pts = selectedWallEntity?.pts;
+    if (!pts || pts.length < 2) return null;
+    return Math.hypot(pts[pts.length - 1].x - pts[0].x, pts[pts.length - 1].y - pts[0].y);
+  }, [selectedWallEntity]);
+  // LIVE3: draw float only while an active wall draft/gesture is in progress.
+  // Selected-wall live labels must not flip the editor into draw mode.
+  const floatIsDrawMode = !!(
+    tool === "wall"
+    && (
+      !!drawTypedSeed
+      || !!(WALL_DRAW_V2 && wallDrawV2?.isActive?.())
+      || draft.length >= 1
+      || !!(wallDrawV2Band?.moved)
+    )
+  );
+  const floatLengthAnchor = useMemo(() => {
+    if (floatIsDrawMode) {
+      return liveWallMeasurements?.end
+        || wallDrawV2Band?.end
+        || draftCursor
+        || cursor
+        || null;
+    }
+    if (liveWallMeasurements?.a && liveWallMeasurements?.b) {
+      return {
+        x: (liveWallMeasurements.a.x + liveWallMeasurements.b.x) / 2,
+        y: (liveWallMeasurements.a.y + liveWallMeasurements.b.y) / 2,
+      };
+    }
+    const pts = selectedWallEntity?.pts;
+    if (pts?.length >= 2) {
+      return {
+        x: (pts[0].x + pts[pts.length - 1].x) / 2,
+        y: (pts[0].y + pts[pts.length - 1].y) / 2,
+      };
+    }
+    return null;
+  }, [floatIsDrawMode, liveWallMeasurements, wallDrawV2Band, draftCursor, cursor, selectedWallEntity]);
+  const floatDisabledReason = useMemo(() => {
+    if (!selectedWallId || floatIsDrawMode) return null;
+    const anchor = resolveLengthEditAnchor(plan, selectedWallId, {
+      selectedEndpoint: selection?.nodeIdx === 0 ? 0 : selection?.nodeIdx === 1 ? 1 : null,
+    });
+    return anchor.ok ? null : (anchor.message || "Длина недоступна");
+  }, [selectedWallId, floatIsDrawMode, plan, selection?.nodeIdx]);
+
+  /**
+   * LIVE4.4 Stage A — immutable semantic visibility set for the selected wall.
+   * No cursor, hover, occupancy, LOD, or collision packing.
+   */
+  const selectedDimensionSemantics = useMemo(() => {
+    if (!selectedWallId || floatIsDrawMode) return null;
+    return resolveSelectedDimensionSemantics({
+      plan: exactLengthPreview || wallEditPreview || effectivePlan || plan,
+      wallId: selectedWallId,
+      room: effectivePlan?.room || plan.room,
+      measurements: liveWallMeasurements,
+      overview: false,
+      allowOverviewCollapse: false,
+    });
+  }, [
+    selectedWallId, floatIsDrawMode, liveWallMeasurements,
+    exactLengthPreview, wallEditPreview, effectivePlan, plan,
+  ]);
+
+  const visibleRuntimeDimensions = useMemo(() => {
+    // LIVE4 / LIVE4.3 / LIVE4.4: Stage A semantics drive suppression. Pointer,
+    // float open-state and overlay LOD must never change liveFaceSpans here.
+    const mode = floatIsDrawMode
+      ? "draw"
+      : (wallEditPreview && selectedWallId
+        ? "edit_hold"
+        : (selectedWallId && (floatEditorOpen || tool === "select" || !floatIsDrawMode)
+          ? "select_editor"
+          : null));
+    const span = selectedDimensionSemantics?.centerline
+      || (liveWallMeasurements?.start && liveWallMeasurements?.end
+        ? { a: liveWallMeasurements.start, b: liveWallMeasurements.end }
+        : (liveWallMeasurements?.a && liveWallMeasurements?.b
+          ? { a: liveWallMeasurements.a, b: liveWallMeasurements.b }
+          : null));
+    const liveFaceSpans = (selectedDimensionSemantics?.suppressSpans?.length
+      ? selectedDimensionSemantics.suppressSpans
+      : (liveWallMeasurements?.labels || [])
+        .filter((l) => l?.kind === "face" && l.a && l.b)
+        .map((l) => ({ a: l.a, b: l.b })));
+    const lineageIds = selectedDimensionSemantics?.lineageIds?.length
+      ? selectedDimensionSemantics.lineageIds
+      : (selectedChainWallIds.size
+        ? [...selectedChainWallIds]
+        : (selectedWallId ? [selectedWallId] : []));
+    return filterDimensionsForActiveInteraction(runtimeDimensions, {
+      mode: selectedWallId && mode == null ? "select_editor" : mode,
+      wallId: selectedWallId,
+      wallIds: lineageIds,
+      span,
+      liveFaceSpans,
+      hideAllFinalized: mode === "draw",
+    });
+  }, [
+    runtimeDimensions, floatIsDrawMode, wallEditPreview,
+    selectedWallId, selectedChainWallIds, floatEditorOpen, tool,
+    selectedDimensionSemantics, liveWallMeasurements,
+  ]);
+
+  // LIVE4.1: keep face dims in a narrow near-wall lane (screen px → world mm).
+  // Grip/arrow collisions use SegDim labelT + knockout, not perpendicular dodge.
+  const livePrimaryOffsetMm = useMemo(
+    () => nearWallLaneOffsetMm(view.zoom || 1),
+    [view.zoom],
+  );
+
+  useEffect(() => {
+    if (!EXPOSE_PLANNER_E2E || typeof window === "undefined" || !window.__dgPlanner) return;
+    window.__dgPlanner.liveWall = liveWallMeasurements
+      ? {
+        centerlineMm: liveWallMeasurements.centerlineMm,
+        cornerDeg: liveWallMeasurements.cornerDeg ?? null,
+        valid: liveWallMeasurements.valid !== false,
+        kind: liveWallMeasurements.kind,
+        start: liveWallMeasurements.start || liveWallMeasurements.a || null,
+        end: liveWallMeasurements.end || liveWallMeasurements.b || null,
+        labels: (liveWallMeasurements.labels || []).map((l) => ({
+          id: l.id,
+          text: l.text,
+          role: l.role,
+          kind: l.kind || null,
+          face: l.face || null,
+          mm: l.mm ?? null,
+          deg: l.deg ?? null,
+          a: l.a || null,
+          b: l.b || null,
+        })),
+      }
+      : null;
+    window.__dgPlanner.floatEditorOpen = !!floatEditorOpen;
+    window.__dgPlanner.wallInspectorOpen = !!wallInspectorOpen;
+    window.__dgPlanner.typedLength = typedLengthRef.current || "";
+    window.__dgPlanner.visibleRuntimeDimCount = visibleRuntimeDimensions.length;
+    window.__dgPlanner.visibleRuntimeDimensions = visibleRuntimeDimensions.map((d) => ({
+      id: d.id,
+      kind: d.kind,
+      wallId: d.wallId || d.reference?.wallId || null,
+      p1: d.p1,
+      p2: d.p2,
+      measurementValue: d.measurementValue ?? d.valueMm ?? null,
+    }));
+    window.__dgPlanner.selectedDimensionSemantics = selectedDimensionSemantics
+      ? {
+        wallId: selectedDimensionSemantics.wallId,
+        lineageIds: selectedDimensionSemantics.lineageIds,
+        fingerprint: selectedDimensionSemantics.fingerprint,
+        facesDiffer: selectedDimensionSemantics.facesDiffer,
+        faces: (selectedDimensionSemantics.faces || []).map((f) => ({
+          id: f.id,
+          face: f.face,
+          mm: f.mm,
+          text: f.text,
+          a: f.a,
+          b: f.b,
+          exterior: !!f.exterior,
+        })),
+        suppressSpans: selectedDimensionSemantics.suppressSpans,
+      }
+      : null;
+  }, [
+    liveWallMeasurements, floatEditorOpen, wallInspectorOpen, visibleRuntimeDimensions,
+    typedLength, selectedDimensionSemantics,
+  ]);
+
+  /**
+   * PHASE 2D1 — active guides only.
+   *
+   * While a V2 wall is being drawn the resolver already picked ONE winning
+   * constraint. Rendering the alignment fallback as well drew a guide for every
+   * nearby aligned node and wall, which is the dense dashed "grid" users saw.
+   * Show the winner's guide and nothing else; each pointermove replaces the
+   * whole set, so nothing accumulates.
+   */
+  const wallDrawV2ActiveGuides = useMemo(() => {
+    if (!WALL_DRAW_V2 || !wallDrawV2Preview) return [];
+    const g = wallDrawV2Preview.endSnap?.guides || wallDrawV2Preview.startSnap?.guides;
+    if (!g) return [];
+    const list = Array.isArray(g) ? g : (Array.isArray(g.items) ? g.items : [g]);
+    const seen = new Set();
+    return list.filter((entry) => {
+      if (!entry || typeof entry !== "object") return false;
+      const key = JSON.stringify([entry.type, entry.angleDeg ?? entry.angle ?? null, entry.at ?? null]);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 1);
+  }, [wallDrawV2Preview]);
 
   const wallDraftGuides = useMemo(() => {
     if (tool !== "wall" || !cursor || display.snapGuides === false || altSnapRef.current) return [];
+    // PHASE 2F2.2: magnetic rays own the local guide story during MODE A.
+    if (angleMagnetPreview?.active) return [];
+    // V2 renders the winning constraint only — never the alignment fallback,
+    // which emitted a guide per nearby aligned node/wall (the dashed "grid").
+    if (WALL_DRAW_V2) return wallDrawV2ActiveGuides;
     if (draftSnap?.guides?.length) {
       const projected = draftSnap.guides
         .filter((g) => g.type === "V" || g.type === "H")
@@ -3693,7 +5989,7 @@ export default function PlanPage() {
     const from = wallDraftFrom || (draft.length === 1 ? draft[0] : null);
     if (!from && !wallDraftFrom) return [];
     return alignmentGuides(plan.nodes, resolvedWalls, cursor, plan.room, wallDraftFrom || from);
-  }, [tool, cursor, draft, wallDraftFrom, plan.nodes, resolvedWalls, plan.room, display.snapGuides, draftSnap]);
+  }, [tool, cursor, draft, wallDraftFrom, plan.nodes, resolvedWalls, plan.room, display.snapGuides, draftSnap, wallDrawV2ActiveGuides, angleMagnetPreview]);
 
   const wallDraftArea = useMemo(() => {
     if (tool !== "wall" || draftSnap?.kind !== "close") return null;
@@ -3704,6 +6000,10 @@ export default function PlanPage() {
   }, [tool, draft, cursor, draftSnap]);
 
   const wallDraftNodeAngles = useMemo(() => {
+    // V2: angleAt() labels EVERY wall incident at the start node (the 180°/87°
+    // arcs users saw stacked on the canvas). The winning constraint is already
+    // shown by the snap indicator and the single active guide.
+    if (WALL_DRAW_V2) return [];
     if (tool !== "wall" || !cursor || !wallDraftFrom) return [];
     return angleAt(wallDraftFrom, resolvedWalls);
   }, [tool, cursor, wallDraftFrom, resolvedWalls]);
@@ -3839,12 +6139,10 @@ export default function PlanPage() {
   };
 
   // PHASE 0D — ручной запуск проверки целостности (без autosave/backend/mutation).
-  // PHASE 0G: сливает session-only room detection diagnostic в тот же result.
   const runPlanCheck = () => {
     setDiagnosticsChecking(true);
     const result = validatePlanIntegrity(plan);
-    const merged = mergeDiagnosticsResult(result, roomDetectionDiagnostic ? [roomDetectionDiagnostic] : []);
-    setPlanDiagnostics({ result: merged, planRef: plan });
+    setPlanDiagnostics({ result, planRef: plan });
     setDiagnosticFilters({ error: true, warning: true, info: true });
     setDiagnosticsChecking(false);
     setDiagnosticsOpen(true);
@@ -3877,7 +6175,7 @@ export default function PlanPage() {
     ? (categoryById(activeCategoryId)?.label || layerById(active).name)
     : layerById(active).name;
   const hasSelection = !!(selection?.ids?.length);
-  const showProperties = hasSelection || pinnedProperties || warningsPanelOpen;
+  const showProperties = true;
 
   const statusBar = (
     <div className="planner-coords no-print">
@@ -3962,8 +6260,32 @@ export default function PlanPage() {
         </span>
       )}
       {tool === "measure" && (
-        <span className="planner-coords__hint">
-          1-й клик — точка A · 2-й — точка B · 3-й — отступ · Enter/Esc — завершить/отмена
+        <span className="planner-coords__hint planner-coords__hint--measure">
+          <span className="planner-measure-kinds" role="group" aria-label="Тип размера">
+            {[
+              ["linear", "Линейный"],
+              ["diagonal", "Диагональ"],
+              ["angle", "Угол"],
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={"planner-measure-kind" + (measureKind === id ? " is-active" : "")}
+                title={label}
+                onClick={() => {
+                  setMeasureKind(id);
+                  measureDrawRef.current = null;
+                  setMeasure([]);
+                  setMeasureOffsetPt(null);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </span>
+          {measureKind === "angle"
+            ? "1 — вершина · 2 — луч A · 3 — луч B · Esc — отмена"
+            : "1 — точка A · 2 — точка B · 3 — отступ · Esc — отмена"}
         </span>
       )}
       {tool === "add" && pending && (
@@ -3984,6 +6306,101 @@ export default function PlanPage() {
     </div>
   );
 
+  const inspectorModel = useMemo(
+    () => buildInspectorModel(selection, plan, selObj),
+    [selection, plan, selObj],
+  );
+
+  const applyFloatingWallLength = (mm) => {
+    if (!selectedWallId || !(mm > 0)) return;
+    const opts = {
+      selectedEndpoint: selection?.nodeIdx === 0 ? 0 : selection?.nodeIdx === 1 ? 1 : null,
+    };
+    setPlan((p) => {
+      const applied = applyExactWallLength(p, selectedWallId, mm, opts);
+      if (!applied.ok || !applied.plan) return p;
+      return syncAutoZones(applied.plan);
+    });
+    setExactLengthPreview(null);
+  };
+
+  const previewFloatingWallLength = (mm) => {
+    if (!selectedWallId) return;
+    if (!(mm > 0)) {
+      setExactLengthPreview(null);
+      return;
+    }
+    const preview = applyExactWallLength(plan, selectedWallId, mm, {
+      selectedEndpoint: selection?.nodeIdx === 0 ? 0 : selection?.nodeIdx === 1 ? 1 : null,
+      previewOnly: true,
+    });
+    if (!preview.ok || !preview.preview?.point) {
+      setExactLengthPreview(null);
+      return;
+    }
+    const moveId = preview.preview.moveNodeId;
+    const node = plan.nodes?.[moveId];
+    if (!moveId || !node) {
+      setExactLengthPreview(null);
+      return;
+    }
+    setExactLengthPreview({
+      ...plan,
+      nodes: {
+        ...plan.nodes,
+        [moveId]: { ...node, ...preview.preview.point },
+      },
+    });
+  };
+
+  const handleInspectorChange = (payload) => {
+    // PHASE 2F1-LIVE — exact wall length via inspector (Enter applies).
+    if (payload?.type === "wall" && payload?.field === "length") {
+      const parsed = parseLengthInput(payload.value);
+      if (!parsed.ok) return;
+      setPlan((p) => {
+        const applied = applyExactWallLength(p, payload.id, parsed.mm, {
+          selectedEndpoint: selection?.nodeIdx === 0 ? 0 : selection?.nodeIdx === 1 ? 1 : null,
+        });
+        if (!applied.ok || !applied.plan) return p;
+        return syncAutoZones(applied.plan);
+      });
+      return;
+    }
+    const mapped = inspectorChangeToPatch(payload);
+    if (!mapped) return;
+    if (mapped.coll === "nodes") {
+      const node = plan.nodes?.[mapped.id];
+      if (!node) return;
+      const nextPt = { x: mapped.patch.x ?? node.x, y: mapped.patch.y ?? node.y };
+      setPlan((p) => movePlanNode(p, mapped.id, nextPt));
+      return;
+    }
+    updateObj(mapped.coll, mapped.id, mapped.patch);
+  };
+
+  const handleInspectorCommand = (cmd, payload = {}) => {
+    if (cmd === "delete") {
+      delSel();
+      return;
+    }
+    if (cmd === "split" && payload?.id) {
+      const wall = resolvePlanWalls(plan).find((w) => w.id === payload.id);
+      if (!wall?.pts?.length) return;
+      const mid = wall.pts[Math.floor(wall.pts.length / 2)] || wall.pts[0];
+      setPlan((p) => {
+        const r = splitWall(p, payload.id, mid, uid);
+        return r?.plan || p;
+      });
+      clearSelection();
+      return;
+    }
+    if (cmd === "merge") {
+      // Merge requires two node ids; skip until dual selection is available.
+      return;
+    }
+  };
+
   return (
     <>
       <PlannerLayout
@@ -3991,15 +6408,49 @@ export default function PlanPage() {
           mode: standalone ? "standalone" : "project",
           title: planTitle,
           saved,
+          saveFailed,
+          saveStatus: saveUiStatus,
           busy,
           onPdf: exportPDF,
           onSync: syncSpec,
           onExportJson: handleExportJson,
-          onImportJson: handleImportJson,
+          onImportJson: (file) => {
+            viewportFittedRef.current = false;
+            viewportManualRef.current = false;
+            handleImportJson(file);
+          },
           onRename: handleRenameDraft,
           onAttach: standalone ? () => setAttachOpen(true) : undefined,
           onCheckPlan: runPlanCheck,
+          onFit: () => fitView("fit-button"),
+          onUndo: undo,
+          onRedo: redo,
           projectId: project?.id,
+        }}
+        toolRailProps={{
+          activeToolId: railActiveToolId,
+          tools: PLANNER_TOOL_RAIL,
+          onToolSelect: handleRailToolSelect,
+          onEscape: handleRailEscape,
+        }}
+        inspectorProps={{
+          selection: inspectorModel.selection,
+          entity: inspectorModel.entity,
+          warnings: inspectorModel.warnings,
+          // PHASE 2D: selecting a wall must not reveal its editor; every other
+          // entity keeps the existing select-to-reveal behaviour.
+          autoOpenOnSelect: selection?.coll !== "walls",
+          openRequestId: inspectorOpenReq,
+          closeRequestId: inspectorCloseReq,
+          context: {
+            layer: activeSheet?.name || active,
+            level: planLevel,
+            scale: Math.round(1 / Math.max(z, 0.001)),
+          },
+          onChange: handleInspectorChange,
+          onCommand: handleInspectorCommand,
+          onClearSelection: clearSelection,
+          onFitPlan: () => fitView("fit-button"),
         }}
         activeSheetId={activeSheetId}
         onSheetPick={handleSheetPick}
@@ -4009,66 +6460,18 @@ export default function PlanPage() {
         planVariant={planVariant}
         onPlanLevel={setPlanLevel}
         onPlanVariant={setPlanVariant}
-        activeCategoryId={activeCategoryId}
-        onCategoryPick={handleCategoryPick}
-        drawerOpen={drawerOpen}
-        drawerTitle={drawerTitle}
-        onDrawerClose={() => setDrawerOpen(false)}
         sheetFilters={activeSheet.filters}
         activeFilterId={activeFilterId}
         onFilterPick={handleFilterPick}
-        toolDrawerContent={(
-          <>
-            <ObjectPalette
-              key={`presets-${materialPresetsRev}`}
-              embedded
-              active={active}
-              tool={tool}
-              pending={pending}
-              wallThk={wallThk}
-              plan={plan}
-              onTool={handleTool}
-              onPending={handlePending}
-              onWallThk={setWallThk}
-              onRoomPatch={(patch) => setPlan((p) => ({ ...p, room: { ...p.room, ...patch } }))}
-              specSummary={specSummary}
-              onSync={syncSpec}
-              onSyncZones={runAutoZonesSync}
-              onSelectPlanItem={handlePickPlanItem}
-              projectId={project?.id}
-            />
-            <div className="planner-drawer-advanced">
-              <PlannerToolMenu
-                embedded
-                sheetId={activeSheetId}
-                categoryId={activeCategoryId}
-                activeToolId={activeToolId}
-                tool={tool}
-                pending={pending}
-                wallThk={wallThk}
-                plan={plan}
-                specSummary={specSummary}
-                searchQuery={toolSearch}
-                onPick={handleToolPick}
-                onWallThk={setWallThk}
-                onRoomPatch={(patch) => setPlan((p) => ({ ...p, room: { ...p.room, ...patch } }))}
-                onSync={syncSpec}
-                onSyncZones={runAutoZonesSync}
-                onSelectPlanItem={handlePickPlanItem}
-                projectId={project?.id}
-              />
-            </div>
-          </>
-        )}
         bottomBarProps={{
           zoom: z,
           display,
           unit,
-          onUnitChange: (id) => patchDisplay({ coordUnit: id }),
+          onUnitChange: (uid_) => patchDisplay({ coordUnit: uid_ }),
           onZoomPreset: setZoomTo,
           onToggle: toggleDisplay,
           onSetDisplay: patchDisplay,
-          onFit: fitView,
+          onFit: () => fitView("fit-button"),
           onFitLayer: fitActiveLayer,
           onCenter: centerView,
           onClearSheet: clearSheet,
@@ -4090,10 +6493,11 @@ export default function PlanPage() {
           zoom: z,
           onZoomIn: () => setZoomTo(z * 1.15),
           onZoomOut: () => setZoomTo(z / 1.15),
-          onZoomSlider: setZoomTo,
-          onFit: fitView,
-          onCenter: centerView,
-          onPan: panView,
+          onFit: () => fitView("fit-button"),
+          onReset: () => {
+            viewportManualRef.current = false;
+            fitView("reset");
+          },
         }}
         statusBar={statusBar}
         footerLeft={(
@@ -4102,44 +6506,16 @@ export default function PlanPage() {
             <button type="button" className="planner-bottom-btn" disabled title="Скоро">По картинке</button>
           </>
         )}
-        showProperties={showProperties}
-        pinnedProperties={pinnedProperties}
-        onTogglePinProperties={() => setPinnedProperties((p) => !p)}
-        propertiesPanel={(
-          <PlannerErrorBoundary resetKey={selection?.ids?.[0] || ""}>
-            <PropertiesPanel
-            tab={propsTab}
-            onTabChange={setPropsTab}
-            sel={sel}
-            selObj={selObj}
-            selection={selection}
-            plan={plan}
-            project={standalone ? { name: planTitle, items: [] } : project}
-            active={active}
-            materials={state.materials}
-            modules={state.modules}
-            updateObj={updateObj}
-            rotateItem={rotateItem}
-            delSel={delSel}
-            onGroup={groupSelection}
-            onUngroup={ungroupSelection}
-            fmtU={fmtU}
-            onSync={syncSpec}
-            specSummary={specSummary}
-            allWarnings={warnList}
-            onFocusWarning={focusPlanWarning}
-            onClose={closePropertiesPanel}
-            onSelectLink={handleSelectLink}
-            />
-          </PlannerErrorBoundary>
-        )}
         canvas={(
           <svg
             ref={svgRef}
             className="plan-svg"
+            onPointerDownCapture={onCanvasPointerDownCapture}
             onPointerDown={onDown}
             onPointerMove={onMove}
             onPointerUp={onUp}
+            onPointerCancel={onPointerAbort}
+            onLostPointerCapture={onPointerAbort}
             onWheel={onWheel}
             onDoubleClick={onDblClick}
             onContextMenu={onContextMenu}
@@ -4158,7 +6534,7 @@ export default function PlanPage() {
               />
               {display.roomWhiteFill !== false && (
                 <g data-room-floors pointerEvents="none">
-                  {plan.zones.map((zn) => (
+                  {renderZones.map((zn) => (
                     <RoomFloorEl key={`fl-${zn.id}`} zn={zn} k={k} enabled={display.roomWhiteFill !== false} />
                   ))}
                 </g>
@@ -4171,7 +6547,7 @@ export default function PlanPage() {
                     wall={w}
                     allWalls={weldedWalls}
                     room={plan.room}
-                    editable={tool === "select" || tool === "wall"}
+                    editable={tool === "select"}
                     eraseMode={tool === "erase"}
                     onDown={(e) => selectWall(e, w)}
                   />
@@ -4181,10 +6557,13 @@ export default function PlanPage() {
                     key={w.id}
                     wall={w}
                     k={k}
-                    editable={active === "room" && (tool === "select" || tool === "wall")}
+                    editable={active === "room" && tool === "select"}
+                    movable={moveHandleWallIds.has(w.id)}
+                    endpointGrips={endpointGripsByWallId.get(w.id) || null}
                     eraseMode={tool === "erase"}
-                    selected={selection?.coll === "walls" && selection.ids[0] === w.id}
-                    hovered={hoverHit?.coll === "walls" && hoverHit.id === w.id}
+                    selected={selection?.coll === "walls" && selectedChainWallIds.has(w.id)}
+                    selectionAnchor={selection?.ids?.[0] === w.id}
+                    hovered={hoverHit?.coll === "walls" && hoveredChainWallIds.has(w.id)}
                     hasError={warnWallIds.has(w.id)}
                     hoverNodeIdx={hoverWallNode?.wallId === w.id ? hoverWallNode.idx : null}
                     fmtU={fmtU}
@@ -4234,7 +6613,7 @@ export default function PlanPage() {
                     wall={w}
                     allWalls={weldedWalls}
                     room={plan.room}
-                    editable={active === "partitions" && (tool === "select" || tool === "wall")}
+                    editable={active === "partitions" && tool === "select"}
                     eraseMode={tool === "erase"}
                     onDown={(e) => selectWall(e, w)}
                   />
@@ -4244,10 +6623,13 @@ export default function PlanPage() {
                     key={`pt-${w.id}`}
                     wall={w}
                     k={k}
-                    editable={active === "partitions" && (tool === "select" || tool === "wall")}
+                    editable={active === "partitions" && tool === "select"}
+                    movable={moveHandleWallIds.has(w.id)}
+                    endpointGrips={endpointGripsByWallId.get(w.id) || null}
                     eraseMode={tool === "erase"}
-                    selected={selection?.coll === "walls" && selection.ids[0] === w.id}
-                    hovered={hoverHit?.coll === "walls" && hoverHit.id === w.id}
+                    selected={selection?.coll === "walls" && selectedChainWallIds.has(w.id)}
+                    selectionAnchor={selection?.ids?.[0] === w.id}
+                    hovered={hoverHit?.coll === "walls" && hoveredChainWallIds.has(w.id)}
                     hasError={warnWallIds.has(w.id)}
                     hoverNodeIdx={hoverWallNode?.wallId === w.id ? hoverWallNode.idx : null}
                     fmtU={fmtU}
@@ -4268,14 +6650,14 @@ export default function PlanPage() {
               </PlanLayerGroup>
               <g data-room-labels pointerEvents="none">
                 <LayerMutedWrap muted={layerState("zones").isMuted}>
-                  {plan.zones.map((zn) => (
+                  {renderZones.map((zn) => (
                     <ZoneEl
                       key={`lbl-${zn.id}`}
                       zn={zn}
                       k={k}
                       room={plan.room}
                       interactive={false}
-                      showRoomLabels={display.showZoneNames !== false}
+                      showRoomLabels={display.showZoneNames === true}
                       showZoneAreas={display.showZoneAreas}
                       showZoneFill={false}
                       fmtU={fmtU}
@@ -4368,6 +6750,11 @@ export default function PlanPage() {
                   />
                 ))}
               </PlanLayerGroup>
+              <PlannerOverlayBoundary resetKey={`wall-mass-${weldedWalls.length}`}>
+              {canvasDisplay?.unifiedWallMass !== false && (
+                <WallMassLayer walls={weldedWalls} room={plan.room} k={k} display={canvasDisplay} />
+              )}
+              </PlannerOverlayBoundary>
               <PlannerOverlayBoundary resetKey={`${selection?.coll}-${selection?.ids?.[0]}-${selection?.nodeIdx ?? ""}`}>
               <WallsTopOverlay
                 walls={weldedWalls}
@@ -4378,6 +6765,8 @@ export default function PlanPage() {
                 display={canvasDisplay}
                 selectedWallId={selection?.coll === "walls" ? selection.ids[0] : null}
                 hoveredWallId={hoverHit?.coll === "walls" ? hoverHit.id : null}
+                selectedWallIds={selectedChainWallIds.size ? selectedChainWallIds : null}
+                hoveredWallIds={hoveredChainWallIds.size ? hoveredChainWallIds : null}
               />
               </PlannerOverlayBoundary>
               <PlannerOverlayBoundary resetKey={`wall-dims-${weldedWalls.length}`}>
@@ -4397,23 +6786,35 @@ export default function PlanPage() {
                 {selObj && sel.coll === "items" && display.showDims && selection?.ids?.length === 1 && (
                   <SelectionDims it={selObj} plan={plan} k={k} fmtU={fmtU} display={display} />
                 )}
-                {selection?.coll === "walls" && selection?.ids?.length === 1 && display.showDims && (() => {
-                  const w = weldedWalls.find((wl) => wl.id === selection.ids[0]);
-                  return w ? <WallSelectionDims wall={w} room={plan.room} k={k} fmtU={fmtU} display={canvasDisplay} /> : null;
-                })()}
+                {/* PHASE 2F1: wall selection must not generate dimension geometry.
+                    Canonical dims are emphasized via DimensionsLayer.emphasizeWallId. */}
               </g>
               </PlannerOverlayBoundary>
-              {display.showDims && (
-                <PlannerOverlayBoundary resetKey={`runtime-dims-${runtimeDimensions.length}`}>
+              {/* PHASE 2F1-LIVE3: finalized dims filtered so the active span
+                  has exactly one interactive representation. */}
+              {/*
+                PHASE 2F2.5 paint stack (world SVG, DOM order = paint order):
+                DimensionsLayer → wall-live linear dims → corner angles
+                (arcs/chips/text) → endpoint grips / chain handle.
+                Angles must never paint under black linear dim strokes.
+              */}
+              {display.showDims && visibleRuntimeDimensions.length > 0 && (
+                <PlannerOverlayBoundary resetKey={`runtime-dims-${visibleRuntimeDimensions.length}`}>
+                <g data-ui="runtime-linear-dimensions">
                 <DimensionsLayer
-                  dimensions={runtimeDimensions}
+                  dimensions={visibleRuntimeDimensions}
                   k={k}
                   fmtDim={fmtU}
                   display={canvasDisplay}
+                  zoom={view.zoom}
+                  emphasizeWallId={null}
+                  emphasizeWall={null}
                   selectedId={selection?.coll === "dimensions" ? selection.ids[0] : null}
+                  hoveredId={hoverDimensionId}
+                  onHover={(id) => setHoverDimensionId(id || null)}
                   onSelect={(e, dim) => {
-                    if (dim.auto) return;
                     if (tool === "erase") {
+                      if (dim.auto) return;
                       deleteHit({ coll: "dimensions", id: dim.id });
                       return;
                     }
@@ -4422,41 +6823,7 @@ export default function PlanPage() {
                   onDoubleClick={(e, dim, pos) => {
                     if (dim.auto || dim.locked) return;
                     setSelection({ coll: "dimensions", ids: [dim.id] });
-                    // PHASE 1B-1B — classify BEFORE opening any editor: only a
-                    // dimension that provably spans one whole network-wall
-                    // gets the geometry-editing UI; partial/item dimensions
-                    // never open an editor at all (see RESULT — PHASE 1B-1B).
-                    const classification = classifyWallLengthDimension(dim, getCurrentPlan());
-                    if (classification.kind === "item") {
-                      window.alert(ITEM_DIMENSION_MESSAGE);
-                      return;
-                    }
-                    if (classification.kind === "wall-partial") {
-                      window.alert(WALL_PARTIAL_DIMENSION_MESSAGE);
-                      return;
-                    }
-                    if (classification.kind === "wall-full") {
-                      const token = dimensionEditSessionRef.current.open();
-                      setDimensionEdit({
-                        kind: "wall-full",
-                        id: dim.id,
-                        wallId: classification.wallId,
-                        value: formatWallLengthMm(classification.currentLengthMm),
-                        error: null,
-                        point1: dim.p1,
-                        point2: dim.p2,
-                        point1Endpoint: classification.point1Endpoint,
-                        point2Endpoint: classification.point2Endpoint,
-                        fixedEndpoint: classification.defaultFixedEndpoint,
-                        token,
-                        x: pos.x,
-                        y: pos.y,
-                      });
-                      return;
-                    }
-                    // classification.kind === "manual" — unchanged existing UX.
                     setDimensionEdit({
-                      kind: "manual",
                       id: dim.id,
                       value: dim.labelOverride || "",
                       x: pos.x,
@@ -4464,8 +6831,70 @@ export default function PlanPage() {
                     });
                   }}
                 />
+                </g>
                 </PlannerOverlayBoundary>
               )}
+              {liveWallActive && !angleMagnetPreview?.active && (
+                <PlannerOverlayBoundary resetKey="wall-live-measurements">
+                  <WallLiveMeasurementOverlay
+                    measurements={liveWallMeasurements}
+                    k={k}
+                    zoom={z}
+                    hideContext={false}
+                    hidePrimaryLabel={
+                      // LIVE4.4: draw float owns the command length only.
+                      // Selected physical-face dims stay visible even when the
+                      // compact editor is open (overlay never strips kind=face).
+                      !!floatIsDrawMode
+                    }
+                    hideThicknessMarks
+                    primaryOffsetMm={livePrimaryOffsetMm}
+                  />
+                </PlannerOverlayBoundary>
+              )}
+              {angleMagnetPreview?.active && (
+                <PlannerOverlayBoundary resetKey="angle-magnets">
+                  <AngleMagnetOverlay preview={angleMagnetPreview} k={k} zoom={z} />
+                </PlannerOverlayBoundary>
+              )}
+              {/*
+                PHASE 2E.1 REWORK — endpoint controls live HERE, after the wall
+                mass, the exterior outlines and the dimensions. Emitted inside
+                WallEl (i.e. inside the wall layer groups) they were painted over
+                by WallMassLayer/WallsTopOverlay below, which is why the manual
+                run found them only by guessing. Positions are the real topology
+                nodes; nothing is offset.
+                PHASE 2F2.5 — grips remain above angle annotations.
+              */}
+              <PlannerOverlayBoundary resetKey={`endpoint-grips-${endpointGripEntries.length}`}>
+                <WallEndpointGripLayer
+                  entries={endpointGripEntries}
+                  k={k}
+                  zoom={z}
+                  activeKey={activeGripKey}
+                  hoverKey={hoverGripKey}
+                  onGripDown={(e, wallId, endpoint) => startNode(e, "walls", wallId, endpoint)}
+                  onGripHover={setHoverGripKey}
+                />
+              </PlannerOverlayBoundary>
+              {/* PHASE 2F1 — ONE central handle for a T-split logical wall. */}
+              <PlannerOverlayBoundary resetKey={`chain-handle-${chainMoveHandle?.logicalId || ""}`}>
+                <WallChainMoveHandleLayer
+                  point={chainMoveHandle?.point || null}
+                  wallId={chainMoveHandle?.anchorWallId || null}
+                  logicalId={chainMoveHandle?.logicalId || null}
+                  segmentCount={chainMoveHandle?.segmentCount || 0}
+                  k={k}
+                  active={hoverWallNode?.idx === -1}
+                  onHandleDown={(e) => {
+                    const wall = resolvedWalls.find((w) => w.id === chainMoveHandle?.anchorWallId);
+                    if (wall) startWallMidNode(e, wall);
+                  }}
+                  onHandleHover={(on) => setHoverWallNode(
+                    on && chainMoveHandle ? { wallId: chainMoveHandle.anchorWallId, idx: -1 } : null,
+                  )}
+                />
+              </PlannerOverlayBoundary>
               <g data-ui="overlay">
                 {tool !== "wall" && guides.map((g, i) => {
                   if (g.type === "V") {
@@ -4519,7 +6948,7 @@ export default function PlanPage() {
                     bounds={{ l: innerL, t: innerT, r: innerR, b: innerB }}
                   />
                 )}
-                {tool === "wall" && draft.length === 0 && cursor && (
+                {tool === "wall" && draftRenderPts.length === 0 && cursor && (
                   <WallCursorPreview cursor={cursor} materialId={activeWallMaterial} thk={wallThk} k={k} />
                 )}
                 {tool === "wall" && (
@@ -4528,12 +6957,9 @@ export default function PlanPage() {
                 {tool === "wall" && wallDraftFrom && wallDraftNodeAngles.length > 0 && (
                   <WallAngleLabels nodePt={wallDraftFrom} angles={wallDraftNodeAngles} k={k} />
                 )}
-                {tool === "wall" && cursor && (
-                  <WallLiveChips cursor={cursor} roomHeight={plan.room.height} areaM2={wallDraftArea} k={k} />
-                )}
-                {draft.length > 0 && (
+                {draftRenderPts.length > 0 && (
                   <DraftLine
-                    pts={draft}
+                    pts={draftRenderPts}
                     cursor={draftCursor}
                     k={k}
                     wall={tool === "wall"}
@@ -4548,6 +6974,7 @@ export default function PlanPage() {
                     allWalls={tool === "wall" ? resolvedWalls : null}
                     draftWallKind={tool === "wall" ? wallFieldsFromTool(activeToolId, active === "room" ? "outer" : "partition", plan.room, wallThk).kind : null}
                     draftWallMaterial={tool === "wall" ? activeWallMaterial : null}
+                    hideHud={tool === "wall"}
                     lineDraft={{
                       layer: lineDraftMeta.layer || active,
                       ductSizeWmm: DEFAULT_DUCT_SIZE_W_MM,
@@ -4602,18 +7029,26 @@ export default function PlanPage() {
                     ))}
                   </g>
                 )}
-                {measure.length === 2 && (
+                {(measure.length === 2 || (measureKind === "angle" && measure.length >= 2)) && (
+                  measureKind === "angle" && measure.length >= 3 ? (
+                    <g data-ui="angle-draft" pointerEvents="none">
+                      <line x1={measure[0].x} y1={measure[0].y} x2={measure[1].x} y2={measure[1].y} stroke="#8f9a94" strokeWidth={1.2 * k} />
+                      <line x1={measure[0].x} y1={measure[0].y} x2={measure[2].x} y2={measure[2].y} stroke="#8f9a94" strokeWidth={1.2 * k} />
+                      <circle cx={measure[0].x} cy={measure[0].y} r={4 * k} fill="#116355" />
+                    </g>
+                  ) : (
                   <DimensionDraftEl
                     p1={measure[0]}
                     p2={measure[1]}
-                    offsetPoint={measureOffsetPt}
+                    offsetPoint={measureKind === "angle" ? null : measureOffsetPt}
                     k={k}
                     fmtDim={fmtU}
                     display={canvasDisplay}
                     snapPt={rulerSnap}
                   />
+                  )
                 )}
-                {dimensionEdit && (!dimensionEdit.kind || dimensionEdit.kind === "manual") && (
+                {dimensionEdit && (
                   <foreignObject
                     x={dimensionEdit.x - 80 * k}
                     y={dimensionEdit.y - 16 * k}
@@ -4650,108 +7085,6 @@ export default function PlanPage() {
                     />
                   </foreignObject>
                 )}
-                {dimensionEdit && dimensionEdit.kind === "wall-full" && (
-                  <React.Fragment>
-                    <g data-ui="wall-length-badges" pointerEvents="none">
-                      {[
-                        { n: 1, pt: dimensionEdit.point1, endpoint: dimensionEdit.point1Endpoint },
-                        { n: 2, pt: dimensionEdit.point2, endpoint: dimensionEdit.point2Endpoint },
-                      ].map(({ n, pt, endpoint }) => {
-                        if (!pt) return null;
-                        const isFixed = endpoint === dimensionEdit.fixedEndpoint;
-                        return (
-                          <g key={n}>
-                            <circle cx={pt.x} cy={pt.y} r={9 * k} fill={isFixed ? "#116355" : "#ffffff"} stroke="#116355" strokeWidth={1.5 * k} />
-                            <text x={pt.x} y={pt.y} textAnchor="middle" dominantBaseline="central" fontSize={10 * k} fontFamily="var(--mono)" fill={isFixed ? "#ffffff" : "#116355"}>
-                              {n}
-                            </text>
-                          </g>
-                        );
-                      })}
-                    </g>
-                    <foreignObject
-                      x={dimensionEdit.x - 95 * k}
-                      y={dimensionEdit.y - 40 * k}
-                      width={190 * k}
-                      height={(dimensionEdit.error ? 92 : 74) * k}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: `${4 * k}px`,
-                          background: "#fff",
-                          border: "1px solid #d9e0dc",
-                          borderRadius: "6px",
-                          padding: `${5 * k}px ${7 * k}px`,
-                          fontFamily: "var(--mono)",
-                          boxSizing: "border-box",
-                        }}
-                      >
-                        <input
-                          autoFocus
-                          value={dimensionEdit.value}
-                          onChange={(e) => setDimensionEdit((d) => (d ? { ...d, value: e.target.value, error: null } : d))}
-                          onBlur={() => submitWallLengthEdit(dimensionEdit)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              submitWallLengthEdit(dimensionEdit);
-                            } else if (e.key === "Escape") {
-                              e.preventDefault();
-                              dimensionEditSessionRef.current.close();
-                              setDimensionEdit(null);
-                            }
-                          }}
-                          style={{
-                            width: "100%",
-                            border: "1px solid #d9e0dc",
-                            borderRadius: "5px",
-                            padding: "2px 6px",
-                            fontSize: `${11 * k}px`,
-                            fontFamily: "var(--mono)",
-                            boxSizing: "border-box",
-                          }}
-                        />
-                        <div style={{ display: "flex", gap: `${4 * k}px` }}>
-                          {[1, 2].map((pointNumber) => {
-                            const endpoint = pointNumber === 1 ? dimensionEdit.point1Endpoint : dimensionEdit.point2Endpoint;
-                            const isActive = dimensionEdit.fixedEndpoint === endpoint;
-                            return (
-                              <button
-                                key={pointNumber}
-                                type="button"
-                                // Keep DOM focus on the input — the toggle must
-                                // never trigger a "leaving the editor" blur
-                                // (PHASE 1B-1B §10, anchor toggle policy).
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => setDimensionEdit((d) => (d ? { ...d, fixedEndpoint: resolveFixedEndpointForPoint(pointNumber, d) } : d))}
-                                style={{
-                                  flex: 1,
-                                  fontSize: `${9 * k}px`,
-                                  fontFamily: "var(--mono)",
-                                  border: "1px solid #d9e0dc",
-                                  borderRadius: "4px",
-                                  padding: "2px 4px",
-                                  background: isActive ? "#116355" : "#fff",
-                                  color: isActive ? "#fff" : "#111",
-                                  cursor: "pointer",
-                                }}
-                              >
-                                {`Закрепить точку ${pointNumber}`}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {dimensionEdit.error && (
-                          <div style={{ fontSize: `${9 * k}px`, color: "#c0392b", fontFamily: "var(--mono)" }}>
-                            {dimensionEdit.error}
-                          </div>
-                        )}
-                      </div>
-                    </foreignObject>
-                  </React.Fragment>
-                )}
                 {tool === "structural" && draft.length >= 1 && (
                   <StructuralDraft
                     kind={structuralKind}
@@ -4768,6 +7101,7 @@ export default function PlanPage() {
                     walls={weldedWalls}
                     selection={selection}
                     k={k}
+                    zoom={z}
                     stepMm={display.arrowStepMm ?? 10}
                     onNudge={nudgeWallSelection}
                   />
@@ -4784,7 +7118,9 @@ export default function PlanPage() {
               </g>
             </g>
             <g data-ui="screen-hud" transform={`translate(${view.panX},${view.panY})`}>
-              <TypedLengthHint value={typedLength} k={k} />
+              {!(tool === "wall" && liveWallActive) && (
+                <TypedLengthHint value={typedLength} k={k} />
+              )}
             </g>
           </svg>
         )}
@@ -4841,6 +7177,83 @@ export default function PlanPage() {
           propertiesOpen={showProperties}
         />
       )}
+      {!diagnosticsOpen && roomDetectionDiagnostic && !roomDiagnosticDismissed && (
+        <PlanDiagnosticsPanel
+          result={{ diagnostics: [roomDetectionDiagnostic] }}
+          onRerun={() => setPlan((p) => syncAutoZones(p))}
+          onClose={() => setRoomDiagnosticDismissed(true)}
+          propertiesOpen={showProperties}
+        />
+      )}
+      <WallFloatingLengthEditor
+        open={
+          !!(floatLengthAnchor && (
+            (floatIsDrawMode && (liveWallMeasurements?.centerlineMm > 0 || drawTypedSeed))
+            || (!floatIsDrawMode && floatEditorOpen && selectedWallId
+              && (liveWallMeasurements?.centerlineMm > 0 || selectedWallLengthMm > 0))
+          ))
+        }
+        mode={floatIsDrawMode ? "draw" : "select"}
+        bareAsMm={floatIsDrawMode}
+        seedText={floatIsDrawMode ? drawTypedSeed : null}
+        showExtendedFields={!floatIsDrawMode}
+        anchorWorld={floatLengthAnchor}
+        view={view}
+        getSvgRect={() => svgRef.current?.getBoundingClientRect?.() || null}
+        lengthMm={
+          floatIsDrawMode
+            ? (liveWallMeasurements?.centerlineMm || null)
+            : (selectedWallLengthMm || liveWallMeasurements?.centerlineMm || null)
+        }
+        angleDeg={liveWallMeasurements?.cornerDeg ?? null}
+        thkMm={selectedWallEntity?.thk ?? liveWallMeasurements?.thkMm ?? wallThk}
+        heightMm={selectedWallEntity?.height ?? plan.room?.height ?? 3000}
+        materialId={selectedWallEntity?.material || "drywall"}
+        disabledReason={!floatIsDrawMode ? floatDisabledReason : null}
+        focusRequest={floatFocusReq}
+        inputRef={floatInputRef}
+        onApplyLength={
+          !floatIsDrawMode
+            ? applyFloatingWallLength
+            : (mm) => {
+              setTypedLength(String(Math.round(mm)));
+              typedLengthRef.current = String(Math.round(mm));
+              applyDrawTypedPreview(String(Math.round(mm)), { commit: true });
+            }
+        }
+        onPreviewLength={
+          !floatIsDrawMode
+            ? previewFloatingWallLength
+            : (mm, raw) => {
+              if (raw != null) {
+                setDrawTypedSeed(raw);
+                setTypedLength(raw);
+              }
+              if (mm != null) applyDrawTypedPreview(String(Math.round(mm)), { commit: false });
+            }
+        }
+        onChangeThickness={(thk) => {
+          if (!selectedWallId) return;
+          updateObj("walls", selectedWallId, { thk });
+        }}
+        onChangeHeight={(height) => {
+          if (!selectedWallId) return;
+          updateObj("walls", selectedWallId, { height });
+        }}
+        onChangeMaterial={(material) => {
+          if (!selectedWallId) return;
+          updateObj("walls", selectedWallId, { material });
+        }}
+        onCancel={() => {
+          setExactLengthPreview(null);
+          if (floatIsDrawMode) {
+            setTypedLength("");
+            setDrawTypedSeed(null);
+          }
+        }}
+        onClose={closeFloatEditor}
+        onOpenProperties={!floatIsDrawMode && selectedWallId ? () => openWallInspector() : null}
+      />
     </>
   );
 }

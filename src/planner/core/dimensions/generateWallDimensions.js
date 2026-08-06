@@ -3,6 +3,22 @@ import { isDoorKind, isOpeningKind } from "../../doorTypes.js";
 import { isRackKind } from "../../rackProperties.js";
 import { formatDimensionValue } from "./display.js";
 import { wallGeometryMap } from "../../buildWallGeometry.js";
+import { pointInPolygon } from "../walls/wallOps.js";
+import { detectRooms } from "../rooms/detectRooms.js";
+import { buildRenderedContours } from "../walls/renderedContours.js";
+import { generateContourDimensions } from "./contourDimensions.js";
+import { finalizeAutoDimensions } from "./finalizeAutoDimensions.js";
+import {
+  FACE_REF_KINDS,
+  buildWallFaceReferences,
+  resolveRoomFacingReference,
+  applyJoinedQuadToReference,
+  anchorsOnCenterline,
+} from "../walls/wallFaceReferences.js";
+import {
+  openChainExteriorOffsetForWall,
+  openChainExteriorFaceSpan,
+} from "../walls/selectedWallPhysicalSpans.js";
 
 const EXTERNAL_OFFSET_1 = 300;
 const EXTERNAL_OFFSET_2 = 600;
@@ -10,6 +26,44 @@ const MIN_PIER_MM = 40;
 const MIN_WALL_DIM_MM = 100;
 const ALIGN_THR_MM = 120;
 const MIN_AUTO_EXTERIOR_MM = 300;
+// Deterministic Fit-scale readability floor: the N longest room-facing
+// wall_length dimensions are promoted to the same priority tier as
+// external_overall so a complex plan always shows a few primary segment
+// dimensions on Fit, not just the outer bounding box (or nothing).
+// LIVE3: promote enough wall_length labels that free-standing / L-shape walls
+// remain readable at normal editing zoom. Does not add new records — only
+// style.importance — so accepted metrology inventory count is unchanged.
+const MAX_IMPORTANT_WALL_LENGTH_DIMS = 48;
+
+/** Open multi-arm junction (T / degree-4 cross) with no closed room/envelope. */
+function hasOpenMultiArmJunction(plan, walls) {
+  const deg = new Map();
+  for (const w of walls || []) {
+    if (!w?.a || !w?.b) continue;
+    deg.set(w.a, (deg.get(w.a) || 0) + 1);
+    deg.set(w.b, (deg.get(w.b) || 0) + 1);
+  }
+  for (const d of deg.values()) {
+    if (d >= 3) return true;
+  }
+  // Also treat four arms meeting via coincident endpoints without shared id
+  // (legacy fixtures) as open junction when ≥3 walls share an endpoint XY.
+  const byXy = new Map();
+  const nodes = plan?.nodes || {};
+  for (const w of walls || []) {
+    for (const nid of [w.a, w.b]) {
+      const n = nodes[nid];
+      if (!n || !Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
+      const key = `${Math.round(n.x)}:${Math.round(n.y)}`;
+      if (!byXy.has(key)) byXy.set(key, new Set());
+      byXy.get(key).add(w.id);
+    }
+  }
+  for (const ids of byXy.values()) {
+    if (ids.size >= 3) return true;
+  }
+  return false;
+}
 
 export const MIN_SERVICE_AISLE_MM = 700;
 export const MIN_MAIN_AISLE_MM = 900;
@@ -34,7 +88,15 @@ function createAutoLinearDimension({
   labelOverride = null,
   style = null,
   attachedTo = null,
+  referenceKind = null,
+  reference = null,
+  invalid = false,
+  invalidReason = null,
+  measurementValue = null,
 }) {
+  const span = Number.isFinite(measurementValue) && measurementValue > 0
+    ? measurementValue
+    : Math.hypot((p2?.x || 0) - (p1?.x || 0), (p2?.y || 0) - (p1?.y || 0));
   return {
     id,
     type: "dimension",
@@ -46,10 +108,14 @@ function createAutoLinearDimension({
     attachedTo,
     labelOverride,
     locked: true,
-    invalid: false,
+    invalid: !!invalid,
+    invalidReason: invalidReason || null,
     auto: true,
     kind,
     style,
+    referenceKind: referenceKind || null,
+    reference: reference || null,
+    measurementValue: span,
   };
 }
 
@@ -130,6 +196,13 @@ function groupWallsByConnectivity(walls) {
 }
 
 // Returns true if all wall endpoints have valence exactly 2 — i.e. a closed loop.
+// A connected wall group is "closed" (has a well-defined exterior envelope)
+// when it has no dangling/open wall end -- i.e. every node touched by a
+// wall endpoint is touched by at least 2. Nodes with valence > 2 are
+// perfectly normal T-junctions (a partition wall welded into an outer
+// wall, split into two segments at that point) and must NOT disqualify the
+// group: only valence === 1 (a wall end that joins nothing) means the
+// group is actually open and has no real building envelope.
 function isClosedLoop(walls) {
   if (!walls?.length) return false;
   const valence = new Map();
@@ -141,7 +214,7 @@ function isClosedLoop(walls) {
       valence.set(k, (valence.get(k) || 0) + 1);
     });
   });
-  return valence.size > 0 && [...valence.values()].every((v) => v === 2);
+  return valence.size > 0 && [...valence.values()].every((v) => v >= 2);
 }
 
 function classifyWallGroup(walls) {
@@ -215,6 +288,8 @@ function generateExteriorDimensionsForGroup(groupWalls, room, gid) {
       offset: -EXTERNAL_OFFSET_2,
       orientation: "horizontal",
       kind: "external_overall",
+      referenceKind: FACE_REF_KINDS.JOINED_OUTER_FACE,
+      style: { importance: "important" },
     }));
   }
   if (totalH >= MIN_AUTO_EXTERIOR_MM) {
@@ -225,6 +300,8 @@ function generateExteriorDimensionsForGroup(groupWalls, room, gid) {
       offset: EXTERNAL_OFFSET_2,
       orientation: "vertical",
       kind: "external_overall",
+      referenceKind: FACE_REF_KINDS.JOINED_OUTER_FACE,
+      style: { importance: "important" },
     }));
   }
 
@@ -408,6 +485,8 @@ function generateInternalClearForCells(walls) {
         offset: EXTERNAL_OFFSET_1,
         orientation: "horizontal",
         kind: "internal_clear",
+        referenceKind: FACE_REF_KINDS.JOINED_ROOM_FACE,
+        style: { importance: "important" },
       }));
     }
     if (height >= MIN_AUTO_EXTERIOR_MM) {
@@ -418,33 +497,44 @@ function generateInternalClearForCells(walls) {
         offset: -EXTERNAL_OFFSET_1,
         orientation: "vertical",
         kind: "internal_clear",
+        referenceKind: FACE_REF_KINDS.JOINED_ROOM_FACE,
+        style: { importance: "important" },
       }));
     }
   });
   return out;
 }
 
-function generatePerWallDimensions(walls, room, displayMode) {
+function generatePerWallDimensions(walls, room, displayMode, roomPolygons = [], roomIds = [], plan = null) {
   const out = [];
   if (!walls?.length) return out;
+  const planForOpen = plan || { walls, nodes: room?._nodes || {}, room };
 
-  // Suppress wall_length for any wall that forms a complete boundary of at least one
-  // detected room cell — covers both outer perimeter walls and full-span partitions.
+  // Suppress wall_length only for a wall that forms a complete boundary of
+  // at least one detected (axis-aligned) room cell — its length is already
+  // covered by that cell's internal_clear dimension. A wall belonging to a
+  // "complex_closed_loop" (any closed loop containing a diagonal) is no
+  // longer blanket-suppressed here: detectRectCells only ever finds
+  // axis-aligned cells, so a diagonal-containing loop has no cell to cover
+  // its segments' lengths, and every segment (horizontal, vertical, or
+  // diagonal) still needs its own room-facing, face-anchored dimension —
+  // exactly what the loop below already produces per wall.
   const cells = detectRectCells(walls);
   const { hSegs: bAxisH, vSegs: bAxisV } = buildAxisSegs(walls);
   const suppressedWallIds = collectFullCellBoundaryWallIds(cells, bAxisH, bAxisV);
-
-  const groups = groupWallsByConnectivity(walls);
-  groups.forEach((g) => {
-    if (classifyWallGroup(g) === "complex_closed_loop") {
-      g.forEach((w) => { if (w?.id != null) suppressedWallIds.add(w.id); });
-    }
-  });
 
   const b = wallPointsBounds(walls, room);
   const cx = (b.minX + b.maxX) / 2;
   const cy = (b.minY + b.maxY) / 2;
   const geom = wallGeometryMap(walls, room);
+  // LIVE4.1: open-chain face/lane lookup is O(walls) — cache once per wallId.
+  const openFaceByWall = new Map();
+  const openFaceFor = (wallId) => {
+    if (openFaceByWall.has(wallId)) return openFaceByWall.get(wallId);
+    const v = openChainExteriorFaceSpan(planForOpen, wallId);
+    openFaceByWall.set(wallId, v);
+    return v;
+  };
 
   (walls || []).forEach((wall) => {
     if (!wall?.pts || wall.pts.length < 2) return;
@@ -461,41 +551,188 @@ function generatePerWallDimensions(walls, room, displayMode) {
       const nx = -uy;
       const ny = ux;
 
-      // Collect quad corners from visible wall body (miter-corrected slab geometry).
-      // For 2-point walls: gather ALL sub-quads (handles T-junction expansion on host walls).
-      // For multi-segment polylines: use the specific segment quad.
-      const quadCorners = [];
+      // Gather this wall's slab sub-quads (T-junction expansion may split a
+      // 2-point wall into several quads; a multi-segment polyline uses just
+      // this segment's own quad). Each quad is [outerA, outerB, innerB, innerA]
+      // — already mitered/joined against neighboring walls by buildWallGeometry.
+      const quads = [];
       if (wall.pts.length === 2) {
         for (const p of geom?.polygons || []) {
-          if (p.wallId === wall.id) quadCorners.push(...p.quad);
+          if (p.wallId === wall.id) quads.push(p.quad);
         }
       } else {
         const quad = geom?.quads?.get(`${wall.id}-${i - 1}`);
-        if (quad) quadCorners.push(...quad);
+        if (quad) quads.push(quad);
       }
 
-      let p1, p2, visibleLen;
-      if (quadCorners.length >= 4) {
-        // Project all slab corners onto wall axis to find actual visible extent
-        const projs = quadCorners.map((pt) => (pt.x - aCL.x) * ux + (pt.y - aCL.y) * uy);
-        const minT = Math.min(...projs);
-        const maxT = Math.max(...projs);
-        visibleLen = maxT - minT;
+      // Decide ONCE per wall segment whether the "inner" or "outer" face is
+      // the one actually facing into a real detected room — geometrically
+      // verified via point-in-polygon against the room's true polygon,
+      // never a whole-plan bounding-box heuristic (that broke diagonal
+      // walls in irregular rooms). Falls back to "inner" when no room
+      // polygon data is supplied, matching prior behaviour. The same
+      // choice is applied to every T-junction sub-quad so a wall never
+      // mixes faces along its own length.
+      let chosenFace = "inner";
+      // LIVE4.1: open L / open chain — measure the physical exterior face
+      // (farther from chain centroid), not nearest-room inner face.
+      const openFace = openFaceFor(wall.id);
+      if (openFace?.reason === "open_chain" && openFace.chosenFace) {
+        chosenFace = openFace.chosenFace;
+      } else if (roomPolygons?.length && quads.length) {
+        const [outerA, outerB, innerB, innerA] = quads[0];
+        const innerMid = { x: (innerA.x + innerB.x) / 2, y: (innerA.y + innerB.y) / 2 };
+        const outerMid = { x: (outerA.x + outerB.x) / 2, y: (outerA.y + outerB.y) / 2 };
+        const innerInRoom = roomPolygons.some((poly) => pointInPolygon(innerMid, poly));
+        const outerInRoom = roomPolygons.some((poly) => pointInPolygon(outerMid, poly));
+        if (outerInRoom && !innerInRoom) chosenFace = "outer";
+        else if (innerInRoom && !outerInRoom) chosenFace = "inner";
+        else {
+          // Both or neither inside a centreline room poly. "inner"/"outer" labels
+          // flip when wallSegmentOffsetSide uses the fixed canvas centre under
+          // plan translation (Phase 2F1-M2). Pick the face mid closer to the
+          // nearest room centroid — label-invariant for a simultaneous flip.
+          let bestD = Infinity;
+          let bestFace = "inner";
+          for (const poly of roomPolygons) {
+            const n = poly.length || 1;
+            const c = {
+              x: poly.reduce((s, p) => s + p.x, 0) / n,
+              y: poly.reduce((s, p) => s + p.y, 0) / n,
+            };
+            for (const [face, mid] of [["inner", innerMid], ["outer", outerMid]]) {
+              const d = Math.hypot(c.x - mid.x, c.y - mid.y);
+              if (d < bestD) { bestD = d; bestFace = face; }
+            }
+          }
+          chosenFace = bestFace;
+        }
+      }
+
+      // Find which sub-quad's chosen-face corner sits at each end of the
+      // wall (by projecting onto the wall axis) and use THAT corner
+      // directly as the dimension endpoint — it is already the correctly
+      // mitered/joined face point, never re-derived from the centerline.
+      let minEntry = null;
+      let maxEntry = null;
+      for (const quad of quads) {
+        const [outerA, outerB, innerB, innerA] = quad;
+        const faceA = chosenFace === "outer" ? outerA : innerA;
+        const faceB = chosenFace === "outer" ? outerB : innerB;
+        for (const pt of [faceA, faceB]) {
+          const t = (pt.x - aCL.x) * ux + (pt.y - aCL.y) * uy;
+          if (!minEntry || t < minEntry.t) minEntry = { t, pt };
+          if (!maxEntry || t > maxEntry.t) maxEntry = { t, pt };
+        }
+      }
+
+      let p1, p2, visibleLen, referenceKind = FACE_REF_KINDS.JOINED_ROOM_FACE, reference = null;
+      if (minEntry && maxEntry) {
+        visibleLen = maxEntry.t - minEntry.t;
         if (visibleLen < MIN_AUTO_EXTERIOR_MM) continue;
-        p1 = { x: aCL.x + ux * minT, y: aCL.y + uy * minT };
-        p2 = { x: aCL.x + ux * maxT, y: aCL.y + uy * maxT };
+        p1 = minEntry.pt;
+        p2 = maxEntry.pt;
+        reference = {
+          wallId: wall.id,
+          kind: referenceKind,
+          side: chosenFace,
+          start: p1,
+          end: p2,
+          joinedStart: p1,
+          joinedEnd: p2,
+        };
       } else {
-        // No quad available: fall back to centerline endpoints
-        p1 = { x: aCL.x, y: aCL.y };
-        p2 = { x: bCL.x, y: bCL.y };
-        visibleLen = clLen;
+        // No silent centerline fallback — use semantic face refs or skip as invalid.
+        const faceBundle = buildWallFaceReferences(wall, room);
+        if (!faceBundle) continue;
+        let roomRef = null;
+        if (roomPolygons?.length) {
+          for (let ri = 0; ri < roomPolygons.length; ri++) {
+            const resolved = resolveRoomFacingReference(
+              wall,
+              roomPolygons[ri],
+              roomIds?.[ri] || null,
+              room,
+            );
+            if (resolved.ok) {
+              roomRef = resolved.reference;
+              break;
+            }
+          }
+        }
+        const faceRef = roomRef || {
+          ...faceBundle.faceA,
+          kind: FACE_REF_KINDS.ROOM_FACE,
+        };
+        const joined = applyJoinedQuadToReference(faceRef, quads, chosenFace === "outer");
+        p1 = joined.joinedStart;
+        p2 = joined.joinedEnd;
+        visibleLen = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        if (visibleLen < MIN_AUTO_EXTERIOR_MM) continue;
+        referenceKind = joined.kind || FACE_REF_KINDS.ROOM_FACE;
+        reference = joined;
+        if (anchorsOnCenterline(p1, p2, faceBundle.centerline, 4)) {
+          // Refuse to emit a centerline-anchored visual wall dimension.
+          continue;
+        }
       }
 
       const midX = (p1.x + p2.x) / 2;
       const midY = (p1.y + p2.y) / 2;
-      const dot = (cx - midX) * nx + (cy - midY) * ny;
-      // 150mm outside miter corner — clears wall body and stays legible
-      const offset = dot > 0 ? -150 : 150;
+      // Room-facing wall_length dimensions must render INSIDE the room they
+      // describe (see acceptance contract) — never decided by "which side is
+      // closer to the whole-plan bounding-box center", which can point
+      // outward (through the wall, into the exterior gap toward
+      // external_overall) for any wall not near the plan's overall center,
+      // e.g. every wall of a shape whose bbox center falls outside a notch
+      // or a non-convex room. Prefer an explicit point-in-polygon probe
+      // against the SAME room polygon set used for chosenFace above.
+      let offset;
+      if (roomPolygons?.length) {
+        const candidateIn = { x: midX + nx * 150, y: midY + ny * 150 };
+        const candidateOut = { x: midX - nx * 150, y: midY - ny * 150 };
+        const inIsInside = roomPolygons.some((poly) => pointInPolygon(candidateIn, poly));
+        const outIsInside = roomPolygons.some((poly) => pointInPolygon(candidateOut, poly));
+        if (inIsInside && !outIsInside) offset = 150;
+        else if (outIsInside && !inIsInside) offset = -150;
+      }
+      // LIVE4: open chains (free L etc.) must wrap the OUTSIDE of the elbow
+      // even when unrelated closed rooms exist elsewhere on the plan. Prefer
+      // that before the "nearest room" pull which aimed labels into the L.
+      // LIVE4.1: reuse openFace computed above (lane + exterior face).
+      if (offset == null && openFace?.reason === "open_chain" && openFace.offsetMm != null) {
+        offset = openFace.offsetMm;
+      } else if (offset == null) {
+        const open = openChainExteriorOffsetForWall(planForOpen, wall.id);
+        if (open?.reason === "open_chain" && open.offsetMm != null) {
+          offset = open.offsetMm;
+        }
+      }
+      if (offset == null && roomPolygons?.length) {
+        // PHASE 2E FOLLOW-UP — neither candidate is inside a room, but rooms
+        // DO exist (e.g. notch cut-off). Prefer the side facing the nearest
+        // room. Closed-room walls already resolved via containment above.
+        let ref = null;
+        let bestD = Infinity;
+        for (const poly of roomPolygons) {
+          const n = poly.length || 1;
+          const c = {
+            x: poly.reduce((s, p) => s + p.x, 0) / n,
+            y: poly.reduce((s, p) => s + p.y, 0) / n,
+          };
+          const d = Math.hypot(c.x - midX, c.y - midY);
+          if (d < bestD) { bestD = d; ref = c; }
+        }
+        if (ref) {
+          const dot = (ref.x - midX) * nx + (ref.y - midY) * ny;
+          offset = dot > 0 ? 150 : -150;   // toward the room, i.e. readable side
+        }
+      }
+      if (offset == null) {
+        // Free-standing / unknown: bbox-center heuristic (prior behaviour).
+        const dot = (cx - midX) * nx + (cy - midY) * ny;
+        offset = dot > 0 ? -150 : 150;
+      }
 
       out.push(createAutoLinearDimension({
         id: `auto-wall-len-${wall.id}-${i}`,
@@ -504,6 +741,9 @@ function generatePerWallDimensions(walls, room, displayMode) {
         offset,
         kind: "wall_length",
         labelOverride: formatDimensionValue(visibleLen, displayMode),
+        referenceKind,
+        reference,
+        measurementValue: visibleLen,
       }));
     }
   });
@@ -687,8 +927,11 @@ function spanLengthMm(p1, p2) {
 }
 
 function spanDedupeKey(dim) {
-  // wall_length dims are per-wall and must never be deduplicated against each other
-  if (dim.kind === "wall_length") return null;
+  // Exterior overall + local exterior edges must never collapse (same span at
+  // bbox extreme). wall_length stays per-wall.
+  if (dim.kind === "wall_length" || dim.kind === "external_overall" || dim.kind === "external_segment") {
+    return null;
+  }
   if (dim.orientation !== "horizontal" && dim.orientation !== "vertical") return null;
   const len = Math.round(spanLengthMm(dim.p1, dim.p2));
   if (dim.orientation === "horizontal") {
@@ -710,6 +953,7 @@ const DIM_KIND_PRIORITY = {
   pier: 4,
   wall_length: 3,
   external_segment: 3,
+  room_edge_clear: 2,
   room_width: 3,
   room_height: 3,
   internal_clear: 2,
@@ -727,7 +971,7 @@ function dedupeDimensions(dims) {
     }
     const len = spanLengthMm(dim.p1, dim.p2);
     const isWallSpan = dim.kind === "external_segment" || dim.kind === "external_overall"
-      || dim.kind === "internal_clear"
+      || dim.kind === "internal_clear" || dim.kind === "room_edge_clear"
       || dim.kind === "room_width" || dim.kind === "room_height" || dim.kind === "pier";
     if (isWallSpan && len > 0 && len < MIN_WALL_DIM_MM) continue;
     const key = spanDedupeKey(dim);
@@ -755,10 +999,18 @@ function dedupeDimensions(dims) {
 // Returns the projected {axis, lo, hi} span of a horizontal/vertical dim. Null for diagonals.
 function axisSpan(dim) {
   if (!dim?.p1 || !dim?.p2) return null;
-  if (dim.orientation === "horizontal") {
+  // dim.orientation is only a "which delta is bigger" label (see
+  // createAutoLinearDimension), NOT a guarantee the segment is truly axis
+  // -aligned -- a genuinely diagonal wall_length can still be labeled
+  // "horizontal" if its dx happens to exceed its dy. Verify actual
+  // co-linearity before treating it as coverable by an external_overall
+  // span, otherwise a diagonal wall can be wrongly stripped as "redundant".
+  const dx = Math.abs(dim.p2.x - dim.p1.x);
+  const dy = Math.abs(dim.p2.y - dim.p1.y);
+  if (dim.orientation === "horizontal" && dy <= ALIGN_THR_MM) {
     return { axis: "h", lo: Math.min(dim.p1.x, dim.p2.x), hi: Math.max(dim.p1.x, dim.p2.x) };
   }
-  if (dim.orientation === "vertical") {
+  if (dim.orientation === "vertical" && dx <= ALIGN_THR_MM) {
     return { axis: "v", lo: Math.min(dim.p1.y, dim.p2.y), hi: Math.max(dim.p1.y, dim.p2.y) };
   }
   return null;
@@ -771,36 +1023,155 @@ function spansNearlyEqual(a, b, tol = 200) {
 }
 
 // Remove wall_length dims whose span is already covered by external_overall.
-// Only external_overall is used as reference — internal_clear is a room interior dim and
-// should not suppress partition wall_length that spans a sub-room.
-// Keeps diagonal wall_length (axisSpan returns null) and short/partial partitions.
+// room_edge_clear is the RemPlanner room-face label set; suppress wall_length
+// only when it measures the same quantized endpoints as an existing room edge
+// (not by coarse axis-span equality — that wiped notch wall_length).
+// Never emit wall-thickness labels.
 function removeWallLengthCoveredBySpans(dims) {
   const overallSpans = dims
     .filter((d) => d.kind === "external_overall")
     .map((d) => axisSpan(d))
     .filter(Boolean);
-  if (!overallSpans.length) return dims;
+  const roomEdgeKeys = new Set(
+    dims
+      .filter((d) => d.kind === "room_edge_clear" || d.kind === "internal_clear")
+      .map((d) => {
+        const a = d.p1;
+        const b = d.p2;
+        if (!a || !b) return null;
+        const x0 = Math.round(Math.min(a.x, b.x));
+        const y0 = Math.round(Math.min(a.y, b.y));
+        const x1 = Math.round(Math.max(a.x, b.x));
+        const y1 = Math.round(Math.max(a.y, b.y));
+        return `${x0}:${y0}:${x1}:${y1}`;
+      })
+      .filter(Boolean),
+  );
   return dims.filter((d) => {
+    if (isLikelyThicknessDim(d)) return false;
     if (d.kind !== "wall_length") return true;
+    const a = d.p1;
+    const b = d.p2;
+    if (a && b) {
+      const x0 = Math.round(Math.min(a.x, b.x));
+      const y0 = Math.round(Math.min(a.y, b.y));
+      const x1 = Math.round(Math.max(a.x, b.x));
+      const y1 = Math.round(Math.max(a.y, b.y));
+      if (roomEdgeKeys.has(`${x0}:${y0}:${x1}:${y1}`)) return false;
+    }
     const span = axisSpan(d);
-    if (!span) return true; // diagonal — always keep
+    if (!span) return true; // diagonal — keep unless exact room-edge match above
     return !overallSpans.some((os) => spansNearlyEqual(span, os));
   });
+}
+
+function isLikelyThicknessDim(dim) {
+  if (!dim?.p1 || !dim?.p2) return false;
+  const len = Number.isFinite(dim.measurementValue)
+    ? dim.measurementValue
+    : Math.hypot(dim.p2.x - dim.p1.x, dim.p2.y - dim.p1.y);
+  return len > 0 && len <= 250 && (dim.kind === "wall_thickness" || dim.reference?.axis === "thickness");
+}
+
+// A handful of the longest surviving room-facing wall_length dimensions are
+// the ones a user actually reads at a glance on Fit — promote them (same
+// "important" tier as external_overall/internal_clear) so the Fit-scale
+// LOD/collision pass doesn't have to choose between showing nothing and
+// showing everything. Runs LAST, on the final post-suppression/post-dedupe
+// set, so a wall whose length is redundant with an external_overall span
+// (already removed by removeWallLengthCoveredBySpans) can never "waste" a
+// promotion slot on a dimension that won't even be rendered. Short/secondary
+// segments are intentionally left at the default tier and may still be
+// hidden by collision, per the required LOD priority order.
+function promoteLongestWallLengthDims(dims) {
+  const wallLen = dims
+    .filter((d) => d.kind === "wall_length")
+    .map((d) => ({ dim: d, len: Math.hypot(d.p2.x - d.p1.x, d.p2.y - d.p1.y) }))
+    .sort((a, b) => b.len - a.len)
+    .slice(0, MAX_IMPORTANT_WALL_LENGTH_DIMS);
+  for (const { dim } of wallLen) dim.style = { ...dim.style, importance: "important" };
+  return dims;
+}
+
+/** Walls incident to a degree≥3 node (T / open cross) — no centreline wall_length. */
+function wallIdsOnOpenJunction(walls) {
+  const deg = new Map();
+  for (const w of walls || []) {
+    if (!w?.a || !w?.b) continue;
+    deg.set(w.a, (deg.get(w.a) || 0) + 1);
+    deg.set(w.b, (deg.get(w.b) || 0) + 1);
+  }
+  const ids = new Set();
+  for (const w of walls || []) {
+    if ((deg.get(w.a) || 0) >= 3 || (deg.get(w.b) || 0) >= 3) ids.add(w.id);
+  }
+  return ids;
+}
+
+function wallIdFromWallLengthDim(dim) {
+  if (dim?.wallId) return dim.wallId;
+  if (dim?.reference?.wallId) return dim.reference.wallId;
+  const id = String(dim?.id || "");
+  const m = id.match(/^auto-wall-len-(.+)-\d+$/);
+  return m ? m[1] : null;
 }
 
 export function generateWallDimensions(plan, opts = {}) {
   const displayMode = opts.dimensionDisplayMode || "remplanner_cm";
   const walls = resolvePlanWalls(plan);
+  let roomPolygons = [];
+  let roomIds = [];
+  let detectedRooms = [];
+  try {
+    detectedRooms = detectRooms(plan);
+    roomPolygons = detectedRooms.map((r) => r.polygon).filter((p) => p?.length >= 3);
+    roomIds = detectedRooms.map((r) => r.id || null);
+  } catch {
+    detectedRooms = [];
+    roomPolygons = [];
+    roomIds = [];
+  }
+  // External overall + per-room clear spans come from the SAME contour the
+  // renderer draws (see renderedContours.js). The previous sources — a
+  // centreline bounding box per closed loop, and a rect-cell grid with a
+  // fallback thickness — produced external dimensions on inner partitions and
+  // left whole rooms without a width or height.
+  const contours = buildRenderedContours(plan, { rooms: detectedRooms });
+  const contourDims = generateContourDimensions(contours);
   const dimensions = [
-    ...generateExteriorDimensions(walls, plan?.room || {}),
-    ...generateInternalClearForCells(walls),
-    ...generatePerWallDimensions(walls, plan?.room || {}, displayMode),
+    ...contourDims.dims,
+    ...generatePerWallDimensions(walls, plan?.room || {}, displayMode, roomPolygons, roomIds, plan),
     ...generateOpeningAndPierDimensions(plan, displayMode),
   ];
   const rack = generateRackAisles(plan, displayMode);
-  const all = removeWallLengthCoveredBySpans(dedupeDimensions([...dimensions, ...rack.dims]));
+  const merged = promoteLongestWallLengthDims(
+    removeWallLengthCoveredBySpans(dedupeDimensions([...dimensions, ...rack.dims])),
+  );
+  // Even when other rooms/envelopes exist, suppress centreline wall_length on
+  // open multi-arm junctions (degree≥3) — T / open cross policy.
+  const openJunctionWallIds = wallIdsOnOpenJunction(walls);
+  const gated = openJunctionWallIds.size
+    ? merged.filter((d) => {
+      if (d.kind !== "wall_length") return true;
+      const wid = wallIdFromWallLengthDim(d);
+      return !(wid && openJunctionWallIds.has(wid));
+    })
+    : merged;
+  const all = finalizeAutoDimensions(gated, {
+    displayMode,
+    hasRoomContours: (contours.roomContours || []).length > 0,
+    hasEnvelopes: (contours.envelopes || []).length > 0,
+    suppressOpenJunctionWallLength: (
+      (contours.roomContours || []).length === 0
+      && (contours.envelopes || []).length === 0
+      && hasOpenMultiArmJunction(plan, walls)
+    ),
+    contours,
+  });
   return {
     dimensions: all,
     validationWarnings: rack.warnings,
+    contourDiagnostics: contourDims.diagnostics,
+    contours,
   };
 }

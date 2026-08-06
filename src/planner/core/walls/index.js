@@ -5,3 +5,7 @@ export * from "./wallNormalize.js";
 export * from "./wallCommit.js";
 export * from "./wallJoins.js";
 export * from "./wallRender.js";
+export * from "./wallCommands.js";
+export * from "./applyWallCommand.js";
+export * from "./logicalWallChain.js";
+export * from "./liveWallMeasurements.js";

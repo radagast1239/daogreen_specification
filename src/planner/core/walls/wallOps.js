@@ -185,7 +185,17 @@ export function refineWallDraftSnap(from, pt, angleSnap, walls, room, zoom, {
     return { pt, fromAdjust: from, snap: null };
   }
 
-  const thr = SNAP_DIST / Math.max(zoom, 0.05);
+  // SNAP_DIST is a screen-pixel radius, converted to world mm by dividing by
+  // zoom — with no ceiling that conversion balloons past 700mm as soon as the
+  // view is zoomed out to fit a whole building (e.g. 80px / 0.11 zoom ≈
+  // 710mm). At that point drawing a new, deliberately non-touching interior
+  // rectangle a normal ~700mm clear of an existing wall got its very first
+  // point forcibly reprojected onto that unrelated wall's centerline
+  // ("wall-start"/"wall-t" host-attach), corrupting the new chain's origin
+  // and fusing two independent contours. Cap the attach radius to a fixed
+  // real-world tolerance so it stays a precise near-wall snap at any zoom.
+  const SNAP_DIST_ATTACH_CAP_MM = 250;
+  const thr = Math.min(SNAP_DIST / Math.max(zoom, 0.05), SNAP_DIST_ATTACH_CAP_MM);
   const attachThr = Math.max(thr, (wallThk || 100) * 1.15);
   let outPt = { ...pt };
   let fromAdjust = { ...from };
@@ -193,6 +203,10 @@ export function refineWallDraftSnap(from, pt, angleSnap, walls, room, zoom, {
 
   const nearFrom = nearestWallSegmentProj(from, walls);
   if (nearFrom && nearFrom.d <= attachThr) {
+    // Always project start onto host centerline (deferred split at commit).
+    fromAdjust = { x: nearFrom.proj.x, y: nearFrom.proj.y };
+    snap = { snapped: true, kind: "wall-start", wallId: nearFrom.wallId };
+
     const segAng = normalizeAngleDeg(Math.atan2(nearFrom.b.y - nearFrom.a.y, nearFrom.b.x - nearFrom.a.x) * 180 / Math.PI);
     const lineAng = normalizeAngleDeg(Math.atan2(pt.y - from.y, pt.x - from.x) * 180 / Math.PI);
     const perpA = normalizeAngleDeg(segAng + 90);
@@ -202,7 +216,6 @@ export function refineWallDraftSnap(from, pt, angleSnap, walls, room, zoom, {
       || angleSnap?.guideType === "perpendicular";
 
     if (perp) {
-      fromAdjust = { x: nearFrom.proj.x, y: nearFrom.proj.y };
       const len = Math.max(Math.hypot(pt.x - from.x, pt.y - from.y), 50);
       const useAng = angleDiff(perpA, lineAng) <= angleDiff(perpB, lineAng) ? perpA : perpB;
       outPt = projectPointToAngle(fromAdjust, useAng, len);
@@ -212,12 +225,15 @@ export function refineWallDraftSnap(from, pt, angleSnap, walls, room, zoom, {
 
   const nearEnd = nearestWallSegmentProj(outPt, walls);
   if (nearEnd && nearEnd.d <= attachThr) {
+    // End on any wall body (not only perpendicular T) — commit will split host.
+    outPt = { x: nearEnd.proj.x, y: nearEnd.proj.y };
     const segAng = normalizeAngleDeg(Math.atan2(nearEnd.b.y - nearEnd.a.y, nearEnd.b.x - nearEnd.a.x) * 180 / Math.PI);
     const lineAng = normalizeAngleDeg(Math.atan2(outPt.y - fromAdjust.y, outPt.x - fromAdjust.x) * 180 / Math.PI);
-    if (isPerpendicularToSegment(segAng, lineAng, toleranceDeg)) {
-      outPt = { x: nearEnd.proj.x, y: nearEnd.proj.y };
-      snap = { snapped: true, kind: "wall-t-end", wallId: nearEnd.wallId };
-    }
+    snap = {
+      snapped: true,
+      kind: isPerpendicularToSegment(segAng, lineAng, toleranceDeg) ? "wall-t-end" : "wall-end",
+      wallId: nearEnd.wallId,
+    };
   }
 
   return { pt: outPt, fromAdjust, snap };
@@ -359,6 +375,130 @@ export function findClosedLoops(walls, maxLoops = 48) {
     if (loops.length >= maxLoops || steps > maxSteps) break;
   }
   return loops;
+}
+
+/**
+ * Minimal planar faces of the wall centerline graph (half-edge face
+ * tracing). Unlike findClosedLoops' cycle enumeration — which explodes into
+ * composite super-loops (and caps out) on graphs with several internal
+ * partitions, e.g. a rectangle carved by a central partition plus two
+ * diagonals — this returns exactly the smallest enclosed regions (the real
+ * rooms), never a parent that merely contains them. The unbounded outer
+ * face is dropped. Deterministic and orientation-consistent.
+ */
+// Planar graph of wall centerlines that additionally SUBDIVIDES a wall
+// segment at any node lying on its interior (a T-junction where a partition
+// ends mid-face of a host wall). Without this the host edge would bypass the
+// junction node and no enclosed sub-face (room) could form there.
+function buildSubdividedWallGraph(walls, thr = SNAP_DIST) {
+  const nodes = [];
+  const key = (p) => `${Math.round(p.x / thr)}_${Math.round(p.y / thr)}`;
+  const getNode = (p) => {
+    const k = key(p);
+    let n = nodes.find((x) => x.key === k);
+    if (!n) { n = { x: p.x, y: p.y, key: k, edges: [] }; nodes.push(n); }
+    return n;
+  };
+  const addEdge = (na, nb, wallId) => {
+    if (na === nb) return;
+    if (!na.edges.find((e) => e.to === nb)) na.edges.push({ to: nb, wallId });
+    if (!nb.edges.find((e) => e.to === na)) nb.edges.push({ to: na, wallId });
+  };
+  // first register every endpoint node
+  const segs = [];
+  walls.forEach((w) => {
+    if (!w.pts || w.pts.length < 2) return;
+    for (let i = 1; i < w.pts.length; i++) {
+      const a = getNode(w.pts[i - 1]);
+      const b = getNode(w.pts[i]);
+      if (a !== b) segs.push({ a, b, wallId: w.id });
+    }
+  });
+  // subdivide each segment at any existing node that lies on its interior
+  for (const s of segs) {
+    const A = s.a, B = s.b;
+    const len = dist(A, B) || 1;
+    const on = [{ t: 0, n: A }, { t: 1, n: B }];
+    for (const n of nodes) {
+      if (n === A || n === B) continue;
+      const proj = projectOnSegment(n, A, B);
+      if (dist(n, proj) > thr) continue;
+      const t = ((n.x - A.x) * (B.x - A.x) + (n.y - A.y) * (B.y - A.y)) / (len * len);
+      if (t <= 0.001 || t >= 0.999) continue;
+      on.push({ t, n });
+    }
+    on.sort((x, y) => x.t - y.t);
+    for (let i = 1; i < on.length; i++) addEdge(on[i - 1].n, on[i].n, s.wallId);
+  }
+  return nodes;
+}
+
+export function findMinimalFaceLoops(walls, thr = SNAP_DIST) {
+  const nodes = buildSubdividedWallGraph(walls, thr);
+  if (nodes.length < 3) return [];
+  // directed half-edges keyed by "fromKey->toKey"
+  const halves = [];
+  const byKey = new Map(nodes.map((n) => [n.key, n]));
+  for (const n of nodes) {
+    for (const e of n.edges) {
+      halves.push({ from: n, to: e.to, id: `${n.key}->${e.to.key}` });
+    }
+  }
+  const outByNode = new Map();
+  for (const h of halves) {
+    h.angle = Math.atan2(h.to.y - h.from.y, h.to.x - h.from.x);
+    if (!outByNode.has(h.from.key)) outByNode.set(h.from.key, []);
+    outByNode.get(h.from.key).push(h);
+  }
+  for (const list of outByNode.values()) list.sort((a, b) => a.angle - b.angle);
+
+  // next half-edge in a face: at `to`, take the outgoing edge that is the
+  // next one CLOCKWISE from the reverse of the incoming edge.
+  const nextHalf = (h) => {
+    const list = outByNode.get(h.to.key) || [];
+    if (!list.length) return null;
+    const backAngle = Math.atan2(h.from.y - h.to.y, h.from.x - h.to.x);
+    let best = null;
+    let bestDelta = Infinity;
+    for (const cand of list) {
+      let d = backAngle - cand.angle;
+      while (d <= 1e-9) d += 2 * Math.PI;
+      if (d < bestDelta) { bestDelta = d; best = cand; }
+    }
+    return best;
+  };
+
+  const used = new Set();
+  const faces = [];
+  for (const start of halves) {
+    if (used.has(start.id)) continue;
+    const loop = [];
+    let cur = start;
+    let guard = 0;
+    while (cur && !used.has(cur.id) && guard++ < halves.length + 4) {
+      used.add(cur.id);
+      loop.push({ x: cur.from.x, y: cur.from.y });
+      cur = nextHalf(cur);
+      if (cur && cur.id === start.id) break;
+    }
+    if (loop.length >= 3) faces.push(loop);
+  }
+  if (!byKey || faces.length === 0) return faces;
+  // signedArea > 0 in screen space (y-down) marks the clockwise-traced
+  // interior faces; the single unbounded face has the opposite sign and the
+  // largest magnitude — drop it.
+  const signed = (poly) => {
+    let a = 0;
+    for (let i = 0; i < poly.length; i++) { const p = poly[i], q = poly[(i + 1) % poly.length]; a += p.x * q.y - q.x * p.y; }
+    return a / 2;
+  };
+  let outerIdx = -1;
+  let outerMag = 0;
+  faces.forEach((f, i) => {
+    const s = signed(f);
+    if (s < 0 && Math.abs(s) > outerMag) { outerMag = Math.abs(s); outerIdx = i; }
+  });
+  return faces.filter((_, i) => i !== outerIdx);
 }
 
 function findWallSegForEdge(a, b, walls, thr = 120) {
@@ -630,7 +770,68 @@ function envelopeRoomFromWalls(walls) {
   return polygonArea(poly) >= MIN_ROOM_AREA_MM2 ? poly : null;
 }
 
+/**
+ * Leaf-room policy: a "parent" loop that a partition fully subdivides into
+ * two-or-more child loops is a graph artifact (findClosedLoops finds the
+ * outer envelope cycle AND each of the smaller cycles the partition carves
+ * out of it -- all three are equally valid graph cycles), not a real extra
+ * room. Only removes a container when its children's combined area
+ * approximately equals its own (they fully tile it) -- a single small child
+ * (a real nested room/closet leaving most of the parent as open space) or a
+ * handful of children covering only part of the parent is left untouched.
+ */
+function removeGhostParentRooms(meta) {
+  if (meta.length <= 1) return meta;
+  const sorted = [...meta].sort((a, b) => b.area - a.area);
+  // A loop with no smaller loop nested inside it is a true leaf. Multi-wall
+  // subdivisions (e.g. two partitions) produce loops at several nesting
+  // depths in the wall graph (whole envelope ⊃ two-room composites ⊃ three
+  // single rooms) -- only the minimal leaves may ever be "real" rooms, so
+  // parent coverage is always summed from the leaf set, never from an
+  // intermediate composite (which would double-count area and make a
+  // legitimate composite look under-covered).
+  const isLeaf = (m) => !sorted.some((other) => other !== m && other.area < m.area && pointInPolygon(other.cen, m.poly));
+  const leaves = sorted.filter(isLeaf);
+  const removed = new Set();
+  for (const parent of sorted) {
+    if (isLeaf(parent)) continue;
+    const children = leaves.filter((leaf) => pointInPolygon(leaf.cen, parent.poly));
+    if (children.length < 2) continue;
+    const coverage = children.reduce((s, m) => s + m.area, 0) / parent.area;
+    if (coverage >= 0.85 && coverage <= 1.08) removed.add(parent);
+  }
+  return sorted.filter((m) => !removed.has(m));
+}
+
 /** Оставить осмысленные помещения: все замкнутые контуры, без дубликатов и сетки ячеек. */
+/**
+ * Room loops from a wall network via minimal planar faces.
+ *
+ * findMinimalFaceLoops already yields exactly the smallest enclosed regions
+ * (leaf rooms) — no composite super-loops — so only light cleanup is needed:
+ * drop sub-minimum-area faces, dedupe, and run the leaf/ghost-parent filter
+ * (a no-op when there is no parent, but keeps the invariant). The heavy
+ * envelope-collapse heuristics in filterRoomLoops exist to repair the OLD
+ * cycle-enumerator's composites and would wrongly collapse legitimate
+ * multi-room subdivisions (e.g. a rectangle split by a central partition
+ * plus two diagonals), so they are intentionally skipped here.
+ */
+export function roomFaceLoops(walls = []) {
+  const faces = findMinimalFaceLoops(walls);
+  const meta = faces
+    .map((poly) => ({ poly, area: polygonArea(poly), cen: polygonCentroid(poly) }))
+    .filter((l) => l.area >= MIN_ROOM_AREA_MM2);
+  const seen = new Set();
+  let uniq = meta.filter((l) => {
+    const sig = loopSignature(l.poly);
+    if (seen.has(sig)) return false;
+    seen.add(sig);
+    return true;
+  });
+  uniq = removeGhostParentRooms(uniq);
+  return uniq.sort((a, b) => b.area - a.area).map((l) => l.poly);
+}
+
 export function filterRoomLoops(loops, walls = []) {
   const meta = loops
     .map((poly) => ({ poly, area: polygonArea(poly), cen: polygonCentroid(poly) }))
@@ -647,6 +848,7 @@ export function filterRoomLoops(loops, walls = []) {
   uniq = clusterRoomLoops(uniq);
   uniq = collapseSimilarAreaLoops(uniq, walls);
   uniq = filterContainedRoomLoops(uniq);
+  uniq = removeGhostParentRooms(uniq);
   const bounds = wallEndpointBounds(walls);
   if (!hasFullSpanningPartition(walls, bounds) && uniq.length > 1 && bounds) {
     const sum = uniq.reduce((s, m) => s + m.area, 0);
@@ -747,7 +949,7 @@ export function wallMiterNext(walls, wall, segEndIdx, thr = NODE_LINK_THR) {
 /** Автопомещения из замкнутых перегородок. */
 export function syncZonesFromWalls(plan) {
   const wallsForRooms = weldWallNodes(resolveWallPtsList(plan.walls, plan.nodes));
-  const loops = filterRoomLoops(findClosedLoops(wallsForRooms), wallsForRooms);
+  const loops = roomFaceLoops(wallsForRooms);
   const prevAuto = (plan.zones || []).filter((z) => z.auto);
   const avgThk = wallsForRooms.length
     ? wallsForRooms.reduce((s, w) => s + (w.thk || 100), 0) / wallsForRooms.length

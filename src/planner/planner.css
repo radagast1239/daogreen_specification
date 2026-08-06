@@ -1,4 +1,5 @@
 @import "./planner-tokens.css";
+@import "./planner-redesign.css";
 
 /* Daogreen Farm Planner — CAD-style UI */
 
@@ -104,6 +105,7 @@
 }
 
 .planner-status--ok { color: var(--pl-brand); }
+.planner-status--err { color: #c0392b; }
 
 .planner-btn {
   display: inline-flex;
@@ -722,7 +724,7 @@
   font-size: 11px;
   font-family: var(--mono);
   color: #4a5550;
-  z-index: 3;
+  z-index: 12;
   pointer-events: none;
   max-width: calc(100% - 220px);
   white-space: nowrap;
@@ -2090,4 +2092,134 @@
   justify-content: space-between;
   gap: 10px;
   font-size: 13px;
+}
+
+/* Final UX: measure kind segmented control */
+.planner-measure-kinds {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 8px;
+  vertical-align: middle;
+  pointer-events: auto;
+}
+.planner-coords__hint--measure,
+.planner-measure-kind {
+  pointer-events: auto;
+}
+.planner-measure-kind {
+  border: 1px solid var(--pl-border, #d9e0dc);
+  background: #fff;
+  color: var(--pl-text, #2a3530);
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.planner-measure-kind:hover {
+  border-color: #9bb5ab;
+  background: #f4f8f6;
+}
+.planner-measure-kind.is-active {
+  background: var(--pl-brand, #116355);
+  border-color: var(--pl-brand, #116355);
+  color: #fff;
+}
+
+/* Final UX: CAD tablet/mobile safe layout */
+@media (max-width: 900px) {
+  .planner-app {
+    margin: 0;
+    width: 100%;
+    overflow-x: hidden;
+    min-height: 0;
+  }
+  .planner-topbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: var(--pl-top-h);
+    align-items: flex-start;
+    padding: 6px 10px;
+  }
+  .planner-topbar__brand {
+    flex: 1 1 auto;
+    max-width: 100%;
+  }
+  .planner-topbar__actions {
+    flex: 1 1 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  .planner-coords {
+    max-width: calc(100% - 16px);
+    white-space: normal;
+    bottom: 48px;
+    left: 8px;
+  }
+  .planner-coords__hint--measure {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-left: 0;
+  }
+  .planner-header-row {
+    overflow-x: auto;
+  }
+  .planner-workspace--cad {
+    flex-wrap: wrap;
+  }
+  .planner-category-rail {
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.2);
+  }
+  .planner-category-rail__main {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 4px;
+  }
+  .planner-category-btn {
+    width: 44px;
+    height: 40px;
+    flex-shrink: 0;
+    border-bottom: none;
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  .planner-tool-drawer {
+    left: 0;
+    width: min(100vw - 16px, var(--pl-drawer-w, 280px));
+    max-width: 100%;
+  }
+  .planner-canvas-area {
+    width: 100%;
+    flex: 1 1 100%;
+    min-height: 42vh;
+  }
+  .planner-props-wrap {
+    width: 100%;
+    max-height: 38vh;
+    border-left: none;
+    border-top: 1px solid var(--pl-border);
+    box-shadow: none;
+  }
+  .planner-bottom-bar {
+    height: auto;
+    min-height: var(--pl-bottom-h, 40px);
+    flex-wrap: wrap;
+    padding: 6px 8px;
+  }
+  .planner-bottom-bar__group--center {
+    order: 3;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
 }

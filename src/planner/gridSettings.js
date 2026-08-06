@@ -18,6 +18,15 @@ import {
   isMajorGridLine,
 } from "./core/grid/gridSettings.js";
 import {
+  GRID_STEP_FAMILY,
+  chooseMinorGridStepMm,
+  chooseMajorGridStepMm,
+  resolveAdaptiveGrid,
+  adaptiveGridCssBackground,
+  cursorCenteredZoomView,
+  resolveViewportLod,
+} from "./core/grid/adaptiveGrid.js";
+import {
   DIMENSION_DISPLAY_MODES,
   DEFAULT_DIMENSION_DISPLAY_MODE,
 } from "./core/dimensions/display.js";
@@ -38,6 +47,13 @@ export {
   buildScreenAxes,
   gridViewportBounds,
   isMajorGridLine,
+  GRID_STEP_FAMILY,
+  chooseMinorGridStepMm,
+  chooseMajorGridStepMm,
+  resolveAdaptiveGrid,
+  adaptiveGridCssBackground,
+  cursorCenteredZoomView,
+  resolveViewportLod,
 };
 
 export const SNAP_ROUND_OPTIONS = [1, 5, 10, 50];
@@ -93,7 +109,8 @@ export function normalizeDisplay(saved) {
     showMediumGrid: true,
     showMajorGrid: true,
     dimensionDisplayMode: DEFAULT_DIMENSION_DISPLAY_MODE,
-    showZoneNames: true,
+    // PHASE 2F1 — hide automatic room centre labels by default.
+    showZoneNames: false,
     showZoneAreas: true,
     showZoneFill: true,
     roomWhiteFill: true,

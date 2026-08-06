@@ -31,19 +31,55 @@ describe("dimension formatting modes", () => {
 });
 
 describe("generateWallDimensions", () => {
-  it("builds exterior chains with 300/600 offsets without duplicate spans", () => {
-    const plan = basePlan();
-    plan.walls = [
+  // Regression for the old facade-chain behaviour: a plain rectangle used to
+  // fragment its exterior into a chain of 300/600-offset segments instead of one
+  // overall span per axis. The current contract is a single external_overall per
+  // axis, with no automatic chain kind and no fragmentation from internal walls.
+  it("exterior is a single overall span per axis, not a chain, and is unaffected by internal partitions", () => {
+    const outerWalls = [
       { id: "w1", pts: [{ x: 0, y: 0 }, { x: 4000, y: 0 }], thk: 100 },
       { id: "w2", pts: [{ x: 4000, y: 0 }, { x: 4000, y: 3000 }], thk: 100 },
       { id: "w3", pts: [{ x: 4000, y: 3000 }, { x: 0, y: 3000 }], thk: 100 },
       { id: "w4", pts: [{ x: 0, y: 3000 }, { x: 0, y: 0 }], thk: 100 },
     ];
+
+    const plan = basePlan();
+    plan.walls = outerWalls;
     const out = generateWallDimensions(plan, { dimensionDisplayMode: "remplanner_cm" });
     const linear = out.dimensions.filter((d) => d.mode === "linear");
+
+    // no duplicate spans (still a valid invariant of the new generator)
     const keys = linear.map((d) => `${d.kind}:${d.orientation}:${Math.round(Math.min(d.p1.x, d.p2.x))}-${Math.round(Math.max(d.p1.x, d.p2.x))}-${Math.round(Math.min(d.p1.y, d.p2.y))}-${Math.round(Math.max(d.p1.y, d.p2.y))}`);
     expect(keys.length).toBe(new Set(keys).size);
-    expect(out.dimensions.some((d) => d.kind === "internal_clear" && Math.abs(d.offset) === 300)).toBe(true);
+
+    // automatic facade chaining is gone: no chain kind at all
+    expect(out.dimensions.some((d) => d.kind === "external_chain")).toBe(false);
+
+    // exactly one horizontal and one vertical overall
+    const ext = out.dimensions.filter((d) => d.kind === "external_overall");
+    expect(ext.filter((d) => d.orientation === "horizontal")).toHaveLength(1);
+    expect(ext.filter((d) => d.orientation === "vertical")).toHaveLength(1);
+    const extH = ext.find((d) => d.orientation === "horizontal");
+    const extV = ext.find((d) => d.orientation === "vertical");
+    const spanOf = (d) => Math.hypot(d.p2.x - d.p1.x, d.p2.y - d.p1.y);
+    expect(Math.round(spanOf(extH))).toBe(4100); // outer face to outer face (4000 + thk)
+    expect(Math.round(spanOf(extV))).toBe(3100);
+
+    // adding an internal partition must not change the overall span or fragment it
+    const withPartition = basePlan();
+    withPartition.walls = [
+      ...outerWalls,
+      { id: "w5", pts: [{ x: 2000, y: 0 }, { x: 2000, y: 3000 }], thk: 100 },
+    ];
+    const out2 = generateWallDimensions(withPartition, { dimensionDisplayMode: "remplanner_cm" });
+    const ext2 = out2.dimensions.filter((d) => d.kind === "external_overall");
+    expect(ext2.filter((d) => d.orientation === "horizontal")).toHaveLength(1);
+    expect(ext2.filter((d) => d.orientation === "vertical")).toHaveLength(1);
+    const ext2H = ext2.find((d) => d.orientation === "horizontal");
+    const ext2V = ext2.find((d) => d.orientation === "vertical");
+    expect(Math.round(spanOf(ext2H))).toBe(Math.round(spanOf(extH)));
+    expect(Math.round(spanOf(ext2V))).toBe(Math.round(spanOf(extV)));
+    expect(out2.dimensions.some((d) => d.kind === "external_chain")).toBe(false);
   });
 
   it("no room_meta/room_width/room_height dims generated (labels handled by ZoneEl)", () => {

@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { weldWallNodes } from "../src/planner/wallGeometry.js";
 import { buildWallGeometry, slabFromMiterQuad } from "../src/planner/buildWallGeometry.js";
+import { nodeDiscCoverage } from "./helpers/wallPolygonAssertions.js";
+
+// A wall's quad is emitted as [outerA, outerB, innerB, innerA], and which face
+// buildWallGeometry calls "outer" is decided by wallSegmentOffsetSide, i.e.
+// relative to the ROOM CENTRE. Two walls meeting at a corner can therefore
+// carry OPPOSITE labels, in which case wallA.quad[1] and wallB.quad[0] are the
+// two DIFFERENT ends of the same miter, a full thickness*sqrt(2) apart, even
+// though the corner is perfectly shared. Compare the corner as a point SET.
+const cornerSet = (pts, digits = 1) =>
+  pts.map((p) => `${p.x.toFixed(digits)},${p.y.toFixed(digits)}`).sort().join(" ");
 
 function slabThickness(poly) {
   const o0 = poly[0];
@@ -26,9 +36,18 @@ describe("buildWallGeometry miter", () => {
     const v = polygons.find((p) => p.wallId === "v");
     expect(h).toBeTruthy();
     expect(v).toBeTruthy();
-    const hCorner = h.quad[1];
-    const vCorner = v.quad[0];
-    expect(Math.hypot(hCorner.x - vCorner.x, hCorner.y - vCorner.y)).toBeLessThan(1.5);
+    // both walls contribute the SAME pair of corner points at the node
+    expect(cornerSet([v.quad[0], v.quad[3]])).toBe(cornerSet([h.quad[1], h.quad[2]]));
+    // and those are the true miter of two 100 mm bands at a right angle: the
+    // convex corner outside the elbow and the concave one inside it
+    expect(cornerSet([h.quad[1], h.quad[2]])).toBe(cornerSet([
+      { x: 4050, y: 1950 }, { x: 3950, y: 2050 },
+    ]));
+    // PHASE 2E: the two bands must TILE the corner, not overlap on one
+    // diagonal while leaving a bite on the other
+    const cov = nodeDiscCoverage(polygons, { x: 4000, y: 2000 }, 49.5);
+    expect(cov.uncovered, JSON.stringify(cov)).toBe(0);
+    expect(cov.doubled, JSON.stringify(cov)).toBe(0);
     expect(Math.abs(slabThickness(h.quad) - 100)).toBeLessThan(3);
     expect(Math.abs(slabThickness(v.quad) - 100)).toBeLessThan(3);
   });
@@ -56,9 +75,15 @@ describe("buildWallGeometry miter", () => {
     expect(pa && pb).toBeTruthy();
     expect(Math.abs(slabThickness(pa.quad) - 100)).toBeLessThan(5);
     expect(Math.abs(slabThickness(pb.quad) - 100)).toBeLessThan(5);
-    const outerAEnd = pa.quad[1];
-    const outerBStart = pb.quad[0];
-    expect(Math.hypot(outerAEnd.x - outerBStart.x, outerAEnd.y - outerBStart.y)).toBeLessThan(120);
+    // the two walls share the identical corner pair, and the miter limit keeps
+    // both points near the node instead of letting the acute join run away
+    expect(cornerSet([pb.quad[0], pb.quad[3]])).toBe(cornerSet([pa.quad[1], pa.quad[2]]));
+    for (const p of [pa.quad[1], pa.quad[2]]) {
+      expect(Math.hypot(p.x - 3000, p.y - 0)).toBeLessThanOrEqual(400);
+    }
+    const cov = nodeDiscCoverage(polygons, { x: 3000, y: 0 }, 49.5);
+    expect(cov.uncovered, JSON.stringify(cov)).toBe(0);
+    expect(cov.doubled, JSON.stringify(cov)).toBe(0);
   });
 
   it("aligns outer corners on rectangle room walls", () => {

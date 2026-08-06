@@ -12,5 +12,6 @@ export function resolvePlanDimensions(plan, opts = {}) {
     auto: auto.dimensions || [],
     dimensions: [...normalizedManual, ...(auto.dimensions || [])],
     validationWarnings: auto.validationWarnings || [],
+    contours: auto.contours || null,
   };
 }

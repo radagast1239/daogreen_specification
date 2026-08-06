@@ -19,7 +19,42 @@ function roomName(index) {
   return `Помещение ${index + 1}`;
 }
 
-function roomModelFromDetection(match, idx, plan, walls, items) {
+/** Next free "Помещение N" not present in usedNames. */
+function nextUniqueRoomName(usedNames, preferredIndex = 0) {
+  let n = Math.max(1, preferredIndex + 1);
+  while (usedNames.has(`Помещение ${n}`)) n += 1;
+  return `Помещение ${n}`;
+}
+
+/**
+ * Ensure display labels are unique after sync. Prefer previous names when free;
+ * never emit two identical "Помещение N" labels.
+ */
+export function ensureUniqueRoomLabels(rooms) {
+  const usedNames = new Set();
+  const usedIds = new Set();
+  return (rooms || []).map((room, idx) => {
+    let id = room.id;
+    if (!id || usedIds.has(id)) {
+      id = `${room.id || "rm"}-${idx + 1}`;
+      let suffix = 2;
+      while (usedIds.has(id)) {
+        id = `${room.id || "rm"}-${idx + 1}-${suffix}`;
+        suffix += 1;
+      }
+    }
+    usedIds.add(id);
+
+    let name = (room.name || "").trim();
+    if (!name || usedNames.has(name)) {
+      name = nextUniqueRoomName(usedNames, idx);
+    }
+    usedNames.add(name);
+    return id === room.id && name === room.name ? room : { ...room, id, name };
+  });
+}
+
+function roomModelFromDetection(match, idx, plan, walls, items, usedNames) {
   const previous = match.previous;
   const detected = match.detected;
   const category = normalizeRoomCategory(previous?.category || "other");
@@ -34,10 +69,15 @@ function roomModelFromDetection(match, idx, plan, walls, items) {
     items,
     previous?.labelPosition || null,
   );
+  let name = previous?.name || null;
+  if (!name || usedNames.has(name)) {
+    name = nextUniqueRoomName(usedNames, idx);
+  }
+  usedNames.add(name);
   return {
     id: previous?.id || match.fallbackId,
     type: "room",
-    name: previous?.name || roomName(idx),
+    name,
     category,
     contourId: detected.contourId,
     polygon: detected.polygon,
@@ -107,7 +147,9 @@ export function syncRooms(plan) {
     : normalizeLegacyRoomsFromZones(plan?.zones, plan?.room?.defaultRoomHeightMm || DEFAULT_ROOM_HEIGHT_MM);
 
   const matched = matchRooms(oldRooms, detected);
-  const rooms = matched.map((m, idx) => roomModelFromDetection(m, idx, plan, walls, items));
+  const usedNames = new Set();
+  const roomsRaw = matched.map((m, idx) => roomModelFromDetection(m, idx, plan, walls, items, usedNames));
+  const rooms = ensureUniqueRoomLabels(roomsRaw);
   const zones = rooms.map((room) => roomToZone(room));
   const validationWarnings = validateRooms(plan, rooms);
   return { rooms, zones, validationWarnings };
@@ -128,21 +170,24 @@ function roomDetectionFailedDiagnostic() {
   };
 }
 
+function logRoomDetectionFailure(err) {
+  if (typeof process !== "undefined" && process.env?.NODE_ENV === "production") return;
+  if (typeof import.meta !== "undefined" && import.meta.env?.PROD) return;
+  console.error("[room-detection] syncRooms failed", err);
+}
+
 /**
- * PHASE 0G — единственная точка перехвата исключений room detection.
+ * Единственная точка перехвата исключений room detection.
  *
- * Низкоуровневые pure-функции (detectRooms/findClosedLoops/...) могут бросить
- * исключение на некорректной геометрии — это ожидаемо для внутреннего слоя.
- * syncRoomsSafe — внешняя orchestration-граница, которая превращает такое
- * исключение в структурированный result-контракт вместо того, чтобы каждый
- * caller (normalizePlan, PlanPage) держал собственный catch { rooms: [] }.
+ * Превращает исключение низкоуровневого движка в структурированный
+ * result-контракт вместо того, чтобы каждый caller (normalizePlan, PlanPage)
+ * держал собственный catch { rooms: [] }.
  *
- * Гарантии:
- *   • не мутирует plan;
- *   • успех и «нет замкнутых контуров» различимы: оба ok:true, но последнее —
- *     честный rooms:[] БЕЗ diagnostics, а сбой движка — ok:false, rooms:null,
- *     с diagnostic ROOM_DETECTION_FAILED;
- *   • raw Error/stack наружу не возвращается — только dev console.error.
+ * Успех и «нет замкнутых контуров» различимы: оба ok:true, но последнее —
+ * честный rooms:[] БЕЗ diagnostics, а сбой движка — ok:false, rooms:null,
+ * zones:null, validationWarnings:null, с diagnostic ROOM_DETECTION_FAILED.
+ * Caller обязан не записывать rooms:null/zones:null напрямую, а сохранить
+ * предыдущие корректные rooms/zones.
  *
  * @param {object} plan
  * @param {(plan:object)=>{rooms,zones,validationWarnings}} [syncFn] — точка
@@ -153,7 +198,7 @@ export function syncRoomsSafe(plan, syncFn = syncRooms) {
     const { rooms, zones, validationWarnings } = syncFn(plan);
     return { ok: true, rooms, zones, validationWarnings, diagnostics: [] };
   } catch (err) {
-    console.error("[room-detection] syncRooms failed", err);
+    logRoomDetectionFailure(err);
     return { ok: false, rooms: null, zones: null, validationWarnings: null, diagnostics: [roomDetectionFailedDiagnostic()] };
   }
 }

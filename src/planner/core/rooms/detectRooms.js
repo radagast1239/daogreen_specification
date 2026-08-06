@@ -9,8 +9,7 @@ import {
   resolveWallPtsList,
   wallSegments,
   weldWallNodes,
-  findClosedLoops,
-  filterRoomLoops,
+  roomFaceLoops,
   innerRoomPolygonFromLoop,
 } from "../walls/wallOps.js";
 import { isDoorKind } from "../../doorTypes.js";
@@ -28,7 +27,12 @@ function pointInBox(p, b) {
 
 function roomIdFromDetected(det, index) {
   const c = det.centroid || { x: 0, y: 0 };
-  return `rm-${Math.round(c.x / 10)}-${Math.round(c.y / 10)}-${Math.round(det.areaMm2 / 1000)}-${index + 1}`;
+  const poly = det.polygon || [];
+  let fingerprint = 0;
+  for (const p of poly) {
+    fingerprint = (fingerprint * 33 + Math.round(p.x / 50) * 17 + Math.round(p.y / 50)) >>> 0;
+  }
+  return `rm-${Math.round(c.x / 10)}-${Math.round(c.y / 10)}-${Math.round(det.areaMm2 / 1000)}-${fingerprint || (index + 1)}`;
 }
 
 function normalizeLegacyRoom(room = {}, index = 0) {
@@ -110,7 +114,7 @@ export function resolveRoomLabelPosition(poly, walls, items = [], prev = null) {
 export function detectRooms(plan) {
   const walls = weldWallNodes(resolveWallPtsList(plan?.walls, plan?.nodes));
   if (!planHasDrawnWalls(walls)) return [];
-  const loops = filterRoomLoops(findClosedLoops(walls), walls);
+  const loops = roomFaceLoops(walls);
   return loops
     .map((poly, i) => {
       const innerPoly = innerRoomPolygonFromLoop(poly, walls, plan?.room, (plan?.room?.wallThk || 100) * 0.5);

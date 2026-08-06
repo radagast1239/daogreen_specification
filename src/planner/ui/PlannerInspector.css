@@ -1,0 +1,418 @@
+/*
+ * Scoped styles for PlannerInspector. Not imported by planner.css and does
+ * not modify any global planner stylesheet — this file is only imported by
+ * PlannerInspector.jsx.
+ */
+
+.dg-inspector {
+  --insp-brand: var(--dg-brand, #116355);
+  --insp-brand-dark: var(--dg-brand-dark, #0b463c);
+  --insp-brand-soft: var(--dg-brand-soft, #e8f2ef);
+  --insp-bg: var(--dg-bg-panel, #ffffff);
+  --insp-border: var(--dg-border, #d9e0dc);
+  --insp-text: var(--dg-text-main, #2f3431);
+  --insp-text-muted: var(--dg-text-muted, #6f7a75);
+  --insp-warning: var(--dg-warning, #d08a22);
+  --insp-error: var(--dg-error, #a5371f);
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  min-width: 320px;
+  max-width: 360px;
+  height: 100%;
+  background: var(--insp-bg);
+  border-left: 1px solid var(--insp-border);
+  box-sizing: border-box;
+  color: var(--insp-text);
+  overflow: hidden;
+}
+
+.dg-inspector__handle {
+  display: none;
+}
+
+.dg-inspector__sheet-controls {
+  display: none;
+  gap: 4px;
+}
+
+.dg-inspector__expand-full {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--insp-text-muted);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.dg-inspector__expand-full:hover {
+  background: var(--insp-brand-soft);
+  color: var(--insp-text);
+}
+
+.dg-inspector__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--insp-border);
+  flex: 0 0 auto;
+}
+
+.dg-inspector__title {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--insp-text);
+}
+
+.dg-inspector__header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.dg-inspector__collapse,
+.dg-inspector__close {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--insp-text-muted);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.dg-inspector__collapse:hover,
+.dg-inspector__close:hover {
+  background: var(--insp-brand-soft);
+  color: var(--insp-text);
+}
+
+.dg-inspector__body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px 14px 20px;
+}
+
+.dg-insp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dg-insp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dg-insp-field__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--insp-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.dg-insp-field--readonly .dg-insp-field__label::after {
+  content: " · только чтение";
+  text-transform: none;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.dg-insp-input {
+  border: 1px solid var(--insp-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--insp-text);
+  background: var(--insp-bg);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dg-insp-input:focus-visible {
+  outline: 2px solid var(--insp-brand);
+  outline-offset: 1px;
+}
+
+.dg-insp-number {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dg-insp-unit {
+  font-size: 12px;
+  color: var(--insp-text-muted);
+  white-space: nowrap;
+}
+
+.dg-insp-readonly-value {
+  font-size: 13px;
+  color: var(--insp-text-muted);
+  background: var(--insp-brand-soft);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: inline-block;
+}
+
+.dg-insp-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--insp-border);
+}
+
+.dg-insp-btn {
+  border: 1px solid var(--insp-border);
+  background: var(--insp-bg);
+  color: var(--insp-text);
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.dg-insp-btn:hover {
+  background: var(--insp-brand-soft);
+}
+
+.dg-insp-btn--primary {
+  background: var(--insp-brand);
+  border-color: var(--insp-brand-dark);
+  color: #ffffff;
+}
+
+.dg-insp-btn--primary:hover {
+  background: var(--insp-brand-dark);
+}
+
+.dg-insp-btn--danger-outline {
+  color: var(--insp-error);
+  border-color: var(--insp-error);
+  margin-left: auto;
+}
+
+.dg-insp-btn--danger {
+  background: var(--insp-error);
+  border-color: var(--insp-error);
+  color: #ffffff;
+}
+
+.dg-insp-delete-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--insp-error);
+}
+
+.dg-insp-delete-confirm__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.dg-insp-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dg-insp-warning {
+  font-size: 12.5px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: rgba(208, 138, 34, 0.12);
+  color: var(--insp-warning);
+  border: 1px solid rgba(208, 138, 34, 0.35);
+}
+
+.dg-insp-warning--error {
+  background: rgba(165, 55, 31, 0.1);
+  color: var(--insp-error);
+  border-color: rgba(165, 55, 31, 0.3);
+}
+
+.dg-insp-note {
+  font-size: 12px;
+  color: var(--insp-text-muted);
+  margin: 0;
+}
+
+.dg-insp-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dg-insp-empty__title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.dg-insp-empty__hint {
+  font-size: 12.5px;
+  color: var(--insp-text-muted);
+  margin: 0;
+}
+
+/* Mobile / tablet: bottom sheet with four explicit phases. Own scroll
+ * region + max-height so the canvas underneath stays reachable and the
+ * document never overflows. "expanded" (75vh) is only ever reached through
+ * an explicit user action (drag or the dedicated expand button) — it is
+ * never a default. presentationMode="docked" opts a viewport out of the
+ * sheet entirely (e.g. tablet keeping a side panel); presentationMode="sheet"
+ * forces the sheet regardless of viewport width (used by the visual harness
+ * and any caller that wants it unconditionally). */
+@media (max-width: 900px) {
+  .dg-inspector:not(.dg-inspector--docked) {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: var(--dg-inspector-sheet-bottom, 0px);
+    top: auto;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    border-left: none;
+    border-top: 1px solid var(--insp-border);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18);
+    z-index: 50;
+    transition: max-height 0.18s ease;
+  }
+
+  .dg-inspector:not(.dg-inspector--docked) .dg-inspector__handle {
+    display: block;
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--insp-border);
+    margin: 8px auto 0;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .dg-inspector:not(.dg-inspector--docked) .dg-inspector__sheet-controls {
+    display: flex;
+  }
+
+  .dg-inspector:not(.dg-inspector--docked).dg-inspector--closed {
+    max-height: 0px;
+    overflow: hidden;
+    box-shadow: none;
+    border-top: none;
+  }
+
+  .dg-inspector:not(.dg-inspector--docked).dg-inspector--peek {
+    max-height: 56px;
+    overflow: hidden;
+  }
+
+  .dg-inspector:not(.dg-inspector--docked).dg-inspector--half {
+    max-height: 45vh;
+  }
+
+  .dg-inspector:not(.dg-inspector--docked).dg-inspector--expanded {
+    max-height: 75vh;
+  }
+
+  .dg-inspector:not(.dg-inspector--docked).dg-inspector--peek .dg-inspector__body,
+  .dg-inspector:not(.dg-inspector--docked).dg-inspector--closed .dg-inspector__body {
+    display: none;
+  }
+
+  .dg-inspector:not(.dg-inspector--docked) .dg-inspector__body {
+    padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* Tablet contract (e.g. 768px): a caller can force a narrower docked side
+ * panel instead of the sheet, entirely via the presentationMode prop —
+ * never hardcoded to a breakpoint by the page shell. */
+.dg-inspector--docked {
+  width: 280px;
+  min-width: 260px;
+  max-width: 300px;
+}
+
+/* presentationMode="sheet" forces the bottom-sheet layout regardless of
+ * viewport width (used by the harness and any integration that wants an
+ * unconditional sheet, e.g. a temporary fullscreen mobile preview on desktop). */
+.dg-inspector--sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--dg-inspector-sheet-bottom, 0px);
+  top: auto;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  border-left: none;
+  border-top: 1px solid var(--insp-border);
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18);
+  z-index: 50;
+  transition: max-height 0.18s ease;
+}
+
+.dg-inspector--sheet .dg-inspector__handle {
+  display: block;
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--insp-border);
+  margin: 8px auto 0;
+  cursor: grab;
+  touch-action: none;
+}
+
+.dg-inspector--sheet .dg-inspector__sheet-controls {
+  display: flex;
+}
+
+.dg-inspector--sheet.dg-inspector--closed {
+  max-height: 0px;
+  overflow: hidden;
+  box-shadow: none;
+  border-top: none;
+}
+
+.dg-inspector--sheet.dg-inspector--peek {
+  max-height: 56px;
+  overflow: hidden;
+}
+
+.dg-inspector--sheet.dg-inspector--half {
+  max-height: 45vh;
+}
+
+.dg-inspector--sheet.dg-inspector--expanded {
+  max-height: 75vh;
+}
+
+.dg-inspector--sheet.dg-inspector--peek .dg-inspector__body,
+.dg-inspector--sheet.dg-inspector--closed .dg-inspector__body {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .dg-inspector {
+    --insp-bg: #232827;
+    --insp-border: rgba(255, 255, 255, 0.12);
+    --insp-text: #e8eeeb;
+    --insp-text-muted: #a3ada8;
+    --insp-brand-soft: rgba(17, 99, 85, 0.28);
+  }
+}

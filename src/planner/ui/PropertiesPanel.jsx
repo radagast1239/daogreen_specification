@@ -1,5 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { areaM2, LINK_RULES, layerById, catalogByKind } from "../catalog.js";
+import {
+  parseLengthInput,
+  formatLiveLength,
+  resolveLengthEditAnchor,
+} from "../core/walls/liveWallMeasurements.js";
 import {
   resolveCatalogKind,
   getRackFootprintPresets,
@@ -76,6 +81,9 @@ export function PropertiesPanel({
   onFocusWarning,
   onClose,
   onSelectLink,
+  onFit,
+  planLevel,
+  onApplyExactLength = null,
 }) {
   const [tabLocal, setTabLocal] = useState("props");
   const tab = tabProp ?? tabLocal;
@@ -97,18 +105,18 @@ export function PropertiesPanel({
           {headSub && <div className="planner-props-head__sub">{headSub}</div>}
         </div>
         {onClose && (
-          <button type="button" className="planner-props-head__close" onClick={onClose} title="Закрыть панель">
-            ×
+          <button type="button" className="planner-props-head__close" onClick={onClose} title="??????? ??????">
+            �
           </button>
         )}
       </div>
       <div className="planner-props-tabs">
         {[
-          { id: "props", label: "Свойства" },
-          { id: "spec", label: "Спецификация" },
-          { id: "links", label: "Связи" },
-          { id: "errors", label: `Ошибки${warnings.length ? ` (${warnings.length})` : ""}` },
-          { id: "comments", label: "Комментарии" },
+          { id: "props", label: "????????" },
+          { id: "spec", label: "????????????" },
+          { id: "links", label: "?????" },
+          { id: "errors", label: `??????${warnings.length ? ` (${warnings.length})` : ""}` },
+          { id: "comments", label: "???????????" },
         ].map((t) => (
           <button
             key={t.id}
@@ -124,7 +132,7 @@ export function PropertiesPanel({
         {tab === "errors" && (
           <ErrorsTab
             warnings={sel?.id ? objWarnings : warnings}
-            filterLabel={sel?.id ? "Только для выбранного объекта" : "Все предупреждения плана"}
+            filterLabel={sel?.id ? "?????? ??? ?????????? ???????" : "??? ?????????????? ?????"}
             onFocus={onFocusWarning}
           />
         )}
@@ -139,15 +147,15 @@ export function PropertiesPanel({
 
         {tab === "spec" && (
           <div>
-            <div className="planner-side__title">Связь со спецификацией</div>
+            <div className="planner-side__title">????? ?? ?????????????</div>
             <div style={{ fontSize: 12, color: "var(--pl-text-muted)", marginBottom: 12 }}>
-              <div>Объекты: <b>{summary.objects}</b></div>
-              <div>Трассы: <b>{summary.lines}</b></div>
-              <div>Связи: <b>{summary.links ?? 0}</b></div>
-              <div>Связано с базой: <b>{summary.linked}</b></div>
+              <div>???????: <b>{summary.objects}</b></div>
+              <div>??????: <b>{summary.lines}</b></div>
+              <div>?????: <b>{summary.links ?? 0}</b></div>
+              <div>??????? ? ?????: <b>{summary.linked}</b></div>
             </div>
             <button type="button" className="planner-btn planner-btn--primary" style={{ width: "100%" }} onClick={onSync} disabled={!onSync}>
-              {onSync ? "Обновить спецификацию из плана" : "Нужен план проекта"}
+              {onSync ? "???????? ???????????? ?? ?????" : "????? ???? ???????"}
             </button>
             {selObj && sel?.coll === "items" && (
               <ItemSpecFields
@@ -163,25 +171,41 @@ export function PropertiesPanel({
 
         {tab === "props" && !selObj && selection?.coll === "items" && selection.ids.length > 1 && (
           <div>
-            <div className="planner-side__title">Выделено объектов: {selection.ids.length}</div>
+            <div className="planner-side__title">???????? ????????: {selection.ids.length}</div>
             <p style={{ fontSize: 12, color: "var(--pl-text-muted)", marginBottom: 12 }}>
-              Перемещайте вместе, группируйте (Ctrl+G) или удаляйте (Del).
+              ??????????? ??????, ??????????? (Ctrl+G) ??? ???????? (Del).
             </p>
             <div className="planner-row" style={{ gap: 8, flexWrap: "wrap" }}>
-              <button type="button" className="planner-btn planner-btn--primary" onClick={onGroup}>Сгруппировать</button>
-              <button type="button" className="planner-btn" onClick={onUngroup}>Разгруппировать</button>
-              <button type="button" className="planner-btn" onClick={delSel}>Удалить все</button>
+              <button type="button" className="planner-btn planner-btn--primary" onClick={onGroup}>?????????????</button>
+              <button type="button" className="planner-btn" onClick={onUngroup}>???????????????</button>
+              <button type="button" className="planner-btn" onClick={delSel}>??????? ???</button>
             </div>
           </div>
         )}
 
         {tab === "props" && !selObj && !(selection?.coll === "items" && selection.ids.length > 1) && (
           <div className="planner-empty-props">
-            <p>Выберите объект на плане или начните рисовать стены на слое <b>Исходный план</b>.</p>
-            <p style={{ marginTop: 12, fontSize: 12 }}>
-              Площадь: {areaM2(plan.room.w, plan.room.h)} м²<br />
-              Объектов: {plan.items.length} · Перегородок: {plan.walls.length}
-            </p>
+            <p className="planner-empty-props__title">????</p>
+            <p>???????? ?????, ??????, ????? ??? ?????? ? ???????? ???????? ?????.</p>
+            <ul className="planner-empty-props__hints">
+              <li>????? ? ?????????? ?????</li>
+              <li>Esc ? ????????? ? ??????</li>
+              <li>Fit ? ???????? ???? ????</li>
+            </ul>
+            <div className="planner-empty-props__meta">
+              <div>????: <b>{active}</b></div>
+              {planLevel != null && planLevel !== "" && <div>???????: <b>{planLevel}</b></div>}
+              <div>??????? ???????: <b>{plan.room.w} � {plan.room.h} ??</b></div>
+              <div>???????: {areaM2(plan.room.w, plan.room.h)} ?�</div>
+              <div>????: {plan.walls.length} � ????????: {plan.items.length}</div>
+            </div>
+            {onFit && (
+              <div className="planner-empty-props__actions">
+                <button type="button" className="planner-btn planner-btn--primary" onClick={onFit}>
+                  ???????? ???? ????
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -210,29 +234,29 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
     const place = resolveItemLabelPlacement(obj, plan.room);
     return (
       <>
-        <div className="planner-side__title">Подпись объекта</div>
+        <div className="planner-side__title">??????? ???????</div>
         <div className="planner-field">
-          <label>Объект</label>
+          <label>??????</label>
           <input readOnly value={obj.label || catalogByKind(obj.kind)?.label || obj.id} />
         </div>
         <div className="planner-field">
-          <label>Текст на плане</label>
+          <label>????? ?? ?????</label>
           <textarea readOnly rows={3} value={lines.join("\n")} />
         </div>
         {place && (
           <div className="planner-row">
             <div className="planner-field">
-              <label>X, мм</label>
+              <label>X, ??</label>
               <input readOnly value={Math.round(place.x)} />
             </div>
             <div className="planner-field">
-              <label>Y, мм</label>
+              <label>Y, ??</label>
               <input readOnly value={Math.round(place.y)} />
             </div>
           </div>
         )}
         <p style={{ fontSize: 12, color: "var(--pl-text-muted)", margin: "0 0 10px" }}>
-          Перетащите подпись на плане · Del — скрыть · стрелки — сдвиг
+          ?????????? ??????? ?? ????? � Del ? ?????? � ??????? ? ?????
         </p>
         {obj.labelPinned && (
           <button
@@ -244,10 +268,10 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
               labelOffsetY: null,
             })}
           >
-            Автопозиция
+            ???????????
           </button>
         )}
-        <button type="button" className="planner-btn" onClick={delSel}>Скрыть подпись</button>
+        <button type="button" className="planner-btn" onClick={delSel}>?????? ???????</button>
       </>
     );
   }
@@ -255,19 +279,19 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
     const tgt = obj.targetId ? plan.items.find((i) => i.id === obj.targetId) : null;
     return (
       <>
-        <div className="planner-side__title">Подпись</div>
+        <div className="planner-side__title">???????</div>
         {tgt && (
           <div className="planner-field">
-            <label>Привязка</label>
+            <label>????????</label>
             <input readOnly value={tgt.label || tgt.id} />
           </div>
         )}
         <div className="planner-field">
-          <label>Текст</label>
+          <label>?????</label>
           <textarea rows={4} value={obj.text} onChange={(e) => updateObj("labels", obj.id, { text: e.target.value })} />
         </div>
         <div className="planner-field">
-          <label>Размер шрифта, pt</label>
+          <label>?????? ??????, pt</label>
           <select
             value={obj.fontSizePt ?? DEFAULT_LABEL_FONT_PT}
             onChange={(e) => updateObj("labels", obj.id, { fontSizePt: +e.target.value })}
@@ -278,7 +302,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
           </select>
         </div>
         <div className="planner-field">
-          <label>Аудитория</label>
+          <label>?????????</label>
           <select value={obj.audience || "internal"} onChange={(e) => updateObj("labels", obj.id, { audience: e.target.value })}>
             {LABEL_AUDIENCES.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
           </select>
@@ -289,7 +313,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
             checked={obj.pinned === true}
             onChange={(e) => updateObj("labels", obj.id, { pinned: e.target.checked })}
           />
-          {" "}Зафиксировать положение
+          {" "}????????????? ?????????
         </label>
         {tgt && !obj.pinned && (
           <button
@@ -306,10 +330,10 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
               });
             }}
           >
-            Обновить выноску
+            ???????? ???????
           </button>
         )}
-        <button type="button" className="planner-btn" onClick={delSel}>Удалить</button>
+        <button type="button" className="planner-btn" onClick={delSel}>???????</button>
       </>
     );
   }
@@ -327,16 +351,16 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
     const roomExchange = calculateRoomAirExchange(climateRoom);
     return (
       <>
-        <div className="planner-side__title">{obj.name || "Помещение"}</div>
+        <div className="planner-side__title">{obj.name || "?????????"}</div>
         <p style={{ fontSize: 12, color: "var(--pl-text-muted)", margin: "0 0 10px" }}>
-          Автопомещение из замкнутых перегородок. Клик по подписи или полу — выбор помещения.
+          ????????????? ?? ????????? ???????????. ???? ?? ??????? ??? ???? ? ????? ?????????.
         </p>
         <div className="planner-field">
-          <label>Название</label>
+          <label>????????</label>
           <input value={obj.name || ""} onChange={(e) => updateObj("zones", obj.id, { name: e.target.value, auto: true })} />
         </div>
         <div className="planner-field">
-          <label>Категория</label>
+          <label>?????????</label>
           <select value={obj.category || "other"} onChange={(e) => updateObj("zones", obj.id, { category: e.target.value })}>
             {ROOM_CATEGORIES.map((id) => (
               <option key={id} value={id}>{ROOM_CATEGORY_LABELS[id] || id}</option>
@@ -344,7 +368,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
           </select>
         </div>
         <div className="planner-field">
-          <label>Высота помещения, мм</label>
+          <label>?????? ?????????, ??</label>
           <input
             type="number"
             min={1200}
@@ -359,11 +383,11 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
           </p>
         </div>
         <div className="planner-field">
-          <label>Площадь</label>
+          <label>???????</label>
           <input readOnly value={formatRoomAreaLabel(obj.areaMm2 || ((+formatZoneAreaM2(obj) || 0) * 1_000_000))} />
         </div>
         <div className="planner-field">
-          <label>Цвет зоны</label>
+          <label>???? ????</label>
           <input
             type="color"
             value={obj.fillColor || obj.zoneColor || roomCategoryColor(obj.category || "other")}
@@ -375,18 +399,18 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         </div>
         <div className="planner-row">
           <div className="planner-field">
-            <label>Климатическая зона</label>
+            <label>????????????? ????</label>
             <input value={obj.climateZone || ""} onChange={(e) => updateObj("zones", obj.id, { climateZone: e.target.value })} />
           </div>
           <div className="planner-field">
-            <label>Санитарная зона</label>
+            <label>?????????? ????</label>
             <input value={obj.sanitationZone || ""} onChange={(e) => updateObj("zones", obj.id, { sanitationZone: e.target.value })} />
           </div>
         </div>
-        <div className="planner-side__title" style={{ marginTop: 12 }}>Климат цели</div>
+        <div className="planner-side__title" style={{ marginTop: 12 }}>?????? ????</div>
         <div className="planner-row">
           <div className="planner-field">
-            <label>Target Temperature, °C</label>
+            <label>Target Temperature, �C</label>
             <input
               type="number"
               value={obj.targetTemperatureC ?? ""}
@@ -404,7 +428,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         </div>
         <div className="planner-row">
           <div className="planner-field">
-            <label>Target CO₂, ppm</label>
+            <label>Target CO?, ppm</label>
             <input
               type="number"
               value={obj.targetCo2Ppm ?? ""}
@@ -412,7 +436,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
             />
           </div>
           <div className="planner-field">
-            <label>Air Changes, 1/ч</label>
+            <label>Air Changes, 1/?</label>
             <input
               type="number"
               step="0.1"
@@ -422,7 +446,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
           </div>
         </div>
         <div className="planner-field">
-          <label>Air Velocity, м/с</label>
+          <label>Air Velocity, ?/?</label>
           <input
             type="number"
             step="0.1"
@@ -431,27 +455,27 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
           />
         </div>
         <div className="planner-field">
-          <label>Расчет объема / воздухообмена</label>
-          <input readOnly value={`V=${roomVolumeM3.toFixed(2)} м3 · ACH=${roomExchange.airChanges} · Q=${roomExchange.requiredAirflowM3h.toFixed(2)} м3/ч`} />
+          <label>?????? ?????? / ?????????????</label>
+          <input readOnly value={`V=${roomVolumeM3.toFixed(2)} ?3 � ACH=${roomExchange.airChanges} � Q=${roomExchange.requiredAirflowM3h.toFixed(2)} ?3/?`} />
         </div>
         <div className="planner-field">
-          <label>Примечания</label>
+          <label>??????????</label>
           <textarea rows={3} value={obj.notes || ""} onChange={(e) => updateObj("zones", obj.id, { notes: e.target.value })} />
         </div>
         <div className="planner-field">
           <label className="planner-chk">
             <input type="checkbox" checked={obj.showName !== false} onChange={(e) => updateObj("zones", obj.id, { showName: e.target.checked })} />
-            {" "}Показывать название
+            {" "}?????????? ????????
           </label>
         </div>
         <div className="planner-field">
           <label className="planner-chk">
             <input type="checkbox" checked={obj.showArea !== false} onChange={(e) => updateObj("zones", obj.id, { showArea: e.target.checked })} />
-            {" "}Показывать площадь
+            {" "}?????????? ???????
           </label>
         </div>
         {!auto && (
-          <button type="button" className="planner-btn" onClick={delSel}>Удалить</button>
+          <button type="button" className="planner-btn" onClick={delSel}>???????</button>
         )}
       </>
     );
@@ -477,23 +501,23 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
     const to = plan.items.find((i) => i.id === obj.toItemId);
     return (
       <>
-        <div className="planner-side__title">{vis.label || "Трасса"}</div>
+        <div className="planner-side__title">{vis.label || "??????"}</div>
         <div className="planner-field">
-          <label>Слой</label>
+          <label>????</label>
           <input readOnly value={layerById(obj.layer)?.name || obj.layer} />
         </div>
         {pipeLine && (
           <>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Система</label>
+                <label>???????</label>
                 <input
                   value={obj.pipeSystem || ""}
                   onChange={(e) => updateObj("lines", obj.id, { pipeSystem: e.target.value })}
                 />
               </div>
               <div className="planner-field">
-                <label>Роль</label>
+                <label>????</label>
                 <input
                   value={obj.pipeRole || ""}
                   onChange={(e) => updateObj("lines", obj.id, { pipeRole: e.target.value })}
@@ -502,7 +526,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
             </div>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Диаметр, мм</label>
+                <label>???????, ??</label>
                 <input
                   type="number"
                   min={8}
@@ -511,7 +535,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
                 />
               </div>
               <div className="planner-field">
-                <label>Материал</label>
+                <label>????????</label>
                 <input
                   value={obj.material || "pp"}
                   onChange={(e) => updateObj("lines", obj.id, { material: e.target.value })}
@@ -520,7 +544,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
             </div>
             {(obj.layer === "drain" || obj.pipeSystem === "drainage" || obj.pipeSystem === "waste") && (
               <div className="planner-field">
-                <label>Уклон, %</label>
+                <label>?????, %</label>
                 <input
                   type="number"
                   step="0.1"
@@ -530,7 +554,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
               </div>
             )}
             <div className="planner-field">
-              <label>Подпись трубы</label>
+              <label>??????? ?????</label>
               <input readOnly value={resolvePipeLabel(obj)} />
             </div>
           </>
@@ -539,37 +563,37 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
           <>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Тип линии</label>
+                <label>??? ?????</label>
                 <select value={obj.lineType || "wall_cable"} onChange={(e) => updateObj("lines", obj.id, { lineType: e.target.value })}>
-                  <option value="wall_cable">По стене</option>
-                  <option value="ceiling_cable">По потолку</option>
-                  <option value="floor_cable">По полу</option>
-                  <option value="cable_tray">В лотке</option>
-                  <option value="sensor_wire">Датчик/слаботочка</option>
+                  <option value="wall_cable">?? ?????</option>
+                  <option value="ceiling_cable">?? ???????</option>
+                  <option value="floor_cable">?? ????</option>
+                  <option value="cable_tray">? ?????</option>
+                  <option value="sensor_wire">??????/??????????</option>
                 </select>
               </div>
               <div className="planner-field">
-                <label>Группа</label>
+                <label>??????</label>
                 <input value={obj.groupName || ""} placeholder="A/B/C/D/E" onChange={(e) => updateObj("lines", obj.id, { groupName: e.target.value })} />
               </div>
             </div>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Кабель</label>
-                <input value={obj.cableType || "ВВГнг-LS"} onChange={(e) => updateObj("lines", obj.id, { cableType: e.target.value })} />
+                <label>??????</label>
+                <input value={obj.cableType || "?????-LS"} onChange={(e) => updateObj("lines", obj.id, { cableType: e.target.value })} />
               </div>
               <div className="planner-field">
-                <label>Мощность, Вт</label>
+                <label>????????, ??</label>
                 <input type="number" value={obj.powerW || 0} onChange={(e) => updateObj("lines", obj.id, { powerW: Math.max(0, +e.target.value || 0) })} />
               </div>
             </div>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Напряжение, В</label>
+                <label>??????????, ?</label>
                 <input type="number" value={obj.voltage || 220} onChange={(e) => updateObj("lines", obj.id, { voltage: Math.max(0, +e.target.value || 0) })} />
               </div>
               <div className="planner-field">
-                <label>Фазы</label>
+                <label>????</label>
                 <input type="number" value={obj.phases || 1} onChange={(e) => updateObj("lines", obj.id, { phases: Math.max(1, +e.target.value || 1) })} />
               </div>
             </div>
@@ -579,30 +603,30 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
           <>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Тип воздуховода</label>
+                <label>??? ???????????</label>
                 <select value={obj.lineType || "duct"} onChange={(e) => updateObj("lines", obj.id, { lineType: e.target.value })}>
-                  <option value="duct">Основной</option>
-                  <option value="supply_duct">Приток</option>
-                  <option value="exhaust_duct">Вытяжка</option>
-                  <option value="recirculation_duct">Рециркуляция</option>
-                  <option value="airflow_arrow">Стрелка потока</option>
+                  <option value="duct">????????</option>
+                  <option value="supply_duct">??????</option>
+                  <option value="exhaust_duct">???????</option>
+                  <option value="recirculation_duct">????????????</option>
+                  <option value="airflow_arrow">??????? ??????</option>
                 </select>
               </div>
               <div className="planner-field">
-                <label>Диаметр, мм</label>
+                <label>???????, ??</label>
                 <input type="number" value={obj.diameterMm || 250} onChange={(e) => updateObj("lines", obj.id, { diameterMm: Math.max(80, +e.target.value || 80) })} />
               </div>
             </div>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Расход, м3/ч</label>
+                <label>??????, ?3/?</label>
                 <input type="number" value={obj.airflowM3h || 0} onChange={(e) => updateObj("lines", obj.id, { airflowM3h: Math.max(0, +e.target.value || 0) })} />
               </div>
               <div className="planner-field">
-                <label>Направление</label>
+                <label>???????????</label>
                 <select value={obj.flowDirection || "forward"} onChange={(e) => updateObj("lines", obj.id, { flowDirection: e.target.value })}>
-                  <option value="forward">Вперед</option>
-                  <option value="reverse">Обратно</option>
+                  <option value="forward">??????</option>
+                  <option value="reverse">???????</option>
                 </select>
               </div>
             </div>
@@ -612,7 +636,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
           <>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Ширина сечения, мм</label>
+                <label>?????? ???????, ??</label>
                 <input
                   type="number"
                   min={100}
@@ -622,7 +646,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
                 />
               </div>
               <div className="planner-field">
-                <label>Высота сечения, мм</label>
+                <label>?????? ???????, ??</label>
                 <input
                   type="number"
                   min={50}
@@ -633,13 +657,13 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
               </div>
             </div>
             <div className="planner-field">
-              <label>Подпись на плане</label>
+              <label>??????? ?? ?????</label>
               <input readOnly value={formatDuctSizeLabel(obj.ductSizeWmm, obj.ductSizeHmm)} />
             </div>
           </>
         ) : (
           <div className="planner-field">
-            <label>Стиль линии</label>
+            <label>????? ?????</label>
             <select value={obj.strokeStyle || "solid"} onChange={(e) => updateObj("lines", obj.id, { strokeStyle: e.target.value })}>
               {Object.entries(STROKE_STYLES).map(([id, s]) => (
                 <option key={id} value={id}>{s.label}</option>
@@ -649,7 +673,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         )}
         {obj.layer === "staff" && (
           <div className="planner-field">
-            <label>Назначение маршрута</label>
+            <label>?????????? ????????</label>
             <select value={obj.traffic || ""} onChange={(e) => updateObj("lines", obj.id, { traffic: e.target.value })}>
               {LINE_TRAFFIC_TYPES.map((t) => (
                 <option key={t.id || "none"} value={t.id}>{t.label}</option>
@@ -658,7 +682,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
           </div>
         )}
         <div className="planner-field">
-          <label>Высота прокладки</label>
+          <label>?????? ?????????</label>
           <select value={obj.routingHeight || "floor"} onChange={(e) => updateObj("lines", obj.id, { routingHeight: e.target.value })}>
             {ROUTING_HEIGHTS.map((h) => (
               <option key={h.id} value={h.id}>{h.label}</option>
@@ -667,70 +691,70 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         </div>
         <div className="planner-row">
           <div className="planner-field">
-            <label>Длина плана</label>
+            <label>????? ?????</label>
             <input readOnly value={fmtU(planLen)} />
           </div>
           <div className="planner-field">
-            <label>Запас, %</label>
+            <label>?????, %</label>
             <input type="number" value={obj.reservePct ?? 10} onChange={(e) => updateObj("lines", obj.id, { reservePct: Math.max(0, +e.target.value || 0) })} />
           </div>
         </div>
         <div className="planner-field">
-          <label>Итого с запасом</label>
+          <label>????? ? ???????</label>
           <input readOnly value={fmtU(totalLen)} />
         </div>
         {pipeLine && (
           <div className="planner-field">
-            <label>Длина в спецификацию (м)</label>
+            <label>????? ? ???????????? (?)</label>
             <input readOnly value={calculatePipeLength(obj).withReserveRoundedM.toFixed(1)} />
           </div>
         )}
         {powerLine && (
           <div className="planner-field">
-            <label>Кабель в спецификацию (м)</label>
+            <label>?????? ? ???????????? (?)</label>
             <input readOnly value={(Math.round((calculatePowerLineLength(obj) / 1000) * 1.15 * 100) / 100).toFixed(2)} />
           </div>
         )}
         {ductLine && (
           <div className="planner-field">
-            <label>Воздуховод в спецификацию (м)</label>
+            <label>?????????? ? ???????????? (?)</label>
             <input readOnly value={(Math.round((calculateDuctLength(obj) / 1000) * (1 + (obj.reservePct ?? 10) / 100) * 100) / 100).toFixed(2)} />
           </div>
         )}
         <div className="planner-field">
-          <label>Цвет линии</label>
+          <label>???? ?????</label>
           <input type="color" value={obj.color || vis.color} onChange={(e) => updateObj("lines", obj.id, { color: e.target.value })} />
         </div>
         <div className="planner-row">
           <div className="planner-field">
-            <label>Толщина</label>
+            <label>???????</label>
             <input type="number" step="0.5" value={obj.strokeW ?? ""} placeholder={String(vis.w)} onChange={(e) => updateObj("lines", obj.id, { strokeW: e.target.value ? +e.target.value : null })} />
           </div>
         </div>
         {obj.layer !== "vent" && (
           <label className="planner-chk">
             <input type="checkbox" checked={obj.showArrows !== false} onChange={(e) => updateObj("lines", obj.id, { showArrows: e.target.checked })} />
-            {" "}Стрелки направления
+            {" "}??????? ???????????
           </label>
         )}
         <label className="planner-chk">
           <input type="checkbox" checked={obj.orthoRoute !== false} onChange={(e) => updateObj("lines", obj.id, { orthoRoute: e.target.checked })} />
-          {" "}Ортогональная трассировка (90°)
+          {" "}????????????? ??????????? (90�)
         </label>
         <div className="planner-field">
-          <label>От объекта</label>
-          <input readOnly value={from?.label || "—"} />
+          <label>?? ???????</label>
+          <input readOnly value={from?.label || "?"} />
         </div>
         <div className="planner-field">
-          <label>К объекту</label>
-          <input readOnly value={to?.label || "—"} />
+          <label>? ???????</label>
+          <input readOnly value={to?.label || "?"} />
         </div>
-        <button type="button" className="planner-btn" onClick={delSel}>Удалить</button>
+        <button type="button" className="planner-btn" onClick={delSel}>???????</button>
       </>
     );
   }
   if (sel.coll === "links") {
-    const rule = LINK_RULES[obj.type] || { label: "Связь", color: "#5a5f5c" };
+    const rule = LINK_RULES[obj.type] || { label: "?????", color: "#5a5f5c" };
     const from = plan.items.find((i) => i.id === obj.fromId);
     const to = plan.items.find((i) => i.id === obj.toId);
     const len = linkLengthMm(obj, plan.items, plan.room);
@@ -739,7 +763,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
       <>
         <div className="planner-side__title">{rule.label}</div>
         <div className="planner-field">
-          <label>Тип связи</label>
+          <label>??? ?????</label>
           <select
             value={obj.type || "irrigation"}
             onChange={(e) => updateObj("links", obj.id, { type: e.target.value, color: LINK_RULES[e.target.value]?.color || null })}
@@ -750,19 +774,19 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
           </select>
         </div>
         <div className="planner-field">
-          <label>От</label>
-          <input readOnly value={from?.label || "—"} />
+          <label>??</label>
+          <input readOnly value={from?.label || "?"} />
         </div>
         <div className="planner-field">
-          <label>К</label>
-          <input readOnly value={to?.label || "—"} />
+          <label>?</label>
+          <input readOnly value={to?.label || "?"} />
         </div>
         <div className="planner-field">
-          <label>План, мм</label>
+          <label>????, ??</label>
           <input readOnly value={Math.round(len.plan2d)} />
         </div>
         <div className="planner-field">
-          <label>Подъём, мм</label>
+          <label>??????, ??</label>
           <input
             type="number"
             value={obj.riseMm ?? len.vertical}
@@ -770,11 +794,11 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
           />
         </div>
         <div className="planner-field">
-          <label>Итого</label>
+          <label>?????</label>
           <input readOnly value={fmtU(len.total)} />
         </div>
         <div className="planner-field">
-          <label>Цвет</label>
+          <label>????</label>
           <input
             type="color"
             value={color}
@@ -782,7 +806,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
           />
         </div>
         <div className="planner-field">
-          <label>Комментарий</label>
+          <label>???????????</label>
           <input
             value={obj.comment || ""}
             onChange={(e) => updateObj("links", obj.id, { comment: e.target.value })}
@@ -791,85 +815,116 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         <div className="planner-field">
           <label>
             <input type="checkbox" checked={obj.ortho !== false} onChange={(e) => updateObj("links", obj.id, { ortho: e.target.checked })} />
-            {" "}Ортогональный маршрут
+            {" "}????????????? ???????
           </label>
         </div>
         <div className="planner-field">
           <label>
             <input type="checkbox" checked={obj.visible !== false} onChange={(e) => updateObj("links", obj.id, { visible: e.target.checked })} />
-            {" "}Показывать на плане
+            {" "}?????????? ?? ?????
           </label>
         </div>
-        <button type="button" className="planner-btn" onClick={delSel}>Удалить связь</button>
+        <button type="button" className="planner-btn" onClick={delSel}>??????? ?????</button>
+      </>
+    );
+  }
+  if (sel.coll === "dimensions") {
+    const modeLabel = obj.mode === "angle" ? "???????" : obj.mode === "diagonal" ? "????????????" : "????????";
+    const kindLabel = obj.auto ? "????" : (obj.kind || "manual");
+    const status = obj.invalid
+      ? "????? ?????????????? ? ????????? ????????"
+      : null;
+    const stylePreset = obj.style?.importance || "normal";
+    const persisted = (plan.dimensions || []).some((d) => d.id === obj.id);
+    const editable = persisted && !obj.auto && !obj.locked;
+    return (
+      <>
+        <div className="planner-side__title">??????</div>
+        <div className="planner-field">
+          <label>???</label>
+          <input value={`${modeLabel} (${kindLabel})`} readOnly />
+        </div>
+        {status && (
+          <div className="planner-field" style={{ color: "#a33", fontSize: 12 }}>{status}</div>
+        )}
+        {!persisted && (
+          <div className="planner-field" style={{ fontSize: 12, opacity: 0.75 }}>
+            ?????????????? ?????? ? ?????? ??????? ??????????.
+          </div>
+        )}
+        <div className="planner-field">
+          <label>????? / ???????</label>
+          <input
+            value={obj.labelOverride ?? ""}
+            placeholder="????"
+            disabled={!editable}
+            onChange={(e) => updateObj("dimensions", obj.id, { labelOverride: e.target.value || null })}
+          />
+        </div>
+        {obj.mode !== "angle" && (
+          <div className="planner-field">
+            <label>??????, ??</label>
+            <input
+              type="number"
+              step={10}
+              value={Number.isFinite(obj.offset) ? obj.offset : 120}
+              disabled={!editable}
+              onChange={(e) => updateObj("dimensions", obj.id, { offset: Number(e.target.value) || 0 })}
+            />
+          </div>
+        )}
+        <div className="planner-field">
+          <label>
+            <input
+              type="checkbox"
+              checked={obj.visible !== false}
+              disabled={!editable}
+              onChange={(e) => updateObj("dimensions", obj.id, { visible: e.target.checked })}
+            />
+            {" "}??????????
+          </label>
+        </div>
+        <div className="planner-field">
+          <label>????? ?????</label>
+          <select
+            value={stylePreset}
+            disabled={!editable}
+            onChange={(e) => {
+              const importance = e.target.value;
+              updateObj("dimensions", obj.id, {
+                style: {
+                  ...(obj.style || {}),
+                  importance: importance === "normal" ? undefined : importance,
+                },
+              });
+            }}
+          >
+            <option value="normal">???????</option>
+            <option value="important">??????</option>
+            <option value="error">?????? / review</option>
+          </select>
+        </div>
+        {editable && (
+          <button type="button" className="planner-btn" onClick={delSel}>??????? ??????</button>
+        )}
+        {obj.auto && (
+          <div className="planner-field" style={{ fontSize: 12, opacity: 0.75 }}>
+            ?????????????? ?????? ????????? ?????? ? ?????????? ??? ????????? auto.
+          </div>
+        )}
       </>
     );
   }
   if (sel.coll === "walls") {
-    const segLen = obj.pts?.length >= 2
-      ? Math.hypot(obj.pts[obj.pts.length - 1].x - obj.pts[obj.pts.length - 2].x, obj.pts[obj.pts.length - 1].y - obj.pts[obj.pts.length - 2].y)
-      : 0;
     return (
-      <>
-        <div className="planner-side__title">{obj.role === "outer" ? "Наружная стена" : "Перегородка"}</div>
-        <div className="planner-field">
-          <label>Тип</label>
-          <select value={obj.kind || "new"} onChange={(e) => updateObj("walls", obj.id, { kind: e.target.value })}>
-            {Object.entries(WALL_KINDS).map(([id, k]) => (
-              <option key={id} value={id}>{k.label}</option>
-            ))}
-          </select>
-          {WALL_KINDS[obj.kind || "new"] && (
-            <span
-              style={{
-                display: "inline-block",
-                width: 14,
-                height: 14,
-                borderRadius: 2,
-                marginTop: 6,
-                background: WALL_KINDS[obj.kind || "new"].color,
-                border: "1px solid #ccc",
-                verticalAlign: "middle",
-              }}
-              title="Цвет на плане"
-            />
-          )}
-        </div>
-        <div className="planner-field">
-          <label>Роль</label>
-          <select value={obj.role || "partition"} onChange={(e) => updateObj("walls", obj.id, { role: e.target.value })}>
-            <option value="outer">Наружная</option>
-            <option value="partition">Перегородка</option>
-          </select>
-        </div>
-        <div className="planner-field">
-          <label>Толщина, мм</label>
-          <input type="number" min={0} value={obj.thk ?? 100} onChange={(e) => updateObj("walls", obj.id, { thk: Math.max(0, +e.target.value || 0) })} />
-        </div>
-        <div className="planner-field">
-          <label>Сторона толщины</label>
-          <select value={obj.thicknessSide || "center"} onChange={(e) => updateObj("walls", obj.id, { thicknessSide: e.target.value })}>
-            {THICKNESS_SIDES.map((s) => (
-              <option key={s.id} value={s.id}>{s.label}</option>
-            ))}
-          </select>
-        </div>
-        <div className="planner-field">
-          <label>Высота, мм</label>
-          <input type="number" min={0} value={obj.height ?? 2700} onChange={(e) => updateObj("walls", obj.id, { height: Math.max(0, +e.target.value || 0) })} />
-        </div>
-        <div className="planner-field">
-          <label>Материал</label>
-          <input value={obj.material || ""} placeholder="ГКЛ / профиль" onChange={(e) => updateObj("walls", obj.id, { material: e.target.value })} />
-        </div>
-        <div className="planner-field">
-          <label>Длина сегмента</label>
-          <input readOnly value={fmtU(segLen)} />
-        </div>
-        <p style={{ fontSize: 12, color: "var(--pl-text-muted)", marginTop: 8 }}>
-          Узлы тянут соседние стены. ПКМ — объединить, выровнять, разорвать. Alt — 10 мм, Shift — 500 мм.
-        </p>
-        <button type="button" className="planner-btn" onClick={delSel}>Удалить</button>
-      </>
+      <WallLengthProps
+        obj={obj}
+        plan={plan}
+        selection={selection}
+        updateObj={updateObj}
+        delSel={delSel}
+        onApplyExactLength={onApplyExactLength}
+      />
     );
   }
   if (sel.coll === "items") {
@@ -880,21 +935,21 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         <div className="planner-side__title">{obj.label}</div>
         {dStyle && (
           <p style={{ fontSize: 12, color: "var(--pl-text-muted)", margin: "0 0 10px" }}>
-            Тип: <b style={{ color: dStyle.accent || dStyle.color }}>{dStyle.label}</b>
+            ???: <b style={{ color: dStyle.accent || dStyle.color }}>{dStyle.label}</b>
           </p>
         )}
         {oStyle && (
           <p style={{ fontSize: 12, color: "var(--pl-text-muted)", margin: "0 0 10px" }}>
-            Тип: <b style={{ color: oStyle.accent || oStyle.color }}>{oStyle.label}</b>
+            ???: <b style={{ color: oStyle.accent || oStyle.color }}>{oStyle.label}</b>
           </p>
         )}
         <div className="planner-field">
-          <label>Название</label>
+          <label>????????</label>
           <input value={obj.label} onChange={(e) => updateObj("items", obj.id, { label: e.target.value })} />
         </div>
         <div className="planner-field">
-          <label>Помещение</label>
-          <input readOnly value={zoneForItem(plan, obj)?.name || obj.zoneName || "— вне помещения —"} />
+          <label>?????????</label>
+          <input readOnly value={zoneForItem(plan, obj)?.name || obj.zoneName || "? ??? ????????? ?"} />
         </div>
         {obj.type === "farm_object" && (
           <FarmObjectFields obj={obj} updateObj={updateObj} />
@@ -904,10 +959,10 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         )}
         {isAcWallUnit(obj.kind) && (
           <>
-            <div className="planner-side__title" style={{ marginTop: 12 }}>Размеры блока</div>
+            <div className="planner-side__title" style={{ marginTop: 12 }}>??????? ?????</div>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Ширина, мм</label>
+                <label>??????, ??</label>
                 <input
                   type="number"
                   value={obj.w}
@@ -915,7 +970,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
                 />
               </div>
               <div className="planner-field">
-                <label>Глубина на плане, мм</label>
+                <label>??????? ?? ?????, ??</label>
                 <input
                   type="number"
                   value={obj.h}
@@ -924,7 +979,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
               </div>
             </div>
             <div className="planner-field">
-              <label>Высота от пола, мм</label>
+              <label>?????? ?? ????, ??</label>
               <input
                 type="number"
                 min={0}
@@ -933,7 +988,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
               />
               {acMountHeightPlanLabel(obj.mountHeightMm ?? 2100) && (
                 <p className="planner-hint" style={{ margin: "4px 0 0", fontSize: 11, color: "var(--pl-text-muted)" }}>
-                  На плане: {acMountHeightPlanLabel(obj.mountHeightMm ?? 2100)} (см от пола)
+                  ?? ?????: {acMountHeightPlanLabel(obj.mountHeightMm ?? 2100)} (?? ?? ????)
                 </p>
               )}
             </div>
@@ -941,9 +996,9 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         )}
         {isTankKind(obj.kind) && (
           <>
-            <div className="planner-side__title" style={{ marginTop: 12 }}>Размеры ёмкости</div>
+            <div className="planner-side__title" style={{ marginTop: 12 }}>??????? ???????</div>
             <div className="planner-field">
-              <label>Типовые размеры</label>
+              <label>??????? ???????</label>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {getTankFootprintPresets().map((p) => (
                   <button
@@ -959,7 +1014,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
             </div>
             <div className="planner-row">
               <div className="planner-field">
-                <label>Ширина, мм</label>
+                <label>??????, ??</label>
                 <input
                   type="number"
                   min={400}
@@ -968,7 +1023,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
                 />
               </div>
               <div className="planner-field">
-                <label>Глубина, мм</label>
+                <label>???????, ??</label>
                 <input
                   type="number"
                   min={400}
@@ -978,7 +1033,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
               </div>
             </div>
             <div className="planner-field">
-              <label>На плане (см)</label>
+              <label>?? ????? (??)</label>
               <input readOnly value={formatTankPlanSize(obj.w, obj.h)} />
             </div>
           </>
@@ -986,28 +1041,28 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         {isDoorKind(obj.kind) && (
           <>
             <div className="planner-field">
-              <label>Номер</label>
-              <input value={obj.doorNum || ""} placeholder="Д01" onChange={(e) => updateObj("items", obj.id, { doorNum: e.target.value })} />
+              <label>?????</label>
+              <input value={obj.doorNum || ""} placeholder="?01" onChange={(e) => updateObj("items", obj.id, { doorNum: e.target.value })} />
             </div>
             <div className="planner-field">
-              <label>Проём, мм</label>
+              <label>?????, ??</label>
               <input type="number" value={obj.w} onChange={(e) => updateObj("items", obj.id, { w: Math.max(600, +e.target.value || 0) })} />
             </div>
             <div className="planner-field">
-              <label>Высота проёма, мм</label>
+              <label>?????? ??????, ??</label>
               <input type="number" value={obj.doorHeightMm ?? 2100} onChange={(e) => updateObj("items", obj.id, { doorHeightMm: Math.max(1800, +e.target.value || 0) })} />
             </div>
             <div className="planner-field">
-              <label>Сторона петель</label>
+              <label>??????? ??????</label>
               <select value={obj.doorSwing || "left"} onChange={(e) => updateObj("items", obj.id, { doorSwing: e.target.value })}>
-                <option value="left">Слева</option>
-                <option value="right">Справа</option>
+                <option value="left">?????</option>
+                <option value="right">??????</option>
               </select>
             </div>
             <div className="planner-field">
               <label>
                 <input type="checkbox" checked={obj.doorOpenIn !== false} onChange={(e) => updateObj("items", obj.id, { doorOpenIn: e.target.checked })} />
-                {" "}Открывание внутрь помещения
+                {" "}?????????? ?????? ?????????
               </label>
             </div>
             {obj.kind !== "door_slide" && (
@@ -1019,7 +1074,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
                     serviceZone: { ...(obj.serviceZone || defaultServiceZone(obj.kind)), enabled: e.target.checked, swing: true },
                   })}
                 />
-                {" "}Показывать зону открывания
+                {" "}?????????? ???? ??????????
               </label>
             )}
           </>
@@ -1027,43 +1082,43 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         {isOpeningKind(obj.kind) && (
           <>
             <div className="planner-field">
-              <label>Номер</label>
-              <input value={obj.openingNum || ""} placeholder="О01" onChange={(e) => updateObj("items", obj.id, { openingNum: e.target.value })} />
+              <label>?????</label>
+              <input value={obj.openingNum || ""} placeholder="?01" onChange={(e) => updateObj("items", obj.id, { openingNum: e.target.value })} />
             </div>
             <div className="planner-field">
-              <label>Проём, мм</label>
+              <label>?????, ??</label>
               <input type="number" value={obj.w} onChange={(e) => updateObj("items", obj.id, { w: Math.max(300, +e.target.value || 0) })} />
             </div>
             <div className="planner-field">
-              <label>Высота проёма, мм</label>
+              <label>?????? ??????, ??</label>
               <input type="number" value={obj.openingHeightMm ?? 1200} onChange={(e) => updateObj("items", obj.id, { openingHeightMm: Math.max(200, +e.target.value || 0) })} />
             </div>
             <div className="planner-field">
-              <label>Высота от пола, мм</label>
+              <label>?????? ?? ????, ??</label>
               <input type="number" value={obj.openingSillMm ?? 900} onChange={(e) => updateObj("items", obj.id, { openingSillMm: Math.max(0, +e.target.value || 0) })} />
             </div>
             <div className="planner-field">
-              <label>Форма</label>
+              <label>?????</label>
               <select value={obj.openingShape || "rect"} onChange={(e) => updateObj("items", obj.id, { openingShape: e.target.value })}>
-                <option value="rect">Прямоугольный</option>
-                <option value="arch">Арочный</option>
+                <option value="rect">?????????????</option>
+                <option value="arch">???????</option>
               </select>
             </div>
           </>
         )}
         {!isDoorKind(obj.kind) && !isOpeningKind(obj.kind) && (
-        <div className="planner-side__title" style={{ marginTop: 12 }}>Размеры и позиция</div>
+        <div className="planner-side__title" style={{ marginTop: 12 }}>??????? ? ???????</div>
         )}
         {(isDoorKind(obj.kind) || isOpeningKind(obj.kind)) && (
-        <div className="planner-side__title" style={{ marginTop: 12 }}>Позиция</div>
+        <div className="planner-side__title" style={{ marginTop: 12 }}>???????</div>
         )}
         <div className="planner-row">
           <div className="planner-field">
-            <label>X, мм</label>
+            <label>X, ??</label>
             <input type="number" value={Math.round(obj.x)} onChange={(e) => updateObj("items", obj.id, { x: +e.target.value || 0 })} />
           </div>
           <div className="planner-field">
-            <label>Y, мм</label>
+            <label>Y, ??</label>
             <input type="number" value={Math.round(obj.y)} onChange={(e) => updateObj("items", obj.id, { y: +e.target.value || 0 })} />
           </div>
         </div>
@@ -1076,17 +1131,17 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         {!isDoorKind(obj.kind) && !isOpeningKind(obj.kind) && !isAcWallUnit(obj.kind) && !isTankKind(obj.kind) && (
         <div className="planner-row">
           <div className="planner-field">
-            <label>Ширина, мм</label>
+            <label>??????, ??</label>
             <input type="number" value={obj.w} onChange={(e) => updateObj("items", obj.id, { w: Math.max(50, +e.target.value || 0) })} />
           </div>
           <div className="planner-field">
-            <label>Глубина, мм</label>
+            <label>???????, ??</label>
             <input type="number" value={obj.h} onChange={(e) => updateObj("items", obj.id, { h: Math.max(50, +e.target.value || 0) })} />
           </div>
         </div>
         )}
         <div className="planner-field">
-          <label>Поворот, °</label>
+          <label>???????, �</label>
           <input
             type="range"
             min={0}
@@ -1107,13 +1162,13 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         </div>
         {obj.params?.tiers && (
           <div className="planner-field">
-            <label>Ярусов</label>
+            <label>??????</label>
             <input type="number" value={obj.params.tiers} onChange={(e) => updateObj("items", obj.id, { params: { ...obj.params, tiers: +e.target.value || 1 } })} />
           </div>
         )}
         {obj.kind === "panel" && (
           <div className="planner-field">
-            <label>Ёмкость щита, Вт</label>
+            <label>??????? ????, ??</label>
             <input
               type="number"
               value={obj.powerW ?? panelCapacityW(obj)}
@@ -1123,7 +1178,7 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         )}
         {(obj.kind === "rack" || obj.kind === "seed_rack" || obj.kind === "pump") && (
           <div className="planner-field">
-            <label>Нагрузка, Вт</label>
+            <label>????????, ??</label>
             <input
               type="number"
               value={obj.powerW ?? itemPowerW(obj)}
@@ -1134,12 +1189,12 @@ function SelFields({ sel, selection, obj, plan, updateObj, rotateItem, delSel, f
         <ItemPropertyFields obj={obj} plan={plan} updateObj={updateObj} fmtU={fmtU} hideComments hideMountHeight={isAcWallUnit(obj.kind)} />
         {!isDoorKind(obj.kind) && (
         <p style={{ fontSize: 12, color: "var(--pl-text-muted)", marginTop: 8 }}>
-          [ ] — поворот 15° · Shift 90° · Alt 1° · стрелки — сдвиг 50/500/10 мм
+          [ ] ? ??????? 15� � Shift 90� � Alt 1� � ??????? ? ????? 50/500/10 ??
         </p>
         )}
         <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
-          <button type="button" className="planner-btn" onClick={() => rotateItem(obj, 90)}>↻ 90°</button>
-          <button type="button" className="planner-btn" onClick={delSel}>Удалить</button>
+          <button type="button" className="planner-btn" onClick={() => rotateItem(obj, 90)}>? 90�</button>
+          <button type="button" className="planner-btn" onClick={delSel}>???????</button>
         </div>
       </>
     );
@@ -1155,17 +1210,17 @@ function FarmObjectFields({ obj, updateObj }) {
       <div className="planner-side__title" style={{ marginTop: 12 }}>FarmObject</div>
       <div className="planner-row">
         <div className="planner-field">
-          <label>Категория</label>
+          <label>?????????</label>
           <input readOnly value={obj.category || "custom"} />
         </div>
         <div className="planner-field">
-          <label>Подтип</label>
+          <label>??????</label>
           <input readOnly value={obj.subtype || obj.kind || ""} />
         </div>
       </div>
       <div className="planner-row">
         <div className="planner-field">
-          <label>Ширина, мм</label>
+          <label>??????, ??</label>
           <input
             type="number"
             value={obj.widthMm ?? obj.w}
@@ -1176,7 +1231,7 @@ function FarmObjectFields({ obj, updateObj }) {
           />
         </div>
         <div className="planner-field">
-          <label>Глубина, мм</label>
+          <label>???????, ??</label>
           <input
             type="number"
             value={obj.depthMm ?? obj.h}
@@ -1191,11 +1246,11 @@ function FarmObjectFields({ obj, updateObj }) {
         <>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Тип стеллажа</label>
+              <label>??? ????????</label>
               <input value={params.rackType || ""} onChange={(e) => patchParams({ rackType: e.target.value })} />
             </div>
             <div className="planner-field">
-              <label>Ярусов</label>
+              <label>??????</label>
               <input
                 type="number"
                 value={params.levels ?? obj.tierCount ?? 5}
@@ -1205,16 +1260,16 @@ function FarmObjectFields({ obj, updateObj }) {
           </div>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Культура</label>
+              <label>????????</label>
               <input value={params.cropType || obj.culture || ""} onChange={(e) => patchParams({ cropType: e.target.value })} />
             </div>
             <div className="planner-field">
-              <label>Полив</label>
+              <label>?????</label>
               <input value={params.irrigationType || ""} onChange={(e) => patchParams({ irrigationType: e.target.value })} />
             </div>
           </div>
           <div className="planner-field">
-            <label>Свет на ярус, шт</label>
+            <label>???? ?? ????, ??</label>
             <input
               type="number"
               value={params.lightingPerLevel ?? 1}
@@ -1226,11 +1281,11 @@ function FarmObjectFields({ obj, updateObj }) {
       {(obj.category === "pipe" || obj.category === "drain_pipe") && (
         <div className="planner-row">
           <div className="planner-field">
-            <label>Тип трубы</label>
+            <label>??? ?????</label>
             <input value={params.pipeType || "supply"} onChange={(e) => patchParams({ pipeType: e.target.value })} />
           </div>
           <div className="planner-field">
-            <label>Диаметр, мм</label>
+            <label>???????, ??</label>
             <input type="number" value={params.diameterMm || 32} onChange={(e) => patchParams({ diameterMm: Math.max(1, +e.target.value || 1) })} />
           </div>
         </div>
@@ -1239,37 +1294,37 @@ function FarmObjectFields({ obj, updateObj }) {
         <>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Тип щита</label>
+              <label>??? ????</label>
               <input value={params.panelType || "distribution"} onChange={(e) => patchParams({ panelType: e.target.value })} />
             </div>
             <div className="planner-field">
-              <label>Группа</label>
+              <label>??????</label>
               <input value={params.groupName || "A"} onChange={(e) => patchParams({ groupName: e.target.value })} />
             </div>
           </div>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Напряжение, В</label>
+              <label>??????????, ?</label>
               <input type="number" value={params.voltage || 380} onChange={(e) => patchParams({ voltage: Math.max(0, +e.target.value || 0) })} />
             </div>
             <div className="planner-field">
-              <label>Фазы</label>
+              <label>????</label>
               <input type="number" value={params.phases || 3} onChange={(e) => patchParams({ phases: Math.max(1, +e.target.value || 1) })} />
             </div>
           </div>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Макс. мощность, кВт</label>
+              <label>????. ????????, ???</label>
               <input type="number" value={params.maxPowerKw || 0} onChange={(e) => patchParams({ maxPowerKw: Math.max(0, +e.target.value || 0) })} />
             </div>
             <div className="planner-field">
-              <label>Степень защиты</label>
+              <label>??????? ??????</label>
               <input value={params.protectionIp || "IP31"} onChange={(e) => patchParams({ protectionIp: e.target.value })} />
             </div>
           </div>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Высота, мм</label>
+              <label>??????, ??</label>
               <input
                 type="number"
                 value={params.heightMm || obj.mountHeightMm || 1200}
@@ -1277,7 +1332,7 @@ function FarmObjectFields({ obj, updateObj }) {
               />
             </div>
             <div className="planner-field">
-              <label>Подпись высоты</label>
+              <label>??????? ??????</label>
               <input readOnly value={formatSocketHeightLabel(params.heightMm || obj.mountHeightMm || 1200)} />
             </div>
           </div>
@@ -1287,27 +1342,27 @@ function FarmObjectFields({ obj, updateObj }) {
         <>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Тип розетки</label>
+              <label>??? ???????</label>
               <input value={params.socketType || "standard_220"} onChange={(e) => patchParams({ socketType: e.target.value })} />
             </div>
             <div className="planner-field">
-              <label>Группа</label>
+              <label>??????</label>
               <input value={params.groupName || "A"} onChange={(e) => patchParams({ groupName: e.target.value })} />
             </div>
           </div>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Напряжение, В</label>
+              <label>??????????, ?</label>
               <input type="number" value={params.voltage || 220} onChange={(e) => patchParams({ voltage: Math.max(0, +e.target.value || 0) })} />
             </div>
             <div className="planner-field">
-              <label>Фазы</label>
+              <label>????</label>
               <input type="number" value={params.phases || 1} onChange={(e) => patchParams({ phases: Math.max(1, +e.target.value || 1) })} />
             </div>
           </div>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Мощность, Вт</label>
+              <label>????????, ??</label>
               <input type="number" value={params.powerW || 0} onChange={(e) => patchParams({ powerW: Math.max(0, +e.target.value || 0) })} />
             </div>
             <div className="planner-field">
@@ -1317,7 +1372,7 @@ function FarmObjectFields({ obj, updateObj }) {
           </div>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Высота, мм</label>
+              <label>??????, ??</label>
               <input
                 type="number"
                 value={params.heightMm || obj.mountHeightMm || 1200}
@@ -1325,7 +1380,7 @@ function FarmObjectFields({ obj, updateObj }) {
               />
             </div>
             <div className="planner-field">
-              <label>Подпись высоты</label>
+              <label>??????? ??????</label>
               <input readOnly value={formatSocketHeightLabel(params.heightMm || obj.mountHeightMm || 1200)} />
             </div>
           </div>
@@ -1335,7 +1390,7 @@ function FarmObjectFields({ obj, updateObj }) {
               checked={params.waterproof === true}
               onChange={(e) => patchParams({ waterproof: e.target.checked })}
             />
-            {" "}Влагозащищенная
+            {" "}???????????????
           </label>
         </>
       )}
@@ -1343,36 +1398,36 @@ function FarmObjectFields({ obj, updateObj }) {
         <>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Тип света</label>
+              <label>??? ?????</label>
               <input value={params.lightType || "linear_100"} onChange={(e) => patchParams({ lightType: e.target.value })} />
             </div>
             <div className="planner-field">
-              <label>Группа</label>
+              <label>??????</label>
               <input value={params.groupName || "D"} onChange={(e) => patchParams({ groupName: e.target.value })} />
             </div>
           </div>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Длина, мм</label>
+              <label>?????, ??</label>
               <input type="number" value={params.lengthMm || 1000} onChange={(e) => patchParams({ lengthMm: Math.max(100, +e.target.value || 100) })} />
             </div>
             <div className="planner-field">
-              <label>Мощность, Вт</label>
+              <label>????????, ??</label>
               <input type="number" value={params.powerW || 0} onChange={(e) => patchParams({ powerW: Math.max(0, +e.target.value || 0) })} />
             </div>
           </div>
           <div className="planner-row">
             <div className="planner-field">
-              <label>На ярус, шт</label>
+              <label>?? ????, ??</label>
               <input type="number" value={params.perLevel || 1} onChange={(e) => patchParams({ perLevel: Math.max(1, +e.target.value || 1) })} />
             </div>
             <div className="planner-field">
-              <label>Ярусов</label>
+              <label>??????</label>
               <input type="number" value={params.levels || 1} onChange={(e) => patchParams({ levels: Math.max(1, +e.target.value || 1) })} />
             </div>
           </div>
           <div className="planner-field">
-            <label>Связанный стеллаж (id)</label>
+            <label>????????? ??????? (id)</label>
             <input value={params.linkedRackId || ""} onChange={(e) => patchParams({ linkedRackId: e.target.value || null })} />
           </div>
         </>
@@ -1381,21 +1436,21 @@ function FarmObjectFields({ obj, updateObj }) {
         <>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Охлаждение, кВт</label>
+              <label>??????????, ???</label>
               <input type="number" value={params.coolingPowerKw || 0} onChange={(e) => patchParams({ coolingPowerKw: Math.max(0, +e.target.value || 0) })} />
             </div>
             <div className="planner-field">
-              <label>Нагрев, кВт</label>
+              <label>??????, ???</label>
               <input type="number" value={params.heatingPowerKw || 0} onChange={(e) => patchParams({ heatingPowerKw: Math.max(0, +e.target.value || 0) })} />
             </div>
           </div>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Воздух, м3/ч</label>
+              <label>??????, ?3/?</label>
               <input type="number" value={params.airflowM3h || 0} onChange={(e) => patchParams({ airflowM3h: Math.max(0, +e.target.value || 0) })} />
             </div>
             <div className="planner-field">
-              <label>Мощность, Вт</label>
+              <label>????????, ??</label>
               <input type="number" value={params.powerW || 0} onChange={(e) => patchParams({ powerW: Math.max(0, +e.target.value || 0) })} />
             </div>
           </div>
@@ -1404,11 +1459,11 @@ function FarmObjectFields({ obj, updateObj }) {
       {(obj.category === "fan" || obj.category === "circulation_fan" || obj.category === "supply" || obj.category === "exhaust") && (
         <div className="planner-row">
           <div className="planner-field">
-            <label>Воздух, м3/ч</label>
+            <label>??????, ?3/?</label>
             <input type="number" value={params.airflowM3h || 0} onChange={(e) => patchParams({ airflowM3h: Math.max(0, +e.target.value || 0) })} />
           </div>
           <div className="planner-field">
-            <label>Диаметр</label>
+            <label>???????</label>
             <input type="number" value={params.diameter || 0} onChange={(e) => patchParams({ diameter: Math.max(0, +e.target.value || 0) })} />
           </div>
         </div>
@@ -1416,11 +1471,11 @@ function FarmObjectFields({ obj, updateObj }) {
       {obj.category === "dehumidifier" && (
         <div className="planner-row">
           <div className="planner-field">
-            <label>Производительность, л/сут</label>
+            <label>??????????????????, ?/???</label>
             <input type="number" value={params.capacityLDay || 0} onChange={(e) => patchParams({ capacityLDay: Math.max(0, +e.target.value || 0) })} />
           </div>
           <div className="planner-field">
-            <label>Мощность, Вт</label>
+            <label>????????, ??</label>
             <input type="number" value={params.powerW || 0} onChange={(e) => patchParams({ powerW: Math.max(0, +e.target.value || 0) })} />
           </div>
         </div>
@@ -1428,11 +1483,11 @@ function FarmObjectFields({ obj, updateObj }) {
       {obj.category === "humidifier" && (
         <div className="planner-row">
           <div className="planner-field">
-            <label>Производительность, л/ч</label>
+            <label>??????????????????, ?/?</label>
             <input type="number" value={params.capacityLh || 0} onChange={(e) => patchParams({ capacityLh: Math.max(0, +e.target.value || 0) })} />
           </div>
           <div className="planner-field">
-            <label>Мощность, Вт</label>
+            <label>????????, ??</label>
             <input type="number" value={params.powerW || 0} onChange={(e) => patchParams({ powerW: Math.max(0, +e.target.value || 0) })} />
           </div>
         </div>
@@ -1447,11 +1502,11 @@ function FarmObjectFields({ obj, updateObj }) {
       ) && (
         <div className="planner-row">
           <div className="planner-field">
-            <label>Тип датчика</label>
+            <label>??? ???????</label>
             <input value={params.sensorType || obj.category || ""} onChange={(e) => patchParams({ sensorType: e.target.value })} />
           </div>
           <div className="planner-field">
-            <label>Ед. изм.</label>
+            <label>??. ???.</label>
             <input value={params.unit || ""} onChange={(e) => patchParams({ unit: e.target.value })} />
           </div>
         </div>
@@ -1459,7 +1514,7 @@ function FarmObjectFields({ obj, updateObj }) {
       {obj.category === "climate_controller" && (
         <div className="planner-row">
           <div className="planner-field">
-            <label>Target T, °C</label>
+            <label>Target T, �C</label>
             <input type="number" value={params.targetTemperatureC || 0} onChange={(e) => patchParams({ targetTemperatureC: +e.target.value || 0 })} />
           </div>
           <div className="planner-field">
@@ -1482,35 +1537,35 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
 
   return (
     <>
-      <div className="planner-side__title" style={{ marginTop: 12 }}>Объект</div>
+      <div className="planner-side__title" style={{ marginTop: 12 }}>??????</div>
       <div className="planner-field">
-        <label>Тип</label>
-        <input readOnly value={cat?.label || obj.kind || "—"} />
+        <label>???</label>
+        <input readOnly value={cat?.label || obj.kind || "?"} />
       </div>
       <div className="planner-row">
         <div className="planner-field">
-          <label>Слой</label>
-          <input readOnly value={layer?.name || obj.layer || "—"} />
+          <label>????</label>
+          <input readOnly value={layer?.name || obj.layer || "?"} />
         </div>
         <div className="planner-field">
-          <label>Помещение</label>
-          <input readOnly value={room?.name || "—"} />
+          <label>?????????</label>
+          <input readOnly value={room?.name || "?"} />
         </div>
       </div>
       {obj.wallId && (
         <div className="planner-field">
-          <label>Стена</label>
+          <label>?????</label>
           <input readOnly value={obj.wallId} />
         </div>
       )}
 
       <div className="planner-field">
-        <label>Подпись на плане</label>
+        <label>??????? ?? ?????</label>
         <select
           value={obj.labelMode || ""}
           onChange={(e) => updateObj("items", obj.id, { labelMode: e.target.value || null })}
         >
-          <option value="">По настройке листа</option>
+          <option value="">?? ????????? ?????</option>
           {LABEL_DISPLAY_MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
         </select>
       </div>
@@ -1522,7 +1577,7 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
               checked={obj.labelHidden !== true}
               onChange={(e) => updateObj("items", obj.id, { labelHidden: !e.target.checked })}
             />
-            {" "}Показывать подпись
+            {" "}?????????? ???????
           </label>
           {obj.labelHidden && (
             <button
@@ -1531,7 +1586,7 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
               style={{ marginTop: 6 }}
               onClick={() => updateObj("items", obj.id, { labelHidden: false })}
             >
-              Показать подпись
+              ???????? ???????
             </button>
           )}
           {obj.labelPinned && obj.labelHidden !== true && (
@@ -1545,15 +1600,15 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
                 labelOffsetY: null,
               })}
             >
-              Автопозиция подписи
+              ??????????? ???????
             </button>
           )}
         </>
       )}
 
-      <div className="planner-side__title" style={{ marginTop: 12 }}>Статус и видимость</div>
+      <div className="planner-side__title" style={{ marginTop: 12 }}>?????? ? ?????????</div>
       <div className="planner-field">
-        <label>Статус</label>
+        <label>??????</label>
         <select
           value={obj.objectStatus || "draft"}
           onChange={(e) => {
@@ -1576,7 +1631,7 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
           checked={obj.includedInProject !== false}
           onChange={(e) => updateObj("items", obj.id, { includedInProject: e.target.checked })}
         />
-        {" "}Включено в проект
+        {" "}???????? ? ??????
       </label>
       <label className="planner-chk">
         <input
@@ -1584,7 +1639,7 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
           checked={obj.visibleToClient !== false}
           onChange={(e) => updateObj("items", obj.id, { visibleToClient: e.target.checked })}
         />
-        {" "}Показать клиенту
+        {" "}???????? ???????
       </label>
       <label className="planner-chk">
         <input
@@ -1592,16 +1647,16 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
           checked={obj.locked === true}
           onChange={(e) => updateObj("items", obj.id, { locked: e.target.checked })}
         />
-        {" "}Заблокировать на плане
+        {" "}????????????? ?? ?????
       </label>
 
       {!isDoorKind(obj.kind) && !isOpeningKind(obj.kind) && (
         <>
-          <div className="planner-side__title" style={{ marginTop: 12 }}>Установка и нагрузка</div>
+          <div className="planner-side__title" style={{ marginTop: 12 }}>????????? ? ????????</div>
           <div className="planner-row">
             {!hideMountHeight && (
               <div className="planner-field">
-                <label>Высота от пола, мм</label>
+                <label>?????? ?? ????, ??</label>
                 <input
                   type="number"
                   value={obj.mountHeightMm ?? 0}
@@ -1610,7 +1665,7 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
               </div>
             )}
             <div className="planner-field">
-              <label>Высота объекта, мм</label>
+              <label>?????? ???????, ??</label>
               <input
                 type="number"
                 value={obj.height ?? ""}
@@ -1621,30 +1676,30 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
           </div>
           <div className="planner-row">
             <div className="planner-field">
-              <label>Вес, кг</label>
+              <label>???, ??</label>
               <input
                 type="number"
                 value={obj.weightKg ?? ""}
-                placeholder="—"
+                placeholder="?"
                 onChange={(e) => updateObj("items", obj.id, { weightKg: e.target.value === "" ? "" : +e.target.value })}
               />
             </div>
             <div className="planner-field">
-              <label>Нагрузка на пол, кг</label>
+              <label>???????? ?? ???, ??</label>
               <input
                 type="number"
                 value={obj.floorLoadKg ?? ""}
-                placeholder="—"
+                placeholder="?"
                 onChange={(e) => updateObj("items", obj.id, { floorLoadKg: e.target.value === "" ? "" : +e.target.value })}
               />
             </div>
           </div>
 
-          <div className="planner-side__title" style={{ marginTop: 12 }}>Сервисная зона</div>
+          <div className="planner-side__title" style={{ marginTop: 12 }}>????????? ????</div>
           {profile && (
             <p className="planner-hint" style={{ margin: "0 0 8px", fontSize: 12, color: "#6d7772" }}>
-              Профиль: {profile.label}
-              {profile.hints?.front ? ` · ${profile.hints.front}` : ""}
+              ???????: {profile.label}
+              {profile.hints?.front ? ` � ${profile.hints.front}` : ""}
             </p>
           )}
           <label className="planner-chk">
@@ -1656,16 +1711,16 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
                 ...(e.target.checked ? defaultServiceZone(obj.kind) : {}),
               })}
             />
-            {" "}Показывать зону обслуживания
+            {" "}?????????? ???? ????????????
           </label>
           {sz.enabled !== false && (
             <div className="planner-row">
               <div className="planner-field">
-                <label>Спереди, мм</label>
+                <label>???????, ??</label>
                 <input type="number" value={sz.front ?? 0} onChange={(e) => patchSz({ front: Math.max(0, +e.target.value || 0) })} />
               </div>
               <div className="planner-field">
-                <label>Сзади, мм</label>
+                <label>?????, ??</label>
                 <input type="number" value={sz.back ?? 0} onChange={(e) => patchSz({ back: Math.max(0, +e.target.value || 0) })} />
               </div>
             </div>
@@ -1673,17 +1728,17 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
           {sz.enabled !== false && (
             <div className="planner-row">
               <div className="planner-field">
-                <label>Слева, мм</label>
+                <label>?????, ??</label>
                 <input type="number" value={sz.left ?? 0} onChange={(e) => patchSz({ left: Math.max(0, +e.target.value || 0) })} />
               </div>
               <div className="planner-field">
-                <label>Справа, мм</label>
+                <label>??????, ??</label>
                 <input type="number" value={sz.right ?? 0} onChange={(e) => patchSz({ right: Math.max(0, +e.target.value || 0) })} />
               </div>
             </div>
           )}
           <div className="planner-field">
-            <label>Зона доступа персонала, мм</label>
+            <label>???? ??????? ?????????, ??</label>
             <input
               type="number"
               value={obj.accessZoneMm ?? sz.access ?? 0}
@@ -1692,14 +1747,14 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
           </div>
           {(profile?.defaults?.flow != null || (sz.flow ?? 0) > 0) && (
             <div className="planner-field">
-              <label>Зона потока (вент.), мм</label>
+              <label>???? ?????? (????.), ??</label>
               <input type="number" value={sz.flow ?? 0} onChange={(e) => patchSz({ flow: Math.max(0, +e.target.value || 0) })} />
             </div>
           )}
 
           {(obj.ports?.length > 0) && (
             <>
-              <div className="planner-side__title" style={{ marginTop: 12 }}>Порты подключения</div>
+              <div className="planner-side__title" style={{ marginTop: 12 }}>????? ???????????</div>
               {obj.ports.map((port, i) => (
                 <div key={i} className="planner-row" style={{ marginBottom: 6 }}>
                   <div className="planner-field">
@@ -1724,49 +1779,49 @@ function ItemPropertyFields({ obj, plan, updateObj, fmtU, hideComments = false, 
 
       {!hideComments && (
         <>
-          <div className="planner-side__title" style={{ marginTop: 12 }}>Комментарии</div>
+          <div className="planner-side__title" style={{ marginTop: 12 }}>???????????</div>
           <div className="planner-field">
-            <label>Внутренний</label>
+            <label>??????????</label>
             <textarea rows={2} value={obj.commentInternal || ""} onChange={(e) => updateObj("items", obj.id, { commentInternal: e.target.value })} />
           </div>
           <div className="planner-field">
-            <label>Клиенту</label>
+            <label>???????</label>
             <textarea rows={2} value={obj.commentClient || ""} onChange={(e) => updateObj("items", obj.id, { commentClient: e.target.value })} />
           </div>
           <div className="planner-field">
-            <label>Монтажнику</label>
+            <label>??????????</label>
             <textarea rows={2} value={obj.commentInstall || ""} onChange={(e) => updateObj("items", obj.id, { commentInstall: e.target.value })} />
           </div>
         </>
       )}
 
-      <div className="planner-side__title" style={{ marginTop: 12 }}>Ссылки и закупка</div>
+      <div className="planner-side__title" style={{ marginTop: 12 }}>?????? ? ???????</div>
       <div className="planner-field">
-        <label>Фото (URL)</label>
-        <input value={obj.photoUrl || ""} placeholder="https://…" onChange={(e) => updateObj("items", obj.id, { photoUrl: e.target.value })} />
+        <label>???? (URL)</label>
+        <input value={obj.photoUrl || ""} placeholder="https://?" onChange={(e) => updateObj("items", obj.id, { photoUrl: e.target.value })} />
       </div>
       <div className="planner-field">
-        <label>Ссылка</label>
-        <input value={obj.externalUrl || ""} placeholder="https://…" onChange={(e) => updateObj("items", obj.id, { externalUrl: e.target.value })} />
+        <label>??????</label>
+        <input value={obj.externalUrl || ""} placeholder="https://?" onChange={(e) => updateObj("items", obj.id, { externalUrl: e.target.value })} />
       </div>
       <div className="planner-row">
         <div className="planner-field">
-          <label>Поставщик</label>
+          <label>?????????</label>
           <input value={obj.supplier || ""} onChange={(e) => updateObj("items", obj.id, { supplier: e.target.value })} />
         </div>
         <div className="planner-field">
-          <label>Цена, ₽</label>
+          <label>????, ?</label>
           <input type="number" value={obj.specPrice ?? ""} onChange={(e) => updateObj("items", obj.id, { specPrice: e.target.value })} />
         </div>
       </div>
       <div className="planner-row">
         <div className="planner-field">
-          <label>Кол-во</label>
+          <label>???-??</label>
           <input type="number" value={obj.specQty ?? 1} onChange={(e) => updateObj("items", obj.id, { specQty: Math.max(0, +e.target.value || 0) })} />
         </div>
         <div className="planner-field">
-          <label>Ед. изм.</label>
-          <input value={obj.specUnit || "шт."} onChange={(e) => updateObj("items", obj.id, { specUnit: e.target.value })} />
+          <label>??. ???.</label>
+          <input value={obj.specUnit || "??."} onChange={(e) => updateObj("items", obj.id, { specUnit: e.target.value })} />
         </div>
       </div>
     </>
@@ -1778,13 +1833,13 @@ function ItemLinksList({ itemId, plan, onSelectLink, clickable = false }) {
   if (!links.length) {
     return (
       <p style={{ fontSize: 12, color: "var(--pl-text-muted)", marginTop: 12 }}>
-        Связей нет. Инструмент «Связь» на листе полива/электрики.
+        ?????? ???. ?????????? �?????� ?? ????? ??????/?????????.
       </p>
     );
   }
   return (
     <div style={{ marginTop: 12 }}>
-      <div className="planner-side__title">Связи объекта</div>
+      <div className="planner-side__title">????? ???????</div>
       <ul className="planner-links-list">
         {links.map((l) => {
           const otherId = l.fromId === itemId ? l.toId : l.fromId;
@@ -1795,13 +1850,13 @@ function ItemLinksList({ itemId, plan, onSelectLink, clickable = false }) {
             <li key={l.id}>
               {clickable ? (
                 <button type="button" className="planner-link-row" onClick={() => onSelectLink?.(l.id, otherId)}>
-                  <span>{rule?.label || l.type}: {l.fromId === itemId ? "→" : "←"} {other?.label || "?"}</span>
-                  <span className="planner-link-row__meta">{Math.round(len.total)} мм</span>
+                  <span>{rule?.label || l.type}: {l.fromId === itemId ? "?" : "?"} {other?.label || "?"}</span>
+                  <span className="planner-link-row__meta">{Math.round(len.total)} ??</span>
                 </button>
               ) : (
                 <>
-                  {rule?.label || l.type}: {l.fromId === itemId ? "→" : "←"} {other?.label || "?"}{" "}
-                  <span style={{ color: "var(--pl-text-muted)" }}>({Math.round(len.total)} мм)</span>
+                  {rule?.label || l.type}: {l.fromId === itemId ? "?" : "?"} {other?.label || "?"}{" "}
+                  <span style={{ color: "var(--pl-text-muted)" }}>({Math.round(len.total)} ??)</span>
                 </>
               )}
             </li>
@@ -1814,17 +1869,18 @@ function ItemLinksList({ itemId, plan, onSelectLink, clickable = false }) {
 
 function panelHeadTitle(sel, selObj, selection, plan) {
   if (selection?.coll === "items" && (selection.ids?.length || 0) > 1) {
-    return `Выбрано объектов: ${selection.ids.length}`;
+    return `??????? ????????: ${selection.ids.length}`;
   }
-  if (!selObj) return "Свойства плана";
-  if (sel?.coll === "items") return selObj.label || catalogByKind(selObj.kind)?.label || "Объект";
-  if (sel?.coll === "walls") return selObj.role === "outer" ? "Наружная стена" : "Перегородка";
-  if (sel?.coll === "zones") return selObj.name || "Помещение";
-  if (sel?.coll === "lines") return resolveLineVisual(selObj).label || "Трасса";
-  if (sel?.coll === "links") return (LINK_RULES[selObj.type] || {}).label || "Связь";
-  if (sel?.coll === "labels") return "Подпись";
-  if (sel?.coll === "item-label") return "Подпись объекта";
-  return "Объект";
+  if (!selObj) return "???????? ?????";
+  if (sel?.coll === "items") return selObj.label || catalogByKind(selObj.kind)?.label || "??????";
+  if (sel?.coll === "walls") return selObj.role === "outer" ? "???????? ?????" : "???????????";
+  if (sel?.coll === "zones") return selObj.name || "?????????";
+  if (sel?.coll === "lines") return resolveLineVisual(selObj).label || "??????";
+  if (sel?.coll === "links") return (LINK_RULES[selObj.type] || {}).label || "?????";
+  if (sel?.coll === "labels") return "???????";
+  if (sel?.coll === "item-label") return "??????? ???????";
+  if (sel?.coll === "dimensions") return "??????";
+  return "??????";
 }
 
 function panelHeadSub(sel, selObj) {
@@ -1837,6 +1893,11 @@ function panelHeadSub(sel, selObj) {
   if (sel.coll === "zones") return ROOM_CATEGORY_LABELS[selObj.category] || selObj.purpose || ZONE_FLOW[selObj.flow]?.label;
   if (sel.coll === "lines") return layerById(selObj.layer)?.name;
   if (sel.coll === "item-label") return catalogByKind(selObj.kind)?.label || selObj.kind;
+  if (sel.coll === "dimensions") {
+    if (selObj.mode === "angle") return "????";
+    if (selObj.mode === "diagonal") return "?????????";
+    return selObj.auto ? "????" : "????????";
+  }
   return null;
 }
 
@@ -1844,10 +1905,10 @@ function ErrorsTab({ warnings, filterLabel, onFocus }) {
   return (
     <div>
       <p className="planner-hint" style={{ margin: "0 0 10px", fontSize: 12, color: "var(--pl-text-muted)" }}>
-        {filterLabel}. Клик — перейти к объекту.
+        {filterLabel}. ???? ? ??????? ? ???????.
       </p>
       {warnings.length === 0 && (
-        <div className="planner-empty-props">Предупреждений нет</div>
+        <div className="planner-empty-props">?????????????? ???</div>
       )}
       {warnings.map((w) => (
         <button
@@ -1857,7 +1918,7 @@ function ErrorsTab({ warnings, filterLabel, onFocus }) {
           onClick={() => onFocus?.(w)}
           disabled={!onFocus || (!w.objectIds?.length && !w.wallIds?.length)}
         >
-          <span className="planner-warn__icon">{w.severity === "critical" ? "✕" : w.severity === "info" ? "i" : "!"}</span>
+          <span className="planner-warn__icon">{w.severity === "critical" ? "?" : w.severity === "info" ? "i" : "!"}</span>
           <span>{w.text}</span>
         </button>
       ))}
@@ -1873,12 +1934,12 @@ function LinksTab({ sel, selObj, plan, fmtU, onSelectLink }) {
     const rule = LINK_RULES[selObj.type];
     return (
       <>
-        <div className="planner-side__title">{rule?.label || "Связь"}</div>
-        <div className="planner-field"><label>От</label><input readOnly value={from?.label || "—"} /></div>
-        <div className="planner-field"><label>К</label><input readOnly value={to?.label || "—"} /></div>
-        <div className="planner-field"><label>Длина</label><input readOnly value={fmtU(len.total)} /></div>
+        <div className="planner-side__title">{rule?.label || "?????"}</div>
+        <div className="planner-field"><label>??</label><input readOnly value={from?.label || "?"} /></div>
+        <div className="planner-field"><label>?</label><input readOnly value={to?.label || "?"} /></div>
+        <div className="planner-field"><label>?????</label><input readOnly value={fmtU(len.total)} /></div>
         {selObj.comment && (
-          <div className="planner-field"><label>Комментарий</label><input readOnly value={selObj.comment} /></div>
+          <div className="planner-field"><label>???????????</label><input readOnly value={selObj.comment} /></div>
         )}
       </>
     );
@@ -1888,11 +1949,11 @@ function LinksTab({ sel, selObj, plan, fmtU, onSelectLink }) {
   }
   const all = plan.links || [];
   if (!all.length) {
-    return <div className="planner-empty-props">Связей на плане пока нет</div>;
+    return <div className="planner-empty-props">?????? ?? ????? ???? ???</div>;
   }
   return (
     <div>
-      <div className="planner-side__title">Все связи ({all.length})</div>
+      <div className="planner-side__title">??? ????? ({all.length})</div>
       <ul className="planner-links-list">
         {all.map((l) => {
           const from = plan.items.find((i) => i.id === l.fromId);
@@ -1901,7 +1962,7 @@ function LinksTab({ sel, selObj, plan, fmtU, onSelectLink }) {
           return (
             <li key={l.id}>
               <button type="button" className="planner-link-row" onClick={() => onSelectLink?.(l.id)}>
-                <span>{rule?.label || l.type}: {from?.label || "?"} → {to?.label || "?"}</span>
+                <span>{rule?.label || l.type}: {from?.label || "?"} ? {to?.label || "?"}</span>
               </button>
             </li>
           );
@@ -1915,7 +1976,7 @@ function CommentsTab({ sel, selObj, updateObj }) {
   if (sel?.coll !== "items" || !selObj) {
     return (
       <div className="planner-empty-props">
-        Выберите объект на плане, чтобы редактировать комментарии для клиента, монтажа и внутренние заметки.
+        ???????? ?????? ?? ?????, ????? ????????????? ??????????? ??? ???????, ??????? ? ?????????? ???????.
       </div>
     );
   }
@@ -1923,24 +1984,24 @@ function CommentsTab({ sel, selObj, updateObj }) {
     <>
       <div className="planner-side__title">{selObj.label}</div>
       <div className="planner-field">
-        <label>Внутренний комментарий</label>
+        <label>?????????? ???????????</label>
         <textarea rows={4} value={selObj.commentInternal || ""} onChange={(e) => updateObj("items", selObj.id, { commentInternal: e.target.value })} />
       </div>
       <div className="planner-field">
-        <label>Комментарий клиенту</label>
+        <label>??????????? ???????</label>
         <textarea rows={4} value={selObj.commentClient || ""} onChange={(e) => updateObj("items", selObj.id, { commentClient: e.target.value })} />
         <p className="planner-hint" style={{ fontSize: 11, margin: "4px 0 0", color: "var(--pl-text-muted)" }}>
-          Не попадает в клиентский PDF, если объект скрыт от клиента.
+          ?? ???????? ? ?????????? PDF, ???? ?????? ????? ?? ???????.
         </p>
       </div>
       <div className="planner-field">
-        <label>Комментарий монтажнику</label>
+        <label>??????????? ??????????</label>
         <textarea rows={4} value={selObj.commentInstall || ""} onChange={(e) => updateObj("items", selObj.id, { commentInstall: e.target.value })} />
       </div>
       <div className="planner-field">
-        <label>Комментарий на связи / трассе</label>
+        <label>??????????? ?? ????? / ??????</label>
         <p className="planner-hint" style={{ fontSize: 12, color: "var(--pl-text-muted)", margin: 0 }}>
-          Для инженерных связей откройте вкладку «Связи» или выберите линию на плане.
+          ??? ?????????? ?????? ???????? ??????? �?????� ??? ???????? ????? ?? ?????.
         </p>
       </div>
     </>
@@ -1952,11 +2013,11 @@ function FootprintPresetChips({ kind, onApply }) {
   const def = resolveCatalogKind(kind);
   const chips = presets.length
     ? presets
-    : [{ label: `${def.w}×${def.h}`, w: def.w, h: def.h }];
+    : [{ label: `${def.w}�${def.h}`, w: def.w, h: def.h }];
   if (!chips.length) return null;
   return (
     <div className="planner-field">
-      <label>Типовые размеры</label>
+      <label>??????? ???????</label>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         {chips.map((p) => (
           <button
@@ -1965,7 +2026,7 @@ function FootprintPresetChips({ kind, onApply }) {
             className="planner-btn planner-btn--sm"
             onClick={() => onApply(p)}
           >
-            {p.label || `${p.w}×${p.h}`}
+            {p.label || `${p.w}�${p.h}`}
           </button>
         ))}
       </div>
@@ -1982,9 +2043,9 @@ function RackPropertyFields({ obj, plan, updateObj }) {
   };
   return (
     <>
-      <div className="planner-side__title" style={{ marginTop: 12 }}>Стеллаж</div>
+      <div className="planner-side__title" style={{ marginTop: 12 }}>???????</div>
       <div className="planner-field">
-        <label>Типовые размеры</label>
+        <label>??????? ???????</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {getRackFootprintPresets().map((p) => (
             <button
@@ -1993,14 +2054,14 @@ function RackPropertyFields({ obj, plan, updateObj }) {
               className="planner-btn planner-btn--sm"
               onClick={() => applyPreset(p)}
             >
-              {p.w}×{p.h}
+              {p.w}�{p.h}
             </button>
           ))}
         </div>
       </div>
       <div className="planner-row">
         <div className="planner-field">
-          <label>Номер</label>
+          <label>?????</label>
           <input
             value={obj.rackNum || ""}
             placeholder={nextRackNumber(plan.items, obj.id)}
@@ -2008,7 +2069,7 @@ function RackPropertyFields({ obj, plan, updateObj }) {
           />
         </div>
         <div className="planner-field">
-          <label>Ряд</label>
+          <label>???</label>
           <input
             value={obj.rowNum || ""}
             placeholder={nextRowLabel(plan.items)}
@@ -2017,7 +2078,7 @@ function RackPropertyFields({ obj, plan, updateObj }) {
         </div>
       </div>
       <div className="planner-field">
-        <label>Тип системы</label>
+        <label>??? ???????</label>
         <select
           value={obj.rackType || "nft"}
           onChange={(e) => updateObj("items", obj.id, {
@@ -2031,7 +2092,7 @@ function RackPropertyFields({ obj, plan, updateObj }) {
         </select>
       </div>
       <div className="planner-field">
-        <label>Назначение</label>
+        <label>??????????</label>
         <select value={obj.rackPurpose || "production"} onChange={(e) => updateObj("items", obj.id, { rackPurpose: e.target.value })}>
           {RACK_PURPOSES.map((p) => (
             <option key={p.id} value={p.id}>{p.label}</option>
@@ -2040,16 +2101,16 @@ function RackPropertyFields({ obj, plan, updateObj }) {
       </div>
       <div className="planner-row">
         <div className="planner-field">
-          <label>Длина, мм</label>
+          <label>?????, ??</label>
           <input type="number" value={obj.w} onChange={(e) => updateObj("items", obj.id, { w: Math.max(400, +e.target.value || 0) })} />
         </div>
         <div className="planner-field">
-          <label>Ширина, мм</label>
+          <label>??????, ??</label>
           <input type="number" value={obj.h} onChange={(e) => updateObj("items", obj.id, { h: Math.max(300, +e.target.value || 0) })} />
         </div>
       </div>
       <div className="planner-field">
-        <label>Высота стеллажа H, мм</label>
+        <label>?????? ???????? H, ??</label>
         <input
           type="number"
           value={obj.rackHeightMm ?? 2400}
@@ -2058,7 +2119,7 @@ function RackPropertyFields({ obj, plan, updateObj }) {
       </div>
       <div className="planner-row">
         <div className="planner-field">
-          <label>Ярусов</label>
+          <label>??????</label>
           <input
             type="number"
             value={obj.tierCount ?? obj.params?.tiers ?? 5}
@@ -2072,7 +2133,7 @@ function RackPropertyFields({ obj, plan, updateObj }) {
           />
         </div>
         <div className="planner-field">
-          <label>Каналов / ярус</label>
+          <label>??????? / ????</label>
           <input
             type="number"
             value={obj.channelCount ?? obj.params?.levels ?? 4}
@@ -2088,21 +2149,21 @@ function RackPropertyFields({ obj, plan, updateObj }) {
       </div>
       <div className="planner-row">
         <div className="planner-field">
-          <label>Шаг ярусов, мм</label>
+          <label>??? ??????, ??</label>
           <input type="number" value={obj.tierSpacingMm ?? 400} onChange={(e) => updateObj("items", obj.id, { tierSpacingMm: Math.max(200, +e.target.value || 0) })} />
         </div>
         <div className="planner-field">
-          <label>Растений, шт</label>
+          <label>????????, ??</label>
           <input value={obj.plantCount ?? ""} onChange={(e) => updateObj("items", obj.id, { plantCount: e.target.value })} />
         </div>
       </div>
       <div className="planner-field">
-        <label>Культура</label>
-        <input value={obj.culture || ""} placeholder="Салат, клубника…" onChange={(e) => updateObj("items", obj.id, { culture: e.target.value })} />
+        <label>????????</label>
+        <input value={obj.culture || ""} placeholder="?????, ?????????" onChange={(e) => updateObj("items", obj.id, { culture: e.target.value })} />
       </div>
       <div className="planner-row">
         <div className="planner-field">
-          <label>S выращ., м²</label>
+          <label>S ?????., ?�</label>
           <input
             value={obj.growAreaM2 ?? ""}
             placeholder={growArea}
@@ -2110,17 +2171,17 @@ function RackPropertyFields({ obj, plan, updateObj }) {
           />
         </div>
         <div className="planner-field">
-          <label>Расход воды, л/ч</label>
+          <label>?????? ????, ?/?</label>
           <input value={obj.waterFlowLh ?? ""} onChange={(e) => updateObj("items", obj.id, { waterFlowLh: e.target.value })} />
         </div>
       </div>
       <div className="planner-row">
         <div className="planner-field">
-          <label>Мощность света, Вт</label>
+          <label>???????? ?????, ??</label>
           <input type="number" value={obj.lightPowerW ?? ""} onChange={(e) => updateObj("items", obj.id, { lightPowerW: Math.max(0, +e.target.value || 0) })} />
         </div>
         <div className="planner-field">
-          <label>Вес с водой, кг</label>
+          <label>??? ? ?????, ??</label>
           <input
             value={obj.weightKg ?? ""}
             placeholder={String(weight)}
@@ -2129,11 +2190,11 @@ function RackPropertyFields({ obj, plan, updateObj }) {
         </div>
       </div>
       <div className="planner-field">
-        <label>Нагрузка на пол</label>
-        <input readOnly value={`~${floorLoad} кг/м² (вес ~${weight} кг)`} />
+        <label>???????? ?? ???</label>
+        <input readOnly value={`~${floorLoad} ??/?� (??? ~${weight} ??)`} />
       </div>
       <p style={{ fontSize: 12, color: "var(--pl-text-muted)", margin: "4px 0 0" }}>
-        S выращ. {growArea} м² · ПКМ — ряд или сетка · связи: полив / электрика / свет
+        S ?????. {growArea} ?� � ??? ? ??? ??? ????? � ?????: ????? / ????????? / ????
       </p>
     </>
   );
@@ -2150,17 +2211,17 @@ function ItemSpecFields({ obj, updateObj, materials, modules, projectItems }) {
   const activeModules = (modules || []).filter((m) => m.active !== false);
   return (
     <div style={{ marginTop: 16, borderTop: "1px solid var(--pl-border)", paddingTop: 12 }}>
-      <div className="planner-side__title">Объект в спецификации</div>
+      <div className="planner-side__title">?????? ? ????????????</div>
       <label className="planner-chk">
         <input type="checkbox" checked={obj.includedInProject !== false} onChange={(e) => updateObj("items", obj.id, { includedInProject: e.target.checked })} />
-        Включено в проект
+        ???????? ? ??????
       </label>
       <label className="planner-chk">
         <input type="checkbox" checked={obj.visibleToClient !== false} onChange={(e) => updateObj("items", obj.id, { visibleToClient: e.target.checked })} />
-        Показать клиенту
+        ???????? ???????
       </label>
       <div className="planner-field">
-        <label>Статус на плане</label>
+        <label>?????? ?? ?????</label>
         <select
           value={obj.objectStatus || "draft"}
           onChange={(e) => updateObj("items", obj.id, { objectStatus: e.target.value, approved: e.target.value === "approved" })}
@@ -2171,36 +2232,145 @@ function ItemSpecFields({ obj, updateObj, materials, modules, projectItems }) {
         </select>
       </div>
       <div className="planner-field">
-        <label>Источник</label>
+        <label>????????</label>
         <select value={obj.specMode || "custom"} onChange={(e) => updateObj("items", obj.id, { specMode: e.target.value })}>
-          <option value="projectSection">Комплект из раздела</option>
-          <option value="module">Комплект из модуля</option>
-          <option value="material">Один материал</option>
-          <option value="custom">Ручная позиция</option>
+          <option value="projectSection">???????? ?? ???????</option>
+          <option value="module">???????? ?? ??????</option>
+          <option value="material">???? ????????</option>
+          <option value="custom">?????? ???????</option>
         </select>
       </div>
       {(obj.specMode || "custom") === "projectSection" && (
         <div className="planner-field">
-          <label>Раздел</label>
+          <label>??????</label>
           <select value={obj.specSourceSection || ""} onChange={(e) => updateObj("items", obj.id, { specSourceSection: e.target.value })}>
-            <option value="">Автоподбор</option>
+            <option value="">??????????</option>
             {templates.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
           </select>
         </div>
       )}
       {(obj.specMode || "custom") === "module" && (
         <div className="planner-field">
-          <label>Модуль</label>
+          <label>??????</label>
           <select value={obj.specModuleName || ""} onChange={(e) => updateObj("items", obj.id, { specModuleName: e.target.value })}>
-            <option value="">Автоподбор</option>
+            <option value="">??????????</option>
             {activeModules.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
           </select>
         </div>
       )}
       <div className="planner-field">
-        <label>Множитель</label>
+        <label>?????????</label>
         <input type="number" value={obj.specQty ?? 1} onChange={(e) => updateObj("items", obj.id, { specQty: Math.max(0, Number(e.target.value) || 0) })} />
       </div>
     </div>
+  );
+}
+
+function WallLengthProps({ obj, plan, selection, updateObj, delSel, onApplyExactLength }) {
+  const segLen = obj.pts?.length >= 2
+    ? Math.hypot(obj.pts[obj.pts.length - 1].x - obj.pts[obj.pts.length - 2].x, obj.pts[obj.pts.length - 1].y - obj.pts[obj.pts.length - 2].y)
+    : 0;
+  const anchor = resolveLengthEditAnchor(plan, obj.id, {
+    selectedEndpoint: selection?.nodeIdx === 0 ? 0 : selection?.nodeIdx === 1 ? 1 : null,
+  });
+  const [draft, setDraft] = useState(String(Math.round(segLen)));
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    setDraft(String(Math.round(segLen)));
+    setError(null);
+  }, [obj.id, segLen]);
+
+  const apply = () => {
+    const parsed = parseLengthInput(draft);
+    if (!parsed.ok) {
+      setError(parsed.reason === "non_positive" ? "????? ?????? ???? ?????? ????." : "???????????? ???????? ?????.");
+      return;
+    }
+    if (!anchor.ok) {
+      setError(anchor.message || "????? ??????????.");
+      return;
+    }
+    if (typeof onApplyExactLength === "function") {
+      const r = onApplyExactLength(obj.id, parsed.mm, {
+        selectedEndpoint: selection?.nodeIdx === 0 ? 0 : selection?.nodeIdx === 1 ? 1 : null,
+      });
+      if (r && r.ok === false) setError(r.message || "?? ??????? ???????? ?????.");
+      else setError(null);
+      return;
+    }
+    // Fallback when host does not wire apply: refuse silent no-op mutation.
+    setError("?????? ????? ???????? ????? ????????? ????? (??????? ????).");
+  };
+
+  return (
+    <>
+      <div className="planner-side__title">{obj.role === "outer" ? "???????? ?????" : "???????????"}</div>
+      <div className="planner-field">
+        <label>???</label>
+        <select value={obj.kind || "new"} onChange={(e) => updateObj("walls", obj.id, { kind: e.target.value })}>
+          {Object.entries(WALL_KINDS).map(([id, k]) => (
+            <option key={id} value={id}>{k.label}</option>
+          ))}
+        </select>
+      </div>
+      <div className="planner-field">
+        <label>????</label>
+        <select value={obj.role || "partition"} onChange={(e) => updateObj("walls", obj.id, { role: e.target.value })}>
+          <option value="outer">????????</option>
+          <option value="partition">???????????</option>
+        </select>
+      </div>
+      <div className="planner-field">
+        <label>???????, ??</label>
+        <input type="number" min={0} value={obj.thk ?? 100} onChange={(e) => updateObj("walls", obj.id, { thk: Math.max(0, +e.target.value || 0) })} />
+      </div>
+      <div className="planner-field">
+        <label>??????? ???????</label>
+        <select value={obj.thicknessSide || "center"} onChange={(e) => updateObj("walls", obj.id, { thicknessSide: e.target.value })}>
+          {THICKNESS_SIDES.map((s) => (
+            <option key={s.id} value={s.id}>{s.label}</option>
+          ))}
+        </select>
+      </div>
+      <div className="planner-field">
+        <label>??????, ??</label>
+        <input type="number" min={0} value={obj.height ?? 2700} onChange={(e) => updateObj("walls", obj.id, { height: Math.max(0, +e.target.value || 0) })} />
+      </div>
+      <div className="planner-field">
+        <label>????????</label>
+        <input value={obj.material || ""} placeholder="??? / ???????" onChange={(e) => updateObj("walls", obj.id, { material: e.target.value })} />
+      </div>
+      <div className="planner-field">
+        <label>????? ({formatLiveLength(segLen)})</label>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={draft}
+          disabled={!anchor.ok}
+          onChange={(e) => { setDraft(e.target.value); setError(null); }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setDraft(String(Math.round(segLen)));
+              setError(null);
+            }
+            if (e.key === "Enter") {
+              e.preventDefault();
+              apply();
+            }
+          }}
+        />
+      </div>
+      {!anchor.ok && (
+        <p style={{ fontSize: 12, color: "var(--pl-text-muted)" }}>{anchor.message}</p>
+      )}
+      {error && (
+        <p style={{ fontSize: 12, color: "#c0392b" }}>{error}</p>
+      )}
+      <p style={{ fontSize: 12, color: "var(--pl-text-muted)", marginTop: 8 }}>
+        ?? (3000) ??? ? ? ???????? (3 ?). Enter ? ?????????, Escape ? ??????.
+      </p>
+      <button type="button" className="planner-btn" onClick={delSel}>???????</button>
+    </>
   );
 }

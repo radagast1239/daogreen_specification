@@ -7,6 +7,7 @@ import { defaultObjectSpecSettings } from "./specSync.js";
 import { planHasDrawnWalls } from "./wallGeometry.js";
 import { ensureWallNetwork, mergeCloseNodes, resolvePlanWalls } from "./wallNetwork.js";
 import { upgradeLegacyWall } from "./core/walls/wallModel.js";
+import { repairLegacyTopology } from "./core/walls/legacyTopologyRepair.js";
 import { normalizeDimensions } from "./core/dimensions/model.js";
 import { normalizeLegacyRoomsFromZones, syncRoomsSafe } from "./core/rooms/index.js";
 import { normalizePlannerObject } from "./farmObjects.js";
@@ -16,23 +17,25 @@ import { syncClimatePlan } from "./climate.js";
 import { DEFAULT_DUCT_SIZE_H_MM, DEFAULT_DUCT_SIZE_W_MM } from "./ventDuctRender.jsx";
 import { uid } from "../store/helpers.js";
 
+/** Persisted-plan drift weld only; interactive/repair topology keeps NODE_LINK_THR. */
+export const PLAN_LOAD_WELD_MM = 1;
+
 export function stripManualZones(zones = []) {
   return zones.filter((z) => z.auto);
 }
 
 /**
- * PHASE 0G corrective — result-aware нормализация.
+ * Result-aware нормализация.
  *
  * normalizePlan() остаётся compatibility wrapper (возвращает только plan) для
  * всех мест, где diagnostic некуда показать. normalizePlanResult() — источник
  * правды: возвращает { plan, diagnostics }, где diagnostics — session-only
  * массив (обычно [] или [ROOM_DETECTION_FAILED]), который НЕ записан внутрь
- * plan. Production load path с доступным UI (см. PlanPage.jsx) должен вызывать
- * именно normalizePlanResult и передавать diagnostics в session-only state.
+ * plan. Load/import путь с доступным UI (PlanPage.jsx) должен вызывать именно
+ * normalizePlanResult и передавать diagnostics в session-only state.
  *
  * options.roomSyncFn — точка инъекции для controlled-failure тестов room
- * detection (см. syncRoomsSafe). Production-код всегда вызывает без него;
- * параметр не меняет схему plan.
+ * detection (см. syncRoomsSafe). Production-код всегда вызывает без него.
  */
 export function normalizePlanResult(raw, options = {}) {
   const d = DEFAULT_PLAN();
@@ -115,9 +118,9 @@ export function normalizePlanResult(raw, options = {}) {
     const synced = options.roomSyncFn
       ? syncRoomsSafe({ ...plan, walls: resolved }, options.roomSyncFn)
       : syncRoomsSafe({ ...plan, walls: resolved });
-    // PHASE 0G: на ok:false (сбой room-engine, не «нет комнат») сохраняем уже
-    // вычисленные выше legacy rooms/zones как есть — без auto-fix. Diagnostic
-    // возвращается вызывающему коду отдельно от plan (не записан внутрь него).
+    // На ok:false (сбой room-engine, не «нет комнат») сохраняем уже
+    // вычисленные выше legacy rooms/zones как есть, без auto-fix.
+    // Diagnostic возвращается вызывающему коду отдельно от plan.
     if (synced.ok) {
       plan.rooms = synced.rooms;
       plan.zones = synced.zones;
@@ -133,9 +136,27 @@ export function normalizePlanResult(raw, options = {}) {
     plan.rooms = [];
   }
 
-  const networked = mergeCloseNodes(ensureWallNetwork(plan, (p) => uid(p)));
+  const networked = mergeCloseNodes(ensureWallNetwork(plan, (p) => uid(p)), PLAN_LOAD_WELD_MM);
   plan.nodes = networked.nodes;
   plan.walls = networked.walls;
+
+  // PHASE 2F1 — bounded repair of PROVEN malformed legacy topology.
+  //
+  // Runs here, during hydration, on purpose: the plan has not reached React
+  // state or the history stack yet, so a repair can never become a user Undo
+  // entry. It is idempotent (a repaired structure no longer classifies as an
+  // anomaly), so a reload repeats no work and cannot start a save loop. Only
+  // provable defects are touched — walls the user drew separately, coincident
+  // distinct nodes and live T splits are left exactly as stored.
+  const repaired = repairLegacyTopology(plan, { makeId: (p) => uid(p) });
+  if (repaired.changed) {
+    plan.nodes = repaired.plan.nodes;
+    plan.walls = repaired.plan.walls;
+    diagnostics = [
+      ...diagnostics,
+      ...repaired.repairs.map((r) => ({ source: "legacy-topology-repair", ...r })),
+    ];
+  }
 
   return { plan: syncClimatePlan(syncElectricalPlan(syncPlanPipes(plan))), diagnostics };
 }

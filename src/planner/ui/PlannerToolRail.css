@@ -1,0 +1,277 @@
+/*
+ * Scoped styles for PlannerToolRail. Not imported by planner.css and does not
+ * modify any global planner stylesheet — this file is only imported by
+ * PlannerToolRail.jsx.
+ */
+
+.dg-tool-rail {
+  --rail-brand: var(--dg-brand, #116355);
+  --rail-brand-dark: var(--dg-brand-dark, #0b463c);
+  --rail-brand-soft: var(--dg-brand-soft, #e8f2ef);
+  --rail-bg: var(--dg-bg-panel, #ffffff);
+  --rail-border: var(--dg-border, #d9e0dc);
+  --rail-text: var(--dg-text-main, #2f3431);
+  --rail-text-muted: var(--dg-text-muted, #6f7a75);
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 84px;
+  min-width: 76px;
+  max-width: 88px;
+  background: var(--rail-bg);
+  border-right: 1px solid var(--rail-border);
+  padding: 8px 4px;
+  gap: 4px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.dg-tool-rail__main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dg-tool-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--rail-text);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.1;
+}
+
+.dg-tool-btn__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dg-tool-btn__label {
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.dg-tool-btn:hover:not(.dg-tool-btn--disabled) {
+  background: var(--rail-brand-soft);
+  border-color: var(--rail-border);
+}
+
+.dg-tool-btn:focus-visible {
+  outline: 2px solid var(--rail-brand);
+  outline-offset: 1px;
+}
+
+.dg-tool-btn--active {
+  background: var(--rail-brand);
+  border-color: var(--rail-brand-dark);
+  color: #ffffff;
+}
+
+.dg-tool-btn--active:hover {
+  background: var(--rail-brand-dark);
+}
+
+.dg-tool-btn--disabled {
+  cursor: not-allowed;
+  color: var(--rail-text-muted);
+  opacity: 0.5;
+}
+
+.dg-tool-popover {
+  position: absolute;
+  left: 100%;
+  top: 8px;
+  margin-left: 8px;
+  min-width: 220px;
+  max-width: 280px;
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
+  background: var(--rail-bg);
+  border: 1px solid var(--rail-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  padding: 8px;
+  z-index: 40;
+}
+
+.dg-tool-popover__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rail-text-muted);
+  padding: 4px 8px 8px;
+}
+
+.dg-tool-popover__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dg-tool-popover__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rail-text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.dg-tool-popover__item:hover:not(.dg-tool-popover__item--disabled) {
+  background: var(--rail-brand-soft);
+}
+
+.dg-tool-popover__item:focus-visible {
+  outline: 2px solid var(--rail-brand);
+  outline-offset: -2px;
+}
+
+.dg-tool-popover__item--active {
+  background: var(--rail-brand-soft);
+  color: var(--rail-brand-dark);
+  font-weight: 600;
+}
+
+.dg-tool-popover__item--disabled {
+  cursor: not-allowed;
+  color: var(--rail-text-muted);
+  opacity: 0.5;
+}
+
+.dg-tool-popover__empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--rail-text-muted);
+}
+
+/* Mobile: horizontal bottom tool strip. Scrolls its own axis only — never
+ * causes document-level overflow. */
+@media (max-width: 720px) {
+  .dg-tool-rail {
+    flex-direction: row;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    height: 72px;
+    border-right: none;
+    border-top: 1px solid var(--rail-border);
+    padding: 4px 6px;
+    padding-bottom: max(4px, env(safe-area-inset-bottom, 0px));
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .dg-tool-rail__main {
+    flex-direction: row;
+  }
+
+  .dg-tool-btn {
+    flex: 0 0 auto;
+    min-width: 60px;
+  }
+
+  .dg-tool-popover {
+    left: 8px;
+    right: 8px;
+    top: auto;
+    bottom: 100%;
+    margin-left: 0;
+    margin-bottom: 8px;
+    max-width: none;
+    width: auto;
+  }
+}
+
+/* orientation prop overrides — let the caller force a layout regardless of
+ * viewport width (e.g. tablet: keep the rail vertical, or force a compact
+ * horizontal strip). Placed after the breakpoint above and keyed off a
+ * two-class selector so it always wins over the plain .dg-tool-rail rules. */
+.dg-tool-rail.dg-tool-rail--vertical {
+  flex-direction: column;
+  width: 84px;
+  min-width: 76px;
+  max-width: 88px;
+  height: auto;
+  border-right: 1px solid var(--rail-border);
+  border-top: none;
+  padding: 8px 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.dg-tool-rail.dg-tool-rail--vertical .dg-tool-rail__main {
+  flex-direction: column;
+}
+
+.dg-tool-rail.dg-tool-rail--vertical .dg-tool-popover {
+  left: 100%;
+  right: auto;
+  top: 8px;
+  bottom: auto;
+  margin-left: 8px;
+  margin-bottom: 0;
+  max-width: 280px;
+  width: auto;
+}
+
+.dg-tool-rail.dg-tool-rail--horizontal {
+  flex-direction: row;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  height: 72px;
+  border-right: none;
+  border-top: 1px solid var(--rail-border);
+  padding: 4px 6px;
+  padding-bottom: max(4px, env(safe-area-inset-bottom, 0px));
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dg-tool-rail.dg-tool-rail--horizontal .dg-tool-rail__main {
+  flex-direction: row;
+}
+
+.dg-tool-rail.dg-tool-rail--horizontal .dg-tool-btn {
+  flex: 0 0 auto;
+  min-width: 60px;
+}
+
+.dg-tool-rail.dg-tool-rail--horizontal .dg-tool-popover {
+  left: 8px;
+  right: 8px;
+  top: auto;
+  bottom: 100%;
+  margin-left: 0;
+  margin-bottom: 8px;
+  max-width: none;
+  width: auto;
+}
+
+@media (prefers-color-scheme: dark) {
+  .dg-tool-rail {
+    --rail-bg: #232827;
+    --rail-border: rgba(255, 255, 255, 0.12);
+    --rail-text: #e8eeeb;
+    --rail-text-muted: #a3ada8;
+    --rail-brand-soft: rgba(17, 99, 85, 0.28);
+  }
+}
