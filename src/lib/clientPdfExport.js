@@ -132,15 +132,16 @@ function mergedPdfColumnStyles(photoCol, nameCol, compact) {
     };
   }
   // Full: name / supplier / source get the remaining width after compact numerics.
+  // unit 13 mm keeps «компл.» on one line; 1 mm taken from supplier + source each.
   return {
     0: { cellWidth: 7, halign: "center" },
     [photoCol]: { cellWidth: PDF_PHOTO_COL_WIDTH_MM },
     [nameCol]: { cellWidth: 48 },
     3: { cellWidth: 12, halign: "right" },
-    4: { cellWidth: 11, halign: "center" },
+    4: { cellWidth: 13, halign: "center" },
     5: { cellWidth: 20, halign: "right" },
-    6: { cellWidth: 35 },
-    7: { cellWidth: 35 },
+    6: { cellWidth: 34 },
+    7: { cellWidth: 34 },
   };
 }
 
